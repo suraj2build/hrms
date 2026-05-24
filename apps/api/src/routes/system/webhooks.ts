@@ -1,0 +1,443 @@
+/**
+ * Webhook Management API
+ *
+ * Manages outbound webhooks and their delivery history.
+ * All write operations are restricted to super_admin / hr_admin.
+ *
+ * GET    /system/webhooks                              — list webhooks with stats
+ * GET    /system/webhooks/:id                          — single webhook + last 20 deliveries
+ * POST   /system/webhooks                              — create webhook (admin)
+ * PUT    /system/webhooks/:id                          — update webhook config (admin)
+ * DELETE /system/webhooks/:id                          — soft-delete webhook (admin)
+ * POST   /system/webhooks/:id/test                     — fire a test event to the webhook URL
+ * GET    /system/webhooks/:id/deliveries               — paginated delivery history
+ * POST   /system/webhooks/deliveries/:deliveryId/retry — mark delivery for retry (admin)
+ */
+
+import type { FastifyInstance } from 'fastify'
+import { z }                    from 'zod'
+
+// ── Validation schemas ────────────────────────────────────────────────────────
+
+const listQuerySchema = z.object({
+  is_active: z.enum(['true', 'false']).optional(),
+  limit:     z.coerce.number().int().min(1).max(200).default(50),
+})
+
+const createBodySchema = z.object({
+  name:             z.string().min(1).max(255),
+  url:              z.string().url({ message: 'url must be a valid URL' }),
+  event_types:      z.array(z.string().min(1)).min(1, 'At least one event_type required'),
+  secret:           z.string().optional(),
+  headers:          z.record(z.string()).optional(),
+  description:      z.string().optional(),
+  max_retries:      z.coerce.number().int().min(0).max(10).optional(),
+  timeout_seconds:  z.coerce.number().int().min(1).max(120).optional(),
+})
+
+const updateBodySchema = createBodySchema.partial()
+
+const deliveriesQuerySchema = z.object({
+  status: z.enum(['pending', 'delivered', 'failed', 'retrying']).optional(),
+  limit:  z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+})
+
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+function isAdmin(role: string): boolean {
+  return ['super_admin', 'hr_admin'].includes(role)
+}
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
+
+export default async function webhooksRoutes(fastify: FastifyInstance) {
+  const auth = { preHandler: [fastify.authenticate] }
+
+  // ── GET /system/webhooks ──────────────────────────────────────────────────
+  fastify.get('/system/webhooks', auth, async (req: any, reply) => {
+    const parsed = listQuerySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message,
+      })
+    }
+
+    const { is_active, limit } = parsed.data
+
+    let q = fastify.supabase
+      .from('webhooks')
+      .select('*', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (is_active !== undefined) {
+      q = q.eq('is_active', is_active === 'true')
+    }
+
+    const { data, error, count } = await q
+
+    if (error) {
+      req.log.error({ err: error }, 'webhooks list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch webhooks' })
+    }
+
+    return reply.send({ data: data ?? [], total: count ?? 0, limit })
+  })
+
+  // ── GET /system/webhooks/:id ──────────────────────────────────────────────
+  fastify.get('/system/webhooks/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: webhook, error: webhookError } = await fastify.supabase
+      .from('webhooks')
+      .select('*')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (webhookError || !webhook) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+    }
+
+    const { data: deliveries, error: deliveryError } = await fastify.supabase
+      .from('webhook_deliveries')
+      .select('*')
+      .eq('webhook_id', id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (deliveryError) {
+      req.log.error({ err: deliveryError }, 'webhook deliveries fetch failed')
+    }
+
+    return reply.send({
+      data: {
+        ...webhook,
+        recent_deliveries: deliveries ?? [],
+      },
+    })
+  })
+
+  // ── POST /system/webhooks ─────────────────────────────────────────────────
+  fastify.post('/system/webhooks', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const parsed = createBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message,
+      })
+    }
+
+    const {
+      name, url, event_types, secret, headers,
+      description, max_retries, timeout_seconds,
+    } = parsed.data
+
+    const { data, error } = await fastify.supabase
+      .from('webhooks')
+      .insert({
+        tenant_id:       req.tenantId,
+        name,
+        url,
+        event_types,
+        secret:          secret          ?? null,
+        headers:         headers         ?? null,
+        description:     description     ?? null,
+        max_retries:     max_retries     ?? 3,
+        timeout_seconds: timeout_seconds ?? 30,
+        is_active:       true,
+        created_by:      req.userId,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      req.log.error({ err: error }, 'webhook insert failed')
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create webhook' })
+    }
+
+    return reply.code(201).send({ data })
+  })
+
+  // ── PUT /system/webhooks/:id ──────────────────────────────────────────────
+  fastify.put('/system/webhooks/:id', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    const parsed = updateBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message,
+      })
+    }
+
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'No fields provided for update' })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('webhooks')
+      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select()
+      .single()
+
+    if (error) {
+      req.log.error({ err: error }, 'webhook update failed')
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update webhook' })
+    }
+
+    if (!data) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+    }
+
+    return reply.send({ data })
+  })
+
+  // ── DELETE /system/webhooks/:id ───────────────────────────────────────────
+  fastify.delete('/system/webhooks/:id', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    const { data, error } = await fastify.supabase
+      .from('webhooks')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select('id')
+      .single()
+
+    if (error || !data) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+    }
+
+    return reply.send({ message: 'Webhook deactivated', id })
+  })
+
+  // ── POST /system/webhooks/:id/test ────────────────────────────────────────
+  fastify.post('/system/webhooks/:id/test', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    // Fetch the webhook
+    const { data: webhook, error: webhookError } = await fastify.supabase
+      .from('webhooks')
+      .select('*')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (webhookError || !webhook) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+    }
+
+    // Validate the URL before attempting delivery
+    let parsedUrl: URL
+    try {
+      parsedUrl = new URL(webhook.url)
+    } catch {
+      return reply.code(422).send({ error: 'INVALID_URL', message: 'Webhook URL is not a valid URL' })
+    }
+
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return reply.code(422).send({ error: 'INVALID_URL', message: 'Webhook URL must use http or https' })
+    }
+
+    const testPayload = {
+      event:      'webhook.test',
+      webhook_id: webhook.id,
+      tenant_id:  req.tenantId,
+      timestamp:  new Date().toISOString(),
+      data:       { message: 'This is a test delivery from the HRMS webhook system.' },
+    }
+
+    const requestBody = JSON.stringify(testPayload)
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent':   'HRMS-Webhook/1.0',
+      'X-Event-Type': 'webhook.test',
+      ...((webhook.headers as Record<string, string>) ?? {}),
+    }
+
+    if (webhook.secret) {
+      headers['X-Webhook-Secret'] = webhook.secret
+    }
+
+    // Create delivery row with status 'pending'
+    const { data: delivery, error: insertError } = await fastify.supabase
+      .from('webhook_deliveries')
+      .insert({
+        webhook_id:     webhook.id,
+        tenant_id:      req.tenantId,
+        event_type:     'webhook.test',
+        payload:        testPayload,
+        status:         'pending',
+        attempt_count:  0,
+        created_at:     new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (insertError || !delivery) {
+      req.log.error({ err: insertError }, 'failed to create test delivery row')
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record test delivery' })
+    }
+
+    // Attempt HTTP POST
+    const startedAt   = Date.now()
+    let httpStatus    = 0
+    let success       = false
+    let errorMessage: string | undefined
+
+    try {
+      const timeout     = (webhook.timeout_seconds ?? 30) * 1_000
+      const controller  = new AbortController()
+      const timer       = setTimeout(() => controller.abort(), timeout)
+
+      const response = await fetch(webhook.url, {
+        method:  'POST',
+        headers,
+        body:    requestBody,
+        signal:  controller.signal,
+      }).finally(() => clearTimeout(timer))
+
+      httpStatus = response.status
+      success    = response.ok
+      if (!response.ok) {
+        errorMessage = `HTTP ${response.status} ${response.statusText}`
+      }
+    } catch (err: any) {
+      errorMessage = err?.name === 'AbortError'
+        ? `Request timed out after ${webhook.timeout_seconds ?? 30}s`
+        : (err?.message ?? 'Unknown fetch error')
+    }
+
+    const duration_ms = Date.now() - startedAt
+
+    // Update delivery row
+    await fastify.supabase
+      .from('webhook_deliveries')
+      .update({
+        status:         success ? 'delivered' : 'failed',
+        http_status:    httpStatus || null,
+        duration_ms,
+        error_message:  errorMessage ?? null,
+        attempt_count:  1,
+        delivered_at:   success ? new Date().toISOString() : null,
+      })
+      .eq('id', delivery.id)
+
+    return reply.send({
+      success,
+      http_status:  httpStatus || null,
+      duration_ms,
+      delivery_id:  delivery.id,
+      ...(errorMessage ? { error: errorMessage } : {}),
+    })
+  })
+
+  // ── GET /system/webhooks/:id/deliveries ───────────────────────────────────
+  fastify.get('/system/webhooks/:id/deliveries', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const parsed = deliveriesQuerySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message,
+      })
+    }
+
+    const { status, limit, offset } = parsed.data
+
+    // Confirm webhook belongs to tenant
+    const { data: webhook } = await fastify.supabase
+      .from('webhooks')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!webhook) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+    }
+
+    let q = fastify.supabase
+      .from('webhook_deliveries')
+      .select('*', { count: 'exact' })
+      .eq('webhook_id', id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (status) {
+      q = q.eq('status', status)
+    }
+
+    const { data, error, count } = await q
+
+    if (error) {
+      req.log.error({ err: error }, 'webhook deliveries query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch deliveries' })
+    }
+
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+  })
+
+  // ── POST /system/webhooks/deliveries/:deliveryId/retry ────────────────────
+  fastify.post('/system/webhooks/deliveries/:deliveryId/retry', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const { deliveryId } = req.params as { deliveryId: string }
+
+    // Confirm delivery belongs to a webhook in this tenant
+    const { data: delivery, error: fetchError } = await fastify.supabase
+      .from('webhook_deliveries')
+      .select('id, webhook_id, status, webhooks!inner(tenant_id)')
+      .eq('id', deliveryId)
+      .single()
+
+    if (fetchError || !delivery) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delivery not found' })
+    }
+
+    const webhookTenantId = (delivery as any).webhooks?.tenant_id
+    if (webhookTenantId !== req.tenantId) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delivery not found' })
+    }
+
+    const { error: updateError } = await fastify.supabase
+      .from('webhook_deliveries')
+      .update({
+        status:        'retrying',
+        next_retry_at: new Date().toISOString(),
+      })
+      .eq('id', deliveryId)
+
+    if (updateError) {
+      req.log.error({ err: updateError }, 'delivery retry update failed')
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to schedule retry' })
+    }
+
+    return reply.send({ message: 'Delivery scheduled for retry', delivery_id: deliveryId })
+  })
+}
