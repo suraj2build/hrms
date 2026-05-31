@@ -13,7 +13,7 @@ const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefine
 const STORAGE_KEY = 'aurora-theme'
 
 function applyTheme(theme: Theme): 'light' | 'dark' {
-  if (typeof document === 'undefined') return 'dark'
+  if (typeof document === 'undefined') return 'light'
   const root       = document.documentElement
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
   const resolved   = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme
@@ -23,12 +23,12 @@ function applyTheme(theme: Theme): 'light' | 'dark' {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState]       = React.useState<Theme>('dark')
-  const [resolvedTheme, setResolvedTheme] = React.useState<'light' | 'dark'>('dark')
+  const [theme, setThemeState]       = React.useState<Theme>('light')
+  const [resolvedTheme, setResolvedTheme] = React.useState<'light' | 'dark'>('light')
 
-  // Read persisted preference on mount; default to dark if nothing stored.
+  // Read persisted preference on mount; default to light if nothing stored.
   React.useEffect(() => {
-    const stored = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? 'dark'
+    const stored = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? 'light'
     setThemeState(stored)
     setResolvedTheme(applyTheme(stored))
   }, [])
