@@ -18,6 +18,7 @@ import { DOMAINS, getDomainForPath } from './nav-config'
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
 import { useAuthStore }        from '@/stores/authStore'
+import { useTheme }            from '@/components/theme-provider'
 import { getInitials }         from '@/lib/utils'
 import { supabase }            from '@/lib/supabase/client'
 import { toast }               from 'sonner'
@@ -31,20 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useBasePath } from '@/lib/routing'
 
-// ── Simple theme persistence ──────────────────────────────────────────────────
-
-function useThemeToggle() {
-  const [dark, setDark] = useState(() =>
-    document.documentElement.classList.contains('dark'),
-  )
-  function toggle() {
-    const next = !dark
-    setDark(next)
-    document.documentElement.classList.toggle('dark', next)
-    try { localStorage.setItem('theme', next ? 'dark' : 'light') } catch { /* ignore */ }
-  }
-  return { dark, toggle }
-}
+// Theme toggle now uses the shared ThemeProvider (aurora-theme key)
 
 // ── TopNavV2 ──────────────────────────────────────────────────────────────────
 
@@ -54,7 +42,9 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const basePath   = useBasePath()
   const { profile, tenant, clear } = useAuthStore()
   const [notifOpen, setNotifOpen]  = useState(false)
-  const { dark, toggle: toggleTheme } = useThemeToggle()
+  const { resolvedTheme, setTheme } = useTheme()
+  const dark = resolvedTheme === 'dark'
+  function toggleTheme() { setTheme(dark ? 'light' : 'dark') }
 
   function openSearch() { onSearchOpen?.() }
 
