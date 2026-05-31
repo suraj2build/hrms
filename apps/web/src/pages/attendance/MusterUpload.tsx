@@ -258,9 +258,9 @@ export function MusterUpload() {
       setFilename('')
       setShowErrors(result.error_count > 0)
       if (result.error_count === 0) {
-        toast.success(`✅ ${result.success_count.toLocaleString()} attendance records updated`)
+        toast.success(`✅ ${(result.success_count ?? 0).toLocaleString()} attendance records updated`)
       } else if (result.success_count > 0) {
-        toast.warning(`Applied ${result.success_count.toLocaleString()} rows — ${result.error_count} failed`)
+        toast.warning(`Applied ${(result.success_count ?? 0).toLocaleString()} rows — ${result.error_count} failed`)
       } else {
         toast.error(`Upload failed — all ${result.error_count} rows had errors`)
       }
@@ -510,7 +510,7 @@ export function MusterUpload() {
               <p className="text-sm font-medium text-foreground">Upload Complete</p>
             </div>
             <Badge variant="outline" className="text-[10px]">
-              {uploadResult.success_count.toLocaleString()} applied · {uploadResult.error_count.toLocaleString()} failed
+              {(uploadResult.success_count ?? 0).toLocaleString()} applied · {(uploadResult.error_count ?? 0).toLocaleString()} failed
             </Badge>
           </div>
 
@@ -595,11 +595,11 @@ export function MusterUpload() {
                     <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
                       {fmtDate(h.period_from)} → {fmtDate(h.period_to)}
                     </td>
-                    <td className="px-3 py-2 text-right">{h.row_count.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right text-success font-medium">{h.success_count.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{(h.row_count ?? 0).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right text-success font-medium">{(h.success_count ?? 0).toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">
                       {h.error_count > 0
-                        ? <span className="text-destructive font-medium">{h.error_count.toLocaleString()}</span>
+                        ? <span className="text-destructive font-medium">{(h.error_count ?? 0).toLocaleString()}</span>
                         : <span className="text-muted-foreground/50">—</span>
                       }
                     </td>

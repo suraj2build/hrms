@@ -234,7 +234,7 @@ export function PayrollReconciliation() {
       item.payroll_value,
       item.expected_value,
       item.variance,
-      item.variance_pct.toFixed(2),
+      (item.variance_pct ?? 0).toFixed(2),
       item.status,
       item.month,
     ].join(','))
@@ -474,7 +474,7 @@ export function PayrollReconciliation() {
                           {item.variance < 0 ? '−' : '+'}{fmt(Math.abs(item.variance))}
                         </div>
                         <div className="text-[10px] text-muted-foreground tabular-nums">
-                          {item.variance_pct > 0 ? '+' : ''}{item.variance_pct.toFixed(1)}%
+                          {(item.variance_pct ?? 0) > 0 ? '+' : ''}{(item.variance_pct ?? 0).toFixed(1)}%
                         </div>
                       </div>
                     </div>

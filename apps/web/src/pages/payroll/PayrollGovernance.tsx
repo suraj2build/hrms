@@ -101,7 +101,7 @@ function StatusBadge({ status }: { status: 'pending' | 'approved' | 'rejected' }
 }
 
 function VarianceBadge({ pct }: { pct: number }) {
-  const abs = Math.abs(pct)
+  const abs = Math.abs(pct ?? 0)
   const cls = abs >= 20
     ? 'text-destructive border-border'
     : abs >= 10
@@ -109,7 +109,7 @@ function VarianceBadge({ pct }: { pct: number }) {
       : 'text-success border-border'
   return (
     <Badge variant="outline" className={cls}>
-      {pct > 0 ? '+' : ''}{pct.toFixed(1)}%
+      {(pct ?? 0) > 0 ? '+' : ''}{(pct ?? 0).toFixed(1)}%
     </Badge>
   )
 }

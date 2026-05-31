@@ -467,7 +467,7 @@ export function PayrollSimulation() {
                       {s.delta > 0 ? '+' : ''}{fmt(s.delta)}
                     </p>
                     <p className="text-[10px] text-muted-foreground tabular-nums">
-                      {s.delta_pct > 0 ? '+' : ''}{s.delta_pct.toFixed(2)}%
+                      {(s.delta_pct ?? 0) > 0 ? '+' : ''}{(s.delta_pct ?? 0).toFixed(2)}%
                     </p>
                   </div>
                 </div>
@@ -513,8 +513,8 @@ export function PayrollSimulation() {
                           {d.delta > 0 ? '+' : ''}{fmt(d.delta)}
                         </td>
                         <td className={cn('px-3 py-2 tabular-nums',
-                          Math.abs(d.delta_pct) > 10 ? 'text-warning font-medium' : 'text-muted-foreground')}>
-                          {d.delta_pct > 0 ? '+' : ''}{d.delta_pct.toFixed(1)}%
+                          Math.abs(d.delta_pct ?? 0) > 10 ? 'text-warning font-medium' : 'text-muted-foreground')}>
+                          {(d.delta_pct ?? 0) > 0 ? '+' : ''}{(d.delta_pct ?? 0).toFixed(1)}%
                         </td>
                       </tr>
                     ))}

@@ -1061,7 +1061,7 @@ export function Attendance() {
                   'text-xl font-bold tabular-nums',
                   pipelineStats.punch_log_count_30d > 0 ? 'text-foreground' : 'text-muted-foreground',
                 )}>
-                  {pipelineStats.punch_log_count_30d.toLocaleString()}
+                  {(pipelineStats.punch_log_count_30d ?? 0).toLocaleString()}
                 </p>
                 <p className="text-[10px] text-muted-foreground">from CSV uploads</p>
               </div>
@@ -1085,7 +1085,7 @@ export function Attendance() {
                   'text-xl font-bold tabular-nums',
                   pipelineStats.daily_rows_from_csv > 0 ? 'text-success' : 'text-muted-foreground',
                 )}>
-                  {pipelineStats.daily_rows_from_csv.toLocaleString()}
+                  {(pipelineStats.daily_rows_from_csv ?? 0).toLocaleString()}
                 </p>
                 <p className="text-[10px] text-muted-foreground">generated (all time)</p>
               </div>
@@ -1511,7 +1511,7 @@ export function Attendance() {
                           'text-lg font-bold',
                           pipelineStats.daily_rows_from_csv > 0 ? 'text-success' : 'text-muted-foreground',
                         )}>
-                          {pipelineStats.daily_rows_from_csv.toLocaleString()}
+                          {(pipelineStats.daily_rows_from_csv ?? 0).toLocaleString()}
                         </p>
                         <p className="text-[10px] text-muted-foreground">generated</p>
                       </div>
@@ -1593,7 +1593,7 @@ export function Attendance() {
               <div className="text-muted-foreground/60">·</div>
               <div className="flex items-center gap-1.5">
                 <Database className="h-3 w-3 text-success" />
-                <span className="font-semibold text-foreground">{pipelineStats.daily_rows_from_csv.toLocaleString()}</span>
+                <span className="font-semibold text-foreground">{(pipelineStats.daily_rows_from_csv ?? 0).toLocaleString()}</span>
                 <span className="text-muted-foreground">daily rows generated</span>
               </div>
               {pipelineStats.csv_employees_30d > 0 && (

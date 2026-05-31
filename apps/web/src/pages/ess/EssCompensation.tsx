@@ -557,11 +557,11 @@ function YTDSummary({ slips }: { slips: SlipSummary[] }) {
   const fySlips = slips.filter(s => s.month >= fyStart && s.month <= fyEnd)
   if (fySlips.length === 0) return null
 
-  const ytdGross      = fySlips.reduce((s, r) => s + r.gross_pay,        0)
-  const ytdNet        = fySlips.reduce((s, r) => s + r.net_pay,          0)
-  const ytdDeductions = fySlips.reduce((s, r) => s + r.total_deductions, 0)
-  const ytdLop        = fySlips.reduce((s, r) => s + r.lop_amount,       0)
-  const ytdOt         = fySlips.reduce((s, r) => s + r.overtime_hours,   0)
+  const ytdGross      = fySlips.reduce((s, r) => s + (r.gross_pay ?? 0),        0)
+  const ytdNet        = fySlips.reduce((s, r) => s + (r.net_pay ?? 0),          0)
+  const ytdDeductions = fySlips.reduce((s, r) => s + (r.total_deductions ?? 0), 0)
+  const ytdLop        = fySlips.reduce((s, r) => s + (r.lop_amount ?? 0),       0)
+  const ytdOt         = fySlips.reduce((s, r) => s + (r.overtime_hours ?? 0),   0)
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">

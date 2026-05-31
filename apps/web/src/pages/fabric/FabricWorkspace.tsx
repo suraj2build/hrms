@@ -153,7 +153,7 @@ function scoreColor(score: number) {
 
 function ScoreBar({ label, value, invert = false }: { label: string; value: number; invert?: boolean }) {
   // When invert=true, lower value is better (e.g. risk)
-  const display = value
+  const display = value ?? 0
   const color = invert
     ? (value <= 25 ? 'bg-emerald-500' : value <= 50 ? 'bg-amber-500' : 'bg-destructive')
     : (value >= 75 ? 'bg-emerald-500' : value >= 50 ? 'bg-amber-500' : 'bg-destructive')
@@ -299,7 +299,7 @@ export default function FabricWorkspace() {
             {healthScores.map(s => (
               <div key={s.label} className="flex items-center gap-2 rounded-lg border px-3 py-1.5 bg-background">
                 <span className="text-xs text-muted-foreground">{s.label}</span>
-                <span className={cn('text-sm font-semibold tabular-nums', scoreColor(s.value))}>{s.value.toFixed(0)}</span>
+                <span className={cn('text-sm font-semibold tabular-nums', scoreColor(s.value ?? 0))}>{(s.value ?? 0).toFixed(0)}</span>
               </div>
             ))}
           </div>
@@ -371,7 +371,7 @@ export default function FabricWorkspace() {
                         <Badge variant={dep.dependency_type === 'triggers' ? 'default' : dep.dependency_type === 'impacts' ? 'secondary' : 'outline'} className="text-xs">
                           {dep.dependency_type}
                         </Badge>
-                        <span className="text-muted-foreground text-xs ml-auto">{(dep.strength * 100).toFixed(0)}% strength</span>
+                        <span className="text-muted-foreground text-xs ml-auto">{((dep.strength ?? 0) * 100).toFixed(0)}% strength</span>
                       </div>
                     ))}
                   </div>

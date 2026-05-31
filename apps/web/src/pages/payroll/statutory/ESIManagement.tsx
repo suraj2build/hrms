@@ -151,8 +151,8 @@ function ColoredStatCard({
 // ── ESI Rate Distribution Bar ─────────────────────────────────────────────────
 
 function ESIRateBar({ config }: { config: ESIConfig }) {
-  const emp  = config.employee_contribution_pct
-  const empr = config.employer_contribution_pct
+  const emp  = config.employee_contribution_pct ?? 0
+  const empr = config.employer_contribution_pct ?? 0
   const total = emp + empr
 
   return (
@@ -769,7 +769,7 @@ export function ESIManagement() {
                       <Info className="h-3 w-3" />
                     </span>
                     <span>
-                      Staff with gross wages ≤ <strong className="text-foreground">₹{config.wage_ceiling.toLocaleString('en-IN')}</strong> fall in scope.
+                      Staff with gross wages ≤ <strong className="text-foreground">₹{(config.wage_ceiling ?? 0).toLocaleString('en-IN')}</strong> fall in scope.
                     </span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

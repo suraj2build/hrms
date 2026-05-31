@@ -290,9 +290,9 @@ function FairnessTab() {
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <SummaryCard label="Avg OT Fairness"      value={`${data.avg_ot_fairness.toFixed(1)}%`}     colorCls={scoreColor(data.avg_ot_fairness)} />
-            <SummaryCard label="Avg Weekend Fairness" value={`${data.avg_weekend_fairness.toFixed(1)}%`} colorCls={scoreColor(data.avg_weekend_fairness)} />
-            <SummaryCard label="Avg Night Fairness"   value={`${data.avg_night_fairness.toFixed(1)}%`}   colorCls={scoreColor(data.avg_night_fairness)} />
+            <SummaryCard label="Avg OT Fairness"      value={`${(data.avg_ot_fairness ?? 0).toFixed(1)}%`}     colorCls={scoreColor(data.avg_ot_fairness ?? 0)} />
+            <SummaryCard label="Avg Weekend Fairness" value={`${(data.avg_weekend_fairness ?? 0).toFixed(1)}%`} colorCls={scoreColor(data.avg_weekend_fairness ?? 0)} />
+            <SummaryCard label="Avg Night Fairness"   value={`${(data.avg_night_fairness ?? 0).toFixed(1)}%`}   colorCls={scoreColor(data.avg_night_fairness ?? 0)} />
             <SummaryCard label="Violations"           value={data.violations_count}                       colorCls={data.violations_count > 0 ? 'text-destructive' : 'text-success'} />
           </div>
 
@@ -310,17 +310,17 @@ function FairnessTab() {
                         <span className="font-medium text-foreground">{emp.name}</span>
                         <span className="text-muted-foreground ml-1.5">#{emp.employee_code}</span>
                       </td>
-                      <td className={cn('px-3 py-2 tabular-nums', scoreColor(emp.ot_fairness))}>
-                        {emp.ot_fairness.toFixed(1)}%
+                      <td className={cn('px-3 py-2 tabular-nums', scoreColor(emp.ot_fairness ?? 0))}>
+                        {(emp.ot_fairness ?? 0).toFixed(1)}%
                       </td>
-                      <td className={cn('px-3 py-2 tabular-nums', scoreColor(emp.weekend_fairness))}>
-                        {emp.weekend_fairness.toFixed(1)}%
+                      <td className={cn('px-3 py-2 tabular-nums', scoreColor(emp.weekend_fairness ?? 0))}>
+                        {(emp.weekend_fairness ?? 0).toFixed(1)}%
                       </td>
-                      <td className={cn('px-3 py-2 tabular-nums', scoreColor(emp.night_fairness))}>
-                        {emp.night_fairness.toFixed(1)}%
+                      <td className={cn('px-3 py-2 tabular-nums', scoreColor(emp.night_fairness ?? 0))}>
+                        {(emp.night_fairness ?? 0).toFixed(1)}%
                       </td>
-                      <td className={cn('px-3 py-2 tabular-nums font-semibold', scoreColor(emp.balance_score))}>
-                        {emp.balance_score.toFixed(1)}
+                      <td className={cn('px-3 py-2 tabular-nums font-semibold', scoreColor(emp.balance_score ?? 0))}>
+                        {(emp.balance_score ?? 0).toFixed(1)}
                       </td>
                       <td className="px-3 py-2">
                         <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -442,9 +442,9 @@ function OtDistributionTab() {
       ) : data ? (
         <>
           <div className="grid grid-cols-3 gap-3 mb-4">
-            <SummaryCard label="Team Avg OT Hours"    value={`${data.team_avg_ot_hours.toFixed(1)}h`} />
-            <SummaryCard label="Max OT Hours"         value={`${data.max_ot_hours.toFixed(1)}h`}     colorCls="text-warning" />
-            <SummaryCard label="Concentration Index"  value={data.concentration_index.toFixed(2)}      colorCls={data.concentration_index > 0.5 ? 'text-destructive' : 'text-success'} />
+            <SummaryCard label="Team Avg OT Hours"    value={`${(data.team_avg_ot_hours ?? 0).toFixed(1)}h`} />
+            <SummaryCard label="Max OT Hours"         value={`${(data.max_ot_hours ?? 0).toFixed(1)}h`}     colorCls="text-warning" />
+            <SummaryCard label="Concentration Index"  value={(data.concentration_index ?? 0).toFixed(2)}      colorCls={(data.concentration_index ?? 0) > 0.5 ? 'text-destructive' : 'text-success'} />
           </div>
 
           {data.employees.length === 0 ? (
@@ -460,12 +460,12 @@ function OtDistributionTab() {
                         <span className="font-medium text-foreground">{emp.name}</span>
                         <span className="text-muted-foreground ml-1.5">#{emp.employee_code}</span>
                       </td>
-                      <td className="px-3 py-2 tabular-nums">{emp.ot_hours.toFixed(1)}h</td>
-                      <td className={cn('px-3 py-2 tabular-nums', emp.vs_team_avg > 0 ? 'text-warning' : 'text-success')}>
-                        {emp.vs_team_avg > 0 ? '+' : ''}{emp.vs_team_avg.toFixed(1)}h
+                      <td className="px-3 py-2 tabular-nums">{(emp.ot_hours ?? 0).toFixed(1)}h</td>
+                      <td className={cn('px-3 py-2 tabular-nums', (emp.vs_team_avg ?? 0) > 0 ? 'text-warning' : 'text-success')}>
+                        {(emp.vs_team_avg ?? 0) > 0 ? '+' : ''}{(emp.vs_team_avg ?? 0).toFixed(1)}h
                       </td>
-                      <td className={cn('px-3 py-2 tabular-nums font-medium', scoreColor(emp.fairness_score))}>
-                        {emp.fairness_score.toFixed(1)}
+                      <td className={cn('px-3 py-2 tabular-nums font-medium', scoreColor(emp.fairness_score ?? 0))}>
+                        {(emp.fairness_score ?? 0).toFixed(1)}
                       </td>
                     </tr>
                   ))}
@@ -522,8 +522,8 @@ function RestGapsTab() {
                     </span>
                     <span className="text-muted-foreground ml-1.5">#{g.employee_code}</span>
                   </td>
-                  <td className={cn('px-3 py-2 tabular-nums font-semibold', g.gap_hours < 8 ? 'text-destructive' : 'text-foreground')}>
-                    {g.gap_hours.toFixed(1)}h
+                  <td className={cn('px-3 py-2 tabular-nums font-semibold', (g.gap_hours ?? 0) < 8 ? 'text-destructive' : 'text-foreground')}>
+                    {(g.gap_hours ?? 0).toFixed(1)}h
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{fmtDate(g.date1)}</td>
                   <td className="px-3 py-2 text-muted-foreground">{fmtDate(g.date2)}</td>
@@ -573,7 +573,7 @@ function ShiftOverloadTab() {
                     <span className="text-muted-foreground ml-1.5">#{emp.employee_code}</span>
                   </td>
                   <td className="px-3 py-2 tabular-nums text-destructive font-semibold">{emp.overload_days}</td>
-                  <td className="px-3 py-2 tabular-nums text-warning">{emp.excess_hours.toFixed(1)}h</td>
+                  <td className="px-3 py-2 tabular-nums text-warning">{(emp.excess_hours ?? 0).toFixed(1)}h</td>
                   <td className="px-3 py-2 text-muted-foreground max-w-[220px] truncate">
                     {emp.affected_dates.map(fmtDate).join(', ')}
                   </td>
@@ -631,7 +631,7 @@ function StaffingHintsTab() {
               {(data?.departments ?? []).map((row, i) => (
                 <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
                   <td className="px-3 py-2 font-medium text-foreground">{row.department}</td>
-                  <td className="px-3 py-2 tabular-nums">{(row.coverage_ratio * 100).toFixed(1)}%</td>
+                  <td className="px-3 py-2 tabular-nums">{((row.coverage_ratio ?? 0) * 100).toFixed(1)}%</td>
                   <td className="px-3 py-2">
                     <Badge variant={pressureVariant(row.staffing_pressure) as any} className="rounded-full text-[10px]">
                       {row.staffing_pressure}

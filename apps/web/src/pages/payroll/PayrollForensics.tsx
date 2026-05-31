@@ -288,7 +288,7 @@ function SnapshotCard({ snap }: { snap: RunSnapshot; run?: PayrollRun }) {
 // ── Replay Variance Row ────────────────────────────────────────────────────────
 
 function VarianceRow({ entry }: { entry: ReplayVarianceEntry }) {
-  const pct = Math.abs(entry.variance_pct)
+  const pct = Math.abs(entry.variance_pct ?? 0)
   return (
     <tr className="border-b border-border/50 hover:bg-muted/20">
       <td className="px-4 py-2.5">

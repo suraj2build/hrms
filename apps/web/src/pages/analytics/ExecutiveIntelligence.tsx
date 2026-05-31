@@ -106,7 +106,7 @@ function currentMonthParam() {
 }
 
 function fmtPct(n: number, decimals = 1) {
-  return `${n.toFixed(decimals)}%`
+  return `${(n ?? 0).toFixed(decimals)}%`
 }
 
 function payrollRiskColor(score: number): string {
@@ -204,8 +204,8 @@ function DashboardSummary() {
         />
         <KpiBlock
           label="Consistency Score"
-          value={data.consistency_score.toFixed(1)}
-          colorCls={data.consistency_score >= 80 ? 'text-success' : data.consistency_score >= 60 ? 'text-warning' : 'text-destructive'}
+          value={(data.consistency_score ?? 0).toFixed(1)}
+          colorCls={(data.consistency_score ?? 0) >= 80 ? 'text-success' : (data.consistency_score ?? 0) >= 60 ? 'text-warning' : 'text-destructive'}
           sub="out of 100"
         />
       </SummaryTopCard>
@@ -238,8 +238,8 @@ function DashboardSummary() {
       <SummaryTopCard title="Payroll Volatility" icon={BarChart2}>
         <KpiBlock
           label="Avg OT Hours"
-          value={`${data.avg_ot_hours.toFixed(1)}h`}
-          colorCls={data.avg_ot_hours > 20 ? 'text-warning' : 'text-muted-foreground'}
+          value={`${(data.avg_ot_hours ?? 0).toFixed(1)}h`}
+          colorCls={(data.avg_ot_hours ?? 0) > 20 ? 'text-warning' : 'text-muted-foreground'}
         />
         <KpiBlock
           label="LOP Rate"
@@ -248,9 +248,9 @@ function DashboardSummary() {
         />
         <KpiBlock
           label="Payroll Risk Score"
-          value={data.payroll_risk_score.toFixed(0)}
-          colorCls={payrollRiskColor(data.payroll_risk_score)}
-          sub={data.payroll_risk_score > 70 ? 'High risk' : data.payroll_risk_score > 40 ? 'Moderate' : 'Low risk'}
+          value={(data.payroll_risk_score ?? 0).toFixed(0)}
+          colorCls={payrollRiskColor(data.payroll_risk_score ?? 0)}
+          sub={(data.payroll_risk_score ?? 0) > 70 ? 'High risk' : (data.payroll_risk_score ?? 0) > 40 ? 'Moderate' : 'Low risk'}
         />
       </SummaryTopCard>
     </div>
@@ -399,7 +399,7 @@ function ExceptionResolution() {
             </div>
             <div className="text-center">
               <p className="text-[10px] text-muted-foreground">Avg Hours</p>
-              <p className="text-lg font-bold text-foreground">{data.avg_resolution_hours.toFixed(1)}h</p>
+              <p className="text-lg font-bold text-foreground">{(data.avg_resolution_hours ?? 0).toFixed(1)}h</p>
             </div>
           </div>
 

@@ -305,10 +305,10 @@ function WorkersTab() {
                       {truncate(w.current_job, 20)}
                     </td>
                     <td className="py-3 px-3 text-xs tabular-nums text-foreground text-right">
-                      {w.jobs_processed.toLocaleString()}
+                      {(w.jobs_processed ?? 0).toLocaleString()}
                     </td>
                     <td className="py-3 px-3 text-xs tabular-nums text-destructive text-right">
-                      {w.failed.toLocaleString()}
+                      {(w.failed ?? 0).toLocaleString()}
                     </td>
                     <td className="py-3 px-3">
                       {w.status === 'active' && (

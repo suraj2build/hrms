@@ -547,7 +547,7 @@ function WorkforceAnalyticsInner() {
           </ResponsiveContainer>
           <div className="flex items-center gap-4 mt-2 text-[10px] text-muted-foreground">
             <span>Overall absent rate: <strong className="text-foreground">{absenteeismData.summary.overall_absent_rate}%</strong></span>
-            <span>Records analysed: <strong className="text-foreground">{absenteeismData.summary.total_records.toLocaleString()}</strong></span>
+            <span>Records analysed: <strong className="text-foreground">{(absenteeismData.summary.total_records ?? 0).toLocaleString()}</strong></span>
           </div>
         </SectionCard>
       )}

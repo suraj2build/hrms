@@ -529,8 +529,8 @@ export function PayrollFinalizationCenter() {
                             <td className={cn('px-2 py-2 tabular-nums font-medium', v.delta_amount >= 0 ? 'text-success' : 'text-destructive')}>
                               {v.delta_amount >= 0 ? '+' : ''}{fmtCurrency(v.delta_amount)}
                             </td>
-                            <td className={cn('px-2 py-2 tabular-nums', Math.abs(v.delta_pct) > 20 ? 'text-destructive font-semibold' : 'text-muted-foreground')}>
-                              {v.delta_pct >= 0 ? '+' : ''}{v.delta_pct.toFixed(1)}%
+                            <td className={cn('px-2 py-2 tabular-nums', Math.abs(v.delta_pct ?? 0) > 20 ? 'text-destructive font-semibold' : 'text-muted-foreground')}>
+                              {(v.delta_pct ?? 0) >= 0 ? '+' : ''}{(v.delta_pct ?? 0).toFixed(1)}%
                             </td>
                             <td className="px-2 py-2 text-muted-foreground">{v.reason ?? '—'}</td>
                           </tr>

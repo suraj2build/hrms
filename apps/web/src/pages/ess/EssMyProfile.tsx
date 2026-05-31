@@ -729,7 +729,7 @@ function AttendanceTab({ summary, summaryLoading }: { summary: OperationalSummar
     { label: 'Absent Days',     value: summary.absent_days,                       color: 'text-destructive', bg: 'bg-destructive/8' },
     { label: 'Late Arrivals',   value: summary.late_days,                         color: 'text-warning',     bg: 'bg-warning/8'   },
     { label: 'LOP Days',        value: summary.lop_days,                          color: 'text-destructive', bg: 'bg-destructive/5' },
-    { label: 'Overtime Hours',  value: `${summary.total_ot_hours.toFixed(1)}h`,   color: 'text-info',        bg: 'bg-info/8'      },
+    { label: 'Overtime Hours',  value: `${(summary.total_ot_hours ?? 0).toFixed(1)}h`,   color: 'text-info',        bg: 'bg-info/8'      },
   ]
 
   return (

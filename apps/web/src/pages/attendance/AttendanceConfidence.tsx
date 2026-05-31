@@ -96,7 +96,7 @@ function topFactors(factors: Record<string, number>, n = 2): string[] {
   return Object.entries(factors)
     .sort(([, a], [, b]) => b - a)
     .slice(0, n)
-    .map(([k, v]) => `${k.replace(/_/g, ' ')} (${v.toFixed(2)})`)
+    .map(([k, v]) => `${k.replace(/_/g, ' ')} (${(v ?? 0).toFixed(2)})`)
 }
 
 // ── Level distribution card ────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ export function AttendanceConfidence() {
                     ),
                   )}
                 >
-                  {summary.avg_score.toFixed(1)}
+                  {(summary.avg_score ?? 0).toFixed(1)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">out of 100</p>
               </div>
@@ -429,7 +429,7 @@ export function AttendanceConfidence() {
                               scoreTextClass(row.confidence_level),
                             )}
                           >
-                            {row.confidence_score.toFixed(1)}
+                            {(row.confidence_score ?? 0).toFixed(1)}
                           </span>
                         </td>
 

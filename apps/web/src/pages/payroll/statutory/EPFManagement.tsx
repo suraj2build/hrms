@@ -128,9 +128,9 @@ function ColoredStatCard({
 // ── EPF Rate Bar (right-column card) ──────────────────────────────────────────
 
 function EPFRateBar({ config }: { config: EPFConfig }) {
-  const empRate     = config.employee_contribution_pct
-  const pfRate      = Math.max(0, config.employer_pf_pct - config.employer_eps_pct)
-  const pensionRate = config.employer_eps_pct
+  const empRate     = config.employee_contribution_pct ?? 0
+  const pfRate      = Math.max(0, (config.employer_pf_pct ?? 0) - (config.employer_eps_pct ?? 0))
+  const pensionRate = config.employer_eps_pct ?? 0
   const adminRate   = 0.5
   const total       = empRate + pfRate + pensionRate + adminRate
 
@@ -252,8 +252,8 @@ function EditConfigDialog({ config, onClose }: { config: EPFConfig; onClose: () 
           ))}
           <div className="p-2.5 rounded-md bg-muted/30 border border-border/50 text-[11px] text-muted-foreground">
             <span className="font-medium text-foreground">EPF split: </span>
-            Employer EPF = {Math.max(0, form.employer_pf_pct - form.employer_eps_pct).toFixed(2)}%
-            &nbsp;·&nbsp; EPS = {form.employer_eps_pct.toFixed(2)}%
+            Employer EPF = {Math.max(0, (form.employer_pf_pct ?? 0) - (form.employer_eps_pct ?? 0)).toFixed(2)}%
+            &nbsp;·&nbsp; EPS = {(form.employer_eps_pct ?? 0).toFixed(2)}%
           </div>
           {error && (
             <div className="flex items-start gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
@@ -612,7 +612,7 @@ export function EPFManagement() {
                     { label: 'Employee Rate',         value: fmtPct(config.employee_contribution_pct) },
                     { label: 'Employer PF',           value: fmtPct(config.employer_pf_pct) },
                     { label: 'Pension Share (EPS)',   value: fmtPct(config.employer_eps_pct) },
-                    { label: 'Provident Share (EPF)', value: `${Math.max(0, config.employer_pf_pct - config.employer_eps_pct).toFixed(2)}%` },
+                    { label: 'Provident Share (EPF)', value: `${Math.max(0, (config.employer_pf_pct ?? 0) - (config.employer_eps_pct ?? 0)).toFixed(2)}%` },
                   ].map(({ label, value }) => (
                     <div key={label} className="p-3.5 bg-muted/30 rounded-xl border border-border/50">
                       <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">{label}</p>
@@ -627,7 +627,7 @@ export function EPFManagement() {
                     <span className="h-5 w-5 bg-primary/10 text-primary rounded-full flex items-center justify-center shrink-0">
                       <Info className="h-3 w-3" />
                     </span>
-                    <span>Wage ceiling restricts PF wage base to <strong className="text-foreground">₹{config.wage_ceiling.toLocaleString('en-IN')}</strong>.</span>
+                    <span>Wage ceiling restricts PF wage base to <strong className="text-foreground">₹{(config.wage_ceiling ?? 0).toLocaleString('en-IN')}</strong>.</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Ceiling:</span>

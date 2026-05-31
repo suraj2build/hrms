@@ -582,7 +582,7 @@ export function PolicySimulation() {
                           </Badge>
                         </td>
                         <td className="px-3 py-2 tabular-nums font-medium text-foreground">
-                          {sc.count.toLocaleString()}
+                          {(sc.count ?? 0).toLocaleString()}
                         </td>
                       </tr>
                     ))}

@@ -412,8 +412,8 @@ function VarianceDialog({
     return `${sign}${fmtCurrency(Math.abs(n))}`
   }
   const fmtPct = (n: number) => {
-    const sign = n >= 0 ? '+' : ''
-    return `${sign}${n.toFixed(1)}%`
+    const sign = (n ?? 0) >= 0 ? '+' : ''
+    return `${sign}${(n ?? 0).toFixed(1)}%`
   }
 
   return (

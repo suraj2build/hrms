@@ -218,7 +218,7 @@ export function AttendanceRisk() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <SummaryTile
             label="Avg Risk Score"
-            value={summary.avg_risk_score.toFixed(1)}
+            value={(summary.avg_risk_score ?? 0).toFixed(1)}
             sub="across all employees"
             icon={Activity}
             cls={

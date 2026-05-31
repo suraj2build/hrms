@@ -435,17 +435,17 @@ export function EssOperationalCenter() {
           >
             <StatRow
               label="LOP Deduction"
-              value={summary.lop_amount.toLocaleString()}
+              value={(summary.lop_amount ?? 0).toLocaleString()}
               valueCls={summary.lop_amount > 0 ? 'text-destructive' : undefined}
             />
             <StatRow
               label="OT Addition"
-              value={summary.ot_amount.toLocaleString()}
+              value={(summary.ot_amount ?? 0).toLocaleString()}
               valueCls={summary.ot_amount > 0 ? 'text-success' : undefined}
             />
             <StatRow
               label="Est. Net Payable"
-              value={summary.estimated_net_payable.toLocaleString()}
+              value={(summary.estimated_net_payable ?? 0).toLocaleString()}
               valueCls="text-foreground font-bold"
             />
             {summary.warnings.length > 0 && (
@@ -488,8 +488,8 @@ export function EssOperationalCenter() {
                 </span>
               </div>
 
-              <StatRow label="Avg Work Hours"  value={workload.avg_work_hours.toFixed(1)} unit=" hrs/day" />
-              <StatRow label="Max Work Hours"  value={workload.max_work_hours.toFixed(1)} unit=" hrs/day" />
+              <StatRow label="Avg Work Hours"  value={(workload.avg_work_hours ?? 0).toFixed(1)} unit=" hrs/day" />
+              <StatRow label="Max Work Hours"  value={(workload.max_work_hours ?? 0).toFixed(1)} unit=" hrs/day" />
 
               <WorkloadMiniBar
                 overload={workload.overload_days}
@@ -531,10 +531,10 @@ export function EssOperationalCenter() {
 
               <StatRow label="Weekend Shifts"    value={fairness.weekend_shifts} unit=" shifts" />
               <StatRow label="Night Shifts"      value={fairness.night_shifts}   unit=" shifts" />
-              <StatRow label="Your OT Hours"     value={fairness.total_ot_hours.toFixed(1)} unit=" hrs" />
+              <StatRow label="Your OT Hours"     value={(fairness.total_ot_hours ?? 0).toFixed(1)} unit=" hrs" />
               <StatRow
                 label="Team Avg OT"
-                value={fairness.team_avg_ot_hours.toFixed(1)}
+                value={(fairness.team_avg_ot_hours ?? 0).toFixed(1)}
                 unit=" hrs"
                 valueCls="text-muted-foreground"
               />
@@ -562,7 +562,7 @@ export function EssOperationalCenter() {
                         />
                       </div>
                       <span className="text-[10px] text-foreground tabular-nums w-12 text-right">
-                        {fairness.total_ot_hours.toFixed(1)}h
+                        {(fairness.total_ot_hours ?? 0).toFixed(1)}h
                       </span>
                     </div>
                     {/* Team avg */}
@@ -571,14 +571,14 @@ export function EssOperationalCenter() {
                       <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                         <div
                           style={{
-                            width: `${Math.min(100, (fairness.team_avg_ot_hours /
-                              Math.max(fairness.total_ot_hours, fairness.team_avg_ot_hours, 1)) * 100)}%`,
+                            width: `${Math.min(100, ((fairness.team_avg_ot_hours ?? 0) /
+                              Math.max(fairness.total_ot_hours ?? 0, fairness.team_avg_ot_hours ?? 0, 1)) * 100)}%`,
                           }}
                           className="h-full rounded-full bg-muted-foreground/40"
                         />
                       </div>
                       <span className="text-[10px] text-muted-foreground tabular-nums w-12 text-right">
-                        {fairness.team_avg_ot_hours.toFixed(1)}h
+                        {(fairness.team_avg_ot_hours ?? 0).toFixed(1)}h
                       </span>
                     </div>
                   </div>

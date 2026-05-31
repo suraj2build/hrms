@@ -415,7 +415,7 @@ function SlaTab() {
                       <td className="py-2 pr-4 text-xs text-muted-foreground">{t.sla_id}</td>
                       <td className="py-2 pr-4">
                         <span className={cn('tabular-nums text-sm', t.hours_remaining < 4 ? 'text-destructive font-medium' : '')}>
-                          {t.hours_remaining.toFixed(1)}h
+                          {(t.hours_remaining ?? 0).toFixed(1)}h
                         </span>
                       </td>
                       <td className="py-2 text-xs text-muted-foreground">{fmtDate(t.due_at)}</td>

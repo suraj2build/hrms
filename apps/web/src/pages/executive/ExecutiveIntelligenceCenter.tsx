@@ -140,14 +140,14 @@ interface TrendsData {
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 function fmtCurrency(n: number): string {
-  if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(1)}Cr`
-  if (n >= 100_000)    return `₹${(n / 100_000).toFixed(1)}L`
-  if (n >= 1_000)      return `₹${(n / 1_000).toFixed(0)}K`
-  return `₹${n.toLocaleString()}`
+  if (n >= 10_000_000) return `₹${((n ?? 0) / 10_000_000).toFixed(1)}Cr`
+  if (n >= 100_000)    return `₹${((n ?? 0) / 100_000).toFixed(1)}L`
+  if (n >= 1_000)      return `₹${((n ?? 0) / 1_000).toFixed(0)}K`
+  return `₹${(n ?? 0).toLocaleString()}`
 }
 
-function fmtPct(n: number): string { return `${n.toFixed(1)}%` }
-function fmtNum(n: number): string { return n.toLocaleString() }
+function fmtPct(n: number): string { return `${(n ?? 0).toFixed(1)}%` }
+function fmtNum(n: number): string { return (n ?? 0).toLocaleString() }
 function fmtMonth(ym: string): string {
   try {
     const [y, m] = ym.split('-').map(Number)

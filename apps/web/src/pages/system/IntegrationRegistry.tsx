@@ -744,11 +744,11 @@ export function IntegrationRegistry() {
                 {/* Stats row */}
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
-                    { label: 'Total Calls',   value: selected.total_calls.toLocaleString() },
+                    { label: 'Total Calls',   value: (selected.total_calls ?? 0).toLocaleString() },
                     {
                       label: 'Error Rate',
-                      value: `${selected.error_rate_pct.toFixed(1)}%`,
-                      cls: selected.error_rate_pct > 5 ? 'text-destructive' : 'text-foreground',
+                      value: `${(selected.error_rate_pct ?? 0).toFixed(1)}%`,
+                      cls: (selected.error_rate_pct ?? 0) > 5 ? 'text-destructive' : 'text-foreground',
                     },
                     {
                       label: 'Avg Latency',

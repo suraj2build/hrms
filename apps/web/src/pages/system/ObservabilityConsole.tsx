@@ -595,7 +595,7 @@ export function ObservabilityConsole() {
                 label: 'Event Handlers',
                 value: obs.event_bus.handler_count,
                 icon:  Radio,
-                sub:   `${obs.event_bus.total_emitted.toLocaleString()} events emitted`,
+                sub:   `${(obs.event_bus.total_emitted ?? 0).toLocaleString()} events emitted`,
                 cls:   'text-foreground',
               },
               {
@@ -677,7 +677,7 @@ export function ObservabilityConsole() {
                           {fmtAge(row.age_seconds)}
                         </td>
                         <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                          {row.tick_count.toLocaleString()}
+                          {(row.tick_count ?? 0).toLocaleString()}
                         </td>
                         <td className="px-3 py-2 text-destructive max-w-xs truncate" title={row.last_error ?? ''}>
                           {row.last_error ?? '—'}
@@ -705,7 +705,7 @@ export function ObservabilityConsole() {
                 ].map(({ label, value, cls }) => (
                   <div key={label} className="rounded-md border border-border px-3 py-2">
                     <p className="text-[10px] text-muted-foreground">{label}</p>
-                    <p className={cn('font-display text-lg font-bold tabular-nums', cls)}>{value.toLocaleString()}</p>
+                    <p className={cn('font-display text-lg font-bold tabular-nums', cls)}>{(value ?? 0).toLocaleString()}</p>
                   </div>
                 ))}
               </div>
@@ -985,7 +985,7 @@ export function ObservabilityConsole() {
                     {obs.event_bus.by_type.map(row => (
                       <tr key={row.type} className="border-b border-border/50">
                         <td className="px-3 py-2 font-mono text-foreground">{row.type}</td>
-                        <td className="px-3 py-2 tabular-nums">{row.emitted.toLocaleString()}</td>
+                        <td className="px-3 py-2 tabular-nums">{(row.emitted ?? 0).toLocaleString()}</td>
                         <td className={cn(
                           'px-3 py-2 tabular-nums',
                           row.failed > 0 ? 'text-destructive font-semibold' : 'text-muted-foreground',

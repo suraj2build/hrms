@@ -155,7 +155,7 @@ function computeMetrics(
   }
 }
 
-function fmt2(n: number) { return n.toFixed(1) }
+function fmt2(n: number) { return (n ?? 0).toFixed(1) }
 
 function RateBar({ value, color }: { value: number; color: string }) {
   return (

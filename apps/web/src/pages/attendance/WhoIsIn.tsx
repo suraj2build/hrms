@@ -271,7 +271,7 @@ export function WhoIsIn() {
               { label: 'Out of Office', count: summary.out_of_office.count,  pct: summary.out_of_office.pct,  color: 'text-blue-600'           },
             ].map(({ label, count, pct, color }) => (
               <div key={label} className="px-4 py-3 text-center">
-                <p className={cn('font-display text-xl font-bold tabular-nums', color)}>{pct.toFixed(2)}%</p>
+                <p className={cn('font-display text-xl font-bold tabular-nums', color)}>{(pct ?? 0).toFixed(2)}%</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
                   {count} Employee{count !== 1 ? '(s)' : ''} Are {label}
                 </p>

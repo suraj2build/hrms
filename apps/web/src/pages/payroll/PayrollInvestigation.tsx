@@ -191,7 +191,7 @@ function DiffBadge({ diff, prefix = '', suffix = '', invertColor = false }: {
     <span className={cn('inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums',
       isPositive ? 'text-success' : 'text-destructive')}>
       {diff > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-      {prefix}{diff > 0 ? '+' : ''}{diff.toFixed(0)}{suffix}
+      {prefix}{diff > 0 ? '+' : ''}{(diff ?? 0).toFixed(0)}{suffix}
     </span>
   )
 }

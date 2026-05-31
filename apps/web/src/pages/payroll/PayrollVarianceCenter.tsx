@@ -81,7 +81,7 @@ function DeltaChip({ value, pct, small }: { value: number; pct: number; small?: 
     )}>
       {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
       {isUp ? '+' : ''}{fmtCurrency(value)}
-      <span className="opacity-70">({isUp ? '+' : ''}{pct.toFixed(1)}%)</span>
+      <span className="opacity-70">({isUp ? '+' : ''}{(pct ?? 0).toFixed(1)}%)</span>
     </div>
   )
 }
@@ -283,8 +283,8 @@ export function PayrollVarianceCenter() {
               <tbody>
                 {filteredRows.map(row => {
                   const isExpanded = expandedRows.has(row.employee_id)
-                  const lopDelta   = row.lop_days - row.prev_lop_days
-                  const otDelta    = row.overtime_hours - row.prev_overtime_hours
+                  const lopDelta   = (row.lop_days ?? 0) - (row.prev_lop_days ?? 0)
+                  const otDelta    = (row.overtime_hours ?? 0) - (row.prev_overtime_hours ?? 0)
                   return (
                     <>
                       <tr

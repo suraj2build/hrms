@@ -213,7 +213,7 @@ function LifecycleAnalyticsTab() {
   const activeFreezes = (freezeData?.data ?? []).filter(f => f.status === 'active')
   const heldCredits   = (heldData as any)?.data ?? []
   const totalFrozen   = activeFreezes.length
-  const totalHeld     = (heldCredits as HeldCreditSummary[]).reduce((s: number, r: HeldCreditSummary) => s + r.total_held_days, 0)
+  const totalHeld     = (heldCredits as HeldCreditSummary[]).reduce((s: number, r: HeldCreditSummary) => s + (r.total_held_days ?? 0), 0)
 
   return (
     <div className="space-y-4">

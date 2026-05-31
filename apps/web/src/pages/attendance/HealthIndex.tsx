@@ -105,7 +105,7 @@ function HealthCard({ entry }: { entry: HealthScore }) {
           <p className="text-[10px] text-muted-foreground capitalize">{entry.scope}</p>
         </div>
         <div className={cn('text-2xl font-bold tabular-nums flex-shrink-0', healthScoreColor(score))}>
-          {score.toFixed(0)}
+          {(score ?? 0).toFixed(0)}
         </div>
       </div>
 
@@ -265,7 +265,7 @@ export function HealthIndex() {
             </p>
             <div className="flex items-end gap-2">
               <p className={cn('text-4xl font-bold tabular-nums', healthScoreColor(summary.org_health_score))}>
-                {summary.org_health_score.toFixed(0)}
+                {(summary.org_health_score ?? 0).toFixed(0)}
               </p>
               <span className="text-muted-foreground text-sm mb-1">/ 100</span>
             </div>

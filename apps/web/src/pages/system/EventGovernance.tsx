@@ -918,7 +918,7 @@ function StatsTab() {
                       <tr key={row.event_type} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="py-2 px-3 text-xs font-mono text-foreground">{row.event_type}</td>
                         <td className="py-2 px-3 text-xs tabular-nums text-right font-semibold text-foreground">
-                          {row.count.toLocaleString()}
+                          {(row.count ?? 0).toLocaleString()}
                         </td>
                       </tr>
                     ))}
@@ -946,7 +946,7 @@ function StatsTab() {
                       <tr key={row.date} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="py-2 px-3 text-xs text-foreground tabular-nums">{fmtDate(row.date)}</td>
                         <td className="py-2 px-3 text-xs tabular-nums text-right text-foreground">
-                          {row.count.toLocaleString()}
+                          {(row.count ?? 0).toLocaleString()}
                         </td>
                       </tr>
                     ))}

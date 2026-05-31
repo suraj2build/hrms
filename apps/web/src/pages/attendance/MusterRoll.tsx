@@ -149,7 +149,7 @@ function exportMusterCsv(employees: EmployeeMuster[], dates: string[], monthLabe
       summary.half_day        ?? 0,
       summary.overtime        ?? 0,
       (summary.missing_punch ?? 0) + (summary.no_punch ?? 0),
-      payable.toFixed(1),
+      (payable ?? 0).toFixed(1),
     ]
   })
   const csv = [header, ...rows]
@@ -499,7 +499,7 @@ export function MusterRoll() {
                 {/* Column 3 — payrollMetrics derived values */}
                 <div>
                   <div className="font-semibold text-foreground mb-1">3. payrollMetrics (derived)</div>
-                  <div><span className="text-foreground">totalPayableDays:</span> {payrollMetrics.totalPayableDays.toFixed(2)}</div>
+                  <div><span className="text-foreground">totalPayableDays:</span> {(payrollMetrics.totalPayableDays ?? 0).toFixed(2)}</div>
                   <div><span className="text-foreground">totalLopDays:</span> {payrollMetrics.totalLopDays}</div>
                   <div><span className="text-foreground">totalOnLeave:</span> {payrollMetrics.totalOnLeave}</div>
                 </div>
@@ -507,7 +507,7 @@ export function MusterRoll() {
                 {/* Column 4 — What the widgets actually render */}
                 <div>
                   <div className="font-semibold text-foreground mb-1">4. Widget values (rendered)</div>
-                  <div><span className="text-foreground">Payable Days chip:</span> {payrollMetrics.totalPayableDays.toFixed(1)}</div>
+                  <div><span className="text-foreground">Payable Days chip:</span> {(payrollMetrics.totalPayableDays ?? 0).toFixed(1)}</div>
                   <div><span className="text-foreground">LOP Days chip:</span> {payrollMetrics.totalLopDays}</div>
                   <div><span className="text-foreground">On Leave chip:</span> {payrollMetrics.totalOnLeave}</div>
                   <div><span className="text-foreground">LOP Risk chip:</span> {rosterSummary.empWithAbsence}</div>
@@ -531,7 +531,7 @@ export function MusterRoll() {
               {
                 label:    'Payable Days',
                 icon:     <CalendarCheck2 className="h-3.5 w-3.5 text-success" />,
-                value:    isLoading ? '…' : payrollMetrics.totalPayableDays.toFixed(1),
+                value:    isLoading ? '…' : (payrollMetrics.totalPayableDays ?? 0).toFixed(1),
                 colorCls: 'text-success',
               },
               {
@@ -928,7 +928,7 @@ export function MusterRoll() {
                                   rowBg,
                                 )}>
                                   <div className="text-[11px] font-semibold text-foreground mb-0.5">
-                                    {payable.toFixed(1)}d
+                                    {(payable ?? 0).toFixed(1)}d
                                   </div>
                                   {/* Phase 2: bumped from text-[9px] → text-[10px] for scanability */}
                                   <div className="flex gap-1 flex-wrap text-[10px]">
@@ -1055,7 +1055,7 @@ export function MusterRoll() {
                 ) : (
                   <div className="space-y-1.5">
                     {[
-                      { label: 'Payable days', value: payrollMetrics.totalPayableDays.toFixed(1), cls: 'text-success' },
+                      { label: 'Payable days', value: (payrollMetrics.totalPayableDays ?? 0).toFixed(1), cls: 'text-success' },
                       { label: 'LOP days',     value: String(payrollMetrics.totalLopDays),         cls: 'text-destructive' },
                       { label: 'On leave',     value: String(payrollMetrics.totalOnLeave),          cls: 'text-info' },
                     ].map(({ label, value, cls }) => (

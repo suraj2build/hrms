@@ -730,7 +730,7 @@ function AttendanceReport({ departments, basePath }: { departments: Department[]
         'Late Days':        r.late,
         'Half Days':        r.half_day,
         'Leave Days':       r.leave_days,
-        'Work Hours':       r.total_work_hours.toFixed(1),
+        'Work Hours':       (r.total_work_hours ?? 0).toFixed(1),
         'Late Minutes':     r.total_late_minutes,
         'OT Minutes':       r.total_overtime_minutes,
       })),
@@ -862,7 +862,7 @@ function AttendanceReport({ departments, basePath }: { departments: Department[]
                 <Td right highlight={r.late > 0 ? 'warning' : undefined}>{r.late > 0 ? r.late : '—'}</Td>
                 <Td right>{r.half_day > 0 ? r.half_day : '—'}</Td>
                 <Td right>{r.leave_days > 0 ? r.leave_days : '—'}</Td>
-                <Td right bold>{r.total_work_hours.toFixed(1)}</Td>
+                <Td right bold>{(r.total_work_hours ?? 0).toFixed(1)}</Td>
                 <Td right>{r.total_late_minutes > 0 ? r.total_late_minutes : '—'}</Td>
                 <Td right>{r.total_overtime_minutes > 0 ? r.total_overtime_minutes : '—'}</Td>
               </tr>
@@ -2227,12 +2227,12 @@ function AttendancePayrollReport({ departments, basePath }: { departments: Depar
 
   // Running totals for the footer — computed from the currently-filtered rows
   const slippedRows = filtered.filter(r => r.has_payroll_slip)
-  const totalAttPayable = filtered.reduce((s, r) => s + r.att_payable_days, 0)
+  const totalAttPayable = filtered.reduce((s, r) => s + (r.att_payable_days ?? 0), 0)
   const totalPrPayable  = slippedRows.reduce((s, r) => s + (r.payroll_payable_days ?? 0), 0)
-  const totalDiffPay    = slippedRows.reduce((s, r) => s + r.diff_payable, 0)
-  const totalAttLop     = filtered.reduce((s, r) => s + r.att_lop_days, 0)
+  const totalDiffPay    = slippedRows.reduce((s, r) => s + (r.diff_payable ?? 0), 0)
+  const totalAttLop     = filtered.reduce((s, r) => s + (r.att_lop_days ?? 0), 0)
   const totalPrLop      = slippedRows.reduce((s, r) => s + (r.payroll_lop_days ?? 0), 0)
-  const totalDiffLop    = slippedRows.reduce((s, r) => s + r.diff_lop, 0)
+  const totalDiffLop    = slippedRows.reduce((s, r) => s + (r.diff_lop ?? 0), 0)
   const visibleMismatches = filtered.filter(r => r.is_mismatch).length
 
   return (
@@ -2455,34 +2455,34 @@ function AttendancePayrollReport({ departments, basePath }: { departments: Depar
                   <Td>{r.department}</Td>
 
                   {/* Attendance payable */}
-                  <Td right bold>{r.att_payable_days.toFixed(1)}</Td>
+                  <Td right bold>{(r.att_payable_days ?? 0).toFixed(1)}</Td>
 
                   {/* Payroll payable */}
                   <Td right>
                     {noSlip
                       ? <span className="text-muted-foreground/40">—</span>
-                      : r.payroll_payable_days!.toFixed(1)}
+                      : (r.payroll_payable_days ?? 0).toFixed(1)}
                   </Td>
 
                   {/* Δ payable */}
                   <Td right highlight={
-                    isMismatch && Math.abs(r.diff_payable) > 0.01
-                      ? (r.diff_payable > 0 ? 'warning' : 'destructive')
+                    isMismatch && Math.abs(r.diff_payable ?? 0) > 0.01
+                      ? ((r.diff_payable ?? 0) > 0 ? 'warning' : 'destructive')
                       : undefined
                   }>
                     {noSlip
                       ? '—'
-                      : r.diff_payable === 0
+                      : (r.diff_payable ?? 0) === 0
                         ? <span className="text-success">✓</span>
-                        : r.diff_payable > 0
-                          ? `+${r.diff_payable.toFixed(2)}`
-                          : r.diff_payable.toFixed(2)}
+                        : (r.diff_payable ?? 0) > 0
+                          ? `+${(r.diff_payable ?? 0).toFixed(2)}`
+                          : (r.diff_payable ?? 0).toFixed(2)}
                   </Td>
 
                   {/* Attendance LOP */}
                   <Td right>
-                    {r.att_lop_days > 0
-                      ? <span className="text-warning font-semibold">{r.att_lop_days.toFixed(1)}</span>
+                    {(r.att_lop_days ?? 0) > 0
+                      ? <span className="text-warning font-semibold">{(r.att_lop_days ?? 0).toFixed(1)}</span>
                       : <span className="text-muted-foreground/40">—</span>}
                   </Td>
 
@@ -2490,20 +2490,20 @@ function AttendancePayrollReport({ departments, basePath }: { departments: Depar
                   <Td right>
                     {noSlip
                       ? <span className="text-muted-foreground/40">—</span>
-                      : r.payroll_lop_days! > 0
-                        ? r.payroll_lop_days!.toFixed(1)
+                      : (r.payroll_lop_days ?? 0) > 0
+                        ? (r.payroll_lop_days ?? 0).toFixed(1)
                         : <span className="text-muted-foreground/40">—</span>}
                   </Td>
 
                   {/* Δ LOP */}
                   <Td right highlight={
-                    isMismatch && Math.abs(r.diff_lop) > 0.01 ? 'destructive' : undefined
+                    isMismatch && Math.abs(r.diff_lop ?? 0) > 0.01 ? 'destructive' : undefined
                   }>
-                    {noSlip || r.diff_lop === 0
+                    {noSlip || (r.diff_lop ?? 0) === 0
                       ? <span className="text-muted-foreground/40">—</span>
-                      : r.diff_lop > 0
-                        ? `+${r.diff_lop.toFixed(2)}`
-                        : r.diff_lop.toFixed(2)}
+                      : (r.diff_lop ?? 0) > 0
+                        ? `+${(r.diff_lop ?? 0).toFixed(2)}`
+                        : (r.diff_lop ?? 0).toFixed(2)}
                   </Td>
 
                   {/* Last recompute */}
