@@ -963,17 +963,19 @@ export function EmployeeProfile() {
   const orgCtx = orgCtxData?.data
 
   const [orgDlgOpen, setOrgDlgOpen] = useState(false)
-  const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
+  const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', work_location_id: '', cost_center_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
 
   const orgMutation = useMutation({
     mutationFn: (body: typeof orgForm) =>
       api.post(`/employees/${id}/org-context`, {
-        site_id:        body.site_id        || null,
-        roster_id:      body.roster_id      || null,
-        effective_from: body.effective_from,
-        reason:         body.reason         || null,
+        site_id:          body.site_id          || null,
+        roster_id:        body.roster_id        || null,
+        work_location_id: body.work_location_id || null,
+        cost_center_id:   body.cost_center_id   || null,
+        effective_from:   body.effective_from,
+        reason:           body.reason           || null,
       }),
-    onSuccess: () => { setOrgDlgOpen(false); refetchOrgCtx(); toast.success('Organisation context updated') },
+    onSuccess: () => { setOrgDlgOpen(false); refetchOrgCtx(); qc.invalidateQueries({ queryKey: ['job-current', id] }); toast.success('Organisation context updated') },
     onError:   (e: Error) => toast.error('Failed to update org context', { description: e.message }),
   })
 
@@ -2535,12 +2537,14 @@ export function EmployeeProfile() {
                   ? <div className="px-6 pb-6"><EmptySection icon={History} title="No position history" /></div>
                   : <div className="overflow-x-auto">
                       <table className="w-full text-xs">
-                        <thead><tr className="border-b border-border">{['Dept','Designation','Manager','Eff. From','Eff. To'].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>)}</tr></thead>
+                        <thead><tr className="border-b border-border">{['Dept','Designation','Work Location','Cost Center','Manager','Eff. From','Eff. To'].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>)}</tr></thead>
                         <tbody>
                           {jobHistoryData!.data.map((row: any) => (
                             <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20">
                               <td className="px-4 py-2">{row.departments?.name ?? '—'}</td>
                               <td className="px-4 py-2">{row.designations?.name ?? '—'}</td>
+                              <td className="px-4 py-2">{row.work_locations?.name ?? '—'}</td>
+                              <td className="px-4 py-2">{row.cost_center?.name ?? '—'}</td>
                               <td className="px-4 py-2">{row.manager ? `${row.manager.first_name} ${row.manager.last_name}` : '—'}</td>
                               <td className="px-4 py-2 whitespace-nowrap">{fmtDate(row.effective_from)}</td>
                               <td className="px-4 py-2 whitespace-nowrap">{row.is_current ? <Badge variant="success" className="rounded-full text-[9px]">Current</Badge> : fmtDate(row.effective_to)}</td>
@@ -2626,10 +2630,12 @@ export function EmployeeProfile() {
                     {isAdmin && (
                       <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
                         setOrgForm({
-                          site_id:        orgCtx?.site?.id        ?? '',
-                          roster_id:      orgCtx?.roster?.id      ?? '',
-                          effective_from: new Date().toISOString().slice(0, 10),
-                          reason:         '',
+                          site_id:          orgCtx?.site?.id          ?? '',
+                          roster_id:        orgCtx?.roster?.id        ?? '',
+                          work_location_id: job?.work_locations?.id   ?? '',
+                          cost_center_id:   job?.cost_center?.id      ?? '',
+                          effective_from:   new Date().toISOString().slice(0, 10),
+                          reason:           '',
                         })
                         setOrgDlgOpen(true)
                       }}>
@@ -2655,6 +2661,18 @@ export function EmployeeProfile() {
                           )}
                         </div>
                       : <span className="text-xs text-muted-foreground">No roster</span>}
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Work Location</p>
+                    {job?.work_locations
+                      ? <div><p className="font-medium">{job.work_locations.name}</p>{job.work_locations.city && <p className="text-xs text-muted-foreground">{job.work_locations.city}</p>}</div>
+                      : <span className="text-xs text-muted-foreground">Not assigned</span>}
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Cost Center</p>
+                    {job?.cost_center
+                      ? <div><p className="font-medium">{job.cost_center.name}</p><p className="text-xs text-muted-foreground font-mono">{job.cost_center.code}</p></div>
+                      : <span className="text-xs text-muted-foreground">Not assigned</span>}
                   </div>
                   {orgCtx?.effective_from && (
                     <div>
@@ -2704,6 +2722,22 @@ export function EmployeeProfile() {
                         className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
                         <option value="">— None —</option>
                         {sitesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Work Location</label>
+                      <select value={orgForm.work_location_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, work_location_id: e.target.value }))}
+                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                        <option value="">— None —</option>
+                        {(workLocsData?.data ?? []).map((w:any) => <option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Cost Center</label>
+                      <select value={orgForm.cost_center_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, cost_center_id: e.target.value }))}
+                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                        <option value="">— None —</option>
+                        {(costCentersData?.data ?? []).map((c:any) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -4014,19 +4048,55 @@ export function EmployeeProfile() {
 
       {/* Add Job History */}
       <Dialog open={addJobOpen} onOpenChange={setAddJobOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Add Position Record</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            {/* Employment Type */}
             <div>
               <Label className="text-xs">Employment Type</Label>
               <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.employment_type ?? 'permanent'} onChange={e => setJobForm((p:any)=>({...p,employment_type:e.target.value}))}>
                 {['permanent','contract','intern','probation','consultant'].map(o=><option key={o} value={o}>{o}</option>)}
               </select>
             </div>
+            {/* Department */}
             <div>
-              <Label className="text-xs">Effective From</Label>
+              <Label className="text-xs">Department</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.department_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,department_id:e.target.value||null}))}>
+                <option value="">— None —</option>
+                {(deptData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            {/* Designation */}
+            <div>
+              <Label className="text-xs">Designation</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.designation_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,designation_id:e.target.value||null}))}>
+                <option value="">— None —</option>
+                {(desigData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            {/* Work Location + Cost Center */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Work Location</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.work_location_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,work_location_id:e.target.value||null}))}>
+                  <option value="">— None —</option>
+                  {(workLocsData?.data ?? []).map((w:any)=><option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs">Cost Center</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.cost_center_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,cost_center_id:e.target.value||null}))}>
+                  <option value="">— None —</option>
+                  {(costCentersData?.data ?? []).map((c:any)=><option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                </select>
+              </div>
+            </div>
+            {/* Effective From */}
+            <div>
+              <Label className="text-xs">Effective From *</Label>
               <DateInput className="mt-1 h-8 text-xs" value={jobForm.effective_from ?? ''} onChange={v=>setJobForm((p:any)=>({...p,effective_from:v}))} />
             </div>
+            {/* Reason */}
             <div>
               <Label className="text-xs">Reason for Change</Label>
               <Input className="mt-1 h-8 text-xs" value={jobForm.reason_for_change ?? ''} onChange={e=>setJobForm((p:any)=>({...p,reason_for_change:e.target.value}))} />
@@ -4034,7 +4104,7 @@ export function EmployeeProfile() {
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>setAddJobOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={()=>addJobMutation.mutate(jobForm)} disabled={addJobMutation.isPending}>
+            <Button size="sm" onClick={()=>addJobMutation.mutate(jobForm)} disabled={addJobMutation.isPending || !jobForm.effective_from}>
               {addJobMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
             </Button>
           </DialogFooter>

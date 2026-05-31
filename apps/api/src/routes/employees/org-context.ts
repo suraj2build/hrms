@@ -117,10 +117,12 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
     const employeeId = (req.params as any).id
     const bodySchema = z.object({
-      site_id:        z.string().uuid().nullable().optional(),
-      roster_id:      z.string().uuid().nullable().optional(),
-      effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      reason:         z.string().max(500).nullable().optional(),
+      site_id:          z.string().uuid().nullable().optional(),
+      roster_id:        z.string().uuid().nullable().optional(),
+      work_location_id: z.string().uuid().nullable().optional(),
+      cost_center_id:   z.string().uuid().nullable().optional(),
+      effective_from:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      reason:           z.string().max(500).nullable().optional(),
     })
 
     const parsed = bodySchema.safeParse(req.body)
@@ -137,7 +139,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const { site_id, roster_id, effective_from, reason } = parsed.data
+    const { site_id, roster_id, work_location_id, cost_center_id, effective_from, reason } = parsed.data
 
     // Close the current assignment (if any)
     const prevDay = new Date(`${effective_from}T12:00:00.000Z`)
@@ -155,23 +157,36 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .insert({
         tenant_id:      req.tenantId,
         employee_id:    employeeId,
-        site_id:        site_id   ?? null,
-        roster_id:      roster_id ?? null,
+        site_id:        site_id          ?? null,
+        roster_id:      roster_id        ?? null,
         effective_from,
         is_current:     true,
-        reason:         reason ?? null,
+        reason:         reason           ?? null,
       })
       .select('id, site_id, roster_id, effective_from, is_current')
       .single()
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
-    // Mirror to employees table for quick lookups without history join
+    // Mirror site+roster to employees table for quick lookups
     await fastify.supabase
       .from('employees')
       .update({ site_id: site_id ?? null, roster_id: roster_id ?? null })
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
+
+    // Mirror work_location + cost_center to current job_history row
+    if (work_location_id !== undefined || cost_center_id !== undefined) {
+      await fastify.supabase
+        .from('job_history')
+        .update({
+          ...(work_location_id !== undefined ? { work_location_id: work_location_id ?? null } : {}),
+          ...(cost_center_id   !== undefined ? { cost_center_id:   cost_center_id   ?? null } : {}),
+        })
+        .eq('employee_id', employeeId)
+        .eq('tenant_id',   req.tenantId)
+        .eq('is_current',  true)
+    }
 
     return reply.code(201).send({ data: newRow })
   })
