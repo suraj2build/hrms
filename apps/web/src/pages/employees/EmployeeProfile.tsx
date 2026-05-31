@@ -1012,11 +1012,11 @@ export function EmployeeProfile() {
   // ── Master data for assignment dialogs (lazy — loads only when dialog opens) ─
   const { data: deptListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-departments'], queryFn: () => api.get('/masters/departments'),
-    enabled: assignTarget === 'department', staleTime: 300_000,
+    enabled: assignTarget === 'department' || addJobOpen || orgDlgOpen, staleTime: 300_000,
   })
   const { data: desigListData } = useQuery<{ data: { id: string; name: string }[] }>({
     queryKey: ['masters-designations'], queryFn: () => api.get('/masters/designations'),
-    enabled: assignTarget === 'designation', staleTime: 300_000,
+    enabled: assignTarget === 'designation' || addJobOpen, staleTime: 300_000,
   })
   const { data: gradeListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-grades'], queryFn: () => api.get('/masters/grades'),
@@ -1024,11 +1024,11 @@ export function EmployeeProfile() {
   })
   const { data: ccListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-cost-centers'], queryFn: () => api.get('/masters/cost-centers'),
-    enabled: assignTarget === 'cost_center', staleTime: 300_000,
+    enabled: assignTarget === 'cost_center' || addJobOpen || orgDlgOpen, staleTime: 300_000,
   })
   const { data: wlListData } = useQuery<{ data: { id: string; name: string; city: string }[] }>({
     queryKey: ['masters-work-locations'], queryFn: () => api.get('/masters/work-locations'),
-    enabled: assignTarget === 'work_location', staleTime: 300_000,
+    enabled: assignTarget === 'work_location' || addJobOpen || orgDlgOpen, staleTime: 300_000,
   })
   const { data: shiftListData } = useQuery<{ data: { id: string; name: string; code: string; start_time: string; end_time: string }[] }>({
     queryKey: ['masters-shifts'], queryFn: () => api.get('/masters/shifts'),
@@ -2729,7 +2729,7 @@ export function EmployeeProfile() {
                       <select value={orgForm.work_location_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, work_location_id: e.target.value }))}
                         className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
                         <option value="">— None —</option>
-                        {(workLocsData?.data ?? []).map((w:any) => <option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
+                        {(wlListData?.data ?? []).map((w:any) => <option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -2737,7 +2737,7 @@ export function EmployeeProfile() {
                       <select value={orgForm.cost_center_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, cost_center_id: e.target.value }))}
                         className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
                         <option value="">— None —</option>
-                        {(costCentersData?.data ?? []).map((c:any) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                        {(ccListData?.data ?? []).map((c:any) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -4063,7 +4063,7 @@ export function EmployeeProfile() {
               <Label className="text-xs">Department</Label>
               <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.department_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,department_id:e.target.value||null}))}>
                 <option value="">— None —</option>
-                {(deptData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+                {(deptListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
             {/* Designation */}
@@ -4071,7 +4071,7 @@ export function EmployeeProfile() {
               <Label className="text-xs">Designation</Label>
               <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.designation_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,designation_id:e.target.value||null}))}>
                 <option value="">— None —</option>
-                {(desigData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+                {(desigListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
             {/* Work Location + Cost Center */}
@@ -4080,14 +4080,14 @@ export function EmployeeProfile() {
                 <Label className="text-xs">Work Location</Label>
                 <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.work_location_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,work_location_id:e.target.value||null}))}>
                   <option value="">— None —</option>
-                  {(workLocsData?.data ?? []).map((w:any)=><option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
+                  {(wlListData?.data ?? []).map((w:any)=><option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
                 </select>
               </div>
               <div>
                 <Label className="text-xs">Cost Center</Label>
                 <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.cost_center_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,cost_center_id:e.target.value||null}))}>
                   <option value="">— None —</option>
-                  {(costCentersData?.data ?? []).map((c:any)=><option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                  {(ccListData?.data ?? []).map((c:any)=><option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
                 </select>
               </div>
             </div>
