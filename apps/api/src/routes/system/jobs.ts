@@ -35,6 +35,75 @@ import { durableQueue }         from '../../lib/durable-queue.js'
 import { eventBus }             from '../../lib/event-bus.js'
 import { platformHealth }       from '../../lib/startup-health.js'
 
+// ── Automation Job Registry ──────────────────────────────────────────────────
+
+interface AutomationJob {
+  id:          string
+  name:        string
+  description: string
+  schedule:    string
+  owner:       string
+  job_type:    string    // maps to job queue job_type / durable job_type
+  is_enabled:  boolean
+}
+
+const AUTOMATION_REGISTRY: AutomationJob[] = [
+  {
+    id:          'attendance-processing',
+    name:        'Attendance Processing',
+    description: 'Processes raw punch logs into daily attendance records',
+    schedule:    'Daily @ 01:00',
+    owner:       'Attendance',
+    job_type:    'process-attendance',
+    is_enabled:  true,
+  },
+  {
+    id:          'leave-accrual',
+    name:        'Leave Balance Accrual',
+    description: 'Credits earned leave balances to eligible employees',
+    schedule:    'Monthly @ 00:05',
+    owner:       'Leave',
+    job_type:    'leave-accrual',
+    is_enabled:  true,
+  },
+  {
+    id:          'sla-scanner',
+    name:        'SLA Scanner',
+    description: 'Flags overdue leave and correction requests for escalation',
+    schedule:    'Every 4 hours',
+    owner:       'Operations',
+    job_type:    'sla-scan',
+    is_enabled:  true,
+  },
+  {
+    id:          'anomaly-detection',
+    name:        'Anomaly Detection',
+    description: 'Runs ML-based anomaly detection on attendance patterns',
+    schedule:    'Daily @ 02:00',
+    owner:       'Intelligence',
+    job_type:    'detect-anomalies',
+    is_enabled:  true,
+  },
+  {
+    id:          'intelligence-scanner',
+    name:        'Intelligence Scanner',
+    description: 'Emits operational insight events to the event bus',
+    schedule:    'Every 6 hours',
+    owner:       'Intelligence',
+    job_type:    'intelligence-scan',
+    is_enabled:  true,
+  },
+  {
+    id:          'event-bus-automation',
+    name:        'Event Bus Automation',
+    description: 'Responds to events for SLA monitoring, balance alerts, and escalations',
+    schedule:    'Event-driven',
+    owner:       'Operations',
+    job_type:    'event-automation',
+    is_enabled:  true,
+  },
+]
+
 export default async function jobQueueRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
@@ -77,6 +146,75 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       data:  dead,
       total: dead.length,
     })
+  })
+
+  // ── GET /system/jobs/automations ───────────────────────────────────────────
+  // Returns the static automation registry enriched with live queue metrics.
+  fastify.get('/system/jobs/automations', auth, async (_req: any, reply) => {
+    const snapshot = jobQueue.getQueueSnapshot()
+
+    const jobs = AUTOMATION_REGISTRY.map(job => {
+      const metrics = snapshot.metrics[job.job_type]
+      // Check if this job type has any recent completed or failed metrics
+      const lastStatus: 'success' | 'failed' | null =
+        metrics
+          ? metrics.failed > 0 ? 'failed' : metrics.completed > 0 ? 'success' : null
+          : null
+
+      return {
+        id:          job.id,
+        name:        job.name,
+        description: job.description,
+        schedule:    job.schedule,
+        owner:       job.owner,
+        is_enabled:  job.is_enabled,
+        last_run_at: null,    // not tracked in-memory queue; extend with DB if needed
+        last_status: lastStatus,
+        next_run_at: null,
+      }
+    })
+
+    return reply.send({ data: jobs, total: jobs.length })
+  })
+
+  // ── POST /system/jobs/:jobId/trigger ────────────────────────────────────────
+  // Manually trigger a registered automation job via the durable queue.
+  fastify.post('/system/jobs/:jobId/trigger', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const { jobId } = req.params as { jobId: string }
+
+    const automation = AUTOMATION_REGISTRY.find(j => j.id === jobId)
+    if (!automation) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: `Automation job '${jobId}' not found` })
+    }
+
+    if (!automation.is_enabled) {
+      return reply.code(409).send({ error: 'JOB_DISABLED', message: `Automation '${automation.name}' is currently disabled` })
+    }
+
+    try {
+      const enqueuedId = await durableQueue.enqueue(
+        automation.job_type,
+        { triggered_by: req.userId, manual_trigger: true },
+        { tenantId: req.tenantId, createdBy: req.userId },
+      )
+
+      fastify.log.info(
+        { jobId: enqueuedId, jobType: automation.job_type, triggeredBy: req.userId },
+        'automation manually triggered via /system/jobs/:jobId/trigger',
+      )
+
+      return reply.send({
+        message: `Automation '${automation.name}' triggered successfully`,
+        jobId:   enqueuedId,
+      })
+    } catch (err: any) {
+      fastify.log.error({ err, automationId: jobId }, 'manual trigger failed')
+      return reply.code(500).send({ error: 'TRIGGER_FAILED', message: err?.message ?? 'Failed to trigger automation' })
+    }
   })
 
   // ── POST /system/jobs/dead/:id/retry ────────────────────────────────────────
@@ -184,6 +322,101 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── GET /metrics ──────────────────────────────────────────────────────────────
+  // Compact operational health snapshot — event bus, durable queue, webhooks,
+  // scheduler heartbeats. For monitoring systems, dashboards, and health cards.
+  fastify.get('/metrics', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
+    const busMetrics   = eventBus.getMetrics()
+    const busHandlers  = eventBus.getHandlerCount()
+    const totalEmitted = Object.values(busMetrics).reduce((s, m) => s + m.emitted, 0)
+    const totalFailed  = Object.values(busMetrics).reduce((s, m) => s + m.failed, 0)
+
+    // Durable queue + stuck job count in parallel with webhook delivery stats
+    const staleThreshold = new Date(Date.now() - 5 * 60 * 1_000).toISOString()
+    const since24h       = new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString()
+
+    const [
+      queueMetrics,
+      stuckResult,
+      retryResult,
+      wh24hResult,
+      whFailedResult,
+      whPendingResult,
+    ] = await Promise.all([
+      durableQueue.getMetrics(fastify.supabase),
+      fastify.supabase
+        .from('background_jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'running')
+        .lt('started_at', staleThreshold),
+      fastify.supabase
+        .from('background_jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .gt('attempt', 0),
+      fastify.supabase
+        .from('webhook_deliveries')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', since24h),
+      fastify.supabase
+        .from('webhook_deliveries')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'failed')
+        .gte('created_at', since24h),
+      fastify.supabase
+        .from('webhook_deliveries')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending'),
+    ])
+
+    const stuckJobs    = stuckResult.count   ?? 0
+    const retryQueue   = retryResult.count   ?? 0
+    const wh24h        = wh24hResult.count   ?? 0
+    const whFailed     = whFailedResult.count ?? 0
+    const whPending    = whPendingResult.count ?? 0
+
+    const queueStatus =
+      stuckJobs > 5         ? 'degraded' :
+      queueMetrics.dead > 10 ? 'warning'  : 'healthy'
+
+    const webhookStatus = whFailed > 0 ? 'degraded' : 'healthy'
+
+    const busStatus =
+      totalEmitted > 0 && totalFailed / totalEmitted > 0.1 ? 'degraded' : 'healthy'
+
+    return reply.send({
+      timestamp:  new Date().toISOString(),
+      event_bus: {
+        handler_count:    busHandlers,
+        total_emitted:    totalEmitted,
+        total_failed:     totalFailed,
+        failure_rate_pct: totalEmitted > 0
+          ? Math.round((totalFailed / totalEmitted) * 100)
+          : 0,
+        status:           busStatus,
+      },
+      queue: {
+        pending:          queueMetrics.pending,
+        running:          queueMetrics.running,
+        completed_24h:    queueMetrics.completed,
+        dead_24h:         queueMetrics.dead,
+        retry_queue_size: retryQueue,
+        stuck_jobs:       stuckJobs,
+        status:           queueStatus,
+      },
+      webhooks: {
+        deliveries_24h: wh24h,
+        failed_24h:     whFailed,
+        pending:        whPending,
+        status:         webhookStatus,
+      },
+    })
+  })
+
   // ── DELETE /system/jobs/dead ─────────────────────────────────────────────────
   // Purges the entire dead-letter queue. Irreversible — use with care.
   fastify.delete('/system/jobs/dead', auth, async (req: any, reply) => {
@@ -209,9 +442,52 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/jobs/durable ──────────────────────────────────────────────────
   // Live counts queried directly from background_jobs.
+  // Includes stuck_running_count: jobs that have been in 'running' state longer
+  // than the stale threshold (5 min) — indicates crashed workers or hung handlers.
   fastify.get('/system/jobs/durable', auth, async (_req: any, reply) => {
     const metrics = await durableQueue.getMetrics(fastify.supabase)
-    return reply.send({ data: metrics })
+
+    // Detect jobs stuck in 'running' longer than the stale recovery threshold (5 min).
+    // These are jobs that a crashed worker held but were not yet recovered by
+    // _recoverStaleJobs() (e.g., the queue is not currently started, or a new crash
+    // happened after recovery). Surfacing them here lets operators act immediately.
+    const STALE_THRESHOLD_MS = 5 * 60 * 1_000
+    const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString()
+
+    const { data: stuckJobs, error: stuckErr } = await fastify.supabase
+      .from('background_jobs')
+      .select('id, job_type, attempt, max_retries, started_at, tenant_id, error')
+      .eq('tenant_id', (_req as any).tenantId)
+      .eq('status', 'running')
+      .lt('started_at', staleThreshold)
+      .order('started_at', { ascending: true })
+      .limit(50)
+
+    if (stuckErr) {
+      fastify.log.warn({ err: stuckErr.message }, 'jobs/durable: stuck-job query failed')
+    }
+
+    const stuck = stuckJobs ?? []
+
+    return reply.send({
+      data: {
+        ...metrics,
+        stuck_running_count: stuck.length,
+        stuck_running_jobs: stuck.map((j: any) => ({
+          id:          j.id,
+          job_type:    j.job_type,
+          attempt:     j.attempt,
+          max_retries: j.max_retries,
+          started_at:  j.started_at,
+          tenant_id:   j.tenant_id,
+          error:       j.error ?? null,
+          // How long this job has been stuck
+          stuck_for_seconds: j.started_at
+            ? Math.floor((Date.now() - new Date(j.started_at).getTime()) / 1000)
+            : null,
+        })),
+      },
+    })
   })
 
   // ── GET /system/jobs/durable/dead ────────────────────────────────────────────
@@ -384,6 +660,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     const { data: heartbeats, error } = await fastify.supabase
       .from('scheduler_heartbeats')
       .select('scheduler_name, tenant_id, last_heartbeat_at, status, tick_count, last_error, metadata, created_at')
+      .eq('tenant_id', req.tenantId)
       .order('last_heartbeat_at', { ascending: false })
 
     if (error) {

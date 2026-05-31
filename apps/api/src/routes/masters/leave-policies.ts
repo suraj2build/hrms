@@ -18,15 +18,38 @@ import { z }                    from 'zod'
 // ── Validation schema ──────────────────────────────────────────────────────────
 
 const policySchema = z.object({
-  leave_type_id:           z.string().uuid(),
-  accrual_type:            z.enum(['monthly', 'yearly', 'upfront']).default('yearly'),
-  accrual_days_per_year:   z.number().min(0).max(365),
-  max_accrual_balance:     z.number().min(0).max(365).nullable().optional(),
-  eligibility_days:        z.number().int().min(0).max(3650).default(0),
-  prorate_on_joining:      z.boolean().default(true),
-  carry_forward_enabled:   z.boolean().default(false),
-  carry_forward_max_days:  z.number().min(0).max(365).nullable().optional(),
-  year_type:               z.enum(['calendar', 'financial']).default('calendar'),
+  leave_type_id:                z.string().uuid(),
+  accrual_type:                 z.enum(['monthly', 'quarterly', 'yearly', 'upfront']).default('yearly'),
+  accrual_days_per_year:        z.number().min(0).max(365),
+  max_accrual_balance:          z.number().min(0).max(365).nullable().optional(),
+  eligibility_days:             z.number().int().min(0).max(3650).default(0),
+  prorate_on_joining:           z.boolean().default(true),
+  carry_forward_enabled:        z.boolean().default(false),
+  carry_forward_max_days:       z.number().min(0).max(365).nullable().optional(),
+  year_type:                    z.enum(['calendar', 'financial']).default('calendar'),
+  // ── Session governance (migration 158 + 160) ────────────────────────────────
+  allow_half_day:               z.boolean().default(true),
+  allow_hourly_leave:           z.boolean().default(false),
+  allow_cross_session:          z.boolean().default(true),
+  minimum_leave_unit:           z.number().refine(v => [0.25, 0.5, 1.0].includes(v), {
+    message: 'minimum_leave_unit must be 0.25, 0.5, or 1.0',
+  }).default(0.5),
+  maximum_sessions_per_day:     z.number().int().min(1).max(4).default(2),
+  session_calculation_mode:     z.enum(['standard', 'shift_aware', 'attendance_aware']).default('standard'),
+  holiday_session_handling:     z.enum(['skip', 'include', 'block']).default('skip'),
+  weekoff_session_handling:     z.enum(['skip', 'include', 'sandwich_only']).default('skip'),
+  fractional_rounding_mode:     z.enum(['half_up', 'half_down', 'ceil', 'floor', 'nearest_0_5', 'nearest_0_25']).default('nearest_0_5'),
+  maximum_fractional_precision: z.number().default(0.5),
+  hours_per_shift:              z.number().min(1).max(24).default(8),
+  max_hours_per_day:            z.number().min(0).max(24).nullable().optional(),
+  // ── Application window governance (migration 161) ───────────────────────────
+  allow_past_dated_leave:               z.boolean().default(false),
+  maximum_past_days:                    z.number().int().min(0).default(0),
+  allow_current_period_leave:           z.boolean().default(true),
+  allow_future_leave:                   z.boolean().default(true),
+  maximum_future_days:                  z.number().int().min(0).nullable().optional(),
+  future_application_requires_approval: z.boolean().default(false),
+  same_day_application_mode:            z.enum(['allowed', 'restricted', 'manager_override_only']).default('allowed'),
 })
 
 // ── Route plugin ───────────────────────────────────────────────────────────────
@@ -70,13 +93,8 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
     if (error) {
       return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     }
-    if (!data) {
-      return reply.code(404).send({
-        error:   'NOT_FOUND',
-        message: 'No policy configured for this leave type',
-      })
-    }
-    return reply.send({ data })
+    // Return null data instead of 404 — frontend treats null as "no policy configured"
+    return reply.send({ data: data ?? null })
   })
 
   // ── POST / (upsert) ────────────────────────────────────────────────────────

@@ -42,8 +42,6 @@ export interface Designation {
   id: string
   tenant_id: string
   name: string
-  level?: number
-  department_id?: string
   created_at: string
 }
 
@@ -99,6 +97,11 @@ export type EmployeeListItem = Pick<
   designation?: Pick<Designation, 'id' | 'name'>
   personal_info?: Pick<EmployeePersonalInfo, 'profile_photo' | 'gender'>
   current_job?: Pick<JobHistory, 'employment_type'>
+  work_location?: { id: string; name: string; city?: string | null } | null
+  user_account?: {
+    status: 'no_account' | 'active' | 'suspended' | 'pending_verification'
+    role:   string | null
+  } | null
 }
 
 // ─── Document ────────────────────────────────────────────────────────────────

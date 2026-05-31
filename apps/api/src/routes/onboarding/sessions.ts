@@ -8,7 +8,7 @@ import { mergeExtractions } from '../../lib/onboarding/profile-merger.js'
 
 const createSessionSchema = z.object({
   candidate_name: z.string().optional(),
-  assigned_to: z.string().uuid().optional(),
+  assigned_to: z.string().uuid().optional().nullable(),
 })
 
 const createDocumentSchema = z.object({
@@ -48,7 +48,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         tenant_id: req.tenantId,
         candidate_name: candidate_name ?? null,
         assigned_to: assigned_to ?? null,
-        status: 'pending',
+        status: 'active',
         created_by: req.userId,
       })
       .select()
@@ -74,8 +74,8 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .select(
         `
         id, candidate_name, status, created_at, assigned_to, created_by,
-        onboarding_documents(count),
-        draft_employee_profiles(id, status, overall_confidence)
+        onboarding_documents(id),
+        draft_employee_profiles(id, status)
         `,
         { count: 'exact' },
       )
@@ -89,9 +89,24 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
     const { data, error, count } = await query
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) {
+      // Graceful degradation when tables don't exist yet (migration pending)
+      if ((error as any).code === '42P01' || error.message?.includes('does not exist')) {
+        return reply.send({ data: [], total: 0 })
+      }
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
 
-    return reply.send({ data, total: count ?? 0 })
+    // Normalise: map document array → count, keep draft profile summary
+    const rows = (data ?? []).map((s: any) => ({
+      ...s,
+      document_count:   Array.isArray(s.onboarding_documents) ? s.onboarding_documents.length : 0,
+      draft_profile:    Array.isArray(s.draft_employee_profiles) ? (s.draft_employee_profiles[0] ?? null) : null,
+      onboarding_documents:   undefined,
+      draft_employee_profiles: undefined,
+    }))
+
+    return reply.send({ data: rows, total: count ?? 0 })
   })
 
   // ── GET /onboarding/sessions/:id ──────────────────────────────────────────
@@ -114,13 +129,18 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('session_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: true })
+      .order('uploaded_at', { ascending: true })
 
-    if (docsError) return reply.code(500).send({ error: 'DB_ERROR', message: docsError.message })
+    if (docsError) {
+      fastify.log.error({ docsError, sessionId: id }, 'GET /sessions/:id — documents sub-query failed')
+      // Don't crash the entire session load on a documents query failure
+    }
 
+    // Select only stable columns — overall_confidence etc. added in migration 178
+    // which may not be applied yet; select('*') is safe but we only need summary here
     const { data: draftProfile } = await fastify.supabase
       .from('draft_employee_profiles')
-      .select('id, status, overall_confidence, missing_critical_fields, conflict_fields')
+      .select('id, status')
       .eq('session_id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -210,27 +230,22 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
   fastify.get('/sessions/:id/documents', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { data: session, error: sessionError } = await fastify.supabase
-      .from('onboarding_sessions')
-      .select('id')
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .single()
-
-    if (sessionError || !session) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Session not found' })
-    }
-
+    // Query documents directly — session ownership is enforced by tenant_id
     const { data, error } = await fastify.supabase
       .from('onboarding_documents')
       .select('*')
       .eq('session_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: true })
+      .order('uploaded_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) {
+      fastify.log.error({ error, sessionId: id }, 'Failed to fetch onboarding documents')
+      // Gracefully return empty list if table doesn't exist yet (migration pending)
+      if ((error as any).code === '42P01') return reply.send({ data: [] })
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
 
-    return reply.send({ data })
+    return reply.send({ data: data ?? [] })
   })
 
   // ── DELETE /onboarding/sessions/:id/documents/:docId ─────────────────────
@@ -323,10 +338,12 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fields: any[]
     }> = []
+    const docErrors: Array<{ docId: string; step: string; reason: string }> = []
 
     let documentsExtracted = 0
 
     for (const doc of documents) {
+      fastify.log.info({ docId: doc.id, docType: doc.document_type, storagePath: doc.storage_path }, 'extract: processing document')
       try {
         // 1. Download file from Supabase Storage
         const { data: fileData, error: downloadError } = await fastify.supabase.storage
@@ -334,35 +351,50 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           .download(doc.storage_path)
 
         if (downloadError || !fileData) {
-          await fastify.supabase
+          const reason = `Download failed: ${downloadError?.message ?? 'no data returned'}`
+          fastify.log.error({ downloadError, storagePath: doc.storage_path }, 'extract: storage download failed')
+          docErrors.push({ docId: doc.id, step: 'download', reason })
+          const { error: updErr } = await fastify.supabase
             .from('onboarding_documents')
-            .update({ extraction_status: 'failed', extraction_error: `Download failed: ${downloadError?.message ?? 'unknown'}` })
+            .update({ extraction_status: 'failed', extraction_error: reason })
             .eq('id', doc.id)
+          if (updErr) fastify.log.error({ updErr }, 'extract: failed to mark doc as failed after download error')
           continue
         }
 
+        fastify.log.info({ docId: doc.id, mimeType: doc.mime_type }, 'extract: download ok, parsing')
         const arrayBuffer = await fileData.arrayBuffer()
         const fileBuffer = Buffer.from(arrayBuffer)
 
         // 2. Parse text
         const parseResult = await parseDocumentToText(fileBuffer, doc.mime_type)
+        fastify.log.info({ docId: doc.id, textLen: parseResult.text.length, parseError: parseResult.error }, 'extract: parse done')
 
-        // 3. Prepare base64 for image types
+        // 3. Prepare base64 for PDFs and images so Claude can read them natively
         let imageBase64: string | undefined
-        if (doc.mime_type.startsWith('image/')) {
+        const mimeType: string = doc.mime_type ?? ''
+        if (mimeType === 'application/pdf' || mimeType.startsWith('image/')) {
           imageBase64 = fileBuffer.toString('base64')
+          fastify.log.info({ docId: doc.id, base64Len: imageBase64.length }, 'extract: base64 encoded for Claude')
         }
 
         // 4. Extract with Claude
+        fastify.log.info({ docId: doc.id }, 'extract: calling Claude')
         const extractionResult = await extractFromDocument(
           doc.document_type,
           parseResult.text,
-          doc.mime_type,
+          mimeType,
           imageBase64,
         )
+        fastify.log.info({
+          docId: doc.id,
+          fieldsCount: extractionResult.fields.length,
+          confidence: extractionResult.overall_confidence,
+          error: extractionResult.error,
+        }, 'extract: Claude done')
 
         // 5. Update document row
-        await fastify.supabase
+        const { error: docUpdErr } = await fastify.supabase
           .from('onboarding_documents')
           .update({
             extraction_status: extractionResult.error ? 'failed' : 'extracted',
@@ -373,39 +405,30 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
             extraction_version: extractionResult.extraction_version,
           })
           .eq('id', doc.id)
+        if (docUpdErr) fastify.log.error({ docUpdErr, docId: doc.id }, 'extract: failed to update document status')
 
-        if (!extractionResult.error && extractionResult.fields.length > 0) {
-          // 6. Insert/upsert draft_employee_fields rows
-          const fieldRows = extractionResult.fields.map((f) => ({
-            tenant_id: req.tenantId,
-            session_id: sessionId,
-            document_id: doc.id,
-            field_name: f.field_name,
-            value: f.value,
-            confidence_score: f.confidence_score,
-            reasoning: f.reasoning,
-            source_document_type: f.source_document_type,
-            is_hr_override: false,
-          }))
-
-          await fastify.supabase
-            .from('draft_employee_fields')
-            .upsert(fieldRows, { onConflict: 'session_id,document_id,field_name' })
-
+        if (extractionResult.error) {
+          docErrors.push({ docId: doc.id, step: 'claude', reason: extractionResult.error })
+        } else if (extractionResult.fields.length === 0) {
+          docErrors.push({ docId: doc.id, step: 'claude', reason: 'Claude returned 0 fields — document may be blank or unsupported format' })
+        } else {
+          // 6. Collect for batch insert after draft profile is created (needs draft_id FK)
           extractionResults.push({
             documentId: doc.id,
             documentType: doc.document_type,
             fields: extractionResult.fields as any,
           })
-
           documentsExtracted++
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
-        await fastify.supabase
+        fastify.log.error({ err: message, docId: doc.id }, 'extract: unhandled exception in extraction loop')
+        docErrors.push({ docId: doc.id, step: 'exception', reason: message })
+        const { error: catchUpdErr } = await fastify.supabase
           .from('onboarding_documents')
           .update({ extraction_status: 'failed', extraction_error: message })
           .eq('id', doc.id)
+        if (catchUpdErr) fastify.log.error({ catchUpdErr, docId: doc.id }, 'extract: failed to mark doc as failed after exception')
       }
     }
 
@@ -419,13 +442,118 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         extractedFields: extractionResults as any,
       })
 
-      // Build flat columns from merged fields for the draft_employee_profiles row
-      const profileColumns: Record<string, unknown> = {}
-      for (const [fieldName, fieldData] of Object.entries(merged.fields)) {
-        if (fieldData.value !== null) {
-          profileColumns[fieldName] = fieldData.value
+      // ── Map extracted field names → valid draft_employee_profiles columns ──
+      // Many extracted fields (full_name, ifsc_code, account_number, etc.) don't
+      // match DB column names exactly. This function normalises them so the
+      // INSERT/UPDATE never references a column that doesn't exist.
+      function buildProfileColumns(fields: Record<string, { value: string | null }>): Record<string, unknown> {
+        // Only these columns exist in draft_employee_profiles (migration 109 + 178)
+        const VALID_COLUMNS = new Set([
+          'first_name', 'last_name', 'email', 'phone', 'dob', 'gender',
+          'address_line1', 'address_city', 'address_state', 'address_pincode',
+          'employee_code', 'joining_date', 'employment_type',
+          'department_id', 'designation_id', 'grade_id',   // UUID FKs — HR sets via dropdown
+          'pan_number', 'uan_number', 'esi_number', 'pf_number',
+          'bank_name', 'bank_account_number', 'bank_ifsc', 'bank_account_type', 'ctc_annual',
+          'previous_employer', 'previous_designation',
+        ])
+
+        // Extracted field → table column remapping
+        const FIELD_MAP: Record<string, string> = {
+          ifsc_code:            'bank_ifsc',
+          account_number:       'bank_account_number',
+          account_type:         'bank_account_type',
+          account_holder_name:  'first_name',   // best-effort
+          ctc_monthly:          '',              // no column — skip
+          from_date:            '',
+          to_date:              '',
+          reason_for_leaving:   '',
+          father_name:          '',
+          passport_number:      '',
+          expiry_date:          '',
+          nationality:          '',
+          branch_name:          '',
+          total_experience_years: '',
+          skills_summary:       '',
+          highest_education:    '',
+          month_year:           '',
+          gross_salary:         '',
+          net_salary:           '',
+          basic_salary:         '',
+          hra:                  '',
+          pf_deduction:         '',
+          esi_deduction:        '',
+          bank_account_last4:   '',
+          effective_date:       'joining_date',
+          reference_number:     '',
+          date:                 '',
         }
+
+        const GENDER_MAP: Record<string, string> = {
+          male: 'male', m: 'male', man: 'male',
+          female: 'female', f: 'female', woman: 'female',
+          other: 'other', others: 'other',
+          prefer_not_to_say: 'prefer_not_to_say',
+        }
+
+        const EMPLOYMENT_TYPE_MAP: Record<string, string> = {
+          permanent: 'permanent', full_time: 'permanent', 'full-time': 'permanent',
+          contract: 'contract', contractor: 'contract',
+          intern: 'intern', internship: 'intern',
+          probation: 'probation',
+          consultant: 'consultant',
+        }
+
+        const cols: Record<string, unknown> = {}
+
+        // Handle full_name → first_name + last_name split
+        const fullName = fields['full_name']?.value
+        if (fullName) {
+          const parts = fullName.trim().split(/\s+/)
+          if (!fields['first_name']?.value) cols['first_name'] = parts[0] ?? fullName
+          if (!fields['last_name']?.value && parts.length > 1) cols['last_name'] = parts.slice(1).join(' ')
+        }
+
+        for (const [rawName, fieldData] of Object.entries(fields)) {
+          if (!fieldData.value || rawName === 'full_name') continue
+
+          const colName = FIELD_MAP[rawName] !== undefined ? FIELD_MAP[rawName] : rawName
+
+          // Empty string in FIELD_MAP means "skip this field"
+          if (!colName || !VALID_COLUMNS.has(colName)) continue
+
+          let value: unknown = fieldData.value
+
+          // Normalise gender
+          if (colName === 'gender') {
+            value = GENDER_MAP[fieldData.value.toLowerCase().replace(/[^a-z_]/g, '')] ?? null
+            if (!value) continue
+          }
+
+          // Normalise employment_type
+          if (colName === 'employment_type') {
+            value = EMPLOYMENT_TYPE_MAP[fieldData.value.toLowerCase().replace(/[^a-z_-]/g, '')] ?? null
+            if (!value) continue
+          }
+
+          // Normalise ctc_annual to numeric (strip ₹ commas etc.)
+          if (colName === 'ctc_annual') {
+            const num = parseFloat(String(fieldData.value).replace(/[^\d.]/g, ''))
+            value = isNaN(num) ? null : num
+            if (!value) continue
+          }
+
+          cols[colName] = value
+        }
+
+        return cols
       }
+
+      const profileColumns = buildProfileColumns(
+        Object.fromEntries(
+          Object.entries(merged.fields).map(([k, v]) => [k, { value: v.value }]),
+        ),
+      )
 
       const { data: existing } = await fastify.supabase
         .from('draft_employee_profiles')
@@ -435,7 +563,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (existing?.id) {
-        await fastify.supabase
+        const { error: updateErr } = await fastify.supabase
           .from('draft_employee_profiles')
           .update({
             ...profileColumns,
@@ -447,9 +575,12 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           })
           .eq('id', existing.id)
 
+        if (updateErr) {
+          fastify.log.error({ updateErr, draftId: existing.id }, 'extract: draft_employee_profiles UPDATE failed — migration 178 may not be applied')
+        }
         draftProfileId = existing.id
       } else {
-        const { data: newDraft } = await fastify.supabase
+        const { data: newDraft, error: insertErr } = await fastify.supabase
           .from('draft_employee_profiles')
           .insert({
             tenant_id: req.tenantId,
@@ -463,7 +594,48 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           .select('id')
           .single()
 
+        if (insertErr) {
+          fastify.log.error({ insertErr, sessionId }, 'extract: draft_employee_profiles INSERT failed — migration 178 may not be applied')
+        }
         draftProfileId = newDraft?.id ?? null
+      }
+
+      // ── Insert draft_employee_fields (needs draft_id — do after profile created) ──
+      if (draftProfileId) {
+        // Delete stale AI-extracted fields for this draft (re-extraction overwrites them)
+        await fastify.supabase
+          .from('draft_employee_fields')
+          .delete()
+          .eq('draft_id', draftProfileId)
+          .eq('tenant_id', req.tenantId)
+          .eq('is_hr_override', false)
+
+        const fieldRows: object[] = []
+        for (const doc of extractionResults) {
+          for (const f of doc.fields) {
+            fieldRows.push({
+              tenant_id:            req.tenantId,
+              draft_id:             draftProfileId,
+              document_id:          doc.documentId,
+              field_name:           f.field_name,
+              extracted_value:      f.value,
+              confidence_score:     f.confidence_score,
+              extraction_reasoning: f.reasoning,
+              source_document_type: f.source_document_type,
+              is_conflicting:       false,
+              is_hr_override:       false,
+            })
+          }
+        }
+
+        if (fieldRows.length > 0) {
+          const { error: fieldsErr } = await fastify.supabase
+            .from('draft_employee_fields')
+            .insert(fieldRows)
+          if (fieldsErr) {
+            fastify.log.error({ fieldsErr }, 'extract: failed to insert draft_employee_fields')
+          }
+        }
       }
 
       // Update session status
@@ -479,12 +651,12 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .insert({
         tenant_id: req.tenantId,
         session_id: sessionId,
-        action: 'extraction_completed',
-        performed_by: req.userId,
-        metadata: {
+        draft_id:   draftProfileId ?? undefined,
+        action:     'extraction_completed',
+        actor_id:   req.userId,
+        details: {
           documents_extracted: documentsExtracted,
           total_documents: documents.length,
-          draft_profile_id: draftProfileId,
         },
       })
 
@@ -493,6 +665,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         session_id: sessionId,
         documents_extracted: documentsExtracted,
         draft_profile_id: draftProfileId,
+        doc_errors: docErrors.length > 0 ? docErrors : undefined,
       },
     })
   })

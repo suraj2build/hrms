@@ -80,8 +80,13 @@ const PAY_FREQ     = ['monthly', 'quarterly', 'annually', 'on_target']
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
-const fmtDate = (d: string) =>
-  new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const fmtDate = (d: string) => {
+  const s = d
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
+}
 
 const labelify = (s: string) =>
   s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())

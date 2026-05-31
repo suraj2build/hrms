@@ -25,6 +25,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
@@ -129,7 +130,11 @@ function buildScenarioPayload(entry: ScenarioEntry) {
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function signedNum(n: number, unit = ''): string {
@@ -384,20 +389,18 @@ export function PolicySimulation() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Date From</label>
-            <Input
-              type="date"
+            <DateInput
               value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
+              onChange={setDateFrom}
               className="h-8 text-xs"
             />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Date To</label>
-            <Input
-              type="date"
+            <DateInput
               value={dateTo}
               min={dateFrom}
-              onChange={e => setDateTo(e.target.value)}
+              onChange={setDateTo}
               className="h-8 text-xs"
             />
           </div>

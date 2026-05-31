@@ -15,7 +15,8 @@
  */
 
 import { toast }                                  from 'sonner'
-import { useState }                              from 'react'
+import { useState, useEffect, Fragment }         from 'react'
+import { useSearchParams, useNavigate }          from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   MapPin, Banknote, FileText, Users, ShieldAlert,
@@ -23,9 +24,10 @@ import {
   Building2, DollarSign, CreditCard,
 } from 'lucide-react'
 
-import { PageContainer } from '@/components/layout/PageContainer'
-import { PageHeader }    from '@/components/layout/PageHeader'
-import { SectionCard }   from '@/components/layout/SectionCard'
+import { PageContainer }        from '@/components/layout/PageContainer'
+import { PageHeader }           from '@/components/layout/PageHeader'
+import { SectionCard }          from '@/components/layout/SectionCard'
+import { OrgGovernancePanel }   from '@/components/org/OrgGovernancePanel'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
@@ -428,9 +430,8 @@ function MasterTab({ tab }: { tab: TabDef }) {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <>
+                <Fragment key={row.id}>
                   <tr
-                    key={row.id}
                     className={cn(
                       'border-b border-border/50 hover:bg-muted/20 transition-colors',
                       !row.is_active && 'opacity-50',
@@ -522,7 +523,7 @@ function MasterTab({ tab }: { tab: TabDef }) {
 
                   {/* Inline edit form */}
                   {editId === row.id && (
-                    <tr key={`${row.id}-edit`} className="border-b border-border/50 bg-muted/10">
+                    <tr className="border-b border-border/50 bg-muted/10">
                       <td colSpan={3 + (tab.extraCols?.length ?? 0)} className="px-3 pb-3 pt-1">
                         <InlineForm
                           fields={tab.fields}
@@ -537,7 +538,7 @@ function MasterTab({ tab }: { tab: TabDef }) {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -569,15 +570,31 @@ export function MastersConfig() {
   const { profile } = useAuthStore()
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
 
-  const [activeTab, setActiveTab] = useState<TabId>('work-locations')
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const activeTab = (searchParams.get('tab') ?? 'work-locations') as TabId
   const currentTab = TABS.find((t) => t.id === activeTab) ?? TABS[0]
+
+  // Bare /admin/masters → canonical first-tab URL so the sidebar highlights correctly
+  useEffect(() => {
+    if (!searchParams.get('tab')) {
+      navigate('/admin/masters?tab=work-locations', { replace: true })
+    }
+  }, [searchParams, navigate])
+
+  const isOrgTab = ['work-locations', 'cost-centers'].includes(currentTab.id)
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Masters Configuration"
-        subtitle="Manage HR master data — work locations, cost centers, salary components, and more"
-      />
+      <div className="flex items-start justify-between gap-4">
+        <PageHeader
+          title={currentTab.label}
+          subtitle="Master data configuration — managed from the Setup sidebar"
+        />
+        {isOrgTab && (
+          <OrgGovernancePanel className="shrink-0 w-52 mt-1" />
+        )}
+      </div>
 
       {/* Access guard */}
       {!isAdmin && (
@@ -591,40 +608,12 @@ export function MastersConfig() {
       )}
 
       {isAdmin && (
-        <div className="flex gap-4 items-start">
-          {/* ── Left: tab list ──────────────────────────────────────────── */}
-          <div className="w-48 flex-shrink-0 space-y-0.5">
-            {TABS.map((tab) => {
-              const active = activeTab === tab.id
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={cn(
-                    'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors',
-                    active
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  )}
-                >
-                  <tab.icon className="h-4 w-4 flex-shrink-0" />
-                  <span className="truncate">{tab.label}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* ── Right: content ────────────────────────────────────────────── */}
-          <div className="flex-1 min-w-0">
-            <SectionCard
-              title={currentTab.label}
-              icon={<currentTab.icon className="h-4 w-4 text-muted-foreground" />}
-            >
-              <MasterTab key={currentTab.id} tab={currentTab} />
-            </SectionCard>
-          </div>
-        </div>
+        <SectionCard
+          title={currentTab.label}
+          icon={<currentTab.icon className="h-4 w-4 text-muted-foreground" />}
+        >
+          <MasterTab key={currentTab.id} tab={currentTab} />
+        </SectionCard>
       )}
     </PageContainer>
   )

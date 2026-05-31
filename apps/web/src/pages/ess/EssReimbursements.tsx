@@ -207,7 +207,7 @@ export function EssReimbursements() {
           {claimsByMonth.map(([month, monthClaims]) => (
             <SectionCard
               key={month}
-              title={new Date(month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+              title={(() => { const d=new Date(month.slice(0,7)+'-01T12:00:00Z'); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()}
             >
               <div className="space-y-3">
                 {monthClaims.map(claim => (
@@ -244,8 +244,8 @@ export function EssReimbursements() {
                     <div className="flex items-center justify-between">
                       <p className="text-xs text-muted-foreground">
                         {claim.submitted_at
-                          ? `Submitted ${new Date(claim.submitted_at).toLocaleDateString()}`
-                          : `Created ${new Date(claim.created_at).toLocaleDateString()}`}
+                          ? `Submitted ${(() => { const d=new Date(claim.submitted_at.length===10?claim.submitted_at+'T12:00:00Z':claim.submitted_at); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()}`
+                          : `Created ${(() => { const d=new Date(claim.created_at.length===10?claim.created_at+'T12:00:00Z':claim.created_at); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()}`}
                       </p>
 
                       <div className="flex gap-2">

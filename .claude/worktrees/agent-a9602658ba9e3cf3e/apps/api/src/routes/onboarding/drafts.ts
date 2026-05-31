@@ -1,0 +1,476 @@
+import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+
+// ─── Validation schemas ────────────────────────────────────────────────────
+
+const fieldOverridesSchema = z.object({
+  overrides: z.array(
+    z.object({
+      field_name: z.string().min(1),
+      value: z.string(),
+    }),
+  ).min(1),
+})
+
+const rejectSchema = z.object({
+  reason: z.string().min(1),
+})
+
+// ─── Validation helpers ────────────────────────────────────────────────────
+
+const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
+const UAN_REGEX = /^\d{12}$/
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// ─── Route plugin ──────────────────────────────────────────────────────────
+
+export default async function draftRoutes(fastify: FastifyInstance) {
+  const auth = { preHandler: [fastify.authenticate] }
+
+  // ── GET /onboarding/drafts/:id ────────────────────────────────────────────
+  fastify.get('/drafts/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: draft, error: draftError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('*')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (draftError || !draft) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
+    }
+
+    // Fetch all fields with confidence/conflict/source info
+    const { data: fields, error: fieldsError } = await fastify.supabase
+      .from('draft_employee_fields')
+      .select('*')
+      .eq('session_id', draft.session_id)
+      .eq('tenant_id', req.tenantId)
+      .order('field_name', { ascending: true })
+
+    if (fieldsError) return reply.code(500).send({ error: 'DB_ERROR', message: fieldsError.message })
+
+    return reply.send({ data: { ...draft, fields: fields ?? [] } })
+  })
+
+  // ── PATCH /onboarding/drafts/:id/fields ───────────────────────────────────
+  fastify.patch('/drafts/:id/fields', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    const parsed = fieldOverridesSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
+    }
+
+    const { data: draft, error: draftError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('id, session_id, status')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (draftError || !draft) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
+    }
+
+    const { overrides } = parsed.data
+
+    // Build flat column updates for the draft_employee_profiles row
+    const profileUpdates: Record<string, string> = {}
+    for (const override of overrides) {
+      profileUpdates[override.field_name] = override.value
+    }
+
+    // Update draft profile columns
+    const { error: updateError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .update({ ...profileUpdates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+
+    if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+
+    // Upsert draft_employee_fields rows with is_hr_override = true
+    const fieldRows = overrides.map((o) => ({
+      tenant_id: req.tenantId,
+      session_id: draft.session_id,
+      document_id: null,
+      field_name: o.field_name,
+      value: o.value,
+      confidence_score: 1.0,
+      reasoning: 'HR manual override',
+      source_document_type: 'hr_override',
+      is_hr_override: true,
+    }))
+
+    await fastify.supabase
+      .from('draft_employee_fields')
+      .upsert(fieldRows, { onConflict: 'session_id,field_name,is_hr_override' })
+
+    // Audit log
+    await fastify.supabase
+      .from('onboarding_audit_log')
+      .insert({
+        tenant_id: req.tenantId,
+        session_id: draft.session_id,
+        draft_profile_id: id,
+        action: 'field_overridden',
+        performed_by: req.userId,
+        metadata: { overrides },
+      })
+
+    // Return updated draft
+    const { data: updatedDraft, error: fetchError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    if (fetchError) return reply.code(500).send({ error: 'DB_ERROR', message: fetchError.message })
+
+    return reply.send({ data: updatedDraft })
+  })
+
+  // ── POST /onboarding/drafts/:id/validate ──────────────────────────────────
+  fastify.post('/drafts/:id/validate', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    const { data: draft, error: draftError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('*')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (draftError || !draft) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
+    }
+
+    const validationErrors: string[] = []
+    const validationWarnings: string[] = []
+    let duplicateRisk: string | null = null
+
+    // ── PAN number format ────────────────────────────────────────────────
+    if (draft.pan_number) {
+      if (!PAN_REGEX.test(draft.pan_number)) {
+        validationErrors.push('pan_number format is invalid (expected AAAAA9999A)')
+      } else {
+        // Duplicate PAN check
+        const { data: panDup } = await fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id')
+          .eq('pan_number', draft.pan_number)
+          .eq('tenant_id', req.tenantId)
+          .limit(1)
+          .maybeSingle()
+
+        if (panDup) {
+          duplicateRisk = `PAN ${draft.pan_number} already exists for employee ${panDup.employee_id}`
+        }
+      }
+    }
+
+    // ── Email format + duplicate ─────────────────────────────────────────
+    if (draft.email) {
+      if (!EMAIL_REGEX.test(draft.email)) {
+        validationErrors.push('email format is invalid')
+      } else {
+        const { data: emailDup } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('email', draft.email)
+          .eq('tenant_id', req.tenantId)
+          .limit(1)
+          .maybeSingle()
+
+        if (emailDup) {
+          if (!duplicateRisk) {
+            duplicateRisk = `Email ${draft.email} already exists for employee ${emailDup.id}`
+          } else {
+            duplicateRisk += ` | Email ${draft.email} also duplicate`
+          }
+        }
+      }
+    }
+
+    // ── UAN format + duplicate ───────────────────────────────────────────
+    if (draft.uan_number) {
+      if (!UAN_REGEX.test(draft.uan_number)) {
+        validationErrors.push('uan_number must be exactly 12 digits')
+      } else {
+        const { data: uanDup } = await fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id')
+          .eq('uan_number', draft.uan_number)
+          .eq('tenant_id', req.tenantId)
+          .limit(1)
+          .maybeSingle()
+
+        if (uanDup) {
+          const uanNote = `UAN ${draft.uan_number} already exists for employee ${uanDup.employee_id}`
+          if (!duplicateRisk) {
+            duplicateRisk = uanNote
+          } else {
+            duplicateRisk += ` | ${uanNote}`
+          }
+        }
+      }
+    }
+
+    // ── IFSC format ──────────────────────────────────────────────────────
+    if (draft.ifsc_code) {
+      if (!IFSC_REGEX.test(draft.ifsc_code)) {
+        validationErrors.push('ifsc_code format is invalid (expected 11 chars e.g. SBIN0001234)')
+      }
+    }
+
+    // ── joining_date not more than 90 days in future ─────────────────────
+    if (draft.joining_date) {
+      const joiningDate = new Date(draft.joining_date)
+      const today = new Date()
+      const ninetyDaysFromNow = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000)
+
+      if (joiningDate > ninetyDaysFromNow) {
+        validationWarnings.push('joining_date is more than 90 days in the future')
+      }
+
+      // Department required if joining_date set
+      if (!draft.department) {
+        validationWarnings.push('department is recommended when joining_date is set')
+      }
+    }
+
+    // ── Required field presence warnings ─────────────────────────────────
+    if (!draft.first_name && !draft.full_name) {
+      validationErrors.push('first_name or full_name is required')
+    }
+    if (!draft.email) {
+      validationErrors.push('email is required')
+    }
+    if (!draft.joining_date) {
+      validationErrors.push('joining_date is required')
+    }
+
+    const hasErrors = validationErrors.length > 0
+    const newStatus = hasErrors ? 'validation_pending' : 'approval_pending'
+
+    await fastify.supabase
+      .from('draft_employee_profiles')
+      .update({
+        validation_errors: validationErrors,
+        validation_warnings: validationWarnings,
+        duplicate_risk: duplicateRisk,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+
+    return reply.send({
+      data: {
+        validation_errors: validationErrors,
+        validation_warnings: validationWarnings,
+        duplicate_risk: duplicateRisk,
+        status: newStatus,
+      },
+    })
+  })
+
+  // ── POST /onboarding/drafts/:id/approve ───────────────────────────────────
+  fastify.post('/drafts/:id/approve', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    const { data: draft, error: draftError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('*')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (draftError || !draft) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
+    }
+
+    if (draft.status !== 'approval_pending') {
+      return reply.code(409).send({
+        error: 'INVALID_STATUS',
+        message: `Draft must be in approval_pending status (current: ${draft.status})`,
+      })
+    }
+
+    // Generate employee_code
+    const { count: empCount } = await fastify.supabase
+      .from('employees')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+
+    const employeeCode = `EMP${String((empCount ?? 0) + 1).padStart(4, '0')}`
+
+    // Build first_name / last_name from draft
+    let firstName = draft.first_name ?? ''
+    let lastName = draft.last_name ?? ''
+    if (!firstName && draft.full_name) {
+      const parts = (draft.full_name as string).trim().split(/\s+/)
+      firstName = parts[0] ?? ''
+      lastName = parts.slice(1).join(' ') || ''
+    }
+
+    // Create employee record (lean columns only per migration 016)
+    const { data: employee, error: empError } = await fastify.supabase
+      .from('employees')
+      .insert({
+        tenant_id: req.tenantId,
+        employee_code: employeeCode,
+        first_name: firstName,
+        last_name: lastName,
+        email: draft.email,
+        phone: draft.phone ?? null,
+        joining_date: draft.joining_date,
+        status: 'active',
+        created_by: req.userId,
+      })
+      .select('id, employee_code')
+      .single()
+
+    if (empError || !employee) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: empError?.message ?? 'Failed to create employee' })
+    }
+
+    const employeeId = employee.id
+
+    // Create employee_personal_info if dob/gender available
+    if (draft.dob || draft.gender) {
+      await fastify.supabase
+        .from('employee_personal_info')
+        .insert({
+          tenant_id: req.tenantId,
+          employee_id: employeeId,
+          dob: draft.dob ?? null,
+          gender: draft.gender ?? null,
+        })
+    }
+
+    // Create profiles row if email matches an auth user
+    if (draft.email) {
+      const { data: authUser } = await fastify.supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', draft.email)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+
+      if (authUser) {
+        await fastify.supabase
+          .from('profiles')
+          .update({ employee_id: employeeId })
+          .eq('id', authUser.id)
+      }
+    }
+
+    // Update draft status
+    await fastify.supabase
+      .from('draft_employee_profiles')
+      .update({
+        status: 'employee_created',
+        linked_employee_id: employeeId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+
+    // Update session status
+    await fastify.supabase
+      .from('onboarding_sessions')
+      .update({ status: 'employee_created', linked_employee_id: employeeId })
+      .eq('id', draft.session_id)
+
+    // Audit log
+    await fastify.supabase
+      .from('onboarding_audit_log')
+      .insert({
+        tenant_id: req.tenantId,
+        session_id: draft.session_id,
+        draft_profile_id: id,
+        action: 'employee_created',
+        performed_by: req.userId,
+        metadata: { employee_id: employeeId, employee_code: employeeCode },
+      })
+
+    return reply.code(201).send({ data: { employee_id: employeeId, employee_code: employeeCode } })
+  })
+
+  // ── POST /onboarding/drafts/:id/reject ────────────────────────────────────
+  fastify.post('/drafts/:id/reject', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    const parsed = rejectSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
+    }
+
+    const { data: draft, error: draftError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('id, session_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (draftError || !draft) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
+    }
+
+    const { error: updateError } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .update({
+        status: 'rejected',
+        rejection_reason: parsed.data.reason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+
+    if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+
+    // Update session status
+    await fastify.supabase
+      .from('onboarding_sessions')
+      .update({ status: 'rejected' })
+      .eq('id', draft.session_id)
+
+    // Audit log
+    await fastify.supabase
+      .from('onboarding_audit_log')
+      .insert({
+        tenant_id: req.tenantId,
+        session_id: draft.session_id,
+        draft_profile_id: id,
+        action: 'rejected',
+        performed_by: req.userId,
+        metadata: { reason: parsed.data.reason },
+      })
+
+    // Return updated draft
+    const { data: updatedDraft } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    return reply.send({ data: updatedDraft })
+  })
+}

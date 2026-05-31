@@ -77,7 +77,12 @@ function fmtPct(n: number): string {
 }
 
 function fmtDatetime(iso: string): string {
-  return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 type ScopeFilter = 'all' | 'employee' | 'department' | 'site' | 'org'
@@ -171,7 +176,7 @@ export function HealthIndex() {
         limit: '50',
       })
       if (scopeFilter !== 'all') params.set('scope', scopeFilter)
-      return api.get(`/attendance/health-index/list?${params}`)
+      return api.get(`/attendance/health-index?${params}`)
     },
     enabled: isAdmin,
     staleTime: 60_000,

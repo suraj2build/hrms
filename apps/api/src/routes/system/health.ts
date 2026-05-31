@@ -13,14 +13,19 @@ import { platformHealth }       from '../../lib/startup-health.js'
 
 export default async function healthRoutes(fastify: FastifyInstance) {
 
-  /** Liveness — is the process running? */
-  fastify.get('/health', async (_req, reply) => {
-    return reply.code(200).send({
+  function livenessPayload() {
+    return {
       status:    platformHealth.status,
       startedAt: platformHealth.startedAt,
       uptime:    Math.floor(process.uptime()),
-    })
-  })
+    }
+  }
+
+  /** Liveness — is the process running? */
+  fastify.get('/health', async (_req, reply) => reply.code(200).send(livenessPayload()))
+
+  /** /status — alias for /health; useful for manual connectivity checks */
+  fastify.get('/status', async (_req, reply) => reply.code(200).send(livenessPayload()))
 
   /** Readiness — is the platform ready to serve requests? */
   fastify.get('/ready', async (_req, reply) => {

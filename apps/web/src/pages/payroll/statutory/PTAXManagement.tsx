@@ -1,32 +1,29 @@
 /**
  * PTAXManagement — /admin/payroll/statutory/ptax
  *
- * HR admin page for managing Professional Tax (P-Tax) state configs,
- * slab management, and monthly contributions.
+ * HR admin page for managing Professional Tax state configurations and slabs.
+ * Full redesign: state card grid (left) + slab panel (right).
+ * Monthly contribution ledger removed per product decision.
  *
  * Access: hr_admin and super_admin only.
  */
 
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useMemo, useEffect } from 'react'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShieldAlert, Settings, RefreshCw, Loader2,
-  AlertCircle, FileText, Plus, MapPin,
+  AlertCircle, Globe, UserCheck, BadgeIndianRupee,
+  Trash2, Search, SlidersHorizontal,
+  Check, X, PlusCircle, ToggleLeft, ToggleRight, FileSpreadsheet,
 } from 'lucide-react'
 
+import { toast }          from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
-import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { toast }          from 'sonner'
+import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -43,22 +40,12 @@ interface PTaxSlab {
   gender: string
 }
 
-interface PTaxContribution {
-  id: string
-  employee_id: string
-  contribution_month: string
-  state_code: string
-  monthly_income: number
-  tax_amount: number
-  status: string
-  employee_code?: string
-  employee_name?: string
-}
-
 interface PTaxStateConfig {
   state_code: string
   state_name: string
   enabled: boolean
+  registration_number: string | null
+  registration_date: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,118 +58,26 @@ function fmtCurrency(n: number): string {
   }).format(n)
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  filed:   'success',
-  pending: 'warning',
-  errored: 'destructive',
+function getLast6Months(): string[] {
+  const now = new Date()
+  return Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    return d.toISOString().slice(0, 7)
+  })
+}
+
+function fmtMonth(ym: string): string {
+  const d = new Date(ym.slice(0,7) + '-01T12:00:00Z')
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 const CURRENT_FY = (() => {
-  const now = new Date()
+  const now  = new Date()
   const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
   return `${year}-${String(year + 1).slice(2)}`
 })()
-
-// ── AddSlabDialog ─────────────────────────────────────────────────────────────
-
-function AddSlabDialog({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient()
-  const [form, setForm] = useState({
-    state_code: '',
-    financial_year: CURRENT_FY,
-    monthly_income_from: 0,
-    monthly_income_to: '' as string | number,
-    monthly_tax: 0,
-    gender: 'all',
-  })
-  const [error, setError] = useState('')
-
-  const mutation = useMutation({
-    mutationFn: () => api.post('/payroll/statutory/ptax/slabs', {
-      ...form,
-      monthly_income_to: form.monthly_income_to === '' ? null : Number(form.monthly_income_to),
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ptax-slabs'] })
-      toast.success('P-Tax slab added', { description: `${form.state_code} · ${form.financial_year}` })
-      onClose()
-    },
-    onError: (e: Error) => {
-      setError(e?.message ?? 'Failed to add slab')
-      toast.error('Failed to add P-Tax slab', { description: e.message })
-    },
-  })
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Plus className="h-4 w-4 text-muted-foreground" />
-            Add P-Tax Slab
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          {[
-            { key: 'state_code',         label: 'State Code',          type: 'text' },
-            { key: 'financial_year',     label: 'Financial Year',      type: 'text',   placeholder: 'e.g. 2025-26' },
-            { key: 'monthly_income_from',label: 'Income From (₹)',      type: 'number' },
-            { key: 'monthly_income_to',  label: 'Income To (₹, blank=no limit)', type: 'number' },
-            { key: 'monthly_tax',        label: 'Monthly Tax (₹)',      type: 'number' },
-          ].map(f => (
-            <div key={f.key}>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">{f.label}</label>
-              <Input
-                type={f.type}
-                placeholder={f.placeholder}
-                value={(form as any)[f.key]}
-                onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                className="h-8 text-xs"
-              />
-            </div>
-          ))}
-
-          <div>
-            <label className="text-xs font-medium text-muted-foreground block mb-1">Gender</label>
-            <select
-              value={form.gender}
-              onChange={e => setForm(prev => ({ ...prev, gender: e.target.value }))}
-              className="w-full h-8 text-xs rounded-md border border-input bg-background px-3 py-1"
-            >
-              <option value="all">All</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-            </select>
-          </div>
-
-          {error && (
-            <div className="flex items-start gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
-
-          <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1 h-8 text-xs" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              className="flex-1 h-8 text-xs"
-              disabled={mutation.isPending}
-              onClick={() => mutation.mutate()}
-            >
-              {mutation.isPending
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Adding…</>
-                : 'Add Slab'
-              }
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -192,10 +87,27 @@ export function PTAXManagement() {
   const qc          = useQueryClient()
 
   const todayYM = new Date().toISOString().slice(0, 7)
-  const [selectedMonth, setSelectedMonth] = useState(todayYM)
-  const [slabFY, setSlabFY]               = useState(CURRENT_FY)
-  const [slabState, setSlabState]         = useState('')
-  const [showAddSlab, setShowAddSlab]     = useState(false)
+  const last6   = useMemo(() => getLast6Months(), [])
+
+  // UI state
+  const [selectedStateCode, setSelectedStateCode] = useState<string>('')
+  const [searchQuery, setSearchQuery]             = useState('')
+  const [filterEnabled, setFilterEnabled]         = useState(false)
+  const [showAddSlabForm, setShowAddSlabForm]      = useState(false)
+
+  // Registration state
+  const [regNumber, setRegNumber] = useState('')
+  const [regDate, setRegDate]     = useState('')
+  const [regEditing, setRegEditing] = useState(false)
+
+  // Slab form
+  const [slabForm, setSlabForm] = useState({
+    monthly_income_from: 0,
+    monthly_income_to:   '' as string | number,
+    monthly_tax:         0,
+    gender:              'all',
+  })
+  const [slabError, setSlabError] = useState('')
 
   // ── State configs query ───────────────────────────────────────────────────────
   const {
@@ -211,6 +123,17 @@ export function PTAXManagement() {
     staleTime: 60_000,
   })
 
+  // ── Set default selected state once loaded ────────────────────────────────────
+  const stateList = useMemo(() => {
+    const list = Array.isArray(stateConfigs) ? stateConfigs : []
+    if (!selectedStateCode && list.length > 0) {
+      // auto-select first enabled state, or first overall
+      const first = list.find(s => s.enabled) ?? list[0]
+      if (first) setSelectedStateCode(first.state_code)
+    }
+    return list
+  }, [stateConfigs, selectedStateCode])
+
   // ── Toggle state mutation ─────────────────────────────────────────────────────
   const toggleStateMutation = useMutation({
     mutationFn: ({ stateCode, enabled }: { stateCode: string; enabled: boolean }) =>
@@ -224,263 +147,631 @@ export function PTAXManagement() {
     },
   })
 
-  // ── Slabs query ───────────────────────────────────────────────────────────────
-  const slabParams = new URLSearchParams()
-  if (slabFY)    slabParams.set('financial_year', slabFY)
-  if (slabState) slabParams.set('state_code', slabState)
+  // ── Sync registration fields when selected state changes ─────────────────────
+  useEffect(() => {
+    const s = stateList.find(x => x.state_code === selectedStateCode)
+    setRegNumber(s?.registration_number ?? '')
+    setRegDate(s?.registration_date ?? '')
+    setRegEditing(false)
+  }, [selectedStateCode, stateList])
 
+  // ── Save registration mutation ────────────────────────────────────────────────
+  const saveRegMutation = useMutation({
+    mutationFn: () => api.put(`/payroll/statutory/ptax/states/${selectedStateCode}`, {
+      registration_number: regNumber || null,
+      registration_date:   regDate   || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ptax-states'] })
+      toast.success('Registration details saved')
+      setRegEditing(false)
+    },
+    onError: () => toast.error('Failed to save registration details'),
+  })
+
+  // ── Slabs query (filtered by selected state + FY) ─────────────────────────────
   const {
     data: slabs,
     isLoading: slabsLoading,
     isError: slabsError,
     refetch: refetchSlabs,
   } = useQuery<PTaxSlab[]>({
-    queryKey: ['ptax-slabs', slabFY, slabState],
-    queryFn:  () => api.get(`/payroll/statutory/ptax/slabs?${slabParams.toString()}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
-    enabled:  isAdmin,
+    queryKey: ['ptax-slabs', CURRENT_FY, selectedStateCode],
+    queryFn:  () => {
+      const params = new URLSearchParams({ financial_year: CURRENT_FY })
+      if (selectedStateCode) params.set('state_code', selectedStateCode)
+      return api.get(`/payroll/statutory/ptax/slabs?${params.toString()}`)
+        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : [])
+    },
+    enabled:  isAdmin && !!selectedStateCode,
     staleTime: 30_000,
   })
 
-  // ── Contributions query ───────────────────────────────────────────────────────
-  const {
-    data: contributions,
-    isLoading: contribLoading,
-    isError: contribError,
-    refetch: refetchContrib,
-  } = useQuery<PTaxContribution[]>({
-    queryKey: ['ptax-contributions', selectedMonth],
-    queryFn:  () => api.get(`/payroll/statutory/ptax/contributions?month=${selectedMonth}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
-    enabled:  isAdmin,
-    staleTime: 30_000,
+  // ── Last 6 months history ─────────────────────────────────────────────────────
+  const historyResults = useQueries({
+    queries: last6.map(ym => ({
+      queryKey: ['ptax-contributions', ym],
+      queryFn:  () => api.get(`/payroll/statutory/ptax/contributions?month=${ym}`)
+        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as Promise<Array<{ state_code: string; tax_amount: number }>>,
+      enabled:  isAdmin,
+      staleTime: 120_000,
+    })),
+  })
+
+  // ── Add slab mutation ─────────────────────────────────────────────────────────
+  const addSlabMutation = useMutation({
+    mutationFn: () => api.post('/payroll/statutory/ptax/slabs', {
+      state_code:          selectedStateCode,
+      financial_year:      CURRENT_FY,
+      monthly_income_from: slabForm.monthly_income_from,
+      monthly_income_to:   slabForm.monthly_income_to === '' ? null : Number(slabForm.monthly_income_to),
+      monthly_tax:         slabForm.monthly_tax,
+      gender:              slabForm.gender,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ptax-slabs', CURRENT_FY, selectedStateCode] })
+      toast.success('P-Tax slab added', { description: `${selectedStateCode} · ${CURRENT_FY}` })
+      setShowAddSlabForm(false)
+      setSlabForm({ monthly_income_from: 0, monthly_income_to: '', monthly_tax: 0, gender: 'all' })
+      setSlabError('')
+    },
+    onError: (e: any) => {
+      const msg = e?.message ?? 'Failed to add slab'
+      setSlabError(msg)
+      toast.error('Failed to add P-Tax slab', { description: msg })
+    },
   })
 
   // ── Guard ─────────────────────────────────────────────────────────────────────
   if (!isAdmin) {
     return (
       <PageContainer>
-        <SectionCard title="Access Restricted">
-          <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
-            <ShieldAlert className="h-10 w-10 opacity-40" />
-            <p className="text-sm">Only HR admins can access P-Tax management.</p>
-          </div>
-        </SectionCard>
+        <div className="p-6 rounded-lg border border-border bg-card flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+          <ShieldAlert className="h-10 w-10 opacity-40" />
+          <p className="text-sm">Only HR admins can access P-Tax management.</p>
+        </div>
       </PageContainer>
     )
   }
 
-  const slabList    = Array.isArray(slabs)        ? slabs        : []
-  const contribList = Array.isArray(contributions) ? contributions : []
-  const stateList   = Array.isArray(stateConfigs)  ? stateConfigs  : []
+  // ── Derived data ──────────────────────────────────────────────────────────────
+  const filteredStates = useMemo(() => stateList.filter(s => {
+    const matchSearch = (s.state_name + s.state_code).toLowerCase().includes(searchQuery.toLowerCase())
+    const matchFilter = filterEnabled ? s.enabled : true
+    return matchSearch && matchFilter
+  }), [stateList, searchQuery, filterEnabled])
+
+  const selectedState  = stateList.find(s => s.state_code === selectedStateCode)
+  const slabList       = Array.isArray(slabs) ? slabs : []
+  const enabledCount   = stateList.filter(s => s.enabled).length
+
+  const historyRows = last6.map((ym, i) => {
+    const rows       = (historyResults[i]?.data ?? []) as Array<{ state_code: string; tax_amount: number }>
+    const total      = rows.reduce((s, c) => s + (Number(c.tax_amount) || 0), 0)
+    const states     = new Set(rows.map(c => c.state_code)).size
+    const headcount  = rows.length
+    return { ym, headcount, states, total, loading: historyResults[i]?.isLoading }
+  })
+  const historyLoading = historyResults.some(r => r.isLoading)
 
   return (
     <PageContainer>
       <PageHeader
+        breadcrumb={[
+          { label: 'Payroll',   href: '/admin/payroll' },
+          { label: 'Statutory', href: '/admin/payroll/statutory' },
+          { label: 'P-Tax' },
+        ]}
         title="Professional Tax Management"
-        subtitle="Manage state-wise P-Tax slabs, configurations, and monthly contributions"
+        subtitle="Enact state-wise configurations, customise salary-band tax slabs, and monitor P-Tax compliance"
         actions={
           <Button
             size="sm"
             variant="outline"
             className="h-8 text-xs gap-1.5"
-            onClick={() => { refetchStates(); refetchSlabs(); refetchContrib() }}
+            onClick={() => { refetchStates(); refetchSlabs() }}
+            disabled={statesLoading || slabsLoading}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className={cn('h-3.5 w-3.5', (statesLoading || slabsLoading) && 'animate-spin')} />
             Refresh
           </Button>
         }
       />
 
-      {/* State Configs card */}
-      <SectionCard
-        title="State Configurations"
-        icon={<MapPin className="h-4 w-4 text-muted-foreground" />}
-      >
-        {statesLoading && (
-          <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
-        )}
-        {statesError && (
-          <div className="flex items-center gap-2 text-xs text-destructive py-2">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Failed to load state configurations.
+      {/* ── Summary stat cards ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+
+        {/* Jurisdictions enabled */}
+        <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4 hover:border-border/80 transition-all">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+            <Globe className="h-5 w-5" />
           </div>
-        )}
-        {!statesLoading && !statesError && (
-          stateList.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground text-sm">No states configured.</div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {stateList.map(s => (
-                <div
-                  key={s.state_code}
-                  className="flex items-center justify-between p-3 rounded-md border border-border/50 bg-muted/20"
-                >
-                  <div>
-                    <p className="text-xs font-medium text-foreground">{s.state_name}</p>
-                    <p className="text-[10px] text-muted-foreground font-mono">{s.state_code}</p>
-                  </div>
+          <div>
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Jurisdictions Enabled</span>
+            <div className="text-2xl font-black text-foreground tracking-tight mt-0.5">
+              {enabledCount}{' '}
+              <span className="text-xs font-semibold text-muted-foreground">/ {stateList.length} States</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Filing contributors */}
+        <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4 hover:border-border/80 transition-all">
+          <div className="h-10 w-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-600 shrink-0 dark:bg-orange-950/40 dark:border-orange-800 dark:text-orange-400">
+            <UserCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">States Configured</span>
+            <div className="text-2xl font-black text-foreground tracking-tight mt-0.5">
+              {slabList.length}{' '}
+              <span className="text-xs font-semibold text-muted-foreground">slabs for {selectedStateCode || '—'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Selected state status */}
+        <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4 hover:border-border/80 transition-all">
+          <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400">
+            <BadgeIndianRupee className="h-5 w-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Selected State</span>
+            <div className="text-2xl font-black text-foreground tracking-tight mt-0.5">
+              {selectedState ? selectedState.state_name : '—'}
+            </div>
+            {selectedState && (
+              <span className={cn(
+                'text-[10px] font-bold px-1.5 py-0.5 rounded-full border mt-0.5 inline-block',
+                selectedState.enabled
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                  : 'bg-muted text-muted-foreground border-border',
+              )}>
+                {selectedState.enabled ? 'Active' : 'Inactive'}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── State Grid + Slab Panel ────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        {/* LEFT: State grid */}
+        <section className="bg-card rounded-2xl border border-border shadow-sm lg:col-span-7 flex flex-col overflow-hidden">
+
+          {/* Header */}
+          <div className="px-5 py-4 border-b border-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-muted/10">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary" />
+              <h2 className="font-bold text-sm text-foreground">State Configurations Grid</h2>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search state…"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-7 h-7 text-xs w-32"
+                />
+                {searchQuery && (
                   <button
-                    type="button"
-                    disabled={toggleStateMutation.isPending}
-                    onClick={() => toggleStateMutation.mutate({ stateCode: s.state_code, enabled: !s.enabled })}
-                    className={cn(
-                      'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                      s.enabled ? 'bg-primary' : 'bg-muted-foreground/30',
-                      toggleStateMutation.isPending && 'opacity-50 cursor-not-allowed',
-                    )}
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
-                    <span className={cn(
-                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                      s.enabled ? 'translate-x-4' : 'translate-x-1',
-                    )} />
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              {/* Enabled filter */}
+              <button
+                onClick={() => setFilterEnabled(!filterEnabled)}
+                className={cn(
+                  'px-2 py-1 border rounded-md text-[10px] font-bold flex items-center gap-1 transition-all',
+                  filterEnabled
+                    ? 'bg-primary/10 border-primary/20 text-primary'
+                    : 'bg-background border-border text-muted-foreground hover:bg-muted/50',
+                )}
+              >
+                <SlidersHorizontal className="h-3 w-3" />
+                <span>Enabled ({enabledCount})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* State cards grid */}
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[460px] overflow-y-auto flex-1">
+            {statesLoading
+              ? Array.from({ length: 9 }).map((_, i) => (
+                  <div key={i} className="h-20 rounded-xl bg-muted/40 border border-border animate-pulse" />
+                ))
+              : statesError
+                ? <div className="col-span-full py-10 text-center text-xs text-destructive flex items-center justify-center gap-1.5">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    Failed to load state configurations.
+                  </div>
+                : filteredStates.length === 0
+                  ? <div className="col-span-full py-10 text-center text-xs text-muted-foreground">
+                      No states match your search or filters.
+                    </div>
+                  : filteredStates.map(state => {
+                      return (
+                        <div
+                          key={state.state_code}
+                          onClick={() => setSelectedStateCode(state.state_code)}
+                          className={cn(
+                            'p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between h-20 group relative hover:shadow-sm',
+                            selectedStateCode === state.state_code
+                              ? 'bg-primary/5 border-primary/40 shadow-sm'
+                              : 'bg-card border-border/50 hover:border-border hover:bg-muted/20',
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold text-muted-foreground tracking-wider">
+                              {state.state_code}
+                            </span>
+                            {/* Toggle */}
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation()
+                                toggleStateMutation.mutate({ stateCode: state.state_code, enabled: !state.enabled })
+                              }}
+                              disabled={toggleStateMutation.isPending}
+                              className="text-muted-foreground hover:text-foreground focus:outline-none cursor-pointer transition-colors"
+                              title={state.enabled ? 'Click to disable' : 'Click to enable'}
+                            >
+                              {state.enabled
+                                ? <ToggleRight className="h-6 w-6 text-primary shrink-0" />
+                                : <ToggleLeft className="h-6 w-6 text-muted-foreground/50 shrink-0" />
+                              }
+                            </button>
+                          </div>
+                          <div className="truncate">
+                            <span className={cn(
+                              'text-xs font-semibold block truncate',
+                              selectedStateCode === state.state_code ? 'text-primary font-bold' : 'text-foreground',
+                            )}>
+                              {state.state_name}
+                            </span>
+                          </div>
+                          {selectedStateCode === state.state_code && (
+                            <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                          )}
+                        </div>
+                      )
+                    })
+            }
+          </div>
+
+          <div className="bg-muted/30 px-5 py-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Check className="h-3.5 w-3.5 text-primary" />
+              Select a state to manage slabs &amp; settings.
+            </span>
+            <span className="font-mono text-[10px]">FY {CURRENT_FY}</span>
+          </div>
+        </section>
+
+        {/* RIGHT: Slab management */}
+        <section className="bg-card rounded-2xl border border-border shadow-sm lg:col-span-5 flex flex-col overflow-hidden">
+
+          {/* Header */}
+          <div className="px-5 py-4 border-b border-border/50 bg-muted/10 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <Settings className="h-4 w-4 text-primary" />
+              <div>
+                <h3 className="font-black text-sm text-foreground tracking-tight">Slabs &amp; Parameters</h3>
+                <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
+                  {selectedState ? `${selectedState.state_name} (${selectedState.state_code})` : 'No state selected'}
+                </span>
+              </div>
+            </div>
+            {selectedStateCode && (
+              <button
+                onClick={() => setShowAddSlabForm(v => !v)}
+                className="px-2.5 py-1 text-[10px] font-bold text-primary bg-primary/10 hover:bg-primary/20 rounded-md cursor-pointer transition-all flex items-center gap-1"
+              >
+                <PlusCircle className="h-3 w-3" />
+                <span>Add Slab</span>
+              </button>
+            )}
+          </div>
+
+          {/* Slab list */}
+          <div className="p-5 flex-1 overflow-y-auto space-y-3">
+
+            {/* Registration Details */}
+            {selectedStateCode && (
+              <div className="p-3.5 bg-muted/20 border border-border/50 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">PT Registration</span>
+                  {!regEditing ? (
+                    <button
+                      onClick={() => setRegEditing(true)}
+                      className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
+                    >
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setRegEditing(false)}
+                      className="text-[9px] font-bold text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+
+                {!regEditing ? (
+                  <div className="space-y-1">
+                    <div>
+                      <p className="text-[9px] text-muted-foreground">Registration No.</p>
+                      <p className={cn('text-xs font-mono font-semibold', regNumber ? 'text-foreground' : 'text-muted-foreground/60')}>
+                        {regNumber || '— not set'}
+                      </p>
+                    </div>
+                    {regDate && (
+                      <div>
+                        <p className="text-[9px] text-muted-foreground">Registered On</p>
+                        <p className="text-xs font-mono text-foreground">{regDate}</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[9px] font-bold text-muted-foreground uppercase block mb-0.5">PT Reg. Number</label>
+                      <Input
+                        value={regNumber}
+                        onChange={e => setRegNumber(e.target.value)}
+                        placeholder="e.g. PTRC-MH-12345"
+                        className="h-7 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted-foreground uppercase block mb-0.5">Registration Date</label>
+                      <DateInput
+                        value={regDate}
+                        onChange={setRegDate}
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-full h-7 text-xs"
+                      disabled={saveRegMutation.isPending}
+                      onClick={() => saveRegMutation.mutate()}
+                    >
+                      {saveRegMutation.isPending ? <><Loader2 className="h-3 w-3 animate-spin mr-1" />Saving…</> : 'Save Registration'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Disabled warning */}
+            {selectedState && !selectedState.enabled && (
+              <div className="p-3 bg-warning/10 rounded-xl border border-warning/30 flex items-start gap-2.5 text-[11px] text-warning">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">P-Tax is disabled for {selectedState.state_name}.</span>
+                  <p className="mt-0.5 opacity-80">Enable the state toggle to activate P-Tax collection.</p>
+                </div>
+              </div>
+            )}
+
+            {!selectedStateCode && (
+              <div className="py-14 text-center flex flex-col items-center gap-2 text-muted-foreground">
+                <Globe className="h-8 w-8 opacity-20" />
+                <p className="text-xs font-medium">Select a state to view its slabs</p>
+              </div>
+            )}
+
+            {selectedStateCode && slabsLoading && (
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-xl bg-muted/40 border border-border animate-pulse" />
+                ))}
+              </div>
+            )}
+
+            {selectedStateCode && slabsError && (
+              <div className="flex items-center gap-2 text-xs text-destructive py-4">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Failed to load slabs for {selectedStateCode}.
+              </div>
+            )}
+
+            {selectedStateCode && !slabsLoading && !slabsError && slabList.length === 0 && (
+              <div className="py-14 text-center border-2 border-dashed border-border rounded-2xl flex flex-col items-center gap-2 p-6 bg-muted/20">
+                <span className="text-muted-foreground text-xs font-semibold">No slabs configured</span>
+                <p className="text-[10px] text-muted-foreground max-w-[200px]">
+                  Add slabs to define professional tax schedules based on salary bands.
+                </p>
+              </div>
+            )}
+
+            {slabList.map((slab, i) => (
+              <div
+                key={slab.id}
+                className="p-3.5 bg-muted/30 hover:bg-muted/50 border border-border/50 rounded-xl flex items-center justify-between group transition-colors"
+              >
+                <div className="min-w-0">
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">
+                    Slab {i + 1}
+                  </span>
+                  <span className="text-xs font-semibold text-foreground mt-0.5 block">
+                    {slab.monthly_income_to == null
+                      ? `Above ${fmtCurrency(slab.monthly_income_from)}`
+                      : `${fmtCurrency(slab.monthly_income_from)} — ${fmtCurrency(slab.monthly_income_to)}`
+                    }
+                  </span>
+                  {slab.gender !== 'all' && (
+                    <span className="text-[10px] text-primary font-medium capitalize">{slab.gender} only</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Monthly Levy</span>
+                    <span className="text-sm font-black text-primary font-mono">₹{slab.monthly_tax}</span>
+                  </div>
+                  {/* Delete — disabled; deletions require API endpoint */}
+                  <button
+                    className="p-1 rounded-md text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    title="Delete slab (contact admin)"
+                    onClick={() => toast.info('Slab deletion requires backend confirmation — coming soon.')}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              ))}
-            </div>
-          )
-        )}
-      </SectionCard>
+              </div>
+            ))}
+          </div>
 
-      {/* Slab Management */}
+          {/* Inline add-slab form — slides in at bottom */}
+          {showAddSlabForm && selectedStateCode && (
+            <div className="border-t border-border/50 bg-muted/30 p-5 space-y-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-bold text-primary uppercase tracking-wider">New Slab — {selectedStateCode}</span>
+                <button
+                  type="button"
+                  onClick={() => { setShowAddSlabForm(false); setSlabError('') }}
+                  className="p-1 rounded-full hover:bg-muted text-muted-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Income From (₹)</label>
+                  <Input
+                    type="number"
+                    value={slabForm.monthly_income_from}
+                    onChange={e => setSlabForm(f => ({ ...f, monthly_income_from: parseInt(e.target.value) || 0 }))}
+                    className="h-7 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Income To (₹, blank = no limit)</label>
+                  <Input
+                    type="number"
+                    value={slabForm.monthly_income_to}
+                    onChange={e => setSlabForm(f => ({ ...f, monthly_income_to: e.target.value }))}
+                    className="h-7 text-xs"
+                    placeholder="No limit"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Monthly Tax (₹)</label>
+                  <Input
+                    type="number"
+                    value={slabForm.monthly_tax}
+                    onChange={e => setSlabForm(f => ({ ...f, monthly_tax: parseInt(e.target.value) || 0 }))}
+                    className="h-7 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Gender</label>
+                  <select
+                    value={slabForm.gender}
+                    onChange={e => setSlabForm(f => ({ ...f, gender: e.target.value }))}
+                    className="w-full h-7 text-xs rounded-md border border-input bg-background px-2"
+                  >
+                    <option value="all">All workers</option>
+                    <option value="male">Male only</option>
+                    <option value="female">Female only</option>
+                  </select>
+                </div>
+              </div>
+
+              {slabError && (
+                <div className="flex items-start gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                  {slabError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setShowAddSlabForm(false); setSlabError('') }}
+                  className="px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  Discard
+                </button>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  disabled={addSlabMutation.isPending}
+                  onClick={() => addSlabMutation.mutate()}
+                >
+                  {addSlabMutation.isPending
+                    ? <><Loader2 className="h-3 w-3 animate-spin" />Adding…</>
+                    : <><Check className="h-3 w-3" />Add Slab</>
+                  }
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* ── Last 6 Months History ────────────────────────────────────────────── */}
       <SectionCard
-        title="Slab Management"
-        icon={<Settings className="h-4 w-4 text-muted-foreground" />}
-        action={
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="FY e.g. 2025-26"
-              value={slabFY}
-              onChange={e => setSlabFY(e.target.value)}
-              className="h-7 text-xs w-28"
-            />
-            <Input
-              placeholder="State code"
-              value={slabState}
-              onChange={e => setSlabState(e.target.value)}
-              className="h-7 text-xs w-24"
-            />
-            <Button
-              size="sm"
-              className="h-7 text-xs gap-1.5"
-              onClick={() => setShowAddSlab(true)}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add Slab
-            </Button>
-          </div>
-        }
+        title="Last 6 Months — P-Tax Filing Register"
+        icon={<FileSpreadsheet className="h-4 w-4 text-muted-foreground" />}
       >
-        {slabsLoading && (
-          <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
-        )}
-        {slabsError && (
-          <div className="flex items-center gap-2 text-xs text-destructive py-2">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Failed to load slabs.
+        {historyLoading ? (
+          <div className="divide-y divide-border animate-pulse">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex gap-4 px-3 py-3">
+                {Array.from({ length: 4 }).map((__, j) => (
+                  <div key={j} className="h-3 bg-muted rounded flex-1" />
+                ))}
+              </div>
+            ))}
           </div>
-        )}
-        {!slabsLoading && !slabsError && (
-          slabList.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
-          ) : (
-            <div className="overflow-x-auto rounded-md border border-border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">State</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Financial Year</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Income From</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Income To</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Monthly Tax</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Gender</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {slabList.map(s => (
-                    <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30">
-                      <td className="px-3 py-2 text-xs font-mono font-medium">{s.state_code}</td>
-                      <td className="px-3 py-2 text-xs">{s.financial_year}</td>
-                      <td className="px-3 py-2 text-xs font-mono">{fmtCurrency(s.monthly_income_from)}</td>
-                      <td className="px-3 py-2 text-xs font-mono">
-                        {s.monthly_income_to != null ? fmtCurrency(s.monthly_income_to) : <span className="text-muted-foreground">No limit</span>}
-                      </td>
-                      <td className="px-3 py-2 text-xs font-mono font-semibold text-warning">{fmtCurrency(s.monthly_tax)}</td>
-                      <td className="px-3 py-2 text-xs capitalize">{s.gender}</td>
-                    </tr>
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {['Filing Cycle', 'Contributors', 'Active States', 'Total P-Tax Levy'].map(h => (
+                    <th key={h} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 whitespace-nowrap">{h}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {historyRows.map(row => (
+                  <tr key={row.ym} className={cn('hover:bg-muted/20 transition-colors', row.ym === todayYM && 'bg-primary/5')}>
+                    <td className="px-3 py-2.5 text-xs font-semibold text-foreground whitespace-nowrap">
+                      {fmtMonth(row.ym)}
+                      {row.ym === todayYM && (
+                        <span className="ml-1.5 text-[9px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">Current</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground">
+                      {row.loading ? <span className="inline-block h-3 w-8 bg-muted rounded animate-pulse" /> : row.headcount === 0 ? <span className="text-muted-foreground">—</span> : `${row.headcount} employees`}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-mono font-medium text-foreground">
+                      {row.loading ? <span className="inline-block h-3 w-8 bg-muted rounded animate-pulse" /> : row.headcount === 0 ? <span className="text-muted-foreground">—</span> : `${row.states} states`}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-mono font-semibold text-primary">
+                      {row.loading ? <span className="inline-block h-3 w-16 bg-muted rounded animate-pulse" /> : row.headcount === 0 ? <span className="text-muted-foreground">—</span> : fmtCurrency(row.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </SectionCard>
-
-      {/* Monthly Contributions */}
-      <SectionCard
-        title="Monthly Contributions"
-        icon={<FileText className="h-4 w-4 text-muted-foreground" />}
-        action={
-          <Input
-            type="month"
-            value={selectedMonth}
-            onChange={e => setSelectedMonth(e.target.value)}
-            className="h-7 text-xs w-36"
-          />
-        }
-      >
-        {contribLoading && (
-          <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
-        )}
-        {contribError && (
-          <div className="flex items-center gap-2 text-xs text-destructive py-2">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Failed to load contributions.
-          </div>
-        )}
-        {!contribLoading && !contribError && (
-          contribList.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
-          ) : (
-            <div className="overflow-x-auto rounded-md border border-border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee Code</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee Name</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">State</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Monthly Income</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Tax Amount</th>
-                    <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {contribList.map(c => (
-                    <tr key={c.id} className="border-b border-border/50 hover:bg-muted/30">
-                      <td className="px-3 py-2 text-xs font-mono text-muted-foreground">{c.employee_code ?? '—'}</td>
-                      <td className="px-3 py-2 text-xs font-medium">{c.employee_name ?? '—'}</td>
-                      <td className="px-3 py-2 text-xs font-mono">{c.state_code}</td>
-                      <td className="px-3 py-2 text-xs font-mono">{fmtCurrency(c.monthly_income)}</td>
-                      <td className="px-3 py-2 text-xs font-mono font-semibold text-warning">{fmtCurrency(c.tax_amount)}</td>
-                      <td className="px-3 py-2">
-                        <Badge
-                          variant={(STATUS_BADGE[c.status] ?? 'secondary') as any}
-                          className="rounded-full text-[10px] capitalize"
-                        >
-                          {c.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        )}
-      </SectionCard>
-
-      {/* Add Slab Dialog */}
-      {showAddSlab && <AddSlabDialog onClose={() => setShowAddSlab(false)} />}
     </PageContainer>
   )
 }

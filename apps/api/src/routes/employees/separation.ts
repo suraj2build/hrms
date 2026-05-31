@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { logAction } from '../../lib/audit-service.js'
 
 const schema = z.object({
   separation_type:      z.enum(['resignation','termination','retirement','end_of_contract','absconding','deceased','mutual_separation']),
@@ -20,7 +22,8 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function separationRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/separation', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -36,8 +39,8 @@ export default async function separationRoutes(fastify: FastifyInstance) {
     return reply.send({ data: data ?? null })
   })
 
-  // POST: initiate separation (also updates employee.status)
-  fastify.post('/employees/:id/separation', auth, async (req: any, reply) => {
+  // POST: initiate separation (also updates employee.status) — HR admin only
+  fastify.post('/employees/:id/separation', hrAdminAuth, async (req: any, reply) => {
     const employee = await verifyEmployee(fastify, req.params.id, req.tenantId)
     if (!employee) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     if (employee.status === 'separated')
@@ -67,11 +70,21 @@ export default async function separationRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'employee_separation',
+      recordId:    (data as any).id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  req.params.id,
+      newData:     { ...parsed.data, employee_status: newStatus },
+    })
+
     return reply.code(201).send(data)
   })
 
-  // PUT: update separation details (e.g. clearance, exit interview)
-  fastify.put('/employees/:id/separation', auth, async (req: any, reply) => {
+  // PUT: update separation details (e.g. clearance, exit interview) — HR admin only
+  fastify.put('/employees/:id/separation', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.partial().safeParse(req.body)
@@ -94,6 +107,17 @@ export default async function separationRoutes(fastify: FastifyInstance) {
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
     }
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'employee_separation',
+      recordId:    (data as any).id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  req.params.id,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.send(data)
   })
 }

@@ -25,6 +25,7 @@
  *   Content-Disposition: attachment; filename=attendance-<date>-<runId_prefix>.csv
  */
 import type { FastifyInstance } from 'fastify'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 /** Escape a CSV cell value: wrap in quotes if it contains commas, quotes, or newlines */
 function csvCell(value: string | number | null | undefined): string {
@@ -43,7 +44,7 @@ function csvRow(...cells: (string | number | null | undefined)[]): string {
 export default async function runExportRoute(fastify: FastifyInstance) {
   fastify.get(
     '/attendance/process/runs/:runId/export',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] },
     async (req, reply) => {
       const { runId } = req.params as { runId: string }
       const tenantId  = req.tenantId

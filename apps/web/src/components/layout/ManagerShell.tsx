@@ -1,0 +1,66 @@
+/**
+ * ManagerShell
+ * Layout wrapper for Manager Console routes (/manager/*).
+ *
+ * Accessible by:
+ *   - Users with role = 'manager'
+ *   - hr_admin / super_admin accessing a manager identity via RoleSwitcher
+ *     (they navigate here directly after impersonating a manager)
+ *
+ * Unauthenticated users → /login
+ * Employees (role = 'employee') → /ess/dashboard
+ */
+
+import { Outlet, Navigate } from 'react-router-dom'
+import { Suspense }         from 'react'
+import { Loader2 }          from 'lucide-react'
+import { ManagerSidebar }   from './ManagerSidebar'
+import { Topbar }           from './Topbar'
+import { useAuthStore }     from '@/stores/authStore'
+import { EventToast }       from '@/components/notifications'
+
+function ShellPageLoader() {
+  return (
+    <div className="flex h-[60vh] items-center justify-center">
+      <div className="h-7 w-7 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
+    </div>
+  )
+}
+
+function LoadingScreen() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-3">
+        <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    </div>
+  )
+}
+
+export function ManagerShell() {
+  const { profile, isBootstrapping } = useAuthStore()
+
+  if (isBootstrapping) return <LoadingScreen />
+
+  // Not authenticated
+  if (!profile) return <Navigate to="/login" replace />
+
+  // Employee-only users can't access manager console
+  if (profile.role === 'employee') return <Navigate to="/ess/dashboard" replace />
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-background">
+      <ManagerSidebar />
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <Topbar />
+        <main className="flex-1 overflow-y-auto p-6">
+          <EventToast />
+          <Suspense fallback={<ShellPageLoader />}>
+            <Outlet />
+          </Suspense>
+        </main>
+      </div>
+    </div>
+  )
+}

@@ -26,6 +26,7 @@ import { FormField, FormRow } from '@/components/forms/FormField'
 import { Badge }              from '@/components/ui/badge'
 import { Button }             from '@/components/ui/button'
 import { Input }              from '@/components/ui/input'
+import { DateInput }          from '@/components/ui/date-input'
 import { api }                from '@/lib/api/client'
 import { useAuthStore }       from '@/stores/authStore'
 
@@ -44,9 +45,11 @@ interface Holiday {
 function todayStr() { return new Date().toISOString().slice(0, 10) }
 
 function fmtDate(dateStr: string) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', weekday: 'short',
-  })
+  const d = new Date(dateStr + 'T12:00:00Z')
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  if (isNaN(d.getTime())) return '—'
+  return `${WD[d.getUTCDay()]}, ${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 
 // ── Shared micro-components ───────────────────────────────────────────────────
@@ -166,11 +169,10 @@ export function Holidays() {
           <div className="space-y-4">
             <FormRow cols={3}>
               <FormField label="Date" htmlFor="holiday-date" required>
-                <Input
+                <DateInput
                   id="holiday-date"
-                  type="date"
                   value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
+                  onChange={setNewDate}
                   disabled={addMutation.isPending}
                 />
               </FormField>

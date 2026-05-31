@@ -290,7 +290,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
         event_type:     'webhook.test',
         payload:        testPayload,
         status:         'pending',
-        attempt_count:  0,
+        attempt_number: 1,
         created_at:     new Date().toISOString(),
       })
       .select()
@@ -340,7 +340,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
         http_status:    httpStatus || null,
         duration_ms,
         error_message:  errorMessage ?? null,
-        attempt_count:  1,
+        attempt_number: 1,
         delivered_at:   success ? new Date().toISOString() : null,
       })
       .eq('id', delivery.id)

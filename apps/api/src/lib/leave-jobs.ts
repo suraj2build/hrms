@@ -23,13 +23,55 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   type LeavePolicy,
+  type BatchResult,
   checkEligibility,
   computeEntitlement,
   computeMonthlyAccrualAmount,
+  computeQuarterlyAccrualAmount,
   creditEmployeeDays,
   runEngineMonthlyAccrual,
   runEngineYearlyCredit,
 } from './leave-entitlement-service.js'
+import {
+  evaluateAccrualLifecycle,
+  type LifecyclePolicy,
+  type AccrualTierRow,
+  type ActiveFreeze,
+  type AccrualContext,
+} from './leave-accrual-lifecycle-engine.js'
+import { checkCycleOwnership } from './leave-replay-engine.js'
+import { writeAccrualEntry, expireAccrualEntry } from './leave-ledger-service.js'
+
+// ── Replay infrastructure helpers ─────────────────────────────────────────────
+
+/**
+ * Generate a fully deterministic cycle key for a ledger entry.
+ * Format: '{tenantId}:{employeeId}:{leaveTypeId}:{year}:{cycleDescriptor}:{accrualType}'
+ *
+ * cycleDescriptor examples:
+ *   monthly:     'YYYY-MM'  e.g. '2026-05'
+ *   quarterly:   'YYYY-QN'  e.g. '2026-Q2'
+ *   yearly:      'YYYY'     e.g. '2026'
+ *   carry_fwd:   'cf-YYYY'  e.g. 'cf-2026'
+ */
+export function generateCycleKey(
+  tenantId:        string,
+  employeeId:      string,
+  leaveTypeId:     string,
+  year:            number,
+  cycleDescriptor: string,   // e.g. '2026-05', '2026-Q2', '2026'
+  accrualType:     string,
+): string {
+  return `${tenantId}:${employeeId}:${leaveTypeId}:${year}:${cycleDescriptor}:${accrualType}`
+}
+
+/**
+ * Generate a new UUID-based lineage ID for a job run.
+ * All ledger entries written within the same job run share this ID.
+ */
+export function generateLineageId(): string {
+  return crypto.randomUUID()
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -56,12 +98,19 @@ function shiftDay(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+interface JobLogOptions {
+  triggerType?: 'scheduler' | 'manual_replay' | 'recovery' | 'dry_run'
+  dryRun?:      boolean
+  reason?:      string
+}
+
 async function startJobLog(
   supabase:    SupabaseClient,
   tenantId:    string,
   jobType:     JobType,
   params:      Record<string, unknown>,
   triggeredBy: string | null,
+  opts:        JobLogOptions = {},
 ): Promise<string> {
   const { data } = await supabase
     .from('leave_job_log')
@@ -71,6 +120,9 @@ async function startJobLog(
       status:       'running',
       params,
       triggered_by: triggeredBy,
+      trigger_type: opts.dryRun ? 'dry_run' : (opts.triggerType ?? 'scheduler'),
+      dry_run:      opts.dryRun ?? false,
+      replay_reason: opts.reason ?? null,
     })
     .select('id')
     .single()
@@ -97,6 +149,24 @@ async function completeJobLog(
     .eq('id', jobId)
 }
 
+interface LedgerWriteContext {
+  /** UUID shared by all entries written in the same job run (for audit lineage) */
+  lineageId?:       string
+  /** Deterministic cycle key — used by the replay engine for idempotency checks */
+  cycleKey?:        string
+  /** If this entry was written as part of a replay, the original lineageId */
+  parentReplayId?:  string
+  /** Policy snapshot ID that governed this accrual (from leave_policy_snapshots) */
+  snapshotId?:      string
+}
+
+/**
+ * Thin delegate to writeAccrualEntry() in leave-ledger-service.
+ *
+ * leave-ledger-service is the SOLE write authority for leave_accrual_ledger.
+ * This wrapper preserves the internal call signature used across job handlers
+ * without duplicating the upsert logic.
+ */
 async function writeLedgerEntry(
   supabase:     SupabaseClient,
   tenantId:     string,
@@ -108,29 +178,52 @@ async function writeLedgerEntry(
   accruedOn:    string,
   expiresOn:    string | null,
   notes?:       string,
+  ctx?:         LedgerWriteContext,
 ): Promise<void> {
-  // upsert with ignoreDuplicates ensures re-running the same job period never
-  // double-writes (pairs with uidx_accrual_ledger_idempotency partial index).
-  // For adjustment / co_grant types the unique index is partial and does NOT
-  // cover them, so ON CONFLICT will simply not match — functionally equivalent
-  // to a plain insert for those types.
-  await supabase.from('leave_accrual_ledger').upsert(
-    {
-      tenant_id:     tenantId,
-      employee_id:   employeeId,
-      leave_type_id: leaveTypeId,
-      year,
-      accrual_type:  accrualType,
-      days,
-      accrued_on:    accruedOn,
-      expires_on:    expiresOn,
-      notes:         notes ?? null,
-    },
-    {
-      onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
-      ignoreDuplicates: true,
-    },
-  )
+  await writeAccrualEntry(supabase, {
+    tenantId,
+    employeeId,
+    leaveTypeId,
+    year,
+    accrualType,
+    days,
+    accruedOn,
+    expiresOn:       expiresOn ?? undefined,
+    notes,
+    cycleKey:        ctx?.cycleKey,
+    lineageId:       ctx?.lineageId,
+    parentReplayId:  ctx?.parentReplayId,
+    snapshotId:      ctx?.snapshotId,
+  })
+}
+
+/**
+ * Guard: return true if a job of the given type is already running for this tenant.
+ *
+ * Checks leave_job_log for a 'running' record started within the last 2 hours.
+ * The 2-hour window prevents stale 'running' rows (from crashed jobs) from
+ * permanently blocking future runs.
+ *
+ * Usage: call at the very start of each scheduler job; abort if true.
+ */
+async function isJobAlreadyRunning(
+  supabase:  SupabaseClient,
+  tenantId:  string,
+  jobType:   JobType,
+): Promise<boolean> {
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+
+  const { data } = await supabase
+    .from('leave_job_log')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('job_type',  jobType)
+    .eq('status',    'running')
+    .gte('created_at', twoHoursAgo)
+    .limit(1)
+    .maybeSingle()
+
+  return !!data
 }
 
 async function fetchPolicies(
@@ -179,16 +272,42 @@ export async function monthlyAccrualJob(
   year:        number,
   month:       number,   // 1-indexed (1 = Jan)
   triggeredBy: string | null = null,
+  opts:        JobLogOptions = {},
 ): Promise<JobResult> {
   const startedAt = Date.now()
+
+  // Concurrency guard: abort if this job type is already running for this tenant.
+  // Prevents duplicate balance credits when the scheduler fires overlapping ticks.
+  if (await isJobAlreadyRunning(supabase, tenantId, 'monthly_accrual')) {
+    return {
+      job_id: 'skipped', job_type: 'monthly_accrual', status: 'completed',
+      employees_processed: 0, total_days_credited: 0, skipped: 0,
+      errors: ['Skipped: monthly_accrual already running for this tenant'],
+      duration_ms: Date.now() - startedAt,
+    }
+  }
+
+  // Generate a lineage ID for this job run — all ledger entries share this ID
+  const lineageId = generateLineageId()
   const jobId = await startJobLog(
-    supabase, tenantId, 'monthly_accrual', { year, month }, triggeredBy,
+    supabase, tenantId, 'monthly_accrual', { year, month, lineage_id: lineageId }, triggeredBy, opts,
   )
+
+  // Store lineage_id in the job log row for cross-referencing
+  await supabase
+    .from('leave_job_log')
+    .update({ lineage_id: lineageId })
+    .eq('id', jobId)
 
   let employees_processed = 0
   let total_days_credited  = 0
   let skipped              = 0
   const errors: string[]   = []
+
+  const monthPad    = String(month).padStart(2, '0')
+  const cycleLabel  = `${year}-${monthPad}`  // e.g. '2026-05'
+  const quarterNum  = Math.ceil(month / 3)
+  const quarterLabel = `${year}-Q${quarterNum}`   // e.g. '2026-Q2'
 
   try {
     // ── Phase 1: Engine-aware accrual (named policy assignments) ─────────────
@@ -213,12 +332,15 @@ export async function monthlyAccrualJob(
       fetchActiveEmployees(supabase, tenantId),
     ])
 
-    const monthlyPolicies = policies.filter(p => p.accrual_type === 'monthly')
+    const accrualDate    = `${year}-${monthPad}-01`
+    const monthlyPolicies  = policies.filter(p => p.accrual_type === 'monthly')
+    const QUARTER_MONTHS   = [1, 4, 7, 10] as const
+    const quarterlyPolicies = QUARTER_MONTHS.includes(month as 1 | 4 | 7 | 10)
+      ? policies.filter(p => p.accrual_type === 'quarterly')
+      : []
 
+    // ── Monthly ──────────────────────────────────────────────────────────────
     if (monthlyPolicies.length && employees.length) {
-      // YYYY-MM-01 — the date label used for the ledger entry
-      const accrualDate = `${year}-${String(month).padStart(2, '0')}-01`
-
       for (const policy of monthlyPolicies) {
         const monthlyDays = computeMonthlyAccrualAmount(policy)
         if (monthlyDays <= 0) {
@@ -240,21 +362,70 @@ export async function monthlyAccrualJob(
             const elig = checkEligibility(emp.joining_date, policy, asOfDate)
             if (!elig.eligible) { skipped++; continue }
 
+            // Deterministic cycle key — idempotency guard for replay
+            const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, cycleLabel, 'monthly')
+
             // Credit balance (respects max_accrual_balance cap)
             await creditEmployeeDays(
               supabase, tenantId, emp.id, policy.leave_type_id,
               monthlyDays, year, policy.max_accrual_balance ?? undefined,
             )
 
-            // Write ledger entry — accrual_type 'monthly'; include expiry if applicable
+            // Write ledger entry — accrual_type 'monthly'; include expiry + replay ctx
             await writeLedgerEntry(
               supabase, tenantId, emp.id, policy.leave_type_id, year,
               'monthly', monthlyDays, accrualDate, expiresOn,
-              `Monthly accrual ${year}-${String(month).padStart(2, '0')}`,
+              `Monthly accrual ${cycleLabel}`,
+              { lineageId, cycleKey },
             )
 
             employees_processed++
             total_days_credited = parseFloat((total_days_credited + monthlyDays).toFixed(2))
+          } catch (e: unknown) {
+            errors.push(`Emp ${emp.id} policy ${policy.id}: ${(e as Error).message}`)
+          }
+        }
+      }
+    }
+
+    // ── Quarterly (only runs on quarter-start months: Jan/Apr/Jul/Oct) ────────
+    if (quarterlyPolicies.length && employees.length) {
+      for (const policy of quarterlyPolicies) {
+        const quarterlyDays = computeQuarterlyAccrualAmount(policy)
+        if (quarterlyDays <= 0) {
+          skipped += employees.length
+          continue
+        }
+
+        const expiresOn = policy.expiry_days
+          ? shiftDay(accrualDate, policy.expiry_days)
+          : null
+
+        for (const emp of employees) {
+          if (engineProcessed.has(emp.id)) { skipped++; continue }
+
+          try {
+            const asOfDate = new Date(`${accrualDate}T12:00:00.000Z`)
+            const elig = checkEligibility(emp.joining_date, policy, asOfDate)
+            if (!elig.eligible) { skipped++; continue }
+
+            await creditEmployeeDays(
+              supabase, tenantId, emp.id, policy.leave_type_id,
+              quarterlyDays, year, policy.max_accrual_balance ?? undefined,
+            )
+
+            // Deterministic cycle key — idempotency guard for replay
+            const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, quarterLabel, 'quarterly')
+
+            await writeLedgerEntry(
+              supabase, tenantId, emp.id, policy.leave_type_id, year,
+              'quarterly', quarterlyDays, accrualDate, expiresOn,
+              `Quarterly accrual ${quarterLabel}`,
+              { lineageId, cycleKey },
+            )
+
+            employees_processed++
+            total_days_credited = parseFloat((total_days_credited + quarterlyDays).toFixed(2))
           } catch (e: unknown) {
             errors.push(`Emp ${emp.id} policy ${policy.id}: ${(e as Error).message}`)
           }
@@ -294,13 +465,33 @@ export async function yearlyAccrualJob(
   leaveYear:   number,
   triggeredBy: string | null = null,
   asOf?:       string,
+  opts:        JobLogOptions = {},
 ): Promise<JobResult> {
   const startedAt = Date.now()
+
+  // Concurrency guard: abort if this job type is already running for this tenant.
+  if (await isJobAlreadyRunning(supabase, tenantId, 'yearly_accrual')) {
+    return {
+      job_id: 'skipped', job_type: 'yearly_accrual', status: 'completed',
+      employees_processed: 0, total_days_credited: 0, skipped: 0,
+      errors: ['Skipped: yearly_accrual already running for this tenant'],
+      duration_ms: Date.now() - startedAt,
+    }
+  }
+
+  // Generate a lineage ID for this job run — all ledger entries share this ID
+  const lineageId = generateLineageId()
   const jobId = await startJobLog(
     supabase, tenantId, 'yearly_accrual',
-    { leave_year: leaveYear, as_of: asOf ?? null },
-    triggeredBy,
+    { leave_year: leaveYear, as_of: asOf ?? null, lineage_id: lineageId },
+    triggeredBy, opts,
   )
+
+  // Store lineage_id in the job log row for cross-referencing
+  await supabase
+    .from('leave_job_log')
+    .update({ lineage_id: lineageId })
+    .eq('id', jobId)
 
   let employees_processed = 0
   let total_days_credited  = 0
@@ -363,11 +554,18 @@ export async function yearlyAccrualJob(
             })
 
             const yearStartStr = asOf ?? `${leaveYear}-01-01`
+            // Deterministic cycle key — idempotency guard for replay
+            const cycleKey = generateCycleKey(
+              tenantId, emp.id, policy.leave_type_id,
+              leaveYear, String(leaveYear), policy.accrual_type,
+            )
+
             await writeLedgerEntry(
               supabase, tenantId, emp.id, policy.leave_type_id, leaveYear,
               policy.accrual_type, days, yearStartStr,
               policy.expiry_days ? shiftDay(yearStartStr, policy.expiry_days) : null,
               `Yearly accrual ${leaveYear}`,
+              { lineageId, cycleKey },
             )
 
             employees_processed++
@@ -412,11 +610,12 @@ export async function coExpiryJob(
   tenantId:    string,
   asOf:        Date = new Date(),
   triggeredBy: string | null = null,
+  opts:        JobLogOptions = {},
 ): Promise<JobResult> {
   const startedAt = Date.now()
   const asOfStr   = asOf.toISOString().slice(0, 10)
   const jobId     = await startJobLog(
-    supabase, tenantId, 'co_expiry', { as_of: asOfStr }, triggeredBy,
+    supabase, tenantId, 'co_expiry', { as_of: asOfStr }, triggeredBy, opts,
   )
 
   let employees_processed = 0
@@ -498,10 +697,10 @@ export async function coExpiryJob(
             .eq('leave_type_id', group.leaveTypeId)
             .eq('year', group.year)
 
-          // Write negative adjustment ledger entry (audit trail of the deduction)
-          await writeLedgerEntry(
+          // Write negative adjustment ledger entry via the authoritative ledger service
+          await expireAccrualEntry(
             supabase, tenantId, group.employeeId, group.leaveTypeId, group.year,
-            'adjustment', -deductDays, asOfStr, null,
+            deductDays, asOfStr,
             `CO expiry: ${deductDays} day(s) removed on ${asOfStr}`,
           )
         }
@@ -557,10 +756,11 @@ export async function carryForwardJob(
   fromYear:    number,
   toYear:      number,
   triggeredBy: string | null = null,
+  opts:        JobLogOptions = {},
 ): Promise<JobResult> {
   const startedAt = Date.now()
   const jobId     = await startJobLog(
-    supabase, tenantId, 'carry_forward', { from_year: fromYear, to_year: toYear }, triggeredBy,
+    supabase, tenantId, 'carry_forward', { from_year: fromYear, to_year: toYear }, triggeredBy, opts,
   )
 
   let employees_processed = 0
@@ -676,10 +876,11 @@ export async function policyRecalculateJob(
   leaveTypeId: string,
   year:        number,
   triggeredBy: string | null = null,
+  opts:        JobLogOptions = {},
 ): Promise<JobResult> {
   const startedAt = Date.now()
   const jobId     = await startJobLog(
-    supabase, tenantId, 'policy_recalculate', { leave_type_id: leaveTypeId, year }, triggeredBy,
+    supabase, tenantId, 'policy_recalculate', { leave_type_id: leaveTypeId, year }, triggeredBy, opts,
   )
 
   let employees_processed = 0
@@ -793,6 +994,454 @@ export async function policyRecalculateJob(
     await completeJobLog(supabase, jobId, 'failed', {}, startedAt, msg)
     return {
       job_id: jobId, job_type: 'policy_recalculate', status: 'failed',
+      employees_processed, total_days_credited, skipped,
+      errors: [...errors, msg], duration_ms: Date.now() - startedAt,
+    }
+  }
+}
+
+// ── Lifecycle Phase 3: Engine-aware accrual with full lifecycle governance ────────
+//
+// This is the Phase 3 layer on top of the existing Phase 1 (engine-aware) accrual.
+// It integrates the leave-accrual-lifecycle-engine for:
+//   • Freeze checks (skip or mark for replay)
+//   • Tiered rate resolution (service-year-based rates)
+//   • Advance vs earned basis determination
+//   • Partial cycle proration for joining / separation months
+//   • Consumability date computation (held credits for non-immediate timing)
+//   • Attendance / paid-day threshold gating
+//   • Service anniversary cycle filtering
+//
+// Usage: monthlyAccrualJob and yearlyAccrualJob call this as their Phase 1.5 step
+// after the engine-aware pass but with full lifecycle context from leave_policy_rules.
+//
+// The function reads leave_policy_rules lifecycle columns, resolves tiers
+// from leave_accrual_tiers, and checks active freezes from leave_accrual_freezes.
+// It then calls evaluateAccrualLifecycle() for each employee × leave type.
+// Credits are written to employee_leave_balance AND leave_accrual_ledger with
+// full lifecycle metadata (earning_basis, consumption_eligible_from, tier_id, etc.)
+//
+// Employees already processed by Phase 1 (engine) are excluded by the caller
+// via engineProcessedIds.
+
+interface LifecycleAccrualOpts {
+  year:                  number
+  month:                 number          // 1-indexed; ignored for yearly
+  accrualDate:           string          // YYYY-MM-DD — the credit posting date
+  engineProcessedIds:    Set<string>     // exclude employees already handled
+  accrualTypeFilter:     ('monthly' | 'quarterly')[] | ('yearly' | 'upfront')[]
+  isYearly:              boolean
+  dryRun?:               boolean
+}
+
+/**
+ * Fetch active lifecycle freezes for all employees in this tenant,
+ * grouped by employee_id.
+ *
+ * Leave_type_id = null freezes apply to all leave types.
+ */
+async function fetchActiveFreezesMap(
+  supabase:  SupabaseClient,
+  tenantId:  string,
+  asOf:      string,
+): Promise<Map<string, ActiveFreeze[]>> {
+  const { data: freezes } = await supabase
+    .from('leave_accrual_freezes')
+    .select('id, employee_id, leave_type_id, freeze_from, freeze_to, reason, status')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .lte('freeze_from', asOf)
+    .or(`freeze_to.is.null,freeze_to.gte.${asOf}`)
+
+  const map = new Map<string, ActiveFreeze[]>()
+  for (const f of (freezes ?? []) as any[]) {
+    const key = `${f.employee_id}:${f.leave_type_id ?? 'all'}`
+    const existing = map.get(key) ?? []
+    existing.push({
+      id:                  f.id,
+      freeze_from:         f.freeze_from,
+      freeze_to:           f.freeze_to ?? null,
+      accrual_freeze_mode: 'skip' as const,  // default; enriched per-policy below
+      reason:              f.reason,
+    })
+    map.set(key, existing)
+  }
+  return map
+}
+
+/**
+ * Get the combined active freezes for an employee + leave type from the map.
+ * Merges both leave-type-specific freezes and any-type freezes (null type).
+ */
+function getEmployeeFreezesForType(
+  freezeMap:   Map<string, ActiveFreeze[]>,
+  employeeId:  string,
+  leaveTypeId: string,
+): ActiveFreeze[] {
+  const specific = freezeMap.get(`${employeeId}:${leaveTypeId}`)  ?? []
+  const general  = freezeMap.get(`${employeeId}:all`)             ?? []
+  return [...specific, ...general]
+}
+
+/**
+ * Fetch tiers for all policy rules in the given policy IDs, grouped by rule_id.
+ */
+async function fetchTiersMap(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  ruleIds:    string[],
+): Promise<Map<string, AccrualTierRow[]>> {
+  if (!ruleIds.length) return new Map()
+
+  const { data: tiers } = await supabase
+    .from('leave_accrual_tiers')
+    .select('id, rule_id, service_years_from, service_years_to, accrual_days_per_year, description')
+    .eq('tenant_id', tenantId)
+    .in('rule_id', ruleIds)
+    .order('service_years_from', { ascending: true })
+
+  const map = new Map<string, AccrualTierRow[]>()
+  for (const t of (tiers ?? []) as any[]) {
+    const existing = map.get(t.rule_id) ?? []
+    existing.push({
+      id:                    t.id,
+      service_years_from:    Number(t.service_years_from),
+      service_years_to:      t.service_years_to != null ? Number(t.service_years_to) : null,
+      accrual_days_per_year: Number(t.accrual_days_per_year),
+      description:           t.description ?? null,
+    })
+    map.set(t.rule_id, existing)
+  }
+  return map
+}
+
+/**
+ * Build a LifecyclePolicy from a leave_policy_rules row.
+ * All new lifecycle columns default safely when absent (pre-migration rows).
+ */
+function buildLifecyclePolicy(rule: any, yearType: 'calendar' | 'financial'): LifecyclePolicy {
+  return {
+    id:                         rule.id,
+    leave_type_id:              rule.leave_type_id,
+    accrual_type:               rule.accrual_type as LifecyclePolicy['accrual_type'],
+    accrual_days_per_year:      Number(rule.accrual_days_per_year),
+    year_type:                  yearType,
+    eligibility_days:           rule.eligibility_days ?? 0,
+    minimum_service_days:       rule.minimum_service_days ?? 0,
+    minimum_paid_days:          rule.minimum_paid_days ?? 0,
+    minimum_attendance_pct:     Number(rule.minimum_attendance_pct ?? 0),
+    accrual_earning_basis:      rule.accrual_earning_basis ?? 'earned',
+    accrual_credit_timing:      rule.accrual_credit_timing ?? 'cycle_start',
+    accrual_consumption_timing: rule.accrual_consumption_timing ?? 'immediate',
+    future_accrual_consumable:  rule.future_accrual_consumable ?? true,
+    advance_accrual_recovery_mode: rule.advance_accrual_recovery_mode ?? 'none',
+    joining_cycle_handling:     rule.joining_cycle_handling ?? 'prorate',
+    separation_cycle_handling:  rule.separation_cycle_handling ?? 'prorate',
+    payroll_cutoff_behavior:    rule.payroll_cutoff_behavior ?? 'hold',
+    accrual_freeze_mode:        rule.accrual_freeze_mode ?? 'skip',
+    tiered_accrual_enabled:     rule.tiered_accrual_enabled ?? false,
+    service_anniversary_cycle:  rule.service_anniversary_cycle ?? false,
+  }
+}
+
+/**
+ * runLifecycleMonthlyAccrual — lifecycle-aware Phase 1.5 of monthlyAccrualJob.
+ *
+ * Processes employees with engine policy assignments, applying the full
+ * lifecycle rule set (freeze, tier, advance/earned, proration, consumability).
+ *
+ * Only processes employees NOT already in engineProcessedIds.
+ * Writes ledger entries with lifecycle metadata.
+ *
+ * @returns BatchResult with processed_employee_ids for Phase 2 deduplication.
+ */
+export async function runLifecycleMonthlyAccrual(
+  supabase:  SupabaseClient,
+  tenantId:  string,
+  year:      number,
+  month:     number,
+  asOf?:     string,
+  engineProcessedIds: Set<string> = new Set(),
+): Promise<BatchResult> {
+  const result: import('./leave-entitlement-service.js').BatchResult = {
+    employees_processed:    0,
+    total_days_credited:    0,
+    skipped:                0,
+    errors:                 [],
+    processed_employee_ids: [],
+  }
+
+  const effectiveAsOf = asOf ?? `${year}-${String(month).padStart(2, '0')}-01`
+
+  // Fetch assignments active on accrual date (scope_type = 'employee')
+  const { data: assignments, error: aErr } = await supabase
+    .from('leave_policy_assignments')
+    .select('employee_id: scope_id, policy_id')
+    .eq('tenant_id',  tenantId)
+    .eq('scope_type', 'employee')
+    .or(`effective_from.is.null,effective_from.lte.${effectiveAsOf}`)
+    .or(`effective_to.is.null,effective_to.gte.${effectiveAsOf}`)
+
+  if (aErr || !assignments?.length) return result
+
+  // Deduplicate: one policy per employee
+  const seen = new Set<string>()
+  const activeAssignments = (assignments as Array<{ employee_id: string; policy_id: string }>)
+    .filter(a => { if (seen.has(a.employee_id)) return false; seen.add(a.employee_id); return true })
+
+  const policyIds = [...new Set(activeAssignments.map(a => a.policy_id))]
+
+  // Load policy masters and rules (with lifecycle columns)
+  const [{ data: masters }, { data: rules }] = await Promise.all([
+    supabase.from('leave_policy_masters')
+      .select('id, year_type')
+      .in('id', policyIds)
+      .eq('tenant_id', tenantId),
+    supabase.from('leave_policy_rules')
+      .select(`
+        id, policy_id, leave_type_id,
+        accrual_type, accrual_days_per_year, max_accrual_balance,
+        eligibility_days, expiry_days, effective_from, effective_to,
+        minimum_service_days, minimum_paid_days, minimum_attendance_pct,
+        accrual_earning_basis, accrual_credit_timing, accrual_consumption_timing,
+        future_accrual_consumable, advance_accrual_recovery_mode,
+        joining_cycle_handling, separation_cycle_handling,
+        payroll_cutoff_behavior, accrual_freeze_mode,
+        tiered_accrual_enabled, service_anniversary_cycle
+      `)
+      .in('policy_id', policyIds)
+      .eq('tenant_id', tenantId)
+      .in('accrual_type', ['monthly', 'quarterly']),
+  ])
+
+  const masterMap = new Map(((masters ?? []) as any[]).map(m => [m.id, m]))
+
+  const rulesByPolicy = new Map<string, any[]>()
+  for (const rule of (rules ?? []) as any[]) {
+    if (rule.effective_from && effectiveAsOf < rule.effective_from) continue
+    if (rule.effective_to   && effectiveAsOf > rule.effective_to)   continue
+    const existing = rulesByPolicy.get(rule.policy_id) ?? []
+    existing.push(rule)
+    rulesByPolicy.set(rule.policy_id, existing)
+  }
+
+  // Fetch employees
+  const { data: employees } = await supabase
+    .from('employees')
+    .select('id, joining_date, separation_date')
+    .eq('tenant_id', tenantId)
+    .in('status', ['active', 'inactive'])  // include recent separations for proration
+
+  const empMap = new Map(((employees ?? []) as any[]).map(e => [e.id, e]))
+
+  // Fetch tiers and freezes in parallel
+  const allRuleIds = (rules ?? []).map((r: any) => r.id)
+  const [tiersMap, freezeMap] = await Promise.all([
+    fetchTiersMap(supabase, tenantId, allRuleIds),
+    fetchActiveFreezesMap(supabase, tenantId, effectiveAsOf),
+  ])
+
+  // Process each assignment
+  for (const assignment of activeAssignments) {
+    if (engineProcessedIds.has(assignment.employee_id)) { result.skipped++; continue }
+
+    const emp = empMap.get(assignment.employee_id) as any
+    if (!emp?.joining_date) { result.skipped++; continue }
+
+    const master = masterMap.get(assignment.policy_id) as any
+    if (!master) { result.skipped++; continue }
+
+    const policyRules = rulesByPolicy.get(assignment.policy_id) ?? []
+    if (!policyRules.length) { result.skipped++; continue }
+
+    const yearType = master.year_type as 'calendar' | 'financial'
+
+    for (const rule of policyRules) {
+      // Skip quarterly rules on non-quarter-start months
+      if (rule.accrual_type === 'quarterly') {
+        const QUARTER_MONTHS = [1, 4, 7, 10] as const
+        if (!(QUARTER_MONTHS as readonly number[]).includes(month)) { result.skipped++; continue }
+      }
+
+      const lifecyclePolicy = buildLifecyclePolicy(rule, yearType)
+      const tiers           = tiersMap.get(rule.id) ?? []
+      const freezes         = getEmployeeFreezesForType(freezeMap, assignment.employee_id, rule.leave_type_id)
+
+      // Enrich freeze entries with the rule's freeze mode
+      const enrichedFreezes: ActiveFreeze[] = freezes.map(f => ({
+        ...f,
+        accrual_freeze_mode: lifecyclePolicy.accrual_freeze_mode,
+      }))
+
+      const ctx: AccrualContext = {
+        employee_id:      assignment.employee_id,
+        joining_date:     emp.joining_date,
+        separation_date:  emp.separation_date ?? undefined,
+        cycle_year:       year,
+        cycle_month:      month,
+        accrual_date:     effectiveAsOf,
+        policy:           lifecyclePolicy,
+        tiers,
+        active_freezes:   enrichedFreezes,
+      }
+
+      const lifecycle = evaluateAccrualLifecycle(ctx)
+
+      if (!lifecycle.should_credit) {
+        result.skipped++
+        continue
+      }
+
+      try {
+        await creditEmployeeDays(
+          supabase, tenantId, assignment.employee_id, rule.leave_type_id,
+          lifecycle.days_to_credit, year, rule.max_accrual_balance,
+        )
+
+        // Write lifecycle-enriched ledger entry
+        const accrualTypeValue = lifecycle.accrual_earning_basis === 'advance'
+          ? 'advance_accrual'
+          : lifecycle.accrual_earning_basis === 'prorated'
+            ? 'prorated_accrual'
+            : rule.accrual_type  // 'monthly' or 'quarterly'
+
+        await supabase.from('leave_accrual_ledger').upsert(
+          {
+            tenant_id:                 tenantId,
+            employee_id:               assignment.employee_id,
+            leave_type_id:             rule.leave_type_id,
+            accrual_type:              accrualTypeValue,
+            days:                      lifecycle.days_to_credit,
+            year,
+            accrued_on:                effectiveAsOf,
+            expires_on:                null,
+            is_expired:                false,
+            notes:                     `Lifecycle ${rule.accrual_type} accrual — ${lifecycle.explain[lifecycle.explain.length - 1]}`,
+            // Lifecycle metadata columns (added in migration 159)
+            accrual_earning_basis:     lifecycle.accrual_earning_basis,
+            consumption_eligible_from: lifecycle.consumption_eligible_from ?? null,
+            release_trigger:           lifecycle.release_trigger === 'immediate' ? 'immediate' : lifecycle.release_trigger,
+            cycle_period:              lifecycle.cycle_period,
+            service_years_at_accrual:  lifecycle.service_years_at_accrual,
+            tier_id:                   lifecycle.applied_tier?.id ?? null,
+          },
+          {
+            onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
+            ignoreDuplicates: true,
+          },
+        )
+
+        result.employees_processed++
+        result.total_days_credited = parseFloat((result.total_days_credited + lifecycle.days_to_credit).toFixed(2))
+        if (!result.processed_employee_ids.includes(assignment.employee_id)) {
+          result.processed_employee_ids.push(assignment.employee_id)
+        }
+      } catch (err: any) {
+        result.errors.push(
+          `lifecycle emp ${assignment.employee_id} / type ${rule.leave_type_id}: ${err?.message ?? 'unknown'}`,
+        )
+      }
+    }
+  }
+
+  return result
+}
+
+// ── Job 5: Entitlement Release — release held credits ─────────────────────────
+//
+// Scans leave_accrual_ledger for rows with:
+//   consumption_eligible_from <= asOf   AND   consumption_eligible_from IS NOT NULL
+//
+// For each such row, records a release event in leave_entitlement_releases
+// so the UI can show when the held credit became consumable.
+//
+// This is a lightweight audit job — it does NOT change the balance.
+// The balance was already credited at accrual time.  The release event merely
+// marks the date the credit became accessible to the employee.
+
+export async function entitlementReleaseJob(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  asOf:        Date = new Date(),
+  triggeredBy: string | null = null,
+  opts:        JobLogOptions = {},
+): Promise<JobResult> {
+  const startedAt = Date.now()
+  const asOfStr   = asOf.toISOString().slice(0, 10)
+  const jobId     = await startJobLog(
+    supabase, tenantId, 'co_expiry',   // reuse existing job_type enum bucket
+    { as_of: asOfStr, sub_type: 'entitlement_release' },
+    triggeredBy, opts,
+  )
+
+  let employees_processed = 0
+  let total_days_credited  = 0
+  let skipped              = 0
+  const errors: string[]   = []
+
+  try {
+    // Fetch ledger rows that have become consumable as of today
+    const { data: heldRows, error: fetchErr } = await supabase
+      .from('leave_accrual_ledger')
+      .select('id, employee_id, leave_type_id, year, days, cycle_period, release_trigger, consumption_eligible_from')
+      .eq('tenant_id', tenantId)
+      .eq('is_expired', false)
+      .lte('consumption_eligible_from', asOfStr)
+      .not('consumption_eligible_from', 'is', null)
+
+    if (fetchErr) throw new Error(fetchErr.message)
+    if (!heldRows?.length) {
+      await completeJobLog(supabase, jobId, 'completed', { employees_processed: 0, total_days_credited: 0, skipped: 0 }, startedAt)
+      return emptyResult(jobId, 'entitlement_release', startedAt)
+    }
+
+    for (const row of heldRows as any[]) {
+      try {
+        // Idempotency: check if release event already recorded for this ledger entry
+        const { count } = await supabase
+          .from('leave_entitlement_releases')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('ledger_entry_id', row.id)
+
+        if ((count ?? 0) > 0) { skipped++; continue }
+
+        // Record the release event
+        await supabase.from('leave_entitlement_releases').insert({
+          tenant_id:       tenantId,
+          employee_id:     row.employee_id,
+          leave_type_id:   row.leave_type_id,
+          ledger_entry_id: row.id,
+          cycle_period:    row.cycle_period ?? `${row.year}`,
+          days_released:   row.days,
+          release_trigger: row.release_trigger ?? 'cycle_completion',
+          released_at:     new Date().toISOString(),
+          released_by:     triggeredBy ?? null,
+          notes:           `Auto-release: consumption_eligible_from=${row.consumption_eligible_from}`,
+        })
+
+        // Clear consumption_eligible_from to prevent re-processing
+        await supabase
+          .from('leave_accrual_ledger')
+          .update({ consumption_eligible_from: null })
+          .eq('id', row.id)
+
+        employees_processed++
+        total_days_credited = parseFloat((total_days_credited + Number(row.days)).toFixed(2))
+      } catch (err: any) {
+        errors.push(`Release emp ${row.employee_id}: ${err?.message ?? 'unknown'}`)
+      }
+    }
+
+    const result = { employees_processed, total_days_credited, skipped, errors }
+    await completeJobLog(supabase, jobId, 'completed', result, startedAt)
+    return { job_id: jobId, job_type: 'entitlement_release', status: 'completed', ...result, duration_ms: Date.now() - startedAt }
+
+  } catch (e: unknown) {
+    const msg = (e as Error).message
+    await completeJobLog(supabase, jobId, 'failed', {}, startedAt, msg)
+    return {
+      job_id: jobId, job_type: 'entitlement_release', status: 'failed',
       employees_processed, total_days_credited, skipped,
       errors: [...errors, msg], duration_ms: Date.now() - startedAt,
     }

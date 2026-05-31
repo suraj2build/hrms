@@ -1,0 +1,550 @@
+/**
+ * work-sessions.ts — Attendance Session Intelligence & Temporal Ownership Engine
+ *
+ * Phase 16 API routes for work session management, anomaly detection,
+ * cross-midnight resolution, payroll locking, and OT heatmaps.
+ *
+ * All routes require HR Admin or Super Admin role.
+ */
+
+import type { FastifyInstance } from 'fastify'
+import {
+  buildDaySessionReport,
+  buildMonthSessionBatch,
+  detectMonthAnomalies,
+  pairPunches,
+  resolveAttendanceBusinessDate,
+} from '../../lib/work-session-engine.js'
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+const HR_ROLES = ['super_admin', 'hr_admin'] as const
+
+// ── Month range helper ────────────────────────────────────────────────────────
+
+function monthRange(month: string): { start: string; end: string } {
+  const start = `${month}-01`
+  // Last day: first day of next month minus one day
+  const [year, mon] = month.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year, mon, 0)) // mon is 1-based; Date.UTC(y, m, 0) = last day of month m-1
+  const dd = String(lastDay.getUTCDate()).padStart(2, '0')
+  const mm = String(lastDay.getUTCMonth() + 1).padStart(2, '0')
+  const end = `${lastDay.getUTCFullYear()}-${mm}-${dd}`
+  return { start, end }
+}
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
+
+export default async function workSessionRoutes(fastify: FastifyInstance) {
+  const supabase = (fastify as any).supabase
+  const auth     = { preHandler: [fastify.authenticate] }
+
+  function requireHrAdmin(req: any, reply: any): boolean {
+    if (!HR_ROLES.includes(req.userRole ?? '')) {
+      reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return false
+    }
+    return true
+  }
+
+  // ── GET /attendance/sessions ──────────────────────────────────────────────
+  // List all work sessions for an employee for a given month.
+
+  fastify.get('/attendance/sessions', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { employeeId, month } = req.query as { employeeId?: string; month?: string }
+    const tenantId = req.tenantId as string
+
+    if (!employeeId) return reply.code(400).send({ error: 'employeeId is required' })
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'month (YYYY-MM) is required' })
+
+    const { start, end } = monthRange(month)
+
+    const { data, error } = await supabase
+      .from('work_sessions')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .gte('attendance_date', start)
+      .lte('attendance_date', end)
+      .order('attendance_date', { ascending: true })
+      .order('session_start', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  // ── GET /attendance/sessions/explain ──────────────────────────────────────
+  // Full DaySessionReport for a single employee/date.
+
+  fastify.get('/attendance/sessions/explain', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { employeeId, date } = req.query as { employeeId?: string; date?: string }
+    const tenantId = req.tenantId as string
+
+    if (!employeeId) return reply.code(400).send({ error: 'employeeId is required' })
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'date (YYYY-MM-DD) is required' })
+
+    const report = await buildDaySessionReport(supabase, tenantId, employeeId, date)
+    return reply.send({ data: report })
+  })
+
+  // ── GET /attendance/sessions/missing-punches ──────────────────────────────
+  // Sessions where session_end IS NULL (incomplete / missing OUT punch).
+
+  fastify.get('/attendance/sessions/missing-punches', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { month } = req.query as { month?: string }
+    const tenantId = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'month (YYYY-MM) is required' })
+
+    const { start, end } = monthRange(month)
+
+    const { data: sessions, error } = await supabase
+      .from('work_sessions')
+      .select(`
+        id,
+        employee_id,
+        attendance_date,
+        session_start,
+        session_end,
+        source,
+        employees!inner ( first_name, last_name, employee_code )
+      `)
+      .eq('tenant_id', tenantId)
+      .gte('attendance_date', start)
+      .lte('attendance_date', end)
+      .is('session_end', null)
+      .order('attendance_date', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: error.message })
+
+    const result = (sessions ?? []).map((s: any) => ({
+      employee_id:    s.employee_id,
+      employee_name:  s.employees ? `${s.employees.first_name} ${s.employees.last_name}` : null,
+      employee_code:  s.employees?.employee_code ?? null,
+      date:           s.attendance_date,
+      in_time:        s.session_start,
+      out_time:       s.session_end,
+      source:         s.source,
+    }))
+
+    return reply.send({ data: result })
+  })
+
+  // ── GET /attendance/sessions/cross-midnight ───────────────────────────────
+  // Sessions that cross midnight.
+
+  fastify.get('/attendance/sessions/cross-midnight', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { month } = req.query as { month?: string }
+    const tenantId = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'month (YYYY-MM) is required' })
+
+    const { start, end } = monthRange(month)
+
+    const { data, error } = await supabase
+      .from('work_sessions')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('is_cross_midnight', true)
+      .gte('attendance_date', start)
+      .lte('attendance_date', end)
+      .order('session_start', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  // ── GET /attendance/sessions/locks ────────────────────────────────────────
+  // Sessions locked for payroll.
+
+  fastify.get('/attendance/sessions/locks', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { month } = req.query as { month?: string }
+    const tenantId = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'month (YYYY-MM) is required' })
+
+    const { start, end } = monthRange(month)
+
+    const { data, error } = await supabase
+      .from('work_sessions')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('payroll_locked', true)
+      .gte('attendance_date', start)
+      .lte('attendance_date', end)
+      .order('attendance_date', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  // ── GET /attendance/sessions/ot-heatmap ───────────────────────────────────
+  // Per-employee daily OT summary for a month.
+
+  fastify.get('/attendance/sessions/ot-heatmap', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { month } = req.query as { month?: string }
+    const tenantId = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'month (YYYY-MM) is required' })
+
+    const { start, end } = monthRange(month)
+
+    const { data: sessions, error } = await supabase
+      .from('work_sessions')
+      .select(`
+        employee_id,
+        attendance_date,
+        overtime_minutes,
+        employees!inner ( first_name, last_name, employee_code )
+      `)
+      .eq('tenant_id', tenantId)
+      .gte('attendance_date', start)
+      .lte('attendance_date', end)
+      .order('attendance_date', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Aggregate per employee
+    const map = new Map<string, {
+      employee_id: string
+      employee_name: string | null
+      employee_code: string | null
+      daily_ot: Record<string, number>
+      total_ot_minutes: number
+    }>()
+
+    for (const s of sessions ?? []) {
+      const eid: string = s.employee_id
+      const ot: number  = s.overtime_minutes ?? 0
+      if (!map.has(eid)) {
+        map.set(eid, {
+          employee_id:   eid,
+          employee_name: s.employees ? `${s.employees.first_name} ${s.employees.last_name}` : null,
+          employee_code: s.employees?.employee_code ?? null,
+          daily_ot:      {},
+          total_ot_minutes: 0,
+        })
+      }
+      const entry = map.get(eid)!
+      const prev = entry.daily_ot[s.attendance_date] ?? 0
+      entry.daily_ot[s.attendance_date] = prev + ot
+      entry.total_ot_minutes += ot
+    }
+
+    const result = Array.from(map.values()).filter(e => e.total_ot_minutes > 0)
+    return reply.send({ data: result })
+  })
+
+  // ── GET /attendance/sessions/compliance-risks ─────────────────────────────
+  // Unresolved anomalies grouped by employee.
+
+  fastify.get('/attendance/sessions/compliance-risks', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { month } = req.query as { month?: string }
+    const tenantId = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'month (YYYY-MM) is required' })
+
+    const { start, end } = monthRange(month)
+
+    const { data: anomalies, error } = await supabase
+      .from('work_session_anomalies')
+      .select(`
+        id,
+        employee_id,
+        anomaly_type,
+        severity,
+        session_id,
+        punch_ids,
+        detail,
+        created_at,
+        resolved,
+        employees!inner ( first_name, last_name, employee_code )
+      `)
+      .eq('tenant_id', tenantId)
+      .eq('resolved', false)
+      .gte('created_at', `${start}T00:00:00.000Z`)
+      .lte('created_at', `${end}T23:59:59.999Z`)
+      .order('created_at', { ascending: false })
+
+    if (error) return reply.code(500).send({ error: error.message })
+
+    const map = new Map<string, {
+      employee_id: string
+      employee_name: string | null
+      employee_code: string | null
+      risk_count: number
+      risks: unknown[]
+    }>()
+
+    for (const a of anomalies ?? []) {
+      const eid: string = a.employee_id
+      if (!map.has(eid)) {
+        map.set(eid, {
+          employee_id:   eid,
+          employee_name: a.employees ? `${a.employees.first_name} ${a.employees.last_name}` : null,
+          employee_code: a.employees?.employee_code ?? null,
+          risk_count:    0,
+          risks:         [],
+        })
+      }
+      const entry = map.get(eid)!
+      entry.risk_count += 1
+      entry.risks.push(a)
+    }
+
+    return reply.send({ data: Array.from(map.values()) })
+  })
+
+  // ── POST /attendance/sessions/pair ────────────────────────────────────────
+  // Trigger punch-pairing for an employee/date and upsert resulting sessions.
+
+  fastify.post('/attendance/sessions/pair', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { employee_id, date } = req.body as { employee_id?: string; date?: string }
+    const tenantId = req.tenantId as string
+
+    if (!employee_id) return reply.code(400).send({ error: 'employee_id is required' })
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'date (YYYY-MM-DD) is required' })
+
+    const report = await buildDaySessionReport(supabase, tenantId, employee_id, date)
+
+    // Build upsert payload from the day report's sessions
+    const sessionRows = report.sessions.map((s: any) => ({
+      employee_id,
+      tenant_id:        tenantId,
+      attendance_date:  s.attendance_date,
+      session_start:    s.in_punch?.punch_time ?? null,
+      session_end:      s.out_punch?.punch_time ?? null,
+      work_minutes:     s.work_minutes,
+      is_cross_midnight: s.is_cross_midnight,
+      source:           s.source,
+      source_punch_ids: s.in_punch
+        ? [s.in_punch.id, ...(s.out_punch ? [s.out_punch.id] : [])]
+        : [],
+      overtime_minutes:    0,
+      late_minutes:        0,
+      early_exit_minutes:  0,
+      shift_id:            report.ownership_decision?.shift_id ?? null,
+      approval_status:     'auto',
+      payroll_locked:      false,
+      compliance_flags:    s.compliance_flags ?? {},
+    }))
+
+    let upsertError: any = null
+    if (sessionRows.length > 0) {
+      const { error } = await supabase
+        .from('work_sessions')
+        .upsert(sessionRows, {
+          onConflict: 'employee_id,tenant_id,session_start',
+          ignoreDuplicates: false,
+        })
+      upsertError = error
+    }
+
+    if (upsertError) return reply.code(500).send({ error: upsertError.message })
+
+    return reply.send({
+      data: {
+        sessions_created: sessionRows.length,
+        anomalies:        report.anomalies?.length ?? 0,
+      },
+    })
+  })
+
+  // ── POST /attendance/sessions/:sessionId/lock ─────────────────────────────
+  // Lock a session for payroll.
+
+  fastify.post('/attendance/sessions/:sessionId/lock', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { sessionId } = req.params as { sessionId: string }
+    const { payroll_run_id } = (req.body ?? {}) as { payroll_run_id?: string }
+    const tenantId = req.tenantId as string
+
+    // Check current state
+    const { data: existing, error: fetchError } = await supabase
+      .from('work_sessions')
+      .select('id, payroll_locked')
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    if (fetchError || !existing) return reply.code(404).send({ error: 'Session not found' })
+    if (existing.payroll_locked) return reply.code(409).send({ error: 'Session already locked' })
+
+    const updatePayload: Record<string, unknown> = {
+      payroll_locked:    true,
+      payroll_locked_at: new Date().toISOString(),
+    }
+    if (payroll_run_id !== undefined) updatePayload.payroll_run_id = payroll_run_id
+
+    const { error: updateError } = await supabase
+      .from('work_sessions')
+      .update(updatePayload)
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+
+    if (updateError) return reply.code(500).send({ error: updateError.message })
+    return reply.send({ data: { locked: true } })
+  })
+
+  // ── POST /attendance/sessions/:sessionId/unlock ───────────────────────────
+  // Unlock a payroll-locked session.
+
+  fastify.post('/attendance/sessions/:sessionId/unlock', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { sessionId } = req.params as { sessionId: string }
+    const tenantId = req.tenantId as string
+
+    // Check current state
+    const { data: existing, error: fetchError } = await supabase
+      .from('work_sessions')
+      .select('id, payroll_locked')
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    if (fetchError || !existing) return reply.code(404).send({ error: 'Session not found' })
+    if (!existing.payroll_locked) return reply.code(400).send({ error: 'Session is not locked' })
+
+    const { error: updateError } = await supabase
+      .from('work_sessions')
+      .update({
+        payroll_locked:    false,
+        payroll_locked_at: null,
+        payroll_run_id:    null,
+      })
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+
+    if (updateError) return reply.code(500).send({ error: updateError.message })
+    return reply.send({ data: { unlocked: true } })
+  })
+
+  // ── GET /work-session-anomalies ───────────────────────────────────────────
+  // List anomalies for a month with optional filters, or free-text search.
+  //
+  // Query modes:
+  //   1. Browse mode  — month=YYYY-MM required. Returns up to 200 rows with severity/resolved filters.
+  //   2. Search mode  — q=<term> (≥3 chars). month is optional; limit capped at 20 for fast responses.
+  //      Matches anomaly_type and employee_name (via joined employees table) using ilike.
+  //
+  // Tenant isolation is always enforced via .eq('tenant_id', tenantId).
+
+  fastify.get('/work-session-anomalies', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { month, severity, resolved, q, limit: rawLimit } = req.query as {
+      month?:    string
+      severity?: string
+      resolved?: string
+      q?:        string
+      limit?:    string
+    }
+    const tenantId  = req.tenantId as string
+    const isSearch  = q && q.trim().length >= 1
+    const pageLimit = isSearch
+      ? Math.min(parseInt(rawLimit ?? '10', 10) || 10, 20)
+      : Math.min(parseInt(rawLimit ?? '100', 10) || 100, 200)
+
+    // Browse mode requires a valid month; search mode does not
+    if (!isSearch) {
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+        return reply.code(400).send({ error: 'month (YYYY-MM) is required when q is not provided' })
+      }
+    }
+
+    let query = supabase
+      .from('work_session_anomalies')
+      .select(
+        'id, employee_id, anomaly_type, attendance_date, severity, resolved, created_at',
+        { count: 'exact' },
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(pageLimit)
+
+    // Apply month range when present
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const { start, end } = monthRange(month)
+      query = query
+        .gte('created_at', `${start}T00:00:00.000Z`)
+        .lte('created_at', `${end}T23:59:59.999Z`)
+    }
+
+    // Free-text search on anomaly_type (employee_name is not a stored column;
+    // anomaly_type is an enum but ilike still works for partial-string matching)
+    if (isSearch) {
+      const term = `%${q!.trim()}%`
+      query = query.ilike('anomaly_type', term)
+    }
+
+    if (severity) query = query.eq('severity', severity)
+
+    if (resolved !== undefined) {
+      const resolvedBool = resolved === 'true' || resolved === '1'
+      query = query.eq('resolved', resolvedBool)
+    }
+
+    const { data, error } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // For search mode, enrich with employee name so the UniversalSearch label field
+    // has a human-readable string. For browse mode the caller handles enrichment
+    // client-side or via the full employee API.
+    if (isSearch && (data ?? []).length > 0) {
+      const empIds = [...new Set((data as Array<{ employee_id: string }>).map((r) => r.employee_id))]
+      const { data: empRows } = await supabase
+        .from('employees')
+        .select('id, first_name, last_name')
+        .in('id', empIds)
+        .eq('tenant_id', tenantId)
+
+      const nameMap = new Map<string, string>()
+      for (const e of (empRows ?? []) as Array<{ id: string; first_name: string; last_name: string }>) {
+        nameMap.set(e.id, `${e.first_name} ${e.last_name}`)
+      }
+
+      const enriched = (data as Array<Record<string, unknown>>).map((r) => ({
+        ...r,
+        employee_name: nameMap.get(r.employee_id as string) ?? null,
+        date:          r.attendance_date,
+      }))
+      return reply.send({ data: enriched })
+    }
+
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── POST /work-session-anomalies/:id/resolve ──────────────────────────────
+  // Mark an anomaly as resolved.
+
+  fastify.post('/work-session-anomalies/:id/resolve', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+    const { id } = req.params as { id: string }
+    const { resolution_note } = (req.body ?? {}) as { resolution_note?: string }
+    const tenantId  = req.tenantId as string
+    const userId    = req.userId as string
+
+    const updatePayload: Record<string, unknown> = {
+      resolved:    true,
+      resolved_at: new Date().toISOString(),
+      resolved_by: userId,
+    }
+    if (resolution_note !== undefined) updatePayload.resolution_note = resolution_note
+
+    const { error } = await supabase
+      .from('work_session_anomalies')
+      .update(updatePayload)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: { resolved: true } })
+  })
+}

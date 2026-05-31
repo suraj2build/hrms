@@ -58,9 +58,10 @@ interface CreateSessionResponse {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString([], {
-    month: 'short', day: 'numeric', year: 'numeric',
-  })
+  const d = new Date(iso.length === 10 ? iso + 'T12:00:00Z' : iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -159,18 +160,15 @@ interface NewOnboardingDialogProps {
 
 function NewOnboardingDialog({ open, onOpenChange, onCreated }: NewOnboardingDialogProps) {
   const [candidateName, setCandidateName] = useState('')
-  const [assignedTo, setAssignedTo] = useState('')
 
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
       api.post<CreateSessionResponse>('/onboarding/sessions', {
         candidate_name: candidateName.trim() || null,
-        assigned_to: assignedTo.trim() || null,
       }),
     onSuccess: (resp) => {
       onCreated(resp.data.id)
       setCandidateName('')
-      setAssignedTo('')
       onOpenChange(false)
       toast.success('Onboarding session created', { description: candidateName.trim() || 'Unnamed candidate' })
     },
@@ -207,15 +205,6 @@ function NewOnboardingDialog({ open, onOpenChange, onCreated }: NewOnboardingDia
             </p>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="assigned-to">Assign To</Label>
-            <Input
-              id="assigned-to"
-              placeholder="e.g. hr@company.com (optional)"
-              value={assignedTo}
-              onChange={(e) => setAssignedTo(e.target.value)}
-            />
-          </div>
 
           <DialogFooter className="pt-2">
             <Button
@@ -318,8 +307,9 @@ export function OnboardingDashboard() {
           title="Total Sessions"
           value={statsLoading ? '—' : (stats?.total_sessions ?? 0)}
           icon={Users}
-          iconColor="text-foreground"
-          iconBg="bg-muted"
+          iconColor="text-blue-600"
+          iconBg="bg-blue-50"
+          accent="bg-blue-500"
         />
         <StatCard
           title="Pending Review"
@@ -327,6 +317,7 @@ export function OnboardingDashboard() {
           icon={Clock}
           iconColor="text-warning"
           iconBg="bg-warning/10"
+          accent="bg-warning"
         />
         <StatCard
           title="Extraction Failed"
@@ -334,6 +325,7 @@ export function OnboardingDashboard() {
           icon={AlertTriangle}
           iconColor="text-destructive"
           iconBg="bg-destructive/10"
+          accent="bg-destructive"
         />
         <StatCard
           title="Approved This Month"
@@ -341,6 +333,7 @@ export function OnboardingDashboard() {
           icon={CheckCircle2}
           iconColor="text-success"
           iconBg="bg-success/10"
+          accent="bg-success"
         />
         <StatCard
           title="Rejected"
@@ -348,6 +341,7 @@ export function OnboardingDashboard() {
           icon={XCircle}
           iconColor="text-muted-foreground"
           iconBg="bg-muted"
+          accent="bg-muted-foreground/40"
         />
       </div>
 

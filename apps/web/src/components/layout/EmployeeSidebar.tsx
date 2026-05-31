@@ -9,19 +9,13 @@ import { useQuery }           from '@tanstack/react-query'
 import {
   LayoutDashboard,
   CalendarDays,
-  CalendarRange,
-  CalendarPlus,
   CalendarOff,
-  CalendarClock,
-  BookOpen,
   Scale,
   Receipt,
-  DollarSign,
   FileCheck,
   CreditCard,
   FileText,
   Mail,
-  Clock,
   CheckSquare,
   Users,
   Building2,
@@ -31,6 +25,12 @@ import {
   ChevronLeft,
   ChevronRight,
   HeadphonesIcon,
+  ShieldCheck,
+  BarChart3,
+  ArrowUpRight,
+  Calculator,
+  ScrollText,
+  TrendingUp,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
 import { useUIStore }    from '@/stores/uiStore'
@@ -65,53 +65,50 @@ const BASE_GROUPS: NavGroup[] = [
   {
     label: 'Attendance & Leave',
     items: [
-      { label: 'My Attendance',       icon: CalendarDays,  href: '/ess/attendance',          exact: true },
-      { label: 'My Schedule',         icon: CalendarClock, href: '/ess/schedule'                         },
-      { label: 'Leave Balance',       icon: Scale,         href: '/ess/leave/balance'                    },
-      { label: 'Apply Leave',         icon: CalendarPlus,  href: '/ess/leave/apply'                      },
-      { label: 'Comp-Off',            icon: CalendarOff,   href: '/ess/comp-off'                         },
-      { label: 'Attendance Calendar', icon: CalendarRange, href: '/ess/attendance/calendar'              },
-      { label: 'Leave Ledger',        icon: BookOpen,      href: '/ess/leave/ledger'                     },
+      { label: 'My Attendance',     icon: CalendarDays, href: '/ess/attendance',      exact: true },
+      { label: 'Leave & Comp-Off',  icon: Scale,        href: '/ess/leave/balance'                   },
+      { label: 'Optional Holidays', icon: CalendarOff,  href: '/ess/optional-holidays'               },
+      { label: 'Approvals',         icon: CheckSquare,  href: '/ess/approvals'                             }, // manager-only
     ],
   },
   {
     label: 'Payroll & Tax',
     items: [
-      { label: 'My Payslips',      icon: Receipt,    href: '/ess/payroll/my-slips' },
-      { label: 'My Compensation',  icon: DollarSign, href: '/ess/compensation'     },
-      { label: 'Tax Declarations', icon: FileCheck,  href: '/ess/declarations'     },
-      { label: 'Reimbursements',   icon: CreditCard, href: '/ess/reimbursements'   },
+      { label: 'Pay & Compensation', icon: Receipt,    href: '/ess/compensation'              },
+      { label: 'Tax Planner',        icon: Calculator, href: '/ess/salary/tax-planner'        },
+      { label: 'IT Statement',       icon: ScrollText, href: '/ess/salary/it-statement'       },
+      { label: 'YTD Statement',      icon: TrendingUp, href: '/ess/salary/ytd'                },
+      { label: 'TDS Recovery',       icon: Receipt,    href: '/ess/salary/tds-recovery'       },
     ],
   },
   {
-    label: 'Documents',
+    label: 'Declarations & Claims',
     items: [
-      { label: 'My Documents', icon: FileText, href: '/ess/documents' },
-      { label: 'Letters',      icon: Mail,     href: '/ess/letters'   },
+      { label: 'HRA Declaration',   icon: FileCheck,  href: '/ess/salary/hra'                      },
+      { label: 'Previous Employer', icon: FileText,   href: '/ess/salary/previous-employer'        },
+      { label: 'Reimbursements',    icon: CreditCard, href: '/ess/reimbursements'                  },
     ],
   },
   {
-    label: 'Requests',
+    label: 'Documents & Support',
     items: [
-      { label: 'Corrections',  icon: Clock,       href: '/ess/attendance/corrections' },
-      { label: 'Approvals',    icon: CheckSquare, href: '/ess/approvals'              },
+      { label: 'My Documents', icon: FileText,       href: '/ess/documents'   },
+      { label: 'Letters',      icon: Mail,           href: '/ess/letters'     },
+      { label: 'My Team',      icon: Users,          href: '/ess/team'        }, // manager-only
+      { label: 'Policies',     icon: BookMarked,     href: '/ess/policies'    },
+      { label: 'HR Support',   icon: HeadphonesIcon, href: '/ess/hr-support'  },
+      { label: 'Helpdesk',     icon: LifeBuoy,       href: '/ess/issues'      },
     ],
   },
-  {
-    label: 'Explore',
-    items: [
-      { label: 'Optional Holidays', icon: CalendarOff, href: '/ess/optional-holidays' },
-      { label: 'My Team',           icon: Users,       href: '/ess/team'              },
-      { label: 'Policies',          icon: BookMarked,  href: '/ess/policies'          },
-    ],
-  },
-  {
-    label: 'Help',
-    items: [
-      { label: 'HR Support', icon: HeadphonesIcon, href: '/ess/hr-support' },
-      { label: 'Helpdesk',   icon: LifeBuoy,       href: '/ess/issues'     },
-    ],
-  },
+]
+
+// ── Manager quick-access items (rendered only for manager+ roles) ──────────────
+
+const MANAGER_QUICK_ITEMS: NavItem[] = [
+  { label: 'Manager Console', icon: LayoutDashboard, href: '/manager/dashboard', exact: true },
+  { label: 'Team Attendance', icon: CalendarDays,    href: '/manager/team/attendance'         },
+  { label: 'Approvals',       icon: CheckSquare,     href: '/manager/approvals'               },
+  { label: 'Team Reports',    icon: BarChart3,        href: '/manager/reports/team'            },
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -172,16 +169,28 @@ export function EmployeeSidebar() {
   const location     = useLocation()
   const pendingCount = usePendingCount(employeeId)
 
-  // Inject live badge count into the Approvals item
+  // Manager-only nav items — hidden for pure employee role
+  const isManager = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
+  const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team'])
+  // Approvals now lives in Attendance & Leave group; My Team in Documents & Support.
+  // Both remain filtered for non-managers via this set.
+
+  // Filter manager-only items; inject live badge into Approvals
   const GROUPS = useMemo((): NavGroup[] =>
-    BASE_GROUPS.map(g => ({
-      ...g,
-      items: g.items.map(item =>
-        item.href === '/ess/approvals'
-          ? { ...item, badge: pendingCount > 0 ? pendingCount : undefined }
-          : item
-      ),
-    })), [pendingCount]
+    BASE_GROUPS
+      .map(g => ({
+        ...g,
+        items: g.items
+          .filter(item => !MANAGER_ONLY_HREFS.has(item.href) || isManager)
+          .map(item =>
+            item.href === '/ess/approvals'
+              ? { ...item, badge: pendingCount > 0 ? pendingCount : undefined }
+              : item
+          ),
+      }))
+      // Drop groups that become empty after filtering
+      .filter(g => g.items.length > 0),
+    [pendingCount, isManager]
   )
 
   return (
@@ -260,6 +269,59 @@ export function EmployeeSidebar() {
 
           </div>
         ))}
+
+        {/* ── Manager section — only for manager/hr_admin/super_admin ──── */}
+        {isManager && (
+          <div className="mt-3">
+            {/* Divider */}
+            <div className={cn(
+              'border-t border-sidebar-border mb-2',
+              sidebarCollapsed ? 'mx-1' : 'mx-1',
+            )} />
+
+            {!sidebarCollapsed && (
+              <div className="flex items-center gap-1.5 px-2.5 pb-1">
+                <ShieldCheck className="h-3 w-3 text-amber-500/80" />
+                <p className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80 select-none">
+                  Manager
+                </p>
+              </div>
+            )}
+
+            {MANAGER_QUICK_ITEMS.map(item => {
+              const active = isActive(item, location.pathname)
+              return (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  title={sidebarCollapsed ? item.label : undefined}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors',
+                    active
+                      ? 'bg-amber-500 text-white font-medium'
+                      : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                    sidebarCollapsed && 'justify-center px-0 w-10 mx-auto',
+                  )}
+                >
+                  <item.icon
+                    className={cn(
+                      'flex-shrink-0',
+                      sidebarCollapsed ? 'h-5 w-5' : 'h-4 w-4',
+                      active ? 'opacity-100' : 'opacity-70',
+                    )}
+                  />
+                  {!sidebarCollapsed && (
+                    <span className="flex-1 truncate">{item.label}</span>
+                  )}
+                  {!sidebarCollapsed && item.href === '/manager/dashboard' && !active && (
+                    <ArrowUpRight className="h-3 w-3 opacity-40 flex-shrink-0" />
+                  )}
+                </Link>
+              )
+            })}
+          </div>
+        )}
+
       </nav>
 
       {/* ── Need Help? ───────────────────────────────────────────────────── */}

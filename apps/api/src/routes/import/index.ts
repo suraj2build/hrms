@@ -260,7 +260,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
     let query = fastify.supabase
       .from('import_job_rows')
       .select(
-        'id, row_number, status, errors, warnings, original_data',
+        'id, row_number, status, errors, warnings, row_data, normalized_data, record_id',
         { count: 'exact' },
       )
       .eq('import_job_id', id)

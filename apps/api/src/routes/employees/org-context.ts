@@ -1,11 +1,11 @@
 /**
  * Employee Org Context — site + roster assignment with history
  *
- * GET  /employees/:id/org-context
+ * GET  /employees/employees/:id/org-context
  *      Returns current effective site/roster assignment for an employee,
  *      with resolved names and next 5 upcoming applicable holidays.
  *
- * POST /employees/:id/org-context
+ * POST /employees/employees/:id/org-context
  *      Creates a new date-effective assignment (and closes the previous one).
  *      Body: { site_id?, roster_id?, effective_from, reason? }
  *      Auth: hr_admin / super_admin
@@ -22,8 +22,8 @@ import {
 export default async function employeeOrgContextRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
-  // ── GET /employees/:id/org-context ────────────────────────────────────────
-  fastify.get('/:id/org-context', auth, async (req: any, reply) => {
+  // ── GET /employees/employees/:id/org-context ────────────────────────────────────────
+  fastify.get('/employees/:id/org-context', auth, async (req: any, reply) => {
     const employeeId = (req.params as any).id
     const today      = new Date().toISOString().slice(0, 10)
 
@@ -109,8 +109,8 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
     })
   })
 
-  // ── POST /employees/:id/org-context ───────────────────────────────────────
-  fastify.post('/:id/org-context', auth, async (req: any, reply) => {
+  // ── POST /employees/employees/:id/org-context ───────────────────────────────────────
+  fastify.post('/employees/:id/org-context', auth, async (req: any, reply) => {
     if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
@@ -120,7 +120,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       site_id:        z.string().uuid().nullable().optional(),
       roster_id:      z.string().uuid().nullable().optional(),
       effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      reason:         z.string().max(500).optional(),
+      reason:         z.string().max(500).nullable().optional(),
     })
 
     const parsed = bodySchema.safeParse(req.body)

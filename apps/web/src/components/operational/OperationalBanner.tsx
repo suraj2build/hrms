@@ -81,26 +81,31 @@ interface CorrectionSummary {
   pending_count: number
 }
 
-/** Very lightweight — called every 60 s, stale-while-revalidate */
+/** Very lightweight — called every 60 s, stale-while-revalidate.
+ *
+ * staleTime === refetchInterval on all three queries so that shell-level
+ * mounts on every page navigation never trigger a redundant re-fetch while
+ * the cached value is still within the polling window.
+ */
 function useOperationalSignals(basePath: string): Signal[] {
   const { data: status } = useQuery<ProcessStatus>({
     queryKey:  ['op-banner-process-status'],
     queryFn:   () => api.get('/attendance/process/status'),
-    staleTime: 30_000,
+    staleTime: 60_000,          // ← was 30_000 (misaligned — caused mount-refetch every navigation)
     refetchInterval: 60_000,
   })
 
   const { data: anomaly } = useQuery<AnomalySummary>({
     queryKey:  ['op-banner-anomaly-summary'],
     queryFn:   () => api.get('/attendance/anomalies/summary'),
-    staleTime: 60_000,
+    staleTime: 120_000,         // ← was 60_000 (misaligned)
     refetchInterval: 120_000,
   })
 
   const { data: correction } = useQuery<CorrectionSummary>({
     queryKey:  ['op-banner-correction-summary'],
     queryFn:   () => api.get('/attendance/regularisation/summary'),
-    staleTime: 60_000,
+    staleTime: 120_000,         // ← was 60_000 (misaligned)
     refetchInterval: 120_000,
   })
 
@@ -143,15 +148,15 @@ function useOperationalSignals(basePath: string): Signal[] {
     })
   }
 
-  // 3. Pending corrections
+  // 3. Pending regularisation requests (was: corrections)
   const correctionCount = correction?.pending_count ?? 0
   if (correctionCount > 0) {
     signals.push({
       id:      'corrections',
       variant: 'muted',
       icon:    ClipboardCheck,
-      message: `${correctionCount} attendance correction${correctionCount === 1 ? '' : 's'} awaiting approval.`,
-      href:    `${basePath}/attendance/corrections`,
+      message: `${correctionCount} regularisation request${correctionCount === 1 ? '' : 's'} awaiting approval.`,
+      href:    `${basePath}/attendance/regularisation`,
       cta:     'Approve',
     })
   }

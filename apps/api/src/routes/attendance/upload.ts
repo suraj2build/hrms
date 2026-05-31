@@ -24,8 +24,9 @@
  * Auth: hr_admin / super_admin only.
  */
 import type { FastifyInstance } from 'fastify'
+import { createHash }             from 'crypto'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { recomputeRange }              from '../../lib/attendance-engine.js'
+import { recomputeRange, localToUtc }  from '../../lib/attendance-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -67,9 +68,11 @@ function normaliseTime(t: string): string {
   return t.length === 5 ? `${t}:00` : t.slice(0, 8)
 }
 
-/** Build a UTC ISO-8601 timestamp from a YYYY-MM-DD date and a HH:MM[:SS] time. */
-function buildTimestamp(date: string, time: string): string {
-  return `${date}T${normaliseTime(time)}.000Z`
+/** Advance a YYYY-MM-DD string by one calendar day (UTC-safe, same as engine). */
+function addOneDay(date: string): string {
+  const d = new Date(`${date}T12:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────
@@ -128,13 +131,52 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       })
     }
 
+    // ── 3a. Duplicate-upload detection (B1) ────────────────────────────────
+    // Compute SHA-256 of the raw CSV content and check if the same checksum
+    // was already uploaded by this tenant in the last 24 hours.
+    // This is a WARN-only check — the upload still proceeds; the caller
+    // receives a `duplicate_warning` flag in the response so the frontend
+    // can surface a confirmation dialog on replay.
+    const contentChecksum = createHash('sha256').update(csvContent as string, 'utf8').digest('hex')
+    let duplicateWarning: { upload_session_id: string; uploaded_at: string } | null = null
+
+    try {
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      const { data: existingUpload } = await fastify.supabase
+        .from('upload_sessions')
+        .select('id, created_at')
+        .eq('tenant_id', req.tenantId)
+        .eq('upload_type', 'attendance_csv')
+        .eq('content_checksum', contentChecksum)
+        .eq('status', 'completed')
+        .gte('created_at', since24h)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (existingUpload) {
+        duplicateWarning = {
+          upload_session_id: (existingUpload as any).id,
+          uploaded_at:       (existingUpload as any).created_at,
+        }
+        req.log.warn(
+          { tenant_id: req.tenantId, checksum: contentChecksum, prior_session: (existingUpload as any).id },
+          'attendance upload: duplicate CSV detected (same checksum within 24h) — proceeding with replay',
+        )
+      }
+    } catch (checksumErr) {
+      // Checksum lookup failure is non-blocking — log and continue
+      req.log.warn({ err: checksumErr }, 'attendance upload: checksum duplicate check failed — skipped')
+    }
+
     interface ParsedRow {
-      line:          number
-      employee_code: string
-      date:          string
-      in_time:       string
-      out_time:      string
-      source:        string
+      line:            number
+      employee_code:   string
+      date:            string
+      in_time:         string
+      out_time:        string
+      isCrossMidnight: boolean   // true when out_time < in_time (out punch lands next calendar day)
+      source:          string
     }
 
     const parsedRows: ParsedRow[]                                     = []
@@ -186,9 +228,10 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
         continue
       }
 
-      // in_time must be before out_time
-      if (normaliseTime(in_time) >= normaliseTime(out_time)) {
-        rowErrors.push({ line: lineNumber, row: rawLine, error: `in_time (${in_time}) must be earlier than out_time (${out_time})` })
+      // in_time and out_time must differ.
+      // out_time < in_time is valid (cross-midnight / night shift) — out punch lands on the next calendar day.
+      if (normaliseTime(in_time) === normaliseTime(out_time)) {
+        rowErrors.push({ line: lineNumber, row: rawLine, error: `in_time and out_time are identical — zero-duration punch is invalid` })
         continue
       }
 
@@ -200,7 +243,8 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       }
       seen.add(dupKey)
 
-      parsedRows.push({ line: lineNumber, employee_code, date, in_time, out_time, source })
+      const isCrossMidnight = normaliseTime(out_time) < normaliseTime(in_time)
+      parsedRows.push({ line: lineNumber, employee_code, date, in_time, out_time, isCrossMidnight, source })
     }
 
     if (parsedRows.length === 0) {
@@ -231,6 +275,19 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       (employees ?? []).map((e: { id: string; employee_code: string }) => [e.employee_code, e.id])
     )
 
+    // ── 4a. Fetch tenant timezone ───────────────────────────────────────────
+    // CSV times are in the tenant's LOCAL timezone (e.g. Asia/Kolkata).
+    // We must convert them to UTC before storing in attendance_punch_logs
+    // (a TIMESTAMPTZ column).  Appending ".000Z" directly — the previous
+    // behaviour — treated local times as UTC, shifting every punch by the
+    // UTC offset (5 h 30 m for IST) and causing wrong status / LOP outcomes.
+    const { data: tenantRow } = await fastify.supabase
+      .from('tenants')
+      .select('timezone')
+      .eq('id', req.tenantId)
+      .maybeSingle()
+    const tenantTz: string = (tenantRow as { timezone?: string } | null)?.timezone ?? 'UTC'
+
     // ── 5. Build punch rows, collecting per-row errors ──────────────────────
     interface PunchRow {
       tenant_id:   string
@@ -255,15 +312,29 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
         continue
       }
 
-      const inAt  = buildTimestamp(row.date, row.in_time)
-      const outAt = buildTimestamp(row.date, row.out_time)
+      // For cross-midnight shifts the OUT punch belongs to the next calendar day.
+      const outDate = row.isCrossMidnight ? addOneDay(row.date) : row.date
+
+      // localToUtc converts tenant-local date+time → UTC using the reflection
+      // technique (same function the attendance engine uses for all shift math).
+      const inAt  = localToUtc(row.date, row.in_time,  tenantTz).toISOString()
+      const outAt = localToUtc(outDate,  row.out_time, tenantTz).toISOString()
 
       punchRows.push({ tenant_id: req.tenantId, employee_id, punched_at: inAt,  direction: 'IN',  source: row.source })
       punchRows.push({ tenant_id: req.tenantId, employee_id, punched_at: outAt, direction: 'OUT', source: row.source })
 
+      // Always recompute the in-punch date.
       const rKey = `${employee_id}::${row.date}`
       if (!recomputeSet.has(rKey)) {
         recomputeSet.set(rKey, { employee_id, date: row.date })
+      }
+      // For cross-midnight rows also recompute the out-punch date (next day),
+      // so the engine can correctly attribute the OUT punch on that date.
+      if (row.isCrossMidnight) {
+        const rKeyNext = `${employee_id}::${outDate}`
+        if (!recomputeSet.has(rKeyNext)) {
+          recomputeSet.set(rKeyNext, { employee_id, date: outDate })
+        }
       }
     }
 
@@ -319,11 +390,76 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       }
     })
 
-    // ── 8. Respond ──────────────────────────────────────────────────────────
-    return reply.send({
-      total_rows:   dataLines.length,
-      success_rows: successRows,
-      failed_rows:  allFailedRows,
+    // ── 8. Record upload session audit row (fire-and-forget) ───────────────
+    // Inserts a completed upload_sessions record so the observability console
+    // and orphan scanner have a full audit trail of every CSV upload.
+    // Non-blocking: failure here must never affect the attendance response.
+    setImmediate(async () => {
+      try {
+        await (fastify as any).supabase
+          .from('upload_sessions')
+          .insert({
+            tenant_id:            req.tenantId,
+            upload_type:          'attendance_csv',
+            status:               'completed',
+            file_name:            'attendance_upload.csv',
+            file_size:            Buffer.byteLength(csvContent as string, 'utf8'),
+            mime_type:            'text/csv',
+            bucket:               'employee-files',
+            created_by:           req.userId,
+            content_checksum:     contentChecksum,
+            upload_started_at:    new Date().toISOString(),
+            upload_completed_at:  new Date().toISOString(),
+            processing_ended_at:  new Date().toISOString(),
+            result_summary: {
+              total_rows:      dataLines.length,
+              success_rows:    successRows,
+              failed_rows:     allFailedRows.length,
+              is_replay:       duplicateWarning !== null,
+            },
+          })
+      } catch (err) {
+        fastify.log.warn(
+          { err },
+          'attendance upload: failed to write upload_sessions audit row — non-critical',
+        )
+      }
     })
+
+    // ── 9. Respond ──────────────────────────────────────────────────────────
+    return reply.send({
+      total_rows:       dataLines.length,
+      success_rows:     successRows,
+      failed_rows:      allFailedRows,
+      duplicate_warning: duplicateWarning,  // non-null = same CSV was uploaded within last 24h
+    })
+  })
+
+  // ── GET /attendance/upload-sessions ────────────────────────────────────────
+  // Returns recent upload_sessions rows for upload_type = 'attendance_csv'.
+  // Used by AttendanceUploadWorkspace to render the Recent Uploads table.
+  // Polled every 30 s by the frontend.
+  //
+  // Query params:
+  //   limit  — max rows to return (default 30, max 100)
+  //
+  fastify.get('/attendance/upload-sessions', adminAuth, async (req: any, reply) => {
+    const rawLimit  = Number((req.query as Record<string, string>)?.limit ?? 30)
+    const pageLimit = Math.min(Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 30), 100)
+
+    const { data, error } = await fastify.supabase
+      .from('upload_sessions')
+      .select('id, status, file_name, file_size, created_at, updated_at, result_summary, content_checksum')
+      .eq('tenant_id', req.tenantId)
+      .eq('upload_type', 'attendance_csv')
+      .order('created_at', { ascending: false })
+      .limit(pageLimit)
+
+    if (error) {
+      req.log.error({ err: error }, 'GET /attendance/upload-sessions failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch upload sessions' })
+    }
+
+    return reply.send({ data: data ?? [] })
   })
 }

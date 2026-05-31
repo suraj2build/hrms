@@ -53,7 +53,10 @@ const REASON_LABEL: Record<WorkedReason, string> = {
 }
 
 function fmt(d: string) {
-  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────

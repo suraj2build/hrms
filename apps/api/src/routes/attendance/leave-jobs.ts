@@ -74,8 +74,10 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
     if (!requireAdmin(req, reply)) return
 
     const schema = z.object({
-      year:  z.number().int().min(2000).max(2100),
-      month: z.number().int().min(1).max(12),
+      year:     z.number().int().min(2000).max(2100),
+      month:    z.number().int().min(1).max(12),
+      reason:   z.string().min(5, 'Reason is required (min 5 chars) for manual recovery operations').max(500),
+      dry_run:  z.boolean().default(false),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
@@ -88,11 +90,15 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
       parsed.data.year,
       parsed.data.month,
       req.userId,
+      { triggerType: 'manual_replay', dryRun: parsed.data.dry_run, reason: parsed.data.reason },
     )
 
     return reply.send({
       data: result,
-      message: `Monthly accrual ${result.status}: ${result.employees_processed} employees credited ${result.total_days_credited} days`,
+      dry_run: parsed.data.dry_run,
+      message: parsed.data.dry_run
+        ? `[DRY RUN] Monthly accrual preview: ${result.employees_processed} employees would be credited ${result.total_days_credited} days`
+        : `Monthly accrual ${result.status}: ${result.employees_processed} employees credited ${result.total_days_credited} days`,
     })
   })
 
@@ -103,6 +109,8 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
     const schema = z.object({
       leave_year: z.number().int().min(2000).max(2100),
       as_of:      z.string().regex(dateRe).optional(),
+      reason:     z.string().min(5, 'Reason is required (min 5 chars) for manual recovery operations').max(500),
+      dry_run:    z.boolean().default(false),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
@@ -115,11 +123,15 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
       parsed.data.leave_year,
       req.userId,
       parsed.data.as_of,
+      { triggerType: 'manual_replay', dryRun: parsed.data.dry_run, reason: parsed.data.reason },
     )
 
     return reply.send({
       data: result,
-      message: `Yearly accrual ${result.status}: ${result.employees_processed} employees credited ${result.total_days_credited} days`,
+      dry_run: parsed.data.dry_run,
+      message: parsed.data.dry_run
+        ? `[DRY RUN] Yearly accrual preview: ${result.employees_processed} employees would be credited ${result.total_days_credited} days`
+        : `Yearly accrual ${result.status}: ${result.employees_processed} employees credited ${result.total_days_credited} days`,
     })
   })
 
@@ -128,7 +140,9 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
     if (!requireAdmin(req, reply)) return
 
     const schema = z.object({
-      as_of: z.string().regex(dateRe).optional(),
+      as_of:   z.string().regex(dateRe).optional(),
+      reason:  z.string().min(5, 'Reason is required (min 5 chars) for manual recovery operations').max(500),
+      dry_run: z.boolean().default(false),
     })
     const parsed = schema.safeParse(req.body ?? {})
     if (!parsed.success) {
@@ -139,12 +153,18 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
       ? new Date(`${parsed.data.as_of}T12:00:00.000Z`)
       : new Date()
 
-    const result = await coExpiryJob(fastify.supabase, req.tenantId, asOf, req.userId)
+    const result = await coExpiryJob(
+      fastify.supabase, req.tenantId, asOf, req.userId,
+      { triggerType: 'manual_replay', dryRun: parsed.data.dry_run, reason: parsed.data.reason },
+    )
 
     const expired = -result.total_days_credited   // positive number for display
     return reply.send({
       data: result,
-      message: `CO expiry ${result.status}: ${result.employees_processed} employees, ${expired} day(s) expired`,
+      dry_run: parsed.data.dry_run,
+      message: parsed.data.dry_run
+        ? `[DRY RUN] CO expiry preview: ${result.employees_processed} employees, ${expired} day(s) would be expired`
+        : `CO expiry ${result.status}: ${result.employees_processed} employees, ${expired} day(s) expired`,
     })
   })
 
@@ -155,6 +175,8 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
     const schema = z.object({
       from_year: z.number().int().min(2000).max(2100),
       to_year:   z.number().int().min(2000).max(2100),
+      reason:    z.string().min(5, 'Reason is required (min 5 chars) for manual recovery operations').max(500),
+      dry_run:   z.boolean().default(false),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
@@ -171,11 +193,15 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
 
     const result = await carryForwardJob(
       fastify.supabase, req.tenantId, from_year, to_year, req.userId,
+      { triggerType: 'manual_replay', dryRun: parsed.data.dry_run, reason: parsed.data.reason },
     )
 
     return reply.send({
       data: result,
-      message: `Carry-forward ${result.status}: ${result.employees_processed} employees, ${result.total_days_credited} days carried`,
+      dry_run: parsed.data.dry_run,
+      message: parsed.data.dry_run
+        ? `[DRY RUN] Carry-forward preview: ${result.employees_processed} employees, ${result.total_days_credited} days would be carried`
+        : `Carry-forward ${result.status}: ${result.employees_processed} employees, ${result.total_days_credited} days carried`,
     })
   })
 
@@ -186,6 +212,8 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
     const schema = z.object({
       leave_type_id: z.string().uuid(),
       year:          z.number().int().min(2000).max(2100),
+      reason:        z.string().min(5, 'Reason is required (min 5 chars) for manual recovery operations').max(500),
+      dry_run:       z.boolean().default(false),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
@@ -195,12 +223,16 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
     const result = await policyRecalculateJob(
       fastify.supabase, req.tenantId,
       parsed.data.leave_type_id, parsed.data.year, req.userId,
+      { triggerType: 'manual_replay', dryRun: parsed.data.dry_run, reason: parsed.data.reason },
     )
 
     const sign  = result.total_days_credited >= 0 ? '+' : ''
     return reply.send({
       data: result,
-      message: `Policy recalculate ${result.status}: ${result.employees_processed} adjusted (${sign}${result.total_days_credited} days net)`,
+      dry_run: parsed.data.dry_run,
+      message: parsed.data.dry_run
+        ? `[DRY RUN] Policy recalculate preview: ${result.employees_processed} employees would be adjusted (${sign}${result.total_days_credited} days net)`
+        : `Policy recalculate ${result.status}: ${result.employees_processed} adjusted (${sign}${result.total_days_credited} days net)`,
     })
   })
 }

@@ -87,7 +87,7 @@ function computeInitialSections(): Set<string> {
 
   // Roster
   if (p.includes('/shift-master') || p.includes('/employee-shifts') ||
-      p.includes('/roster') || p.includes('/manager-dashboard')) {
+      p.includes('/roster')) {
     set.add('roster')
   }
 
@@ -172,8 +172,7 @@ export function Sidebar() {
     // Roster
     if (p.startsWith(`${basePath}/shift-master`) ||
         p.startsWith(`${basePath}/employee-shifts`) ||
-        p.startsWith(`${basePath}/roster`) ||
-        p.startsWith(`${basePath}/manager-dashboard`)) {
+        p.startsWith(`${basePath}/roster`)) {
       return 'roster'
     }
 
@@ -292,10 +291,10 @@ export function Sidebar() {
       emphasis:    true,
       items: [
         { label: 'Shift Definitions', icon: AlarmClock,    href: `${basePath}/shift-master`,         permission: 'employees:write' },
-        { label: 'Employee Shifts',   icon: UserCog,       href: `${basePath}/employee-shifts`,      permission: 'employees:write' },
+        { label: 'Shift Overrides',    icon: UserCog,       href: `${basePath}/employee-shifts`,      permission: 'employees:write' },
         { label: 'Roster Planner',    icon: CalendarClock, href: `${basePath}/roster`,               permission: 'employees:write' },
         { label: 'Roster Intel',      icon: BarChart3,     href: `${basePath}/roster/intelligence`,  permission: 'employees:read' },
-        { label: 'Manager View',      icon: LayoutGrid,    href: `${basePath}/manager-dashboard`,    permission: 'employees:read' },
+        { label: 'Manager View',      icon: LayoutGrid,    href: '/manager/dashboard',               permission: 'employees:read' },
       ],
     },
 

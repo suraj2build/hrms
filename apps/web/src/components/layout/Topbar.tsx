@@ -1,16 +1,16 @@
 import { LogOut, ChevronDown } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
-import { supabase } from '@/lib/supabase/client'
-import { useAuthStore } from '@/stores/authStore'
-import { useBasePath } from '@/lib/routing'
-import { Button } from '@/components/ui/button'
+import { useNavigate }         from 'react-router-dom'
+import { toast }               from 'sonner'
+import { supabase }            from '@/lib/supabase/client'
+import { useAuthStore }        from '@/stores/authStore'
+import { useBasePath }         from '@/lib/routing'
+import { Button }              from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { getInitials } from '@/lib/utils'
+import { getInitials }         from '@/lib/utils'
 import { CommandPaletteTrigger } from '@/components/operational/CommandPalette'
-import { ThemeToggle } from '@/components/theme-toggle'
-import { RoleSwitcher } from './RoleSwitcher'
-import { NotificationBell } from '@/components/notifications'
+import { ThemeToggle }         from '@/components/theme-toggle'
+import { RoleSwitcher }        from './RoleSwitcher'
+import { NotificationBell }    from '@/components/notifications'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+
+// ── Topbar ─────────────────────────────────────────────────────────────────────
+//
+// Architecture note (2026-05):
+//   The "View Profile As" chip (employee / manager impersonation switcher) has
+//   been removed. Each workspace now lives in its own shell:
+//     ESS     → /ess/*      (EssShell)
+//     Manager → /manager/*  (ManagerShell)
+//     Admin   → /admin/*    (AdminShellV2) — operational governance only
+//
+//   Admins who need to preview ESS or Manager experiences use the RoleSwitcher
+//   workspace dropdown, which navigates to the correct shell rather than
+//   embedding a foreign UX inside AdminShell.
 
 export function Topbar() {
   const { profile, tenant, clear } = useAuthStore()
@@ -33,7 +46,7 @@ export function Topbar() {
   }
 
   return (
-    <header className="h-14 border-b border-border bg-background flex items-center px-4 gap-4 flex-shrink-0">
+    <header className="h-14 border-b border-border bg-background flex items-center px-4 gap-3 flex-shrink-0">
       {/* Command palette trigger */}
       <CommandPaletteTrigger className="flex-shrink-0" />
 
@@ -45,7 +58,7 @@ export function Topbar() {
           </span>
         )}
 
-        {/* Role / portal switcher */}
+        {/* Workspace switcher (Admin Portal / Manager Workspace / ESS) */}
         <RoleSwitcher />
 
         {/* Notifications */}
@@ -68,10 +81,13 @@ export function Topbar() {
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
+
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>
               <p className="text-sm font-medium">{profile?.full_name}</p>
-              <p className="text-xs text-muted-foreground capitalize">{profile?.role?.replace('_', ' ')}</p>
+              <p className="text-xs text-muted-foreground capitalize">
+                {profile?.role?.replace('_', ' ')}
+              </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate('/ess/profile')}>

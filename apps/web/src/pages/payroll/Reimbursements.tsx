@@ -24,10 +24,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -282,7 +282,6 @@ export function Reimbursements() {
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc          = useQueryClient()
 
-  const [activeTab, setActiveTab]         = useState<'claims' | 'categories'>('claims')
   const [statusFilter, setStatusFilter]   = useState('All')
   const [reviewTarget, setReviewTarget]   = useState<ReimbClaim | null>(null)
   const [rejectTarget, setRejectTarget]   = useState<ReimbClaim | null>(null)
@@ -299,7 +298,7 @@ export function Reimbursements() {
   const { data: categories = [], isLoading: catsLoading } = useQuery<ReimbCategory[]>({
     queryKey: ['reimb-categories'],
     queryFn:  () => api.get('/payroll/reimbursements/categories').then((r: any) => r.data),
-    enabled:  activeTab === 'categories',
+    staleTime: 60_000,
   })
 
   const approveMutation = useMutation({
@@ -320,11 +319,6 @@ export function Reimbursements() {
     onError: (e: Error) => toast.error('Failed to mark as paid', { description: e.message }),
   })
 
-  const tabs = [
-    { key: 'claims',     label: 'Claims' },
-    { key: 'categories', label: 'Categories' },
-  ] as const
-
   return (
     <PageContainer>
       <PageHeader
@@ -335,7 +329,7 @@ export function Reimbursements() {
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
-            {isAdmin && activeTab === 'categories' && (
+            {isAdmin && (
               <Button size="sm" onClick={() => setShowAddCat(true)}>
                 <Plus className="mr-2 h-4 w-4" /> Add Category
               </Button>
@@ -344,179 +338,166 @@ export function Reimbursements() {
         }
       />
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border mb-6">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs defaultValue="claims">
+        <TabsList className="mb-4">
+          <TabsTrigger value="claims">Claims</TabsTrigger>
+          <TabsTrigger value="categories">Categories</TabsTrigger>
+        </TabsList>
 
-      {/* ── Claims Tab ── */}
-      {activeTab === 'claims' && (
-        <SectionCard title="Reimbursement Claims">
-          {/* Filter */}
-          <div className="mb-4">
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-            >
-              {STATUS_OPTS.map(s => (
-                <option key={s} value={s}>
-                  {s === 'All' ? 'All Statuses' : s.replace('_', ' ').replace(/^\w/, c => c.toUpperCase())}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {claimsLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        {/* ── Claims Tab ── */}
+        <TabsContent value="claims">
+          <SectionCard title="Reimbursement Claims">
+            {/* Filter */}
+            <div className="mb-4">
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="h-8 rounded-md border border-border bg-background px-3 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
+              >
+                {STATUS_OPTS.map(s => (
+                  <option key={s} value={s}>
+                    {s === 'All' ? 'All Statuses' : s.replace('_', ' ').replace(/^\w/, c => c.toUpperCase())}
+                  </option>
+                ))}
+              </select>
             </div>
-          ) : claims.length === 0 ? (
-            <p className="text-center text-muted-foreground py-12">No claims found.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left py-3 px-4 font-medium">Employee</th>
-                    <th className="text-left py-3 px-4 font-medium">Category</th>
-                    <th className="text-left py-3 px-4 font-medium">Month</th>
-                    <th className="text-right py-3 px-4 font-medium">Claimed</th>
-                    <th className="text-right py-3 px-4 font-medium">Approved</th>
-                    <th className="text-left py-3 px-4 font-medium">Status</th>
-                    {isAdmin && <th className="text-left py-3 px-4 font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {claims.map(claim => (
-                    <tr key={claim.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-foreground">
-                          {claim.employee_name ?? claim.employee_id}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-foreground">
-                        {claim.category_name ?? claim.category_id}
-                      </td>
-                      <td className="py-3 px-4 text-muted-foreground">{claim.claim_month}</td>
-                      <td className="py-3 px-4 text-right text-foreground">{fmt(claim.claimed_amount)}</td>
-                      <td className="py-3 px-4 text-right text-foreground">
-                        {claim.approved_amount != null ? fmt(claim.approved_amount) : '—'}
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge variant={STATUS_BADGE[claim.status] ?? 'secondary'}>
-                          {claim.status.replace('_', ' ').replace(/^\w/, c => c.toUpperCase())}
-                        </Badge>
-                      </td>
-                      {isAdmin && (
+
+            {claimsLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading…</span>
+              </div>
+            ) : claims.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <FileText className="h-10 w-10 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No claims found.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Employee</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Category</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Month</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Claimed</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Approved</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Status</th>
+                      {isAdmin && <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {claims.map(claim => (
+                      <tr key={claim.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {(claim.status === 'submitted' || claim.status === 'under_review') && (
-                              <>
-                                <Button size="sm" variant="outline" onClick={() => setReviewTarget(claim)}>
-                                  <FileText className="mr-1 h-3 w-3" /> Review
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={approveMutation.isPending}
-                                  onClick={() => approveMutation.mutate(claim.id)}
-                                >
-                                  <CheckCircle2 className="mr-1 h-3 w-3" /> Approve
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => setRejectTarget(claim)}>
-                                  <XCircle className="mr-1 h-3 w-3" /> Reject
-                                </Button>
-                              </>
-                            )}
-                            {claim.status === 'approved' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={payMutation.isPending}
-                                onClick={() => payMutation.mutate(claim.id)}
-                              >
-                                Mark Paid
-                              </Button>
-                            )}
+                          <div className="font-medium text-foreground">
+                            {claim.employee_name ?? claim.employee_id}
                           </div>
                         </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      )}
+                        <td className="py-3 px-4 text-foreground">
+                          {claim.category_name ?? claim.category_id}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">{claim.claim_month}</td>
+                        <td className="py-3 px-4 text-right text-foreground">{fmt(claim.claimed_amount)}</td>
+                        <td className="py-3 px-4 text-right text-foreground">
+                          {claim.approved_amount != null ? fmt(claim.approved_amount) : '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant={STATUS_BADGE[claim.status] ?? 'secondary'}>
+                            {claim.status.replace('_', ' ').replace(/^\w/, c => c.toUpperCase())}
+                          </Badge>
+                        </td>
+                        {isAdmin && (
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {(claim.status === 'submitted' || claim.status === 'under_review') && (
+                                <>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setReviewTarget(claim)}>
+                                    <FileText className="h-3 w-3" /> Review
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={approveMutation.isPending} onClick={() => approveMutation.mutate(claim.id)}>
+                                    <CheckCircle2 className="h-3 w-3" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-destructive hover:text-destructive" onClick={() => setRejectTarget(claim)}>
+                                    <XCircle className="h-3 w-3" /> Reject
+                                  </Button>
+                                </>
+                              )}
+                              {claim.status === 'approved' && (
+                                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={payMutation.isPending} onClick={() => payMutation.mutate(claim.id)}>
+                                  Mark Paid
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
 
-      {/* ── Categories Tab ── */}
-      {activeTab === 'categories' && (
-        <SectionCard title="Reimbursement Categories">
-          {catsLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : categories.length === 0 ? (
-            <p className="text-center text-muted-foreground py-12">No categories configured.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left py-3 px-4 font-medium">Name</th>
-                    <th className="text-left py-3 px-4 font-medium">Code</th>
-                    <th className="text-right py-3 px-4 font-medium">Max Amount</th>
-                    <th className="text-left py-3 px-4 font-medium">Requires Receipt</th>
-                    <th className="text-left py-3 px-4 font-medium">Taxable</th>
-                    <th className="text-left py-3 px-4 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categories.map(cat => (
-                    <tr key={cat.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                      <td className="py-3 px-4 font-medium text-foreground">{cat.name}</td>
-                      <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{cat.code}</td>
-                      <td className="py-3 px-4 text-right text-foreground">
-                        {cat.max_amount != null ? fmt(cat.max_amount) : 'Unlimited'}
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge variant={cat.requires_receipt ? 'warning' : 'secondary'}>
-                          {cat.requires_receipt ? 'Yes' : 'No'}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge variant={cat.is_taxable ? 'destructive' : 'secondary'}>
-                          {cat.is_taxable ? 'Taxable' : 'Non-taxable'}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge variant={cat.is_active ? 'success' : 'secondary'}>
-                          {cat.is_active ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </td>
+        {/* ── Categories Tab ── */}
+        <TabsContent value="categories">
+          <SectionCard title="Reimbursement Categories">
+            {catsLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading…</span>
+              </div>
+            ) : categories.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <Plus className="h-10 w-10 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No categories configured.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Name</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Code</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Max Amount</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Receipt</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Taxable</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      )}
+                  </thead>
+                  <tbody>
+                    {categories.map(cat => (
+                      <tr key={cat.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                        <td className="py-3 px-4 font-medium text-foreground">{cat.name}</td>
+                        <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{cat.code}</td>
+                        <td className="py-3 px-4 text-right text-foreground">
+                          {cat.max_amount != null ? fmt(cat.max_amount) : 'Unlimited'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant={cat.requires_receipt ? 'warning' : 'secondary'}>
+                            {cat.requires_receipt ? 'Required' : 'Optional'}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant={cat.is_taxable ? 'warning' : 'secondary'}>
+                            {cat.is_taxable ? 'Taxable' : 'Non-taxable'}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant={cat.is_active ? 'success' : 'secondary'}>
+                            {cat.is_active ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+      </Tabs>
 
       {/* Dialogs */}
       <ReviewDialog open={!!reviewTarget} claim={reviewTarget} onClose={() => setReviewTarget(null)} />

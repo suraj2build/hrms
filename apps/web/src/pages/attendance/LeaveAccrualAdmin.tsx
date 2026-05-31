@@ -14,12 +14,13 @@
 
 import { useState }                                      from 'react'
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query'
+import { useNavigate }                                   from 'react-router-dom'
 import { toast }                                         from 'sonner'
 import {
   BookOpen, ShieldAlert, Plus, Pencil, Trash2,
-  PlayCircle, CheckCircle2, XCircle, BadgeCheck,
+  CheckCircle2, XCircle, BadgeCheck,
   Loader2, ChevronDown, ChevronUp, RefreshCw,
-  ArrowRightLeft, Coins,
+  Coins, Activity, ExternalLink,
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -28,6 +29,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import {
   Dialog,
   DialogContent,
@@ -123,12 +125,21 @@ const DEFAULT_FORM: RuleFormState = {
 
 function fmtDatetime(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function fmtDate(str: string | null) {
   if (!str) return '—'
-  return new Date(`${str}T00:00:00`).toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })
+  const s = str
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 type BadgeVariant = 'default' | 'secondary' | 'warning' | 'destructive' | 'outline' | 'success'
@@ -143,6 +154,7 @@ export function LeaveAccrualAdmin() {
   const { profile } = useAuthStore()
   const isAdmin     = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
   const qc          = useQueryClient()
+  const navigate    = useNavigate()
 
   // ── Rule dialog state ──────────────────────────────────────────────────────
   const [ruleDialog, setRuleDialog]     = useState(false)
@@ -150,9 +162,7 @@ export function LeaveAccrualAdmin() {
   const [ruleForm, setRuleForm]         = useState<RuleFormState>(DEFAULT_FORM)
   const [expandedRule, setExpandedRule] = useState<string | null>(null)
 
-  // ── Manual run state ───────────────────────────────────────────────────────
-  const [runPeriod, setRunPeriod]       = useState(() => new Date().toISOString().slice(0, 7))
-  const [cfYear, setCfYear]             = useState(() => String(new Date().getFullYear() - 1))
+  // Manual run state removed — use Leave Engine Status page for recovery operations
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: leaveTypesResp } = useQuery<{ data: LeaveType[] }>({
@@ -205,30 +215,6 @@ export function LeaveAccrualAdmin() {
     mutationFn: (id: string) => api.delete(`/leave/accrual/rules/${id}`),
     onSuccess: () => { refetchRules(); toast.success('Rule deactivated') },
     onError: (e) => toast.error('Failed to deactivate rule', { description: (e as Error).message }),
-  })
-
-  const runAccrualMutation = useMutation({
-    mutationFn: (period: string) => api.post<{ data: { employees_credited: number; total_days_credited: number; errors: string[] } }>('/leave/accrual/run', { period }),
-    onSuccess: (r) => {
-      refetchRuns()
-      qc.invalidateQueries({ queryKey: ['leave-balance'] })
-      toast.success(`Accrual complete`, {
-        description: `${r.data.employees_credited} employees credited ${r.data.total_days_credited} days.` +
-          (r.data.errors.length ? ` ${r.data.errors.length} errors.` : ''),
-      })
-    },
-    onError: (e) => toast.error('Accrual failed', { description: (e as Error).message }),
-  })
-
-  const carryForwardMutation = useMutation({
-    mutationFn: (fromYear: number) => api.post<{ data: { employees_processed: number; total_days_carried: number } }>('/leave/accrual/carry-forward', { from_year: fromYear }),
-    onSuccess: (r) => {
-      refetchRuns()
-      toast.success('Carry-forward complete', {
-        description: `${r.data.employees_processed} employees · ${r.data.total_days_carried} days carried.`,
-      })
-    },
-    onError: (e) => toast.error('Carry-forward failed', { description: (e as Error).message }),
   })
 
   const approveEncMutation = useMutation({
@@ -336,13 +322,28 @@ export function LeaveAccrualAdmin() {
         }
       />
 
+      {/* Automation notice */}
+      <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <Activity className="h-4 w-4 text-primary" />
+          <div className="text-xs">
+            <p className="font-medium text-foreground">Accrual runs automatically</p>
+            <p className="text-muted-foreground">Monthly credits, carry-forward and expiry are fully scheduler-driven.</p>
+          </div>
+        </div>
+        <Button
+          size="sm" variant="outline" className="h-8 text-xs gap-1.5 shrink-0"
+          onClick={() => navigate('/admin/leave-jobs')}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Engine Status
+        </Button>
+      </div>
+
       <Tabs defaultValue="rules">
         <TabsList className="mb-4">
           <TabsTrigger value="rules" className="text-xs gap-1.5">
             <BookOpen className="h-3.5 w-3.5" /> Rules
-          </TabsTrigger>
-          <TabsTrigger value="run" className="text-xs gap-1.5">
-            <PlayCircle className="h-3.5 w-3.5" /> Manual Run
           </TabsTrigger>
           <TabsTrigger value="history" className="text-xs gap-1.5">
             <RefreshCw className="h-3.5 w-3.5" /> Run History
@@ -442,82 +443,6 @@ export function LeaveAccrualAdmin() {
               ))}
             </div>
           </SectionCard>
-        </TabsContent>
-
-        {/* ── Manual Run Tab ─────────────────────────────────────────────── */}
-        <TabsContent value="run">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-            {/* Monthly accrual trigger */}
-            <SectionCard
-              title="Run Monthly Accrual"
-              icon={<PlayCircle className="h-4 w-4 text-muted-foreground" />}
-            >
-              <p className="text-xs text-muted-foreground mb-4">
-                Triggers the rule-based monthly accrual engine for the selected period.
-                Idempotent — will skip periods that already ran successfully.
-              </p>
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Period (YYYY-MM)</label>
-                  <Input
-                    type="month"
-                    value={runPeriod}
-                    onChange={e => setRunPeriod(e.target.value)}
-                    className="h-8 text-xs"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  className="h-8 text-xs w-full gap-1.5"
-                  disabled={!runPeriod || runAccrualMutation.isPending}
-                  onClick={() => runAccrualMutation.mutate(runPeriod)}
-                >
-                  {runAccrualMutation.isPending
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Running…</>
-                    : <><PlayCircle className="h-3.5 w-3.5" />Run Accrual for {runPeriod}</>
-                  }
-                </Button>
-              </div>
-            </SectionCard>
-
-            {/* Carry-forward trigger */}
-            <SectionCard
-              title="Process Carry-Forward"
-              icon={<ArrowRightLeft className="h-4 w-4 text-muted-foreground" />}
-            >
-              <p className="text-xs text-muted-foreground mb-4">
-                Rolls unused balances from the specified year into the next year,
-                capped by the carry-forward maximum in each rule.
-                Run this once per year, typically in January.
-              </p>
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">From Year</label>
-                  <Input
-                    type="number"
-                    min={2020}
-                    max={2099}
-                    value={cfYear}
-                    onChange={e => setCfYear(e.target.value)}
-                    className="h-8 text-xs"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-xs w-full gap-1.5"
-                  disabled={!cfYear || carryForwardMutation.isPending}
-                  onClick={() => carryForwardMutation.mutate(parseInt(cfYear, 10))}
-                >
-                  {carryForwardMutation.isPending
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Processing…</>
-                    : <><ArrowRightLeft className="h-3.5 w-3.5" />Carry Forward {cfYear} → {parseInt(cfYear) + 1}</>
-                  }
-                </Button>
-              </div>
-            </SectionCard>
-          </div>
         </TabsContent>
 
         {/* ── Run History Tab ────────────────────────────────────────────── */}
@@ -738,11 +663,11 @@ export function LeaveAccrualAdmin() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Effective From *</label>
-                <Input type="date" value={ruleForm.effective_from} onChange={pf('effective_from')} className="h-8 text-xs" />
+                <DateInput value={ruleForm.effective_from} onChange={v => setRuleForm(p => ({ ...p, effective_from: v }))} className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Effective To (optional)</label>
-                <Input type="date" value={ruleForm.effective_to} onChange={pf('effective_to')} min={ruleForm.effective_from} className="h-8 text-xs" />
+                <DateInput value={ruleForm.effective_to} onChange={v => setRuleForm(p => ({ ...p, effective_to: v }))} min={ruleForm.effective_from} className="h-8 text-xs" />
               </div>
             </div>
 

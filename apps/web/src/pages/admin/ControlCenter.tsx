@@ -30,7 +30,7 @@ import {
   ArrowUpRight, Inbox,
   UserCheck, UserPlus, UserX, Play, CheckSquare,
   CalendarCheck, FileSearch, ClipboardList, ArrowRight,
-  Activity,
+  Activity, BarChart3, TrendingUp, ChevronRight,
 } from 'lucide-react'
 import { InsightChart, EmptyWorkspaceState } from '@/components/dashboard'
 import { OperationalTable } from '@/components/dashboard/primitives'
@@ -157,10 +157,18 @@ function fmtINR(val: number): string {
 }
 
 function fmtDate(s: string) {
-  return new Date(s + 'T12:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 function fmtDateTime(s: string) {
-  return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const d = new Date(s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 function monthRange() {
   const now = new Date()
@@ -256,14 +264,82 @@ function Card({ title, action, children, className, noPad }: {
   className?: string; noPad?: boolean
 }) {
   return (
-    <div className={cn('rounded-xl bg-card ring-1 ring-black/5 flex flex-col', className)}>
+    <div className={cn('rounded-2xl bg-card shadow-card flex flex-col', className)}>
       {title && (
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 flex-shrink-0">
-          <p className="font-display text-base font-semibold text-foreground">{title}</p>
+          <p className="font-display text-[13.5px] font-bold text-foreground">{title}</p>
           {action}
         </div>
       )}
       <div className={cn('flex-1', !noPad && !title && 'p-4')}>{children}</div>
+    </div>
+  )
+}
+
+/**
+ * KpiCard — next-gen stat tile with pastel icon container.
+ * Matches the Daily-ADS / Rippling / Deel pattern:
+ *   [icon box]  label
+ *               BIG NUMBER
+ *               sub / trend
+ */
+function KpiCard({
+  label, value, icon: Icon,
+  iconBg, iconColor,
+  valueColor,
+  sub, trend, trendPositive,
+  onClick,
+}: {
+  label:          string
+  value:          string | number
+  icon:           React.ComponentType<{ className?: string }>
+  iconBg:         string   // e.g. 'bg-teal-50'
+  iconColor:      string   // e.g. 'text-teal-600'
+  valueColor?:    string
+  sub?:           string
+  trend?:         string   // e.g. '+12%' or '↑ 3'
+  trendPositive?: boolean  // true = green, false = red
+  onClick?:       () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-2xl bg-card shadow-card p-5 flex flex-col gap-3',
+        onClick && 'cursor-pointer hover:shadow-card-md transition-shadow',
+      )}
+      onClick={onClick}
+    >
+      {/* Icon container + optional trend badge */}
+      <div className="flex items-start justify-between">
+        <span className={cn('h-11 w-11 rounded-2xl flex items-center justify-center flex-shrink-0', iconBg)}>
+          <Icon className={cn('h-5 w-5', iconColor)} />
+        </span>
+        {trend && (
+          <span className={cn(
+            'text-[9.5px] font-bold px-2 py-1 rounded-full tracking-wide',
+            trendPositive === true  ? 'bg-success/10 text-success' :
+            trendPositive === false ? 'bg-destructive/10 text-destructive' :
+                                      'bg-muted text-muted-foreground',
+          )}>
+            {trend}
+          </span>
+        )}
+      </div>
+      {/* Metric */}
+      <div>
+        <p className="text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground leading-none">
+          {label}
+        </p>
+        <p className={cn(
+          'font-display text-[2rem] font-black tabular-nums leading-none mt-2',
+          valueColor ?? 'text-foreground',
+        )}>
+          {value ?? '—'}
+        </p>
+        {sub && (
+          <p className="text-[11px] text-muted-foreground mt-1.5 leading-none">{sub}</p>
+        )}
+      </div>
     </div>
   )
 }
@@ -374,7 +450,21 @@ export function ControlCenter() {
 
   const oh           = opHealthRaw?.data
   const excSummary   = excSummaryRaw?.data
-  const schedulers   = schedulerRaw?.data ?? []
+
+  // Deduplicate by scheduler_name — API can occasionally return the same name
+  // twice (e.g. both a legacy 'leave-scheduler' and 'leave_scheduler' row).
+  // Keep the row with the highest tick_count (most recently active).
+  const schedulers = useMemo(() => {
+    const raw = schedulerRaw?.data ?? []
+    const seen = new Map<string, SchedulerRow>()
+    for (const s of raw) {
+      const existing = seen.get(s.scheduler_name)
+      if (!existing || s.tick_count > existing.tick_count) {
+        seen.set(s.scheduler_name, s)
+      }
+    }
+    return [...seen.values()]
+  }, [schedulerRaw])
   const reconcIssues = reconcRaw?.data ?? []
   const eventLog     = eventLogRaw?.data ?? []
 
@@ -612,48 +702,72 @@ export function ControlCenter() {
           )}
         </Card>
 
-        {/* Employee counters */}
+        {/* Employee KPI tiles */}
         <div className="grid grid-cols-2 gap-3">
-          {/* Total Employees */}
-          <div className="rounded-xl bg-card ring-1 ring-black/5 p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Total Employees</p>
-              <Users className="h-3.5 w-3.5 text-muted-foreground/50" />
-            </div>
-            <p className="font-display text-3xl font-bold tabular-nums text-foreground">
-              {dashStats?.total_employees ?? freshness?.total_active_employees ?? '—'}
-            </p>
-            <button
-              className="text-xs text-primary font-medium mt-1.5 text-left hover:underline"
-              onClick={() => nav('/admin/employees')}
-            >
-              Workforce roster →
-            </button>
-          </div>
-          {/* Active */}
-          <div className="rounded-xl bg-card ring-1 ring-black/5 p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Active</p>
-              <UserCheck className="h-3.5 w-3.5 text-success/60" />
-            </div>
-            <p className="font-display text-3xl font-bold tabular-nums text-foreground">
-              {dashStats?.active_employees ?? freshness?.employees_with_data ?? '—'}
-            </p>
-            <p className="text-xs text-success font-medium mt-1.5">
-              {dashStats?.active_employees && dashStats?.total_employees
-                ? `+${Math.round((dashStats.active_employees / dashStats.total_employees) * 100)}% of total`
-                : 'Synced'}
-            </p>
-          </div>
+          <KpiCard
+            label="Total Employees"
+            value={dashStats?.total_employees ?? freshness?.total_active_employees ?? '—'}
+            icon={Users}
+            iconBg="bg-cyan-50"
+            iconColor="text-cyan-600"
+            sub="Workforce roster →"
+            onClick={() => nav('/admin/employees')}
+          />
+          <KpiCard
+            label="Active"
+            value={dashStats?.active_employees ?? freshness?.employees_with_data ?? '—'}
+            icon={UserCheck}
+            iconBg="bg-emerald-50"
+            iconColor="text-emerald-600"
+            valueColor="text-emerald-700"
+            sub={
+              dashStats?.active_employees && dashStats?.total_employees
+                ? `${Math.round((dashStats.active_employees / dashStats.total_employees) * 100)}% of total`
+                : 'Synced'
+            }
+            trend={dashStats?.active_employees && dashStats?.total_employees ? `${Math.round((dashStats.active_employees / dashStats.total_employees) * 100)}%` : undefined}
+            trendPositive={true}
+          />
         </div>
       </div>
+
+      {/* ── Executive Intelligence Banner ────────────────────────────────── */}
+      <button
+        className="w-full text-left rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 via-primary/[0.03] to-transparent px-5 py-3.5 flex items-center gap-4 hover:border-primary/40 hover:from-primary/10 hover:via-primary/[0.06] transition-all duration-200 group"
+        onClick={() => nav('/admin/executive')}
+      >
+        {/* Icon */}
+        <div className="flex-shrink-0 h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+          <BarChart3 className="h-4.5 w-4.5 text-primary" />
+        </div>
+
+        {/* Text */}
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-foreground leading-tight">Executive Intelligence Center</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+            CEO &amp; CHRO strategic view · workforce, financial, compliance &amp; trend analytics
+          </p>
+        </div>
+
+        {/* Right side: trend indicator + arrow */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="hidden sm:flex items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground">
+            <TrendingUp className="h-3.5 w-3.5 text-primary/60" />
+            <span>6 strategic views</span>
+          </div>
+          <div className="flex items-center gap-1 text-[11px] font-semibold text-primary">
+            <span>Open</span>
+            <ChevronRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </div>
+      </button>
 
       {/* ── ROW 2: Processing Banner + Anomaly KPI ───────────────────────── */}
       <div className="grid grid-cols-[1.6fr_1fr] gap-4">
 
         {/* Processing banner */}
         <div className={cn(
-          'rounded-xl border px-5 py-4 flex items-center justify-between gap-4',
+          'rounded-2xl border px-5 py-4 flex items-center justify-between gap-4',
           runFailed ? 'bg-destructive/5 border-destructive/20' :
           isStale   ? 'bg-warning/5 border-warning/20' :
                       'bg-success/5 border-success/20',
@@ -672,7 +786,7 @@ export function ControlCenter() {
                 {lastRun
                   ? `${fmtDateTime(lastRun.started_at)}${lastRun.duration_ms ? ` · ${Math.round(lastRun.duration_ms / 1000)}s` : ''}`
                   : 'No runs recorded'}
-                {anomalyCount > 0 && ` · ${anomalyCount} open anomalies pending review`}
+                {regList.length > 0 && ` · ${regList.length} regularisations pending manager approval`}
               </p>
             </div>
           </div>
@@ -688,25 +802,19 @@ export function ControlCenter() {
           </Button>
         </div>
 
-        {/* Anomaly KPI */}
-        <div
-          className="rounded-xl bg-card ring-1 ring-black/5 p-4 flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => nav('/admin/attendance/anomalies')}
-        >
-          <div className={cn(
-            'h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0',
-            anomalyCount > 0 ? 'bg-warning/10' : 'bg-muted',
-          )}>
-            <AlertTriangle className={cn('h-5 w-5', anomalyCount > 0 ? 'text-warning' : 'text-muted-foreground')} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Anomalies</p>
-            <p className={cn('font-display text-3xl font-bold tabular-nums', anomalyCount > 0 ? 'text-warning' : 'text-foreground')}>
-              {anomalyCount}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">Open · needs review</p>
-          </div>
-        </div>
+        {/* Pending Regularizations KPI — replaces raw anomaly count (non-actionable) */}
+        <KpiCard
+          label="Pending Regularizations"
+          value={regList.length}
+          icon={ClipboardList}
+          iconBg={regList.length > 0 ? 'bg-violet-50' : 'bg-muted'}
+          iconColor={regList.length > 0 ? 'text-violet-600' : 'text-muted-foreground'}
+          valueColor={regList.length > 0 ? 'text-violet-700' : undefined}
+          sub="Awaiting manager action"
+          trend={regList.length > 0 ? `${regList.length} pending` : undefined}
+          trendPositive={false}
+          onClick={() => nav('/admin/attendance/regularisation')}
+        />
       </div>
 
       {/* ── ROW 3: Exceptions + Scheduler (2-col) ────────────────────────── */}
@@ -887,7 +995,7 @@ export function ControlCenter() {
         </Card>
 
         {/* Quick Actions — dark card */}
-        <div className="rounded-xl bg-foreground text-background ring-1 ring-white/10 flex flex-col overflow-hidden">
+        <div className="rounded-2xl bg-foreground text-background shadow-card-md flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <p className="font-display text-sm font-semibold text-background">Quick Actions</p>
             <span className="text-[9px] font-bold uppercase tracking-widest text-background/40">SHORTCUTS</span>
@@ -984,35 +1092,35 @@ export function ControlCenter() {
 
         {/* New Joiners + Absent Today */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-card ring-1 ring-black/5 p-4 flex flex-col">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">New Joiners</p>
-              <UserPlus className="h-3.5 w-3.5 text-info/60" />
-            </div>
-            <p className={cn('font-display text-3xl font-bold tabular-nums mt-1',
-              (dashStats?.new_joiners_this_month ?? 0) > 0 ? 'text-info' : 'text-foreground')}>
-              {dashStats?.new_joiners_this_month ?? '—'}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1.5">This month</p>
-          </div>
-          <div className="rounded-xl bg-card ring-1 ring-black/5 p-4 flex flex-col cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => nav('/admin/attendance/muster')}>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Absent Today</p>
-              <UserX className={cn('h-3.5 w-3.5', todayAbsent > 0 ? 'text-warning/60' : 'text-muted-foreground/40')} />
-            </div>
-            <p className={cn('font-display text-3xl font-bold tabular-nums mt-1',
-              todayAbsent > 0 ? 'text-warning' : 'text-foreground')}>
-              {todayAbsent}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1.5">Real-time</p>
-          </div>
+          <KpiCard
+            label="New Joiners"
+            value={dashStats?.new_joiners_this_month ?? '—'}
+            icon={UserPlus}
+            iconBg="bg-sky-50"
+            iconColor="text-sky-600"
+            valueColor={(dashStats?.new_joiners_this_month ?? 0) > 0 ? 'text-sky-600' : undefined}
+            sub="This month"
+            trend={(dashStats?.new_joiners_this_month ?? 0) > 0 ? `+${dashStats!.new_joiners_this_month}` : undefined}
+            trendPositive={true}
+          />
+          <KpiCard
+            label="Absent Today"
+            value={todayAbsent}
+            icon={UserX}
+            iconBg={todayAbsent > 0 ? 'bg-amber-50' : 'bg-muted'}
+            iconColor={todayAbsent > 0 ? 'text-amber-600' : 'text-muted-foreground'}
+            valueColor={todayAbsent > 0 ? 'text-amber-600' : undefined}
+            sub="Real-time"
+            trend={todayAbsent > 0 ? `${todayAbsent} out` : undefined}
+            trendPositive={false}
+            onClick={() => nav('/admin/attendance/muster')}
+          />
         </div>
       </div>
 
       {/* ── ROW 6: Payroll footer bar ─────────────────────────────────────── */}
       {payroll && (
-        <div className="rounded-xl bg-card ring-1 ring-black/5 px-5 py-3 flex items-center gap-5 flex-wrap">
+        <div className="rounded-2xl bg-card shadow-card px-5 py-3 flex items-center gap-5 flex-wrap">
           <div className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
               <Database className="h-3.5 w-3.5 text-primary" />
@@ -1067,43 +1175,35 @@ export function ControlCenter() {
       <div className="grid grid-cols-3 gap-4">
 
         {/* Corrections */}
-        <div className="rounded-xl bg-card ring-1 ring-black/5 px-5 py-4 flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => nav('/admin/attendance/corrections')}>
-          <div className={cn(
-            'h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0',
-            correctionsCount > 0 ? 'bg-warning/10' : 'bg-success/10',
-          )}>
-            <CheckSquare className={cn('h-4.5 w-4.5', correctionsCount > 0 ? 'text-warning' : 'text-success')} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Corrections</p>
-            <p className={cn('font-display text-2xl font-bold tabular-nums', correctionsCount > 0 ? 'text-warning' : 'text-foreground')}>
-              {correctionsCount}
-            </p>
-            <p className="text-xs text-muted-foreground">Today's edits</p>
-          </div>
-        </div>
+        <KpiCard
+          label="Corrections"
+          value={correctionsCount}
+          icon={CheckSquare}
+          iconBg={correctionsCount > 0 ? 'bg-orange-50' : 'bg-emerald-50'}
+          iconColor={correctionsCount > 0 ? 'text-orange-500' : 'text-emerald-600'}
+          valueColor={correctionsCount > 0 ? 'text-orange-500' : undefined}
+          sub="Today's edits"
+          trend={correctionsCount > 0 ? `${correctionsCount} pending` : 'All clear'}
+          trendPositive={correctionsCount === 0}
+          onClick={() => nav('/admin/attendance/corrections')}
+        />
 
         {/* Pending Approvals */}
-        <div className="rounded-xl bg-card ring-1 ring-black/5 px-5 py-4 flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => nav('/admin/attendance/regularisation')}>
-          <div className={cn(
-            'h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0',
-            regList.length > 0 ? 'bg-info/10' : 'bg-muted',
-          )}>
-            <ClipboardList className={cn('h-4.5 w-4.5', regList.length > 0 ? 'text-info' : 'text-muted-foreground')} />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pending Approvals</p>
-            <p className={cn('font-display text-2xl font-bold tabular-nums', regList.length > 0 ? 'text-info' : 'text-foreground')}>
-              {regList.length}
-            </p>
-            <p className="text-xs text-muted-foreground">Awaiting admin</p>
-          </div>
-        </div>
+        <KpiCard
+          label="Pending Approvals"
+          value={regList.length}
+          icon={ClipboardList}
+          iconBg={regList.length > 0 ? 'bg-violet-50' : 'bg-muted'}
+          iconColor={regList.length > 0 ? 'text-violet-600' : 'text-muted-foreground'}
+          valueColor={regList.length > 0 ? 'text-violet-600' : undefined}
+          sub="Awaiting admin"
+          trend={regList.length > 0 ? `${regList.length} waiting` : undefined}
+          trendPositive={false}
+          onClick={() => nav('/admin/attendance/regularisation')}
+        />
 
         {/* Operations Timeline */}
-        <div className="rounded-xl bg-card ring-1 ring-black/5 px-5 py-4">
+        <div className="rounded-2xl bg-card shadow-card px-5 py-4">
           <div className="flex items-center justify-between mb-2">
             <p className="font-display text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Operations Timeline</p>
             <button
@@ -1141,7 +1241,7 @@ export function ControlCenter() {
 
       {/* ── Escalated Corrections (SLA breached) — conditional ───────────── */}
       {escalatedRegList.length > 0 && (
-        <div className="rounded-xl bg-card ring-1 ring-black/5 overflow-hidden">
+        <div className="rounded-2xl bg-card shadow-card overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-border/50">
             <div>
               <p className="font-display text-sm font-semibold text-foreground">Escalated Corrections</p>

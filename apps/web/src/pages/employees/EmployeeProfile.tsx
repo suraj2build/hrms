@@ -22,7 +22,15 @@ import {
   MapPin, LayoutGrid, CalendarClock, GraduationCap,
   AlertTriangle, CheckCircle2, Banknote, TrendingUp,
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy,
+  ChevronDown, Info, RefreshCw,
 } from 'lucide-react'
+import {
+  SeverityBadge,
+  RiskIndicator,
+  IntelligenceEmptyState,
+  IntelligenceLoadingSkeleton,
+  ExplainabilityDrawer,
+} from '@/components/ui/intelligence/index.js'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -30,12 +38,26 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter } from '@/components/ui/sheet'
 import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
+import {
+  PFModeBadge,
+  ESIStatusBadge,
+  StatutoryExplainer,
+  StatutoryEmptyNote,
+  InfoTooltip,
+  TooltipProvider,
+  PF_MODE_TOOLTIP,
+  ESI_STATUS_TOOLTIP,
+  type PFMode,
+  type ESIStatusType,
+} from '@/components/payroll/StatutoryBadges'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -111,9 +133,10 @@ function fmt(val?: string | null) { return val ?? '—' }
 
 function fmtDate(s?: string | null) {
   if (!s) return '—'
-  return new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtMoney(n?: number | null) {
@@ -184,6 +207,352 @@ function AssignableField({
   )
 }
 
+// ── Intelligence Panel ────────────────────────────────────────────────────────
+
+function VerificationChip({ status }: { status: string }) {
+  const config: Record<string, { label: string; className: string }> = {
+    verified:      { label: 'Verified',      className: 'bg-success/10 text-success' },
+    pending:       { label: 'Pending',        className: 'bg-muted/50 text-muted-foreground' },
+    degraded:      { label: 'Degraded',       className: 'bg-warning/10 text-warning-foreground' },
+    failed:        { label: 'Failed',         className: 'bg-destructive/10 text-destructive' },
+    needs_review:  { label: 'Needs Review',   className: 'bg-orange-50 text-orange-600' },
+    partial_match: { label: 'Partial Match',  className: 'bg-amber-50 text-amber-700' },
+    expired:       { label: 'Expired',        className: 'bg-muted/40 text-muted-foreground' },
+    inconclusive:  { label: 'Inconclusive',   className: 'bg-muted/40 text-muted-foreground' },
+    skipped:       { label: 'Not verified',   className: 'bg-muted/30 text-muted-foreground' },
+  }
+  const c = config[status] ?? { label: status, className: 'bg-muted/30 text-muted-foreground' }
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${c.className}`}>
+      {c.label}
+    </span>
+  )
+}
+
+function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmin: boolean }) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerItem, setDrawerItem] = useState<any>(null)
+
+  const { data: trustData, isLoading: trustLoading } = useQuery({
+    queryKey: ['employee-trust-score', employeeId],
+    queryFn: () => api.get(`/trust/scores/employee/${employeeId}`),
+    enabled: !!employeeId && open,
+    retry: false,
+  })
+
+  const { data: verData, isLoading: verLoading } = useQuery({
+    queryKey: ['employee-verifications', employeeId],
+    queryFn: () => api.get(`/trust/verifications/employee/${employeeId}`),
+    enabled: !!employeeId && open,
+    retry: false,
+  })
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.post(`/trust/verifications/retry/${employeeId}`),
+    onSuccess: () => {
+      toast.success('Verification retry scheduled')
+      queryClient.invalidateQueries({ queryKey: ['employee-verifications', employeeId] })
+    },
+    onError: () => toast.error('Retry failed'),
+  })
+
+  const verifications: any[] = (verData as any)?.verifications ?? []
+
+  const hasCritical = verifications.some((v: any) => v.status === 'failed')
+
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      {/* Collapsed header */}
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 hover:bg-muted/40 text-sm transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground/60" />
+          <span className="font-medium text-foreground/80">Compliance Intelligence</span>
+          {hasCritical && (
+            <SeverityBadge severity="critical" className="ml-1" />
+          )}
+        </div>
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/40 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {/* Expanded content */}
+      {open && (
+        <div className="px-4 py-3 space-y-3 border-t">
+          {/* Section A: Trust Score */}
+          {trustLoading
+            ? <IntelligenceLoadingSkeleton rows={1} cardHeight="h-8" />
+            : (trustData as any)?.score != null
+              ? (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Trust Score</span>
+                  <RiskIndicator score={(trustData as any).score} />
+                </div>
+              )
+              : null}
+
+          {/* Section B: Verification Status Chips */}
+          {verLoading
+            ? <IntelligenceLoadingSkeleton rows={2} cardHeight="h-7" />
+            : verifications.length > 0
+              ? (
+                <div className="space-y-1.5">
+                  {verifications.map((v: any) => (
+                    <div key={v.verification_type} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground capitalize">
+                        {v.verification_type === 'bank_account' ? 'Bank Account' : v.verification_type.toUpperCase()}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <VerificationChip status={v.status} />
+                        {v.verified_at && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {(() => { const _d = new Date(v.verified_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}` })()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+              : (
+                !verLoading && (
+                  <IntelligenceEmptyState
+                    title="No verification records yet"
+                    description="Records appear after the first verification run."
+                  />
+                )
+              )}
+
+          {/* Section C: Explainability text */}
+          {verifications.filter((v: any) => v.explanation).slice(0, 1).map((v: any) => (
+            <p key={v.verification_type} className="text-[11px] text-muted-foreground bg-muted/20 rounded px-2 py-1.5 leading-relaxed">
+              {v.explanation}
+            </p>
+          ))}
+
+          {/* Section D: Admin Retry Button */}
+          {isAdmin && verifications.some((v: any) => ['degraded', 'failed', 'pending'].includes(v.status)) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[10px] w-full gap-1.5"
+              onClick={() => retryMutation.mutate()}
+              disabled={retryMutation.isPending}
+            >
+              {retryMutation.isPending
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <RefreshCw className="h-3 w-3" />}
+              Re-verify
+            </Button>
+          )}
+        </div>
+      )}
+
+      <ExplainabilityDrawer
+        open={drawerOpen}
+        onClose={() => { setDrawerOpen(false); setDrawerItem(null) }}
+        title="Intelligence Detail"
+        explainability={drawerItem?.explainability}
+      />
+    </div>
+  )
+}
+
+// ── Compensation Revision Drawer ──────────────────────────────────────────────
+
+interface CompensationRevisionDrawerProps {
+  revision:   any | null
+  currentCTC: number
+  onClose:    () => void
+  isAdmin:    boolean
+  onApprove:  (id: string) => void
+  onReject:   (id: string) => void
+}
+
+function CompensationRevisionDrawer({
+  revision, currentCTC, onClose, isAdmin, onApprove, onReject,
+}: CompensationRevisionDrawerProps) {
+  if (!revision) return null
+
+  const oldAnnual  = revision.before_ctc_annual ?? currentCTC
+  const newAnnual  = revision.new_ctc_annual     ?? 0
+  const delta      = newAnnual - oldAnnual
+  const deltaMonthly = delta / 12
+  const pct        = oldAnnual > 0 ? ((delta / oldAnnual) * 100).toFixed(1) : '0.0'
+  const isUp       = delta >= 0
+
+  const oldMonthly = oldAnnual / 12
+  const newMonthly = newAnnual / 12
+  const pfDelta    = Math.min(newMonthly, 15000) * 0.12 - Math.min(oldMonthly, 15000) * 0.12
+  const esiEligible = newMonthly <= 21000
+
+  const effectiveDateObj = revision.effective_date
+    ? new Date(`${revision.effective_date.slice(0, 10)}T00:00:00`)
+    : null
+  const effectiveMonth = (() => {
+    if (!effectiveDateObj) return '—'
+    const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    if (isNaN(effectiveDateObj.getTime())) return '—'
+    return `${_M[effectiveDateObj.getMonth()]}-${effectiveDateObj.getFullYear()}`
+  })()
+
+  const narrative = (() => {
+    const pctNum = Math.abs(Number(pct))
+    const dir    = isUp ? 'increase' : 'decrease'
+    const pfNote = Math.abs(pfDelta) < 1 ? '' : ` PF employer contribution changes by ${fmtMoney(Math.abs(pfDelta))}/mo.`
+    const esiNote = esiEligible ? ' ESI applicable at new CTC.' : ' ESI not applicable at new CTC.'
+    return `${pctNum.toFixed(1)}% ${dir} from previous CTC. No compliance risk detected.${pfNote}${esiNote} Effective from ${effectiveMonth}.`
+  })()
+
+  const statusVariant =
+    revision.status === 'approved' ? 'success' :
+    revision.status === 'rejected' ? 'destructive' :
+    revision.status === 'pending'  ? 'warning' : 'secondary'
+
+  return (
+    <Sheet open={!!revision} onOpenChange={open => { if (!open) onClose() }}>
+      <SheetContent size="sm">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2 text-sm">
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            Revision Detail
+          </SheetTitle>
+          <div className="flex items-center gap-2 mt-1">
+            <Badge variant="outline" className="rounded-full text-[10px] capitalize">
+              {revision.revision_type ?? '—'}
+            </Badge>
+            <Badge variant={statusVariant as any} className="rounded-full text-[10px] capitalize">
+              {revision.status ?? '—'}
+            </Badge>
+          </div>
+        </SheetHeader>
+
+        <SheetBody className="space-y-4">
+
+          {/* 1. What Changed */}
+          <div className="rounded-lg border bg-card p-3 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">What Changed</p>
+            <div className="flex items-center gap-2 text-sm">
+              {revision.before_ctc_annual && (
+                <>
+                  <span className="tabular-nums text-muted-foreground">{fmtMoney(revision.before_ctc_annual)}</span>
+                  <span className="text-muted-foreground">→</span>
+                </>
+              )}
+              <span className="font-semibold tabular-nums">{fmtMoney(newAnnual)}</span>
+              <span className={cn('text-xs font-semibold', isUp ? 'text-success' : 'text-destructive')}>
+                {isUp ? '+' : ''}{pct}%
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Effective: <span className="font-medium text-foreground">{fmtDate(revision.effective_date)}</span>
+            </p>
+          </div>
+
+          {/* 2. Financial Impact */}
+          <div className="rounded-lg border bg-card p-3 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Financial Impact</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-muted/30 p-2 text-center">
+                <p className="text-[10px] text-muted-foreground mb-0.5">Monthly Change</p>
+                <p className={cn('text-sm font-bold tabular-nums', isUp ? 'text-success' : 'text-destructive')}>
+                  {isUp ? '+' : ''}{fmtMoney(deltaMonthly)}/mo
+                </p>
+              </div>
+              <div className="rounded-md bg-muted/30 p-2 text-center">
+                <p className="text-[10px] text-muted-foreground mb-0.5">Annual Change</p>
+                <p className={cn('text-sm font-bold tabular-nums', isUp ? 'text-success' : 'text-destructive')}>
+                  {isUp ? '+' : ''}{fmtMoney(delta)}/yr
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Payroll Impact */}
+          <div className="rounded-lg border bg-card p-3 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Payroll Impact</p>
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">PF Employer Delta</span>
+                <span className={cn('font-medium tabular-nums', pfDelta >= 0 ? 'text-foreground' : 'text-destructive')}>
+                  {pfDelta >= 0 ? '+' : ''}{fmtMoney(pfDelta)}/mo
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">ESI Applicability</span>
+                <Badge
+                  variant={esiEligible ? 'success' : 'secondary'}
+                  className="rounded-full text-[9px]"
+                >
+                  {esiEligible ? 'Eligible' : 'Not eligible'}
+                </Badge>
+              </div>
+              {!esiEligible && (
+                <p className="text-[10px] text-muted-foreground">Monthly CTC exceeds ₹21,000 limit.</p>
+              )}
+            </div>
+          </div>
+
+          {/* 4. Effective Cycle */}
+          <div className="rounded-lg border bg-card p-3 space-y-1">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Effective Cycle</p>
+            <p className="text-xs text-foreground">
+              Effective from <span className="font-medium">{effectiveMonth}</span>. Will be included in the next payroll cycle after the effective date.
+            </p>
+          </div>
+
+          {/* 5. Explainability */}
+          <div className="rounded-lg bg-muted/30 border border-border p-3 space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Info className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Summary</p>
+            </div>
+            <p className="text-xs text-foreground/80 leading-relaxed">{narrative}</p>
+          </div>
+
+          {/* Reason / Notes */}
+          {revision.reason && (
+            <div className="text-xs space-y-0.5">
+              <p className="text-muted-foreground font-semibold">Reason</p>
+              <p className="text-foreground">{revision.reason}</p>
+            </div>
+          )}
+          {revision.notes && (
+            <div className="text-xs space-y-0.5">
+              <p className="text-muted-foreground font-semibold">Notes</p>
+              <p className="text-foreground">{revision.notes}</p>
+            </div>
+          )}
+
+        </SheetBody>
+
+        {isAdmin && revision.status === 'pending' && (
+          <SheetFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={() => { onReject(revision.id); onClose() }}
+            >
+              Reject
+            </Button>
+            <Button
+              size="sm"
+              className="text-success-foreground bg-success hover:bg-success/90"
+              onClick={() => { onApprove(revision.id); onClose() }}
+            >
+              Approve
+            </Button>
+          </SheetFooter>
+        )}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function EmployeeProfile() {
@@ -243,6 +612,47 @@ export function EmployeeProfile() {
     queryKey: ['contracts', id], queryFn: () => api.get(`/employees/${id}/contracts`),
     enabled: !!id && visited.has('compensation'), staleTime: 30_000,
   })
+
+  // ── Statutory eligibility (lazy — bank sub-tab only) ────────────────────────
+  // EPF eligibility override: PF mode, ceiling restriction, international worker
+  const { data: epfEligData } = useQuery<{ data: any[] }>({
+    queryKey: ['epf-elig-profile', id],
+    queryFn:  () => api.get(`/payroll/statutory/epf/eligibility`),
+    enabled:  !!id && visited.has('compensation'),
+    staleTime: 120_000,
+    select: (res: any) => ({
+      data: (res.data ?? []).filter((r: any) => r.employee_id === id),
+    }),
+  })
+  const { data: esiEligData } = useQuery<{ data: any[] }>({
+    queryKey: ['esi-elig-profile', id],
+    queryFn:  () => api.get(`/payroll/statutory/esi/eligibility?employee_id=${id}&active_only=true`),
+    enabled:  !!id && visited.has('compensation'),
+    staleTime: 120_000,
+  })
+
+  const epfOverride = epfEligData?.data?.[0] ?? null
+  const esiEligRow  = esiEligData?.data?.[0] ?? null
+
+  // Derive PF mode for display
+  const profilePfMode: PFMode | null = epfOverride
+    ? (epfOverride.restrict_pf_to_ceiling === true
+        ? 'capped'
+        : epfOverride.restrict_pf_to_ceiling === false
+          ? 'actual'
+          : (epfOverride.higher_pf_opted ? 'actual' : null))
+    : null
+
+  // Derive ESI status for display
+  const profileToday = new Date().toISOString().slice(0, 10)
+  const esiContinuationActive = !!(esiEligRow?.continuation_until && esiEligRow.continuation_until >= profileToday)
+  const profileEsiStatus: ESIStatusType | null = esiEligRow
+    ? (esiEligRow.is_esi_applicable === false
+        ? 'not_applicable'
+        : esiContinuationActive
+          ? 'continuation'
+          : 'eligible')
+    : null
   const { data: docsData } = useQuery<{ data: any[] }>({
     queryKey: ['emp-docs', id], queryFn: () => api.get(`/employees/${id}/documents`),
     enabled: !!id && visited.has('documents'), staleTime: 30_000,
@@ -415,9 +825,10 @@ export function EmployeeProfile() {
 
   // ── Compensation revision state ─────────────────────────────────────────────
   const today = new Date().toISOString().slice(0, 10)
-  const [revisionOpen, setRevisionOpen]   = useState(false)
-  const [rejectTarget, setRejectTarget]   = useState<string | null>(null)
-  const [rejectReason, setRejectReason]   = useState('')
+  const [revisionOpen, setRevisionOpen]     = useState(false)
+  const [rejectTarget, setRejectTarget]     = useState<string | null>(null)
+  const [rejectReason, setRejectReason]     = useState('')
+  const [drawerRevision, setDrawerRevision] = useState<any | null>(null)
   const [revisionForm, setRevisionForm] = useState({
     revision_type:    'increment',
     effective_date:   today,
@@ -849,6 +1260,177 @@ export function EmployeeProfile() {
     onError:   (e: Error) => toast.error('Failed to delete document', { description: e.message }),
   })
 
+  // ── Bank & Statutory edit ──────────────────────────────────────────────────
+  const [editBankOpen, setEditBankOpen] = useState(false)
+  const [bankForm, setBankForm] = useState({
+    bank_name: '', account_number: '', ifsc_code: '', branch_name: '',
+    account_type: '' as 'savings' | 'current' | 'salary' | '',
+    pan_number: '', aadhaar_number: '', uan_number: '', pf_number: '',
+    esi_number: '', pt_applicable: false, lwf_applicable: false,
+    tax_regime: 'new' as 'old' | 'new',
+  })
+  const bankMutation = useMutation({
+    mutationFn: () => {
+      const body: Record<string, unknown> = {}
+      if (bankForm.bank_name)      body.bank_name      = bankForm.bank_name
+      if (bankForm.account_number) body.account_number = bankForm.account_number
+      if (bankForm.ifsc_code)      body.ifsc_code      = bankForm.ifsc_code
+      if (bankForm.branch_name)    body.branch_name    = bankForm.branch_name
+      if (bankForm.account_type)   body.account_type   = bankForm.account_type
+      if (bankForm.pan_number)     body.pan_number     = bankForm.pan_number
+      if (bankForm.aadhaar_number) body.aadhaar_number = bankForm.aadhaar_number
+      if (bankForm.uan_number)     body.uan_number     = bankForm.uan_number
+      if (bankForm.pf_number)      body.pf_number      = bankForm.pf_number
+      if (bankForm.esi_number)     body.esi_number     = bankForm.esi_number
+      body.pt_applicable  = bankForm.pt_applicable
+      body.lwf_applicable = bankForm.lwf_applicable
+      body.tax_regime     = bankForm.tax_regime
+      return api.put(`/employees/${id}/bank-statutory`, body)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      setEditBankOpen(false)
+      toast.success('Bank & Statutory details updated')
+    },
+    onError: (e: Error) => toast.error('Save failed', { description: e.message }),
+  })
+
+  // ── Separation ─────────────────────────────────────────────────────────────
+  const [sepDlgOpen, setSepDlgOpen]  = useState(false)
+  const [sepIsEdit,  setSepIsEdit]   = useState(false)
+  const [sepForm, setSepForm] = useState({
+    separation_type:     'resignation',
+    initiated_by:        'employee',
+    notice_date:         '',
+    last_working_date:   '',
+    exit_reason:         '',
+    exit_interview_done: false,
+    clearance_done:      false,
+    remarks:             '',
+  })
+  function openSepDialog(edit: boolean) {
+    setSepIsEdit(edit)
+    if (edit && separationData?.data) {
+      const d = separationData.data
+      setSepForm({
+        separation_type:     d.separation_type     ?? 'resignation',
+        initiated_by:        d.initiated_by        ?? 'employee',
+        notice_date:         d.notice_date?.slice(0, 10)       ?? '',
+        last_working_date:   d.last_working_date?.slice(0, 10) ?? '',
+        exit_reason:         d.exit_reason         ?? '',
+        exit_interview_done: d.exit_interview_done ?? false,
+        clearance_done:      d.clearance_done      ?? false,
+        remarks:             d.remarks             ?? '',
+      })
+    } else {
+      setSepForm({ separation_type: 'resignation', initiated_by: 'employee', notice_date: '', last_working_date: '', exit_reason: '', exit_interview_done: false, clearance_done: false, remarks: '' })
+    }
+    setSepDlgOpen(true)
+  }
+  const createSepMutation = useMutation({
+    mutationFn: () => api.post(`/employees/${id}/separation`, {
+      ...sepForm,
+      notice_date:       sepForm.notice_date       || undefined,
+      last_working_date: sepForm.last_working_date || undefined,
+      exit_reason:       sepForm.exit_reason       || undefined,
+      remarks:           sepForm.remarks           || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['separation', id] })
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      setSepDlgOpen(false)
+      toast.success('Separation initiated')
+    },
+    onError: (e: Error) => toast.error('Failed to initiate separation', { description: e.message }),
+  })
+  const updateSepMutation = useMutation({
+    mutationFn: () => api.put(`/employees/${id}/separation`, {
+      ...sepForm,
+      notice_date:       sepForm.notice_date       || undefined,
+      last_working_date: sepForm.last_working_date || undefined,
+      exit_reason:       sepForm.exit_reason       || undefined,
+      remarks:           sepForm.remarks           || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['separation', id] })
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      setSepDlgOpen(false)
+      toast.success('Separation record updated')
+    },
+    onError: (e: Error) => toast.error('Failed to update separation', { description: e.message }),
+  })
+
+  // ── Contracts CRUD ─────────────────────────────────────────────────────────
+  const [addContractOpen,  setAddContractOpen]  = useState(false)
+  const [editContractId,   setEditContractId]   = useState<string | null>(null)
+  const [contractForm, setContractForm] = useState({
+    contract_type: 'appointment', start_date: '', end_date: '',
+    status: 'active', notes: '',
+  })
+  function openContractDialog(c?: any) {
+    if (c) {
+      setEditContractId(c.id)
+      setContractForm({
+        contract_type: c.contract_type ?? 'appointment',
+        start_date:    c.start_date?.slice(0, 10) ?? '',
+        end_date:      c.end_date?.slice(0, 10)   ?? '',
+        status:        c.status        ?? 'active',
+        notes:         c.notes         ?? '',
+      })
+    } else {
+      setEditContractId(null)
+      setContractForm({ contract_type: 'appointment', start_date: new Date().toISOString().slice(0, 10), end_date: '', status: 'active', notes: '' })
+    }
+    setAddContractOpen(true)
+  }
+  const addContractMutation = useMutation({
+    mutationFn: () => api.post(`/employees/${id}/contracts`, {
+      ...contractForm,
+      end_date: contractForm.end_date || undefined,
+      notes:    contractForm.notes    || undefined,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', id] }); setAddContractOpen(false); toast.success('Contract added') },
+    onError:   (e: Error) => toast.error('Failed to add contract', { description: e.message }),
+  })
+  const editContractMutation = useMutation({
+    mutationFn: (contractId: string) => api.put(`/employees/${id}/contracts/${contractId}`, {
+      ...contractForm,
+      end_date: contractForm.end_date || undefined,
+      notes:    contractForm.notes    || undefined,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', id] }); setAddContractOpen(false); setEditContractId(null); toast.success('Contract updated') },
+    onError:   (e: Error) => toast.error('Failed to update contract', { description: e.message }),
+  })
+  const delContractMutation = useMutation({
+    mutationFn: (contractId: string) => api.delete(`/employees/${id}/contracts/${contractId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', id] }); toast.success('Contract deleted') },
+    onError:   (e: Error) => toast.error('Failed to delete contract', { description: e.message }),
+  })
+
+  // ── Nominations CRUD ───────────────────────────────────────────────────────
+  const [nomDlgOpen, setNomDlgOpen] = useState(false)
+  const [nomScheme, setNomScheme]   = useState<'pf' | 'gratuity' | 'esi' | 'superannuation'>('pf')
+  const [nomForm, setNomForm] = useState({
+    nominee_name: '', share_percentage: '', dob: '', is_minor: false, guardian_name: '',
+  })
+  const addNomMutation = useMutation({
+    mutationFn: () => api.post(`/employees/${id}/nominations`, {
+      scheme:           nomScheme,
+      nominee_name:     nomForm.nominee_name,
+      share_percentage: Number(nomForm.share_percentage),
+      dob:              nomForm.dob || undefined,
+      is_minor:         nomForm.is_minor,
+      guardian_name:    nomForm.is_minor ? (nomForm.guardian_name || undefined) : undefined,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nominations', id] }); setNomDlgOpen(false); toast.success('Nominee added') },
+    onError:   (e: Error) => toast.error(e.message),
+  })
+  const delNomMutation = useMutation({
+    mutationFn: (nomId: string) => api.delete(`/employees/${id}/nominations/${nomId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nominations', id] }); toast.success('Nominee removed') },
+    onError:   (e: Error) => toast.error('Failed to remove nominee', { description: e.message }),
+  })
+
   const openSignedUrl = useCallback(async (path: string) => {
     try { window.open(await getSignedUrl(path), '_blank') }
     catch { toast.error('Could not open file') }
@@ -947,68 +1529,94 @@ export function EmployeeProfile() {
 
       {/* ── Left Card ── */}
       <div className="w-72 flex-shrink-0 sticky top-4">
-        <Card className="overflow-hidden">
-          <div className="h-32 bg-gradient-to-br from-primary/60 via-primary/30 to-accent/25 relative">
-            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">
-              <div className="relative">
-                <div className="h-20 w-20 rounded-full ring-4 ring-card bg-primary/20 flex items-center justify-center">
-                  <span className="text-xl font-bold text-primary">{initials}</span>
-                </div>
-                {photoMutation.isPending && (
-                  <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center">
-                    <Loader2 className="h-5 w-5 animate-spin text-white" />
-                  </div>
+        {/* ── Profile Card ── */}
+        <div className="overflow-hidden rounded-3xl bg-card border border-border shadow-md">
+
+          {/* ── Banner ── */}
+          <div className="h-32 bg-gradient-to-tr from-primary/40 via-primary/25 to-accent/30 relative overflow-hidden">
+            <div className="absolute -top-6 -right-6 h-28 w-28 rounded-full bg-white/10" />
+            <div className="absolute -bottom-10 -left-4 h-24 w-24 rounded-full bg-white/10" />
+            <div className="absolute top-4 right-14 h-8 w-8 rounded-full bg-white/10" />
+          </div>
+
+          {/* ── Avatar (outside banner so overflow-hidden doesn't clip it) ── */}
+          <div className="flex justify-center -mt-14 relative z-10 px-5">
+            <div className="relative">
+              <div className="h-28 w-28 rounded-2xl ring-[3px] ring-card bg-muted border border-border/50 flex items-center justify-center overflow-hidden shadow-lg">
+                {pi?.profile_photo ? (
+                  <img
+                    src={pi.profile_photo}
+                    alt={`${emp.first_name} ${emp.last_name}`}
+                    className="h-full w-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="text-3xl font-black text-primary tracking-tight select-none">{initials}</span>
                 )}
               </div>
+              {photoMutation.isPending && (
+                <div className="absolute inset-0 rounded-2xl bg-background/80 backdrop-blur-sm flex items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="pt-12 pb-5 px-5 flex flex-col items-center gap-3">
-            <div className="text-center">
-              <p className="font-display text-base font-semibold text-foreground">{emp.first_name} {emp.last_name}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {job?.designations?.name ?? job?.departments?.name ?? '—'}
+          {/* ── Content ── */}
+          <div className="pt-4 pb-6 px-5 flex flex-col items-center gap-4">
+
+            {/* Name + designation */}
+            <div className="text-center w-full space-y-1">
+              <h2 className="font-display text-[15px] font-extrabold text-foreground leading-tight tracking-tight">
+                {emp.first_name} {emp.last_name}
+              </h2>
+              <p className="text-[10.5px] text-primary font-bold truncate uppercase tracking-widest">
+                {job?.designations?.name ?? job?.departments?.name ?? 'Unassigned'}
               </p>
             </div>
 
-            <Badge variant={STATUS_VARIANT[emp.status] ?? 'secondary'} className="rounded-full text-[10px] capitalize">
-              {emp.status.replace('_', ' ')}
+            <Badge
+              variant={STATUS_VARIANT[emp.status] ?? 'secondary'}
+              className="rounded-full text-[9px] font-bold uppercase tracking-widest select-none px-4 py-1"
+            >
+              {emp.status.replace(/_/g, ' ')}
             </Badge>
 
-            <div className="w-full space-y-2 pt-2 border-t border-border">
+            {/* Meta fields */}
+            <div className="w-full rounded-xl bg-muted/40 border border-border/60 overflow-hidden">
               {[
-                { label: 'Employee Code',   value: emp.employee_code },
-                { label: 'Employment Type', value: job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : '—' },
-                { label: 'Joining Date',    value: fmtDate(emp.joining_date) },
-              ].map(({ label, value }) => (
-                <div key={label} className="flex justify-between items-center text-xs">
-                  <span className="text-muted-foreground">{label}</span>
-                  <span className="font-medium text-foreground text-right max-w-[140px] truncate">{value}</span>
+                { label: 'Employee ID',     value: emp.employee_code },
+                { label: 'Engagement',      value: job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : '—' },
+                { label: 'Date Joined',     value: fmtDate(emp.joining_date) },
+              ].map(({ label, value }, i, arr) => (
+                <div key={label} className={cn(
+                  'flex justify-between items-center px-3.5 py-2.5 text-xs',
+                  i < arr.length - 1 && 'border-b border-border/60',
+                )}>
+                  <span className="text-muted-foreground font-medium">{label}</span>
+                  <span className="font-bold text-foreground text-right max-w-[130px] truncate">{value}</span>
                 </div>
               ))}
             </div>
 
-            {/* ── Org Hierarchy Chain ── */}
+            {/* ── Organisation Line ── */}
             {(emp.sites || job?.work_locations || job?.departments || job?.cost_center) && (
-              <div className="w-full pt-2 border-t border-border space-y-0.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">
-                  Org Placement
+              <div className="w-full rounded-xl bg-muted/40 border border-border/60 px-3.5 py-3 space-y-2">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1">
+                  Organisation Line
                 </p>
                 {[
-                  emp.sites         ? { label: emp.sites.name,              icon: 'Globe',    isLast: !job?.work_locations && !job?.departments && !job?.cost_center } : null,
-                  job?.work_locations ? { label: job.work_locations.name,   icon: 'MapPin',   isLast: !job?.departments && !job?.cost_center } : null,
-                  job?.departments  ? { label: job.departments.name,        icon: 'Building2',isLast: !job?.cost_center } : null,
-                  job?.cost_center  ? { label: `${job.cost_center.code}`,   icon: 'DollarSign',isLast: true } : null,
+                  emp.sites           ? { label: emp.sites.name,                                                                                                  Icon: Globe,      isLast: !job?.work_locations && !job?.departments && !job?.cost_center } : null,
+                  job?.work_locations ? { label: job.work_locations.name,                                                                                         Icon: MapPin,     isLast: !job?.departments && !job?.cost_center } : null,
+                  job?.departments    ? { label: job.departments.name,                                                                                            Icon: Building2,  isLast: !job?.cost_center } : null,
+                  job?.cost_center    ? { label: job.cost_center.name ? `${job.cost_center.name} (${job.cost_center.code})` : (job.cost_center.code ?? '—'),      Icon: DollarSign, isLast: true } : null,
                 ].filter(Boolean).map((item, idx) => item && (
-                  <div key={idx} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <span className="text-muted-foreground/30 w-3 text-[9px] shrink-0 font-mono">
+                  <div key={idx} className="flex items-center gap-2 text-[11px]">
+                    <span className="text-muted-foreground/40 w-3 text-center shrink-0 font-mono text-[10px]">
                       {item.isLast ? '└' : '├'}
                     </span>
-                    {item.icon === 'Globe'      && <Globe       className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
-                    {item.icon === 'MapPin'     && <MapPin      className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
-                    {item.icon === 'Building2'  && <Building2   className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
-                    {item.icon === 'DollarSign' && <DollarSign  className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
-                    <span className="truncate">{item.label}</span>
+                    <item.Icon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+                    <span className="truncate text-foreground/80 font-medium">{item.label}</span>
                   </div>
                 ))}
               </div>
@@ -1019,14 +1627,16 @@ export function EmployeeProfile() {
               onChange={e => { const f = e.target.files?.[0]; if (f) photoMutation.mutate(f); e.target.value = '' }}
             />
             <Button
-              variant="outline" size="sm" className="w-full gap-1.5 text-xs mt-1"
+              variant="outline" size="sm"
+              className="w-full gap-2 text-[10px] font-bold uppercase tracking-wider border-border/70 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-all"
               onClick={() => photoInputRef.current?.click()}
               disabled={photoMutation.isPending}
             >
-              <Camera className="h-3.5 w-3.5" />Update Photo
+              <Camera className="h-3.5 w-3.5" />
+              Upload Photo
             </Button>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* ── Right Panel ── */}
@@ -1159,142 +1769,63 @@ export function EmployeeProfile() {
             </Card>
           )}
 
-          {/* CORE › Job Info (read-only) */}
-          {subTab === 'jobinfo' && (
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Current Job Information</CardTitle></CardHeader>
-              <CardContent>
-                {!job
-                  ? <EmptySection icon={Briefcase} title="No job info" subtitle="Add a position in Position History." />
-                  : <>
-                      <Grid2>
-                        <KV label="Department"      value={job.departments?.name} />
-                        <KV label="Designation"     value={job.designations?.name} />
-                        <KV label="Grade"           value={job.grades?.name} />
-                        <KV label="Manager"         value={job.manager ? `${job.manager.first_name} ${job.manager.last_name}` : undefined} />
-                        <KV label="Effective From"  value={fmtDate(job.effective_from)} />
-                        <KV label="Employment Type" value={job.employment_type} />
-                        <KV label="Work Location"   value={job.work_locations?.name} />
-                        <KV label="Shift"           value={job.shifts?.name} />
-                      </Grid2>
-
-                      {/* ── Site + Roster ── */}
-                      <div className="mt-4 pt-4 border-t border-border">
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Organisation Assignment</p>
-                        <Grid2>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Site</p>
-                            {emp?.sites
-                              ? <>
-                                  <p className="text-sm font-medium text-foreground">{emp.sites.name}</p>
-                                  <p className="text-xs text-muted-foreground font-mono">{emp.sites.timezone}</p>
-                                </>
-                              : <p className="text-sm text-muted-foreground">Not assigned</p>
-                            }
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Roster</p>
-                            {emp?.rosters
-                              ? <>
-                                  <p className="text-sm font-medium text-foreground">{emp.rosters.name}</p>
-                                  <p className="text-xs text-muted-foreground">{emp.rosters.cycle_days}-day cycle</p>
-                                </>
-                              : emp?.sites
-                                ? <p className="text-sm text-muted-foreground italic">Inherited from site</p>
-                                : <p className="text-sm text-muted-foreground">No roster</p>
-                            }
-                          </div>
-                        </Grid2>
-                      </div>
-
-                      <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
-                        To change job details, add a new record in Position History.
-                      </p>
-                    </>}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* CORE › Job Info — Work Configuration (admin only) */}
-          {subTab === 'jobinfo' && job && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <AlarmClock className="h-4 w-4 text-muted-foreground" />
-                  Work Configuration
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Shift Override</p>
-                  {job.shifts
-                    ? <Badge variant="secondary" className="rounded-full text-xs border border-orange-200 bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400">{job.shifts.name}</Badge>
-                    : <span className="text-xs text-muted-foreground italic">None — policy resolves</span>}
-                </div>
-                {isAdmin && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Today's Roster</p>
-                    {rosterToday
-                      ? <Badge variant="secondary" className="rounded-full text-xs">{rosterToday.shifts.name} (override)</Badge>
-                      : <span className="text-xs text-muted-foreground">No override — rotation policy applies</span>}
-                  </div>
-                )}
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Work Location</p>
-                  {job.work_locations
-                    ? <span className="font-medium text-foreground">{job.work_locations.name}{job.work_locations.city && <span className="text-xs text-muted-foreground ml-1">· {job.work_locations.city}</span>}</span>
-                    : <span className="text-xs text-muted-foreground">—</span>}
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Reporting Manager</p>
-                  {job.manager
-                    ? <span className="font-medium text-foreground">{job.manager.first_name} {job.manager.last_name}<span className="text-xs text-muted-foreground ml-1">#{job.manager.employee_code}</span></span>
-                    : <span className="text-xs text-muted-foreground">—</span>}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* CORE › Job Info — Monthly Attendance */}
+          {/* CORE › Job Info — single clean read-only snapshot */}
           {subTab === 'jobinfo' && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                    Attendance — {attMonth}
-                  </CardTitle>
-                  <div className="flex items-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
-                      const d = new Date(`${attMonth}-01`); d.setMonth(d.getMonth() - 1)
-                      setAttMonth(d.toISOString().slice(0, 7))
-                    }}><ChevronLeft className="h-3.5 w-3.5" /></Button>
-                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
-                      const d = new Date(`${attMonth}-01`); d.setMonth(d.getMonth() + 1)
-                      setAttMonth(d.toISOString().slice(0, 7))
-                    }}><ChevronRight className="h-3.5 w-3.5" /></Button>
-                  </div>
+                  <CardTitle className="text-sm font-semibold">Current Job Information</CardTitle>
+                  {isAdmin && job && (
+                    <span className="text-[10px] text-muted-foreground">
+                      To change — use <button className="underline hover:text-foreground transition-colors" onClick={() => { changeSection('employment'); setSubTab('workforce') }}>Workforce Assignment</button>
+                    </span>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
-                {attLoading
-                  ? <div className="flex items-center gap-1.5 py-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /><span className="text-xs">Loading…</span></div>
-                  : attSummary
-                    ? (
-                      <div className="grid grid-cols-3 gap-3 text-center">
-                        {[
-                          { label: 'Total Days',   value: attSummary.total_days,   cls: 'text-foreground' },
-                          { label: 'Payable Days', value: attSummary.payable_days ?? attSummary.present, cls: 'text-success' },
-                          { label: 'LOP Days',     value: attSummary.lop_days     ?? attSummary.absent,  cls: 'text-destructive' },
-                        ].map(({ label, value, cls }) => (
-                          <div key={label} className="p-2 rounded-md bg-muted/40">
-                            <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
-                            <p className={`text-lg font-bold ${cls}`}>{value}</p>
+                {!job
+                  ? <EmptySection icon={Briefcase} title="No job info on record" subtitle="Go to Employment › Position History to add a position." />
+                  : (
+                    <>
+                      <Grid2>
+                        <KV label="Department"      value={job.departments?.name} />
+                        <KV label="Designation"     value={job.designations?.name} />
+                        <KV label="Grade / Band"    value={job.grades ? `${job.grades.name} (${job.grades.code})` : null} />
+                        <KV label="Employment Type" value={job.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : undefined} />
+                        <KV label="Reporting Manager" value={job.manager ? `${job.manager.first_name} ${job.manager.last_name} #${job.manager.employee_code}` : undefined} />
+                        <KV label="Work Location"   value={job.work_locations ? `${job.work_locations.name}${job.work_locations.city ? ` · ${job.work_locations.city}` : ''}` : null} />
+                        <KV label="Cost Center"     value={job.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : null} />
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-0.5">Shift</p>
+                          {job.shifts
+                            ? <><p className="text-sm font-medium">{job.shifts.name}</p>
+                               {(job.shifts.start_time || job.shifts.end_time) && <p className="text-xs text-muted-foreground">{job.shifts.start_time} – {job.shifts.end_time}</p>}</>
+                            : <p className="text-sm text-muted-foreground italic">Policy default</p>}
+                        </div>
+                        <KV label="Effective From"  value={fmtDate(job.effective_from)} />
+                      </Grid2>
+
+                      {/* Site + Roster — compact, single row */}
+                      {(emp?.sites || emp?.rosters) && (
+                        <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-0.5">Site</p>
+                            {emp.sites
+                              ? <><p className="text-sm font-medium">{emp.sites.name}</p><p className="text-xs text-muted-foreground font-mono">{emp.sites.timezone}</p></>
+                              : <p className="text-sm text-muted-foreground">Not assigned</p>}
                           </div>
-                        ))}
-                      </div>
-                    )
-                    : <p className="text-xs text-muted-foreground">No data for this month.</p>}
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-0.5">Roster</p>
+                            {emp.rosters
+                              ? <><p className="text-sm font-medium">{emp.rosters.name}</p><p className="text-xs text-muted-foreground">{emp.rosters.cycle_days}-day cycle</p></>
+                              : emp.sites
+                                ? <p className="text-sm text-muted-foreground italic">Inherited from site</p>
+                                : <p className="text-sm text-muted-foreground">—</p>}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
               </CardContent>
             </Card>
           )}
@@ -1604,9 +2135,10 @@ export function EmployeeProfile() {
                   <div className="divide-y divide-border">
                     {importantDates.map((row: ImportantDateRow) => {
                       const d        = new Date(`${row.event_date}T00:00:00`)
-                      const display  = row.year_known
-                        ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                        : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                      const _M2 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                      const display  = isNaN(d.getTime()) ? '—' : row.year_known
+                        ? `${String(d.getDate()).padStart(2,'0')}-${_M2[d.getMonth()]}-${d.getFullYear()}`
+                        : `${String(d.getDate()).padStart(2,'0')}-${_M2[d.getMonth()]}`
                       return (
                         <div key={row.id} className="flex items-center gap-3 py-2.5">
                           <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -1673,11 +2205,10 @@ export function EmployeeProfile() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Date</Label>
-                  <Input
-                    type="date"
+                  <DateInput
                     className="h-8 text-xs"
                     value={idateForm.event_date}
-                    onChange={e => setIdateForm(p => ({ ...p, event_date: e.target.value }))}
+                    onChange={v => setIdateForm(p => ({ ...p, event_date: v }))}
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -1781,13 +2312,15 @@ export function EmployeeProfile() {
                           onAssign={() => openAssign('cost_center')}
                           canAssign={isAdmin}
                         />
+                        <AssignableField
+                          label="Shift"
+                          value={job.shifts ? `${job.shifts.name}${job.shifts.start_time ? ` (${job.shifts.start_time}–${job.shifts.end_time})` : ''}` : null}
+                          onAssign={() => openAssign('shift')}
+                          canAssign={isAdmin}
+                        />
                         <div>
                           <p className="text-xs text-muted-foreground mb-0.5">Assigned Since</p>
                           <p className="text-sm font-medium">{fmtDate(job.effective_from)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Payroll Group</p>
-                          <p className="text-sm text-muted-foreground italic text-[11px]">Not configured in schema</p>
                         </div>
                       </div>
                     )}
@@ -1941,6 +2474,48 @@ export function EmployeeProfile() {
                     )}
                 </CardContent>
               </Card>
+
+              {/* Monthly Attendance — belongs here alongside shift/roster context */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                      Attendance — {attMonth}
+                    </CardTitle>
+                    <div className="flex items-center gap-1">
+                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
+                        const d = new Date(`${attMonth}-01`); d.setMonth(d.getMonth() - 1)
+                        setAttMonth(d.toISOString().slice(0, 7))
+                      }}><ChevronLeft className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
+                        const d = new Date(`${attMonth}-01`); d.setMonth(d.getMonth() + 1)
+                        setAttMonth(d.toISOString().slice(0, 7))
+                      }}><ChevronRight className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {attLoading
+                    ? <div className="flex items-center gap-1.5 py-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /><span className="text-xs">Loading…</span></div>
+                    : attSummary
+                      ? (
+                        <div className="grid grid-cols-3 gap-3 text-center">
+                          {[
+                            { label: 'Total Days',   value: attSummary.total_days,                          cls: 'text-foreground'    },
+                            { label: 'Payable Days', value: attSummary.payable_days ?? attSummary.present,  cls: 'text-success'       },
+                            { label: 'LOP Days',     value: attSummary.lop_days     ?? attSummary.absent,   cls: 'text-destructive'   },
+                          ].map(({ label, value, cls }) => (
+                            <div key={label} className="p-2 rounded-md bg-muted/40">
+                              <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
+                              <p className={`text-lg font-bold ${cls}`}>{value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                      : <p className="text-xs text-muted-foreground">No attendance data for this month.</p>}
+                </CardContent>
+              </Card>
             </div>
           )}
 
@@ -2004,17 +2579,32 @@ export function EmployeeProfile() {
           {/* EMPLOYMENT › Separation */}
           {subTab === 'separation' && (
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Separation</CardTitle></CardHeader>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold">Separation</CardTitle>
+                  {isAdmin && (
+                    separationData?.data
+                      ? <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => openSepDialog(true)}>
+                          <Edit2 className="h-3.5 w-3.5" />Edit
+                        </Button>
+                      : <Button size="sm" variant="outline" className="h-7 gap-1 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                          onClick={() => openSepDialog(false)}>
+                          <LogOut className="h-3.5 w-3.5" />Initiate Separation
+                        </Button>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent>
                 {!separationData?.data
-                  ? <EmptySection icon={LogOut} title="No separation record" subtitle="Employee is currently active." />
+                  ? <EmptySection icon={LogOut} title="No separation record" subtitle={isAdmin ? 'Click Initiate Separation to begin offboarding.' : 'Employee is currently active.'} />
                   : <Grid2>
-                      <KV label="Type"            value={separationData.data.separation_type} />
-                      <KV label="Initiated By"    value={separationData.data.initiated_by} />
-                      <KV label="Notice Date"     value={fmtDate(separationData.data.notice_date)} />
+                      <KV label="Type"             value={separationData.data.separation_type?.replace(/_/g, ' ')} />
+                      <KV label="Initiated By"     value={separationData.data.initiated_by} />
+                      <KV label="Notice Date"      value={fmtDate(separationData.data.notice_date)} />
                       <KV label="Last Working Day" value={fmtDate(separationData.data.last_working_date)} />
-                      <KV label="Exit Reason"     value={separationData.data.exit_reason} />
-                      <div className="flex gap-2 flex-wrap">
+                      <KV label="Exit Reason"      value={separationData.data.exit_reason} />
+                      {separationData.data.remarks && <KV label="Remarks" value={separationData.data.remarks} />}
+                      <div className="flex gap-2 flex-wrap sm:col-span-2">
                         <Badge variant={separationData.data.exit_interview_done ? 'success' : 'secondary'} className="rounded-full text-[10px]">{separationData.data.exit_interview_done ? '✓' : '✗'} Exit Interview</Badge>
                         <Badge variant={separationData.data.clearance_done ? 'success' : 'secondary'} className="rounded-full text-[10px]">{separationData.data.clearance_done ? '✓' : '✗'} Clearance</Badge>
                       </div>
@@ -2126,7 +2716,7 @@ export function EmployeeProfile() {
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-muted-foreground">Effective From *</label>
-                      <Input type="date" value={orgForm.effective_from} onChange={(e) => setOrgForm((p) => ({ ...p, effective_from: e.target.value }))} className="h-8 text-xs" />
+                      <DateInput value={orgForm.effective_from} onChange={(v) => setOrgForm((p) => ({ ...p, effective_from: v }))} className="h-8 text-xs" />
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-muted-foreground">Reason</label>
@@ -2148,30 +2738,39 @@ export function EmployeeProfile() {
           {/* COMPENSATION › Compensation */}
           {subTab === 'compensation' && (
             <div className="space-y-4">
-            {/* Pending revision banner — admin only */}
+
+            {/* A. Pending revision banner — admin only */}
             {isAdmin && pendingRevisions.length > 0 && (
-              <div className="rounded-md border border-warning/40 bg-warning/5 p-3">
-                <div className="flex items-center gap-2 mb-2">
+              <div className="rounded-xl border border-warning/40 bg-warning/5 p-3 space-y-2">
+                <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0" />
-                  <span className="text-sm font-medium text-warning">
-                    {pendingRevisions.length} revision{pendingRevisions.length > 1 ? 's' : ''} pending approval
+                  <span className="text-sm font-semibold text-warning">
+                    {pendingRevisions.length} pending revision{pendingRevisions.length > 1 ? 's' : ''} awaiting approval
                   </span>
                 </div>
                 {pendingRevisions.map((r: any) => (
-                  <div key={r.id} className="flex items-center justify-between text-xs mt-1 pl-6">
-                    <span className="text-muted-foreground">
-                      <span className="capitalize font-medium text-foreground">{r.revision_type}</span>
-                      {r.new_ctc_annual ? ` — ${fmtMoney(r.new_ctc_annual)} p.a.` : ''}
-                      {r.effective_date ? ` eff. ${fmtDate(r.effective_date)}` : ''}
-                    </span>
-                    <div className="flex gap-1 ml-2">
-                      <Button size="sm" variant="outline" className="h-6 text-[10px] text-success border-success/40"
-                        disabled={approveRevisionMutation.isPending}
-                        onClick={() => approveRevisionMutation.mutate(r.id)}>
-                        Approve
+                  <div key={r.id} className="flex items-center justify-between gap-2 bg-background/60 rounded-lg px-3 py-2 text-xs">
+                    <div className="flex-1 min-w-0">
+                      <span className="capitalize font-medium">{(r.revision_type ?? '—').replace(/_/g, ' ')}</span>
+                      <span className="text-muted-foreground mx-1.5">→</span>
+                      <span className="font-semibold tabular-nums">{fmtMoney(r.new_ctc_annual)}</span>
+                      <span className="text-muted-foreground ml-1.5">eff. {fmtDate(r.effective_date)}</span>
+                      {r.reason && <span className="text-muted-foreground ml-1.5 truncate">· {r.reason}</span>}
+                    </div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-muted-foreground"
+                        onClick={() => setDrawerRevision(r)}>
+                        View
                       </Button>
-                      <Button size="sm" variant="outline" className="h-6 text-[10px] text-destructive border-destructive/40"
-                        onClick={() => { setRejectTarget(r.id); setRejectReason('') }}>
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-success border-success/30 hover:bg-success/10"
+                        disabled={approveRevisionMutation.isPending}
+                        onClick={() => approveRevisionMutation.mutate(r.id)}
+                      >
+                        {approveRevisionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Approve'}
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                        onClick={() => { setRejectTarget(r.id); setRejectReason('') }}
+                      >
                         Reject
                       </Button>
                     </div>
@@ -2180,10 +2779,14 @@ export function EmployeeProfile() {
               </div>
             )}
 
+            {/* B. Compensation Snapshot card */}
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold">Compensation</CardTitle>
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Banknote className="h-4 w-4 text-muted-foreground" />
+                    Compensation Snapshot
+                  </CardTitle>
                   {isAdmin && (
                     <div className="flex gap-1.5">
                       <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
@@ -2202,7 +2805,7 @@ export function EmployeeProfile() {
                           }))
                           setSetupCompOpen(true)
                         }}>
-                        <Edit2 className="h-3.5 w-3.5" />{comp ? 'Edit Compensation' : 'Set Up'}
+                        <Edit2 className="h-3.5 w-3.5" />{comp ? 'Edit' : 'Set Up'}
                       </Button>
                       {comp && (
                         <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
@@ -2216,145 +2819,179 @@ export function EmployeeProfile() {
               </CardHeader>
               <CardContent>
                 {!comp
-                  ? <EmptySection icon={DollarSign} title="No salary components configured" />
-                  : <>
-                      {/* Header: structure + CTC */}
-                      <div className="flex flex-wrap items-center gap-3 mb-4">
-                        <Badge variant="outline" className="rounded-full text-xs">
-                          {comp.structure?.name ?? 'Custom Structure'}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          Annual CTC: <span className="font-semibold text-foreground">{fmtMoney(comp.ctc_annual)}</span>
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          Monthly CTC: <span className="font-semibold text-foreground">{fmtMoney(comp.ctc_monthly)}</span>
-                        </span>
-                      </div>
-
-                      {/* Component table */}
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="border-b border-border">
-                              {['Component', 'Type', 'Calc Type', 'Monthly', 'Annual'].map(h => (
-                                <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(comp.components ?? [])
-                              .slice()
-                              .sort((a, b) => a.sequence - b.sequence)
-                              .map((c) => {
-                                const typeVariant =
-                                  c.component_type === 'earning'              ? 'success'     :
-                                  c.component_type === 'deduction'            ? 'destructive' :
-                                  c.component_type === 'employer_contribution' ? 'secondary'   : 'outline'
-                                const typeLabel =
-                                  c.component_type === 'earning'              ? 'Earning'      :
-                                  c.component_type === 'deduction'            ? 'Deduction'    :
-                                  c.component_type === 'employer_contribution' ? 'Employer Con.' : c.component_type ?? '—'
-                                const calcLabel = (c.calculation_type ?? '').replace(/_/g, ' ')
-                                return (
-                                  <tr key={c.id} className="border-b border-border/50">
-                                    <td className="px-3 py-2 font-medium">
-                                      {c.name ?? '—'}
-                                      {c.is_basic && (
-                                        <Badge variant="outline" className="ml-1.5 rounded-full text-[9px] py-0">Basic</Badge>
-                                      )}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <Badge variant={typeVariant} className="rounded-full text-[10px]">{typeLabel}</Badge>
-                                    </td>
-                                    <td className="px-3 py-2 text-muted-foreground capitalize">{calcLabel}</td>
-                                    <td className="px-3 py-2 tabular-nums">{fmtMoney(c.monthly_amount)}</td>
-                                    <td className="px-3 py-2 tabular-nums">{fmtMoney(c.annual_amount)}</td>
-                                  </tr>
-                                )
-                              })
-                            }
-                          </tbody>
-                          {/* Totals footer */}
-                          {comp.totals && (
-                            <tfoot>
-                              <tr className="border-t-2 border-border bg-muted/30">
-                                <td className="px-3 py-2 font-semibold text-foreground" colSpan={3}>Gross Earnings</td>
-                                <td className="px-3 py-2 font-semibold tabular-nums">{fmtMoney(comp.totals.gross_monthly)}</td>
-                                <td className="px-3 py-2 font-semibold tabular-nums">{fmtMoney(comp.totals.gross_annual)}</td>
-                              </tr>
-                              {comp.totals.deductions_annual > 0 && (
-                                <tr className="border-t border-border/60">
-                                  <td className="px-3 py-2 text-destructive font-medium" colSpan={3}>Total Deductions</td>
-                                  <td className="px-3 py-2 text-destructive tabular-nums">{fmtMoney(comp.totals.deductions_monthly)}</td>
-                                  <td className="px-3 py-2 text-destructive tabular-nums">{fmtMoney(comp.totals.deductions_annual)}</td>
-                                </tr>
-                              )}
-                              <tr className="border-t-2 border-border bg-success/5">
-                                <td className="px-3 py-2 font-bold text-success" colSpan={3}>Net Take-Home</td>
-                                <td className="px-3 py-2 font-bold text-success tabular-nums">{fmtMoney(comp.totals.net_monthly)}</td>
-                                <td className="px-3 py-2 font-bold text-success tabular-nums">{fmtMoney(comp.totals.net_annual)}</td>
-                              </tr>
-                            </tfoot>
-                          )}
-                        </table>
-                      </div>
-
-                      {/* Summary chips */}
+                  ? <EmptySection icon={DollarSign} title="No compensation configured" />
+                  : (
+                    <Grid2>
+                      <KV label="Annual CTC"       value={fmtMoney(comp.ctc_annual)} />
+                      <KV label="Monthly CTC"      value={fmtMoney(comp.ctc_monthly)} />
+                      <KV label="Net Take-Home"    value={comp.totals ? fmtMoney(comp.totals.net_monthly) + '/mo' : undefined} />
+                      <KV label="Salary Structure" value={comp.structure?.name} />
                       {comp.totals && (
-                        <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-border text-xs">
-                          <span className="text-muted-foreground">
-                            Basic: <span className="font-semibold text-foreground">{fmtMoney(comp.totals.basic_monthly)}/mo</span>
-                          </span>
-                          {comp.totals.employer_contributions_annual > 0 && (
-                            <span className="text-muted-foreground">
-                              Employer Contributions: <span className="font-semibold text-foreground">{fmtMoney(comp.totals.employer_contributions_monthly)}/mo</span>
-                            </span>
-                          )}
-                        </div>
+                        <>
+                          <KV label="Gross Monthly"  value={fmtMoney(comp.totals.gross_monthly)} />
+                          <KV label="Basic Monthly"  value={fmtMoney(comp.totals.basic_monthly)} />
+                        </>
                       )}
-                    </>}
+                    </Grid2>
+                  )}
               </CardContent>
             </Card>
 
-            {/* Compensation History Timeline */}
-            {(compensationHistoryData?.data?.length ?? 0) > 1 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                  Compensation History
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-border">
-                        {['Effective From', 'To', 'Annual CTC', 'Monthly CTC', 'Status'].map(h => (
-                          <th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {compensationHistoryData!.data.map((h: any) => (
-                        <tr key={h.id} className="border-b border-border/50 hover:bg-muted/20">
-                          <td className="px-4 py-2 whitespace-nowrap">{fmtDate(h.effective_from)}</td>
-                          <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">{h.effective_to ? fmtDate(h.effective_to) : '—'}</td>
-                          <td className="px-4 py-2 tabular-nums font-medium">{fmtMoney(h.ctc_annual)}</td>
-                          <td className="px-4 py-2 tabular-nums">{fmtMoney(h.ctc_monthly)}</td>
-                          <td className="px-4 py-2">
-                            {h.is_active
-                              ? <Badge variant="success" className="rounded-full text-[9px]">Active</Badge>
-                              : <Badge variant="secondary" className="rounded-full text-[9px]">Closed</Badge>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* C. Impact Preview Row — only if pending revisions */}
+            {pendingRevisions.length > 0 && comp && (() => {
+              const first      = pendingRevisions[0]
+              const delta      = (first.new_ctc_annual ?? 0) - (comp.ctc_annual ?? 0)
+              const monthly    = delta / 12
+              const oldM       = (comp.ctc_annual ?? 0) / 12
+              const newM       = (first.new_ctc_annual ?? 0) / 12
+              const pfImpact   = Math.min(newM, 15000) * 0.12 - Math.min(oldM, 15000) * 0.12
+              const isUp       = delta >= 0
+              return (
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                    Pending Revision Impact Preview
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg border bg-muted/20 p-2.5 text-center">
+                      <p className="text-[10px] text-muted-foreground">Monthly Change</p>
+                      <p className={cn('text-sm font-bold tabular-nums', isUp ? 'text-success' : 'text-destructive')}>
+                        {isUp ? '+' : ''}{fmtMoney(monthly)}/mo
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-2.5 text-center">
+                      <p className="text-[10px] text-muted-foreground">Annual Change</p>
+                      <p className={cn('text-sm font-bold tabular-nums', isUp ? 'text-success' : 'text-destructive')}>
+                        {isUp ? '+' : ''}{fmtMoney(delta)}/yr
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-2.5 text-center">
+                      <p className="text-[10px] text-muted-foreground">PF Employer</p>
+                      <p className={cn('text-sm font-bold tabular-nums', pfImpact >= 0 ? 'text-foreground' : 'text-destructive')}>
+                        {pfImpact >= 0 ? '+' : ''}{fmtMoney(pfImpact)}/mo
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+              )
+            })()}
+
+            {/* D. Revision Lifecycle Timeline — admin only */}
+            {isAdmin && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
+                  Revision History
+                </p>
+                {!(payrollRevisionsData?.data?.length)
+                  ? (
+                    <div className="rounded-lg border bg-card p-4 text-center">
+                      <TrendingUp className="h-5 w-5 mx-auto mb-1.5 opacity-20" />
+                      <p className="text-xs text-muted-foreground">No revisions recorded yet.</p>
+                    </div>
+                  )
+                  : (
+                    <div className="pl-1">
+                      {payrollRevisionsData!.data.map((r: any) => {
+                        const statusVariant =
+                          r.status === 'approved' ? 'success' :
+                          r.status === 'rejected' ? 'destructive' :
+                          r.status === 'pending'  ? 'warning' : 'secondary'
+                        const dotBorder =
+                          r.status === 'approved' ? 'border-success'     :
+                          r.status === 'pending'  ? 'border-warning'     :
+                          r.status === 'rejected' ? 'border-destructive' : 'border-muted-foreground/40'
+                        const deltaPct = (r.before_ctc_annual && r.new_ctc_annual && r.before_ctc_annual > 0)
+                          ? (((r.new_ctc_annual - r.before_ctc_annual) / r.before_ctc_annual) * 100).toFixed(1)
+                          : null
+                        return (
+                          <div key={r.id} className="relative pl-6 pb-3 border-l-2 border-border/50 last:border-l-0">
+                            <div className={cn(
+                              'absolute -left-[5px] top-1 h-2.5 w-2.5 rounded-full bg-background border-2',
+                              dotBorder,
+                            )} />
+                            <div
+                              className="rounded-lg border bg-card p-2.5 cursor-pointer hover:bg-muted/30 transition-colors"
+                              onClick={() => setDrawerRevision(r)}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium capitalize">{r.revision_type}</span>
+                                  <Badge variant={statusVariant as any} className="rounded-full text-[9px] capitalize">{r.status}</Badge>
+                                </div>
+                                <span className="text-[11px] text-muted-foreground">{fmtDate(r.effective_date)}</span>
+                              </div>
+                              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                                {r.before_ctc_annual && <span>{fmtMoney(r.before_ctc_annual)}</span>}
+                                {r.before_ctc_annual && <span>→</span>}
+                                <span className="font-medium text-foreground">{fmtMoney(r.new_ctc_annual)}</span>
+                                {deltaPct && (
+                                  <span className={Number(deltaPct) >= 0 ? 'text-success' : 'text-destructive'}>
+                                    {Number(deltaPct) >= 0 ? '+' : ''}{deltaPct}%
+                                  </span>
+                                )}
+                              </div>
+                              {r.reason && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{r.reason}</p>}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+              </div>
             )}
+
+            {/* E. Compensation Records */}
+            {(compensationHistoryData?.data?.length ?? 0) > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <History className="h-4 w-4 text-muted-foreground" />
+                    Compensation Records
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border">
+                          {['Effective From', 'To', 'Annual CTC', 'Monthly CTC', 'Status'].map(h => (
+                            <th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {compensationHistoryData!.data.map((h: any) => (
+                          <tr key={h.id} className={cn('border-b border-border/50 hover:bg-muted/20', h.is_active && 'bg-success/5')}>
+                            <td className="px-4 py-2 whitespace-nowrap">{fmtDate(h.effective_from)}</td>
+                            <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">{h.effective_to ? fmtDate(h.effective_to) : '—'}</td>
+                            <td className="px-4 py-2 tabular-nums font-medium">{fmtMoney(h.ctc_annual)}</td>
+                            <td className="px-4 py-2 tabular-nums">{fmtMoney(h.ctc_monthly)}</td>
+                            <td className="px-4 py-2">
+                              {h.is_active
+                                ? <Badge variant="success" className="rounded-full text-[9px]">Active</Badge>
+                                : <Badge variant="secondary" className="rounded-full text-[9px]">Closed</Badge>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* F. Intelligence Panel */}
+            {id && <IntelligencePanel employeeId={id} isAdmin={isAdmin} />}
+
+            {/* G. Compensation Revision Drawer */}
+            <CompensationRevisionDrawer
+              revision={drawerRevision}
+              currentCTC={comp?.ctc_annual ?? 0}
+              onClose={() => setDrawerRevision(null)}
+              isAdmin={isAdmin}
+              onApprove={(revId) => approveRevisionMutation.mutate(revId)}
+              onReject={(revId) => { setRejectTarget(revId); setRejectReason('') }}
+            />
+
           </div>
           )}
 
@@ -2399,10 +3036,9 @@ export function EmployeeProfile() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Effective Date *</label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={revisionForm.effective_date}
-                    onChange={e => setRevisionForm(p => ({ ...p, effective_date: e.target.value }))}
+                    onChange={v => setRevisionForm(p => ({ ...p, effective_date: v }))}
                     className="h-8 text-xs"
                   />
                   {revisionForm.effective_date > today && (
@@ -2494,10 +3130,9 @@ export function EmployeeProfile() {
                 {/* Effective From */}
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Effective From *</label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={setupCompForm.effective_from}
-                    onChange={e => setSetupCompForm(p => ({ ...p, effective_from: e.target.value }))}
+                    onChange={v => setSetupCompForm(p => ({ ...p, effective_from: v }))}
                     className="h-8 text-xs"
                   />
                   {setupCompForm.effective_from > today && (
@@ -2590,9 +3225,31 @@ export function EmployeeProfile() {
           {subTab === 'bank' && (
             <div className="space-y-4">
               <Card>
-                <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Bank Details</CardTitle></CardHeader>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Bank Details</CardTitle>
+                    {isAdmin && (
+                      <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
+                        onClick={() => {
+                          setBankForm(f => ({
+                            ...f,
+                            bank_name:    bs?.bank_name    ?? '',
+                            ifsc_code:    bs?.ifsc         ?? '',
+                            branch_name:  bs?.branch       ?? '',
+                            account_type: (bs?.account_type ?? '') as any,
+                            // account_number & aadhaar are masked — leave blank for re-entry
+                            account_number: '',
+                            aadhaar_number: '',
+                          }))
+                          setEditBankOpen(true)
+                        }}>
+                        <Edit2 className="h-3.5 w-3.5" />Edit
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
                 <CardContent>
-                  {!bs ? <EmptySection icon={Landmark} title="No bank info available" /> : (
+                  {!bs ? <EmptySection icon={Landmark} title="No bank info available" subtitle={isAdmin ? 'Click Edit to add bank details' : undefined} /> : (
                     <Grid2>
                       <KV label="Bank Name"      value={bs.bank_name} />
                       <KV label="Account Number" value={bs.account_number_masked} />
@@ -2604,21 +3261,139 @@ export function EmployeeProfile() {
                 </CardContent>
               </Card>
               <Card>
-                <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Statutory</CardTitle></CardHeader>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Statutory</CardTitle>
+                    {isAdmin && (
+                      <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
+                        onClick={() => {
+                          setBankForm(f => ({
+                            ...f,
+                            pan_number:     bs?.pan        ?? '',
+                            uan_number:     bs?.uan        ?? '',
+                            pf_number:      bs?.pf_number  ?? '',
+                            esi_number:     bs?.esi_number ?? '',
+                            pt_applicable:  bs?.pt_applicable  ?? false,
+                            lwf_applicable: bs?.lwf_applicable ?? false,
+                            tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
+                            aadhaar_number: '',
+                          }))
+                          setEditBankOpen(true)
+                        }}>
+                        <Edit2 className="h-3.5 w-3.5" />Edit
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
                 <CardContent>
                   {!bs ? <EmptySection icon={Landmark} title="No statutory info available" /> : (
-                    <Grid2>
-                      <KV label="PAN"       value={bs.pan} />
-                      <KV label="Aadhaar"   value={bs.aadhaar_masked} />
-                      <KV label="UAN"       value={bs.uan} />
-                      <KV label="PF Number" value={bs.pf_number} />
-                      <KV label="ESI"       value={bs.esi_number} />
-                      <div className="flex flex-wrap gap-2 sm:col-span-2">
-                        <Badge variant={bs.pt_applicable  ? 'success' : 'secondary'} className="rounded-full text-[10px]">PT {bs.pt_applicable  ? 'Applicable' : 'N/A'}</Badge>
-                        <Badge variant={bs.lwf_applicable ? 'success' : 'secondary'} className="rounded-full text-[10px]">LWF {bs.lwf_applicable ? 'Applicable' : 'N/A'}</Badge>
-                        {bs.tax_regime && <Badge variant="outline" className="rounded-full text-[10px] capitalize">{bs.tax_regime} Regime</Badge>}
+                    <div className="space-y-4">
+                      {/* Identity numbers */}
+                      <Grid2>
+                        <KV label="PAN"       value={bs.pan} />
+                        <KV label="Aadhaar"   value={bs.aadhaar_masked} />
+                        <KV label="UAN"       value={bs.uan} />
+                        <KV label="PF Number" value={bs.pf_number} />
+                        <KV label="ESI"       value={bs.esi_number} />
+                        <div className="flex flex-wrap gap-2 sm:col-span-2">
+                          <Badge variant={bs.pt_applicable  ? 'success' : 'secondary'} className="rounded-full text-[10px]">PT {bs.pt_applicable  ? 'Applicable' : 'N/A'}</Badge>
+                          <Badge variant={bs.lwf_applicable ? 'success' : 'secondary'} className="rounded-full text-[10px]">LWF {bs.lwf_applicable ? 'Applicable' : 'N/A'}</Badge>
+                          {bs.tax_regime && <Badge variant="outline" className="rounded-full text-[10px] capitalize">{bs.tax_regime} Regime</Badge>}
+                        </div>
+                      </Grid2>
+
+                      <TooltipProvider>
+                      {/* EPF compliance status card */}
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                            EPF Status
+                            {profilePfMode && <InfoTooltip text={PF_MODE_TOOLTIP[profilePfMode]} />}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {epfOverride?.is_exempt && (
+                              <Badge variant="secondary" className="rounded-full text-[10px]">Exempt</Badge>
+                            )}
+                            {epfOverride?.higher_pf_opted && (
+                              <Badge variant="outline" className="rounded-full text-[10px] text-blue-600 border-blue-200">Higher PF</Badge>
+                            )}
+                            {profilePfMode && <PFModeBadge mode={profilePfMode} />}
+                          </div>
+                        </div>
+                        {epfOverride ? (
+                          <div className="space-y-1">
+                            {/* "Why?" only for exceptions */}
+                            {profilePfMode && profilePfMode !== 'actual' && (
+                              <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80 leading-snug pb-0.5">
+                                {profilePfMode === 'capped' ? 'PF restricted to statutory wage ceiling.' : 'Employee-level PF override differs from organisation policy.'}
+                              </p>
+                            )}
+                            {epfOverride.is_international_worker && (
+                              <StatutoryExplainer label="Worker Type" value="International worker" />
+                            )}
+                            {epfOverride.higher_pf_opted && epfOverride.higher_pf_pct && (
+                              <StatutoryExplainer
+                                label="Higher PF Rate"
+                                value={`${epfOverride.higher_pf_pct}% on actual wages`}
+                                tooltip="Employee has opted for PF on actual wages above the statutory ceiling."
+                              />
+                            )}
+                            {epfOverride.restrict_pf_to_ceiling === true && (
+                              <StatutoryExplainer label="Ceiling" value="Always capped to ₹15,000" tooltip="Employee-level override: PF ceiling always applied regardless of organisation policy." />
+                            )}
+                            {epfOverride.restrict_pf_to_ceiling === false && (
+                              <StatutoryExplainer label="Ceiling" value="No ceiling (override)" tooltip="Employee-level override: PF ceiling never applied. Typical for international workers or CXO agreements." />
+                            )}
+                            {epfOverride.restrict_pf_to_ceiling === null && !epfOverride.higher_pf_opted && (
+                              <StatutoryEmptyNote text="Follows organisation PF policy." />
+                            )}
+                            {epfOverride.voluntary_pf_pct > 0 && (
+                              <StatutoryExplainer label="Voluntary PF" value={`${epfOverride.voluntary_pf_pct}% additional`} />
+                            )}
+                            {epfOverride.effective_from && (
+                              <StatutoryExplainer label="Override effective" value={epfOverride.effective_from} muted />
+                            )}
+                          </div>
+                        ) : (
+                          <StatutoryEmptyNote text="Employee follows organisation PF policy — no individual override." />
+                        )}
                       </div>
-                    </Grid2>
+
+                      {/* ESI compliance status card */}
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                            ESI Status
+                            {profileEsiStatus && <InfoTooltip text={ESI_STATUS_TOOLTIP[profileEsiStatus]} />}
+                          </span>
+                          {profileEsiStatus
+                            ? <ESIStatusBadge status={profileEsiStatus} />
+                            : <Badge variant="secondary" className="rounded-full text-[10px]">Not configured</Badge>
+                          }
+                        </div>
+                        {esiEligRow ? (
+                          <div className="space-y-1">
+                            {/* Continuation banner — exception only */}
+                            {esiContinuationActive && esiEligRow.continuation_until && (
+                              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2.5 py-1.5">
+                                <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-snug">
+                                  ESI continues until <span className="font-semibold">{esiEligRow.continuation_until}</span> — contribution period continuation is active.
+                                </p>
+                              </div>
+                            )}
+                            {esiEligRow.effective_from && (
+                              <StatutoryExplainer label="Effective From" value={esiEligRow.effective_from} muted />
+                            )}
+                            {esiEligRow.reason && (
+                              <StatutoryExplainer label="Reason" value={esiEligRow.reason} muted />
+                            )}
+                          </div>
+                        ) : (
+                          <StatutoryEmptyNote text="Employee not enrolled in ESI for this period." />
+                        )}
+                      </div>
+                      </TooltipProvider>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -2628,24 +3403,47 @@ export function EmployeeProfile() {
           {/* COMPENSATION › Contracts */}
           {subTab === 'contracts' && (
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold">Contracts</CardTitle></CardHeader>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold">Contracts</CardTitle>
+                  {isAdmin && (
+                    <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => openContractDialog()}>
+                      <Plus className="h-3.5 w-3.5" />Add Contract
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent className="p-0">
                 {!(contractsData?.data?.length)
-                  ? <div className="px-6 pb-6"><EmptySection icon={FileText} title="No contracts" /></div>
+                  ? <div className="px-6 pb-6"><EmptySection icon={FileText} title="No contracts" subtitle={isAdmin ? 'Click Add Contract to create one.' : undefined} /></div>
                   : <div className="overflow-x-auto">
                       <table className="w-full text-xs">
-                        <thead><tr className="border-b border-border">{['Type','Start','End','File'].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2">{h}</th>)}</tr></thead>
+                        <thead><tr className="border-b border-border">{['Type','Start','End','Status','File', ...(isAdmin ? ['Actions'] : [])].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2">{h}</th>)}</tr></thead>
                         <tbody>
                           {contractsData!.data.map((c: any) => (
                             <tr key={c.id} className="border-b border-border/50">
-                              <td className="px-4 py-2 capitalize">{c.contract_type}</td>
+                              <td className="px-4 py-2 capitalize">{c.contract_type?.replace(/_/g, ' ')}</td>
                               <td className="px-4 py-2">{fmtDate(c.start_date)}</td>
                               <td className="px-4 py-2">{c.end_date ? fmtDate(c.end_date) : '—'}</td>
+                              <td className="px-4 py-2"><Badge variant={c.status === 'active' ? 'success' : 'secondary'} className="rounded-full text-[9px] capitalize">{c.status ?? '—'}</Badge></td>
                               <td className="px-4 py-2">
                                 {c.storage_path
-                                  ? <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => openSignedUrl(c.storage_path)}>View PDF</Button>
+                                  ? <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => openSignedUrl(c.storage_path)}>View</Button>
                                   : <span className="text-muted-foreground">—</span>}
                               </td>
+                              {isAdmin && (
+                                <td className="px-4 py-2">
+                                  <div className="flex gap-1">
+                                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openContractDialog(c)}>
+                                      <Edit2 className="h-3 w-3" />
+                                    </Button>
+                                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                      onClick={() => { if (confirm('Delete this contract?')) delContractMutation.mutate(c.id) }}>
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -2843,6 +3641,9 @@ export function EmployeeProfile() {
                 </Card>
               )}
 
+              {/* ── Compliance Intelligence panel ── */}
+              {id && <IntelligencePanel employeeId={id} isAdmin={isAdmin} />}
+
               {/* ── Initiate Revision dialog ── */}
               {isAdmin && (
                 <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
@@ -2898,11 +3699,10 @@ export function EmployeeProfile() {
                       {/* Effective date */}
                       <div className="space-y-1.5">
                         <Label className="text-xs">Effective Date <span className="text-destructive">*</span></Label>
-                        <Input
-                          type="date"
+                        <DateInput
                           className="h-8 text-xs"
                           value={revisionForm.effective_date}
-                          onChange={e => setRevisionForm(f => ({ ...f, effective_date: e.target.value }))}
+                          onChange={v => setRevisionForm(f => ({ ...f, effective_date: v }))}
                         />
                         {revisionForm.effective_date > today && (
                           <p className="text-[10px] text-warning">Future revision — will be applied to payroll from {fmtDate(revisionForm.effective_date)}</p>
@@ -3115,18 +3915,51 @@ export function EmployeeProfile() {
             <div className="space-y-4">
               {(['pf', 'gratuity', 'esi', 'superannuation'] as const).map(scheme => {
                 const schemeNoms = (nominationsData?.data ?? []).filter((n: any) => n.scheme === scheme)
+                const schemeTotal = schemeNoms.reduce((s: number, n: any) => s + Number(n.share_percentage), 0)
                 return (
                   <Card key={scheme}>
-                    <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold uppercase">{scheme}</CardTitle></CardHeader>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-semibold uppercase flex items-center gap-2">
+                          {scheme}
+                          {schemeNoms.length > 0 && (
+                            <Badge variant={schemeTotal === 100 ? 'success' : 'warning'} className="rounded-full text-[9px] normal-case">
+                              {schemeTotal}% allocated
+                            </Badge>
+                          )}
+                        </CardTitle>
+                        {isAdmin && (
+                          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
+                            onClick={() => {
+                              setNomScheme(scheme)
+                              setNomForm({ nominee_name: '', share_percentage: '', dob: '', is_minor: false, guardian_name: '' })
+                              setNomDlgOpen(true)
+                            }}>
+                            <Plus className="h-3.5 w-3.5" />Add Nominee
+                          </Button>
+                        )}
+                      </div>
+                    </CardHeader>
                     <CardContent>
                       {!schemeNoms.length
-                        ? <p className="text-xs text-muted-foreground">No nominations for this scheme.</p>
+                        ? <p className="text-xs text-muted-foreground">{isAdmin ? 'No nominees yet — click Add Nominee.' : 'No nominations for this scheme.'}</p>
                         : <div className="space-y-2">{schemeNoms.map((n: any) => (
-                          <div key={n.id} className="flex items-center justify-between text-xs p-2 rounded-md bg-muted/30">
-                            <span className="font-medium">{n.nominee_name}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">{n.share_percentage}%</span>
+                          <div key={n.id} className="flex items-center justify-between text-xs p-2.5 rounded-md bg-muted/30">
+                            <div>
+                              <span className="font-medium">{n.nominee_name}</span>
+                              {n.relationship_types?.name && <span className="text-muted-foreground ml-1.5">({n.relationship_types.name})</span>}
+                              {n.dob && <p className="text-muted-foreground text-[10px] mt-0.5">DOB: {fmtDate(n.dob)}</p>}
+                              {n.is_minor && n.guardian_name && <p className="text-[10px] text-warning mt-0.5">Guardian: {n.guardian_name}</p>}
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="font-semibold tabular-nums">{n.share_percentage}%</span>
                               {n.is_minor && <Badge variant="warning" className="rounded-full text-[9px]">Minor</Badge>}
+                              {isAdmin && (
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                  onClick={() => { if (confirm(`Remove ${n.nominee_name}?`)) delNomMutation.mutate(n.id) }}>
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ))}</div>}
@@ -3192,7 +4025,7 @@ export function EmployeeProfile() {
             </div>
             <div>
               <Label className="text-xs">Effective From</Label>
-              <Input className="mt-1 h-8 text-xs" type="date" value={jobForm.effective_from ?? ''} onChange={e=>setJobForm((p:any)=>({...p,effective_from:e.target.value}))} />
+              <DateInput className="mt-1 h-8 text-xs" value={jobForm.effective_from ?? ''} onChange={v=>setJobForm((p:any)=>({...p,effective_from:v}))} />
             </div>
             <div>
               <Label className="text-xs">Reason for Change</Label>
@@ -3217,8 +4050,8 @@ export function EmployeeProfile() {
               <div key={f.key}><Label className="text-xs">{f.label}</Label><Input className="mt-1 h-8 text-xs" value={prevForm[f.key]??''} onChange={e=>setPrevForm((p:any)=>({...p,[f.key]:e.target.value}))}/></div>
             ))}
             <div className="grid grid-cols-2 gap-2">
-              <div><Label className="text-xs">From</Label><Input className="mt-1 h-8 text-xs" type="date" value={prevForm.from_date??''} onChange={e=>setPrevForm((p:any)=>({...p,from_date:e.target.value}))}/></div>
-              <div><Label className="text-xs">To</Label><Input className="mt-1 h-8 text-xs" type="date" value={prevForm.to_date??''} onChange={e=>setPrevForm((p:any)=>({...p,to_date:e.target.value}))}/></div>
+              <div><Label className="text-xs">From</Label><DateInput className="mt-1 h-8 text-xs" value={prevForm.from_date??''} onChange={v=>setPrevForm((p:any)=>({...p,from_date:v}))}/></div>
+              <div><Label className="text-xs">To</Label><DateInput className="mt-1 h-8 text-xs" value={prevForm.to_date??''} onChange={v=>setPrevForm((p:any)=>({...p,to_date:v}))}/></div>
             </div>
           </div>
           <DialogFooter>
@@ -3239,8 +4072,8 @@ export function EmployeeProfile() {
               <div key={f.key}><Label className="text-xs">{f.label}</Label><Input className="mt-1 h-8 text-xs" value={pvForm[f.key]??''} onChange={e=>setPvForm((p:any)=>({...p,[f.key]:e.target.value}))}/></div>
             ))}
             <div className="grid grid-cols-2 gap-2">
-              <div><Label className="text-xs">Issue Date</Label><Input className="mt-1 h-8 text-xs" type="date" value={pvForm.issue_date??''} onChange={e=>setPvForm((p:any)=>({...p,issue_date:e.target.value}))}/></div>
-              <div><Label className="text-xs">Expiry Date</Label><Input className="mt-1 h-8 text-xs" type="date" value={pvForm.expiry_date??''} onChange={e=>setPvForm((p:any)=>({...p,expiry_date:e.target.value}))}/></div>
+              <div><Label className="text-xs">Issue Date</Label><DateInput className="mt-1 h-8 text-xs" value={pvForm.issue_date??''} onChange={v=>setPvForm((p:any)=>({...p,issue_date:v}))}/></div>
+              <div><Label className="text-xs">Expiry Date</Label><DateInput className="mt-1 h-8 text-xs" value={pvForm.expiry_date??''} onChange={v=>setPvForm((p:any)=>({...p,expiry_date:v}))}/></div>
             </div>
           </div>
           <DialogFooter>
@@ -3258,7 +4091,7 @@ export function EmployeeProfile() {
           <DialogHeader><DialogTitle>Add Family Member</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={famForm.name??''} onChange={e=>setFamForm((p:any)=>({...p,name:e.target.value}))}/></div>
-            <div><Label className="text-xs">Date of Birth</Label><Input className="mt-1 h-8 text-xs" type="date" value={famForm.dob??''} onChange={e=>setFamForm((p:any)=>({...p,dob:e.target.value}))}/></div>
+            <div><Label className="text-xs">Date of Birth</Label><DateInput className="mt-1 h-8 text-xs" value={famForm.dob??''} onChange={v=>setFamForm((p:any)=>({...p,dob:v}))}/></div>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="fam_dep" checked={!!famForm.is_dependent} onChange={e=>setFamForm((p:any)=>({...p,is_dependent:e.target.checked}))} className="rounded" />
               <Label htmlFor="fam_dep" className="text-xs">Dependent</Label>
@@ -3279,7 +4112,7 @@ export function EmployeeProfile() {
           <DialogHeader><DialogTitle>Issue Access Card</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Card Number</Label><Input className="mt-1 h-8 text-xs" value={cardForm.card_number??''} onChange={e=>setCardForm((p:any)=>({...p,card_number:e.target.value}))}/></div>
-            <div><Label className="text-xs">Issued Date</Label><Input className="mt-1 h-8 text-xs" type="date" value={cardForm.issued_date??''} onChange={e=>setCardForm((p:any)=>({...p,issued_date:e.target.value}))}/></div>
+            <div><Label className="text-xs">Issued Date</Label><DateInput className="mt-1 h-8 text-xs" value={cardForm.issued_date??''} onChange={v=>setCardForm((p:any)=>({...p,issued_date:v}))}/></div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>setAddCardOpen(false)}>Cancel</Button>
@@ -3350,11 +4183,10 @@ export function EmployeeProfile() {
                   {/* Effective from */}
                   <div className="space-y-1">
                     <Label className="text-xs font-medium">Effective From *</Label>
-                    <Input
-                      type="date"
+                    <DateInput
                       className="h-8 text-xs"
                       value={assignForm.effective_from}
-                      onChange={e => setAssignForm(p => ({ ...p, effective_from: e.target.value }))}
+                      onChange={v => setAssignForm(p => ({ ...p, effective_from: v }))}
                     />
                     {isPast && (
                       <p className="text-[10px] text-warning flex items-center gap-1">
@@ -3636,6 +4468,171 @@ export function EmployeeProfile() {
               disabled={!docMeta?.name || !docMeta?.doc_type || uploadDocMutation.isPending || !docFile}
               onClick={()=>docFile && uploadDocMutation.mutate({ file: docFile, name: docMeta!.name, doc_type: docMeta!.doc_type })}>
               {uploadDocMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Upload
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bank & Statutory Edit Dialog ── */}
+      <Dialog open={editBankOpen} onOpenChange={setEditBankOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Edit Bank &amp; Statutory Details</DialogTitle></DialogHeader>
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Bank Details</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Bank Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.bank_name} onChange={e=>setBankForm(f=>({...f,bank_name:e.target.value}))}/></div>
+              <div>
+                <Label className="text-xs">Account Type</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.account_type} onChange={e=>setBankForm(f=>({...f,account_type:e.target.value as any}))}>
+                  <option value="">—</option>
+                  {['savings','current','salary'].map(t=><option key={t} value={t} className="capitalize">{t}</option>)}
+                </select>
+              </div>
+              <div><Label className="text-xs">Account Number</Label><Input className="mt-1 h-8 text-xs font-mono" placeholder="Enter to update (masked for security)" value={bankForm.account_number} onChange={e=>setBankForm(f=>({...f,account_number:e.target.value}))}/></div>
+              <div><Label className="text-xs">IFSC Code</Label><Input className="mt-1 h-8 text-xs font-mono uppercase" value={bankForm.ifsc_code} onChange={e=>setBankForm(f=>({...f,ifsc_code:e.target.value.toUpperCase()}))}/></div>
+              <div className="col-span-2"><Label className="text-xs">Branch Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.branch_name} onChange={e=>setBankForm(f=>({...f,branch_name:e.target.value}))}/></div>
+            </div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2 border-t border-border">Statutory Identifiers</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">PAN Number</Label><Input className="mt-1 h-8 text-xs font-mono uppercase" value={bankForm.pan_number} onChange={e=>setBankForm(f=>({...f,pan_number:e.target.value.toUpperCase()}))}/></div>
+              <div><Label className="text-xs">Aadhaar Number</Label><Input className="mt-1 h-8 text-xs font-mono" placeholder="Enter to update (masked)" value={bankForm.aadhaar_number} onChange={e=>setBankForm(f=>({...f,aadhaar_number:e.target.value}))}/></div>
+              <div><Label className="text-xs">UAN</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.uan_number} onChange={e=>setBankForm(f=>({...f,uan_number:e.target.value}))}/></div>
+              <div><Label className="text-xs">PF Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.pf_number} onChange={e=>setBankForm(f=>({...f,pf_number:e.target.value}))}/></div>
+              <div><Label className="text-xs">ESI Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.esi_number} onChange={e=>setBankForm(f=>({...f,esi_number:e.target.value}))}/></div>
+              <div>
+                <Label className="text-xs">Tax Regime</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.tax_regime} onChange={e=>setBankForm(f=>({...f,tax_regime:e.target.value as 'old'|'new'}))}>
+                  <option value="new">New Regime</option>
+                  <option value="old">Old Regime</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-6 pt-1">
+              <div className="flex items-center gap-2">
+                <Switch checked={bankForm.pt_applicable} onCheckedChange={v=>setBankForm(f=>({...f,pt_applicable:v}))} />
+                <Label className="text-xs">PT Applicable</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={bankForm.lwf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,lwf_applicable:v}))} />
+                <Label className="text-xs">LWF Applicable</Label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={()=>setEditBankOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={bankMutation.isPending} onClick={()=>bankMutation.mutate()}>
+              {bankMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Separation Dialog (Initiate / Edit) ── */}
+      <Dialog open={sepDlgOpen} onOpenChange={setSepDlgOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{sepIsEdit ? 'Edit Separation Record' : 'Initiate Separation'}</DialogTitle></DialogHeader>
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Separation Type</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none capitalize" value={sepForm.separation_type} onChange={e=>setSepForm(f=>({...f,separation_type:e.target.value}))}>
+                  {['resignation','termination','retirement','end_of_contract','absconding','deceased','mutual_separation'].map(t=>(
+                    <option key={t} value={t}>{t.replace(/_/g,' ')}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs">Initiated By</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={sepForm.initiated_by} onChange={e=>setSepForm(f=>({...f,initiated_by:e.target.value}))}>
+                  <option value="employee">Employee</option>
+                  <option value="employer">Employer</option>
+                </select>
+              </div>
+              <div><Label className="text-xs">Notice Date</Label><DateInput className="mt-1 h-8 text-xs" value={sepForm.notice_date} onChange={v=>setSepForm(f=>({...f,notice_date:v}))}/></div>
+              <div><Label className="text-xs">Last Working Day</Label><DateInput className="mt-1 h-8 text-xs" value={sepForm.last_working_date} onChange={v=>setSepForm(f=>({...f,last_working_date:v}))}/></div>
+            </div>
+            <div><Label className="text-xs">Exit Reason</Label><Input className="mt-1 h-8 text-xs" value={sepForm.exit_reason} onChange={e=>setSepForm(f=>({...f,exit_reason:e.target.value}))}/></div>
+            <div><Label className="text-xs">Remarks</Label><Input className="mt-1 h-8 text-xs" value={sepForm.remarks} onChange={e=>setSepForm(f=>({...f,remarks:e.target.value}))}/></div>
+            <div className="flex gap-6 pt-1">
+              <div className="flex items-center gap-2">
+                <Switch checked={sepForm.exit_interview_done} onCheckedChange={v=>setSepForm(f=>({...f,exit_interview_done:v}))} />
+                <Label className="text-xs">Exit Interview Done</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={sepForm.clearance_done} onCheckedChange={v=>setSepForm(f=>({...f,clearance_done:v}))} />
+                <Label className="text-xs">Clearance Done</Label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={()=>setSepDlgOpen(false)}>Cancel</Button>
+            <Button size="sm"
+              disabled={createSepMutation.isPending || updateSepMutation.isPending}
+              onClick={()=> sepIsEdit ? updateSepMutation.mutate() : createSepMutation.mutate()}>
+              {(createSepMutation.isPending || updateSepMutation.isPending) && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              {sepIsEdit ? 'Update' : 'Initiate'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Contract Add / Edit Dialog ── */}
+      <Dialog open={addContractOpen} onOpenChange={open=>{ if(!open){ setAddContractOpen(false); setEditContractId(null) } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{editContractId ? 'Edit Contract' : 'Add Contract'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Contract Type</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none capitalize" value={contractForm.contract_type} onChange={e=>setContractForm(f=>({...f,contract_type:e.target.value}))}>
+                {['appointment','renewal','amendment','nda','other'].map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Start Date</Label><DateInput className="mt-1 h-8 text-xs" value={contractForm.start_date} onChange={v=>setContractForm(f=>({...f,start_date:v}))}/></div>
+              <div><Label className="text-xs">End Date</Label><DateInput className="mt-1 h-8 text-xs" value={contractForm.end_date} onChange={v=>setContractForm(f=>({...f,end_date:v}))}/></div>
+            </div>
+            <div>
+              <Label className="text-xs">Status</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={contractForm.status} onChange={e=>setContractForm(f=>({...f,status:e.target.value}))}>
+                {['draft','active','expired','terminated'].map(s=><option key={s} value={s} className="capitalize">{s}</option>)}
+              </select>
+            </div>
+            <div><Label className="text-xs">Notes</Label><Input className="mt-1 h-8 text-xs" value={contractForm.notes} onChange={e=>setContractForm(f=>({...f,notes:e.target.value}))}/></div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={()=>{ setAddContractOpen(false); setEditContractId(null) }}>Cancel</Button>
+            <Button size="sm"
+              disabled={!contractForm.start_date || addContractMutation.isPending || editContractMutation.isPending}
+              onClick={()=> editContractId ? editContractMutation.mutate(editContractId) : addContractMutation.mutate()}>
+              {(addContractMutation.isPending || editContractMutation.isPending) && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              {editContractId ? 'Update' : 'Add'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Nominee Dialog ── */}
+      <Dialog open={nomDlgOpen} onOpenChange={setNomDlgOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Add Nominee — {nomScheme.toUpperCase()}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Nominee Name</Label><Input className="mt-1 h-8 text-xs" value={nomForm.nominee_name} onChange={e=>setNomForm(f=>({...f,nominee_name:e.target.value}))}/></div>
+            <div><Label className="text-xs">Share % <span className="text-muted-foreground">(of total 100%)</span></Label><Input type="number" min="1" max="100" className="mt-1 h-8 text-xs" value={nomForm.share_percentage} onChange={e=>setNomForm(f=>({...f,share_percentage:e.target.value}))}/></div>
+            <div><Label className="text-xs">Date of Birth</Label><DateInput className="mt-1 h-8 text-xs" value={nomForm.dob} onChange={v=>setNomForm(f=>({...f,dob:v}))}/></div>
+            <div className="flex items-center gap-2">
+              <Switch checked={nomForm.is_minor} onCheckedChange={v=>setNomForm(f=>({...f,is_minor:v}))} />
+              <Label className="text-xs">Nominee is a minor</Label>
+            </div>
+            {nomForm.is_minor && (
+              <div><Label className="text-xs">Guardian Name <span className="text-destructive">*</span></Label><Input className="mt-1 h-8 text-xs" value={nomForm.guardian_name} onChange={e=>setNomForm(f=>({...f,guardian_name:e.target.value}))}/></div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={()=>setNomDlgOpen(false)}>Cancel</Button>
+            <Button size="sm"
+              disabled={!nomForm.nominee_name || !nomForm.share_percentage || (nomForm.is_minor && !nomForm.guardian_name) || addNomMutation.isPending}
+              onClick={()=>addNomMutation.mutate()}>
+              {addNomMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Add Nominee
             </Button>
           </DialogFooter>
         </DialogContent>

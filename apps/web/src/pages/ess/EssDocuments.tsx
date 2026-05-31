@@ -7,8 +7,8 @@
  * Tokens only — no raw hex / bg-gray-*.
  */
 
-import { useState }  from 'react'
-import { useQuery }  from '@tanstack/react-query'
+import { useState, useCallback } from 'react'
+import { useQuery }                      from '@tanstack/react-query'
 import {
   FileText, Download, Eye, AlertTriangle, Loader2,
   FileImage, File, FileBadge, FolderOpen, Info,
@@ -22,17 +22,21 @@ import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { toast }         from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface EmpDocument {
-  id:           string
-  name:         string
-  doc_type:     string
-  storage_path: string | null
-  file_size:    number | null
-  mime_type:    string | null
-  created_at:   string
+  id:                    string
+  name:                  string
+  doc_type:              string
+  storage_path:          string | null
+  /** 1-hour signed download URL returned by the API — use this for View/Download */
+  signed_url:            string | null
+  signed_url_expires_in: number | null
+  file_size:             number | null
+  mime_type:             string | null
+  created_at:            string
 }
 
 interface EmpContract {
@@ -42,6 +46,8 @@ interface EmpContract {
   end_date:      string | null
   status:        string
   storage_path:  string | null
+  /** Signed download URL if available */
+  signed_url:    string | null
   created_at:    string
 }
 
@@ -49,9 +55,10 @@ interface EmpContract {
 
 function fmtDate(s: string | null) {
   if (!s) return '—'
-  return new Date(`${s}T12:00:00Z`).toLocaleDateString([], {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtSize(bytes: number | null) {
@@ -85,7 +92,17 @@ const CONTRACT_TYPE_LABEL: Record<string, string> = {
 
 // ── Document row ──────────────────────────────────────────────────────────────
 
-function DocRow({ doc }: { doc: EmpDocument }) {
+interface DocRowProps {
+  doc:         EmpDocument
+  refreshing:  boolean
+  onView:      (doc: EmpDocument) => void
+  onDownload:  (doc: EmpDocument) => void
+}
+
+function DocRow({ doc, refreshing, onView, onDownload }: DocRowProps) {
+  // Presence check only — never open storage_path directly (relative path, not URL)
+  const hasFile = !!(doc.signed_url || doc.storage_path)
+
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-border/40 last:border-0 gap-3">
       <div className="flex items-center gap-2.5 min-w-0">
@@ -99,13 +116,27 @@ function DocRow({ doc }: { doc: EmpDocument }) {
           </p>
         </div>
       </div>
-      {doc.storage_path ? (
+      {hasFile ? (
         <div className="flex items-center gap-1 flex-shrink-0">
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="View">
-            <Eye className="h-3.5 w-3.5" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            title="View"
+            disabled={!hasFile || refreshing}
+            onClick={() => onView(doc)}
+          >
+            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
           </Button>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Download">
-            <Download className="h-3.5 w-3.5" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            title="Download"
+            disabled={!hasFile || refreshing}
+            onClick={() => onDownload(doc)}
+          >
+            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           </Button>
         </div>
       ) : (
@@ -117,27 +148,135 @@ function DocRow({ doc }: { doc: EmpDocument }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+/**
+ * Threshold (ms) before the 1-hour signed URL TTL at which we pro-actively
+ * refresh.  Set to 55 minutes so URLs are refreshed with a 5-minute buffer.
+ * Also used on click to detect a stale URL before opening.
+ */
+const URL_REFRESH_THRESHOLD_MS = 55 * 60 * 1000   // 55 min of 60 min TTL
+
 export function EssDocuments() {
   const { profile } = useAuthStore()
   const employeeId  = profile?.employee_id ?? null
   const [activeTab, setActiveTab] = useState<'documents' | 'contracts'>('documents')
 
-  const { data: docData, isLoading: docLoading } = useQuery<EmpDocument[]>({
+  // Track which document (by id) is currently being URL-refreshed so we can
+  // show a spinner on the correct row's buttons.
+  const [refreshingDocId, setRefreshingDocId] = useState<string | null>(null)
+  // Track which contract is being refreshed
+  const [refreshingContractId, setRefreshingContractId] = useState<string | null>(null)
+
+  const {
+    data: docData,
+    isLoading: docLoading,
+    refetch: refetchDocs,
+    dataUpdatedAt: docUpdatedAt,
+  } = useQuery<EmpDocument[]>({
     queryKey: ['ess-documents', employeeId],
     queryFn:  () => api.get(`/employees/${employeeId}/documents`).then((r: any) => r.data),
     enabled:  !!employeeId,
-    staleTime: 60_000,
+    // Pro-active refresh every 45 min ensures signed URLs (1h TTL) never expire
+    // while the tab is in focus, eliminating the need for on-click refresh in most cases.
+    staleTime:       45 * 60 * 1000,
+    refetchInterval: 45 * 60 * 1000,
   })
 
-  const { data: contractData, isLoading: contractLoading } = useQuery<EmpContract[]>({
+  const {
+    data: contractData,
+    isLoading: contractLoading,
+    refetch: refetchContracts,
+    dataUpdatedAt: contractUpdatedAt,
+  } = useQuery<EmpContract[]>({
     queryKey: ['ess-contracts', employeeId],
     queryFn:  () => api.get(`/employees/${employeeId}/contracts`).then((r: any) => r.data),
     enabled:  !!employeeId,
-    staleTime: 60_000,
+    staleTime:       45 * 60 * 1000,
+    refetchInterval: 45 * 60 * 1000,
   })
 
   const documents = docData ?? []
   const contracts = contractData ?? []
+
+  // ── Signed-URL helpers ───────────────────────────────────────────────────────
+  // Opens a window synchronously (avoids Safari popup blocking) then redirects
+  // to either the cached URL (if fresh) or a freshly fetched one.
+  const openDocUrl = useCallback(async (doc: EmpDocument, mode: 'view' | 'download') => {
+    const isUrlStale = !doc.signed_url || (Date.now() - docUpdatedAt) > URL_REFRESH_THRESHOLD_MS
+
+    // Open immediately to stay within the synchronous click handler — prevents
+    // popup blocking in Safari and Firefox. If we need a fresh URL we redirect
+    // the already-opened window after the async fetch.
+    const win = mode === 'view'
+      ? window.open(isUrlStale ? 'about:blank' : doc.signed_url!, '_blank', 'noopener,noreferrer')
+      : null
+
+    if (!isUrlStale && doc.signed_url) {
+      if (mode === 'download') {
+        const a = document.createElement('a')
+        a.href = doc.signed_url; a.download = doc.name
+        a.rel = 'noopener noreferrer'; a.target = '_blank'; a.click()
+      }
+      return
+    }
+
+    // URL is stale — fetch fresh data
+    setRefreshingDocId(doc.id)
+    try {
+      const result   = await refetchDocs()
+      const freshDoc = (result.data ?? []).find(d => d.id === doc.id)
+      const freshUrl = freshDoc?.signed_url ?? null
+
+      if (!freshUrl) {
+        win?.close()
+        toast.error('Document URL unavailable', { description: 'The file may have been removed. Contact HR.' })
+        return
+      }
+
+      if (mode === 'view' && win) {
+        win.location.href = freshUrl
+      } else if (mode === 'download') {
+        const a = document.createElement('a')
+        a.href = freshUrl; a.download = doc.name
+        a.rel = 'noopener noreferrer'; a.target = '_blank'; a.click()
+      }
+    } catch {
+      win?.close()
+      toast.error('Failed to refresh document URL — please try again')
+    } finally {
+      setRefreshingDocId(null)
+    }
+  }, [docUpdatedAt, refetchDocs])
+
+  const openContractUrl = useCallback(async (contract: EmpContract) => {
+    const isUrlStale = !contract.signed_url || (Date.now() - contractUpdatedAt) > URL_REFRESH_THRESHOLD_MS
+
+    const win = window.open(
+      isUrlStale ? 'about:blank' : contract.signed_url!,
+      '_blank',
+      'noopener,noreferrer',
+    )
+
+    if (!isUrlStale && contract.signed_url) return
+
+    setRefreshingContractId(contract.id)
+    try {
+      const result       = await refetchContracts()
+      const freshContract = (result.data ?? []).find(c => c.id === contract.id)
+      const freshUrl      = freshContract?.signed_url ?? null
+
+      if (!freshUrl) {
+        win?.close()
+        toast.error('Contract URL unavailable', { description: 'Contact HR.' })
+        return
+      }
+      if (win) win.location.href = freshUrl
+    } catch {
+      win?.close()
+      toast.error('Failed to refresh contract URL — please try again')
+    } finally {
+      setRefreshingContractId(null)
+    }
+  }, [contractUpdatedAt, refetchContracts])
 
   if (!employeeId) {
     return (
@@ -212,7 +351,15 @@ export function EssDocuments() {
             </div>
           ) : (
             <div className="space-y-0">
-              {documents.map(doc => <DocRow key={doc.id} doc={doc} />)}
+              {documents.map(doc => (
+                <DocRow
+                  key={doc.id}
+                  doc={doc}
+                  refreshing={refreshingDocId === doc.id}
+                  onView={(d)     => openDocUrl(d, 'view')}
+                  onDownload={(d) => openDocUrl(d, 'download')}
+                />
+              ))}
             </div>
           )}
         </SectionCard>
@@ -257,10 +404,20 @@ export function EssDocuments() {
                       {c.status}
                     </Badge>
                   </div>
-                  {c.storage_path && (
+                  {(c.signed_url || c.storage_path) && (
                     <div className="flex items-center gap-2 pt-1">
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
-                        <Eye className="h-3 w-3" /> View PDF
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1"
+                        disabled={refreshingContractId === c.id}
+                        onClick={() => openContractUrl(c)}
+                      >
+                        {refreshingContractId === c.id
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <Eye className="h-3 w-3" />
+                        }
+                        View PDF
                       </Button>
                     </div>
                   )}

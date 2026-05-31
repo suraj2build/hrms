@@ -126,7 +126,11 @@ function fmtTime(iso: string | null): string {
 }
 
 function fmtDate(dateStr: string): string {
-  return new Date(dateStr + 'T12:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const s = dateStr
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 
 const STATUS_BADGE: Record<string, string> = {

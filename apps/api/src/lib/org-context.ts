@@ -5,14 +5,26 @@
  * work location, timezone) and applying consistent holiday / weekly-off rules
  * across the attendance processor and leave engine.
  *
- * Precedence rules
- * ─────────────────
- * Shift (timing):   shift_roster override  >  employee_shifts standing  >  site default_shift_id
- * Weekly-off days:  employee roster  >  site default roster  >  []
- *   NOTE: shifts NO LONGER carry weekly_off_days — that concept belongs exclusively
- *   to rosters. The first parameter of getWeeklyOffDays() is kept as [] by callers.
- * Holiday scoping:  location-specific  >  site-specific  >  global   (deduplicated by date)
- * Site/roster:      employee_org_assignments (date-effective)  >  employees.site_id / roster_id
+ * ── Workforce Governance Model (migration 154) ────────────────────────────────
+ *
+ * Shift resolution priority (highest → lowest):
+ *   1. shift_roster              (date-specific override — highest priority)
+ *   2. rotation_policy           (employee override → site default → condition→shift)
+ *   3. employee_shifts           (Shift Override — exception/temporary only)
+ *   4. sites.default_shift_id    (DEPRECATED — legacy fallback, not for new setups)
+ *
+ * Roster (weekly-off) resolution:
+ *   employees.roster_id  >  sites.default_roster_id  >  []
+ *
+ * Rotation policy resolution:
+ *   employees.rotation_policy_id  >  sites.default_rotation_policy_id  >  not configured
+ *
+ * Weekly-off days: employee roster > site default roster > []
+ *   NOTE: shifts NO LONGER carry weekly_off_days — belongs exclusively to rosters.
+ *   The first parameter of getWeeklyOffDays() is kept as [] by callers.
+ *
+ * Holiday scoping: location-specific > site-specific > global (deduplicated by date)
+ * Site/roster:     employee_org_assignments (date-effective) > employees.site_id / roster_id
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -44,10 +56,16 @@ export interface EmployeeOrgContext {
   /** weekly_off_days from the site's default_roster ([] when none). */
   site_default_roster_weekly_off: number[]
   /**
-   * The site-level default shift id (sites.default_shift_id).
-   * Used as the 3rd-priority fallback in shift resolution when the employee has
-   * neither a shift_roster override nor a standing employee_shifts assignment.
-   * null when the employee has no site or the site has no default shift.
+   * The site-level default rotation policy id (sites.default_rotation_policy_id).
+   * Used by the rotation engine to determine which shift applies per working condition.
+   * null when the employee has no site or the site has no default rotation policy.
+   */
+  site_default_rotation_policy_id: string | null
+  /**
+   * @deprecated (migration 154) — sites.default_shift_id was the legacy 3rd-priority
+   * fallback before rotation policies were introduced. The new governance model uses
+   * rotation_policy instead. Kept for backward compatibility only.
+   * Will be removed after data migration to rotation policies is complete.
    */
   site_default_shift_id:          string | null
 }
@@ -254,32 +272,35 @@ export async function resolveEmployeeOrgContextBatch(
     locMap.set(j.employee_id, j.work_location_id ?? null)
   }
 
-  // 4. Fetch unique sites (timezone + default_roster_id + default_shift_id)
+  // 4. Fetch unique sites (timezone + governance policy ids + deprecated default_shift_id)
   const uniqueSiteIds = [...new Set(
     [...orgByEmp.values()].map((v) => v.site_id).filter((id): id is string => id !== null),
   )]
   const siteDetailMap = new Map<string, {
-    timezone:          string
-    default_roster_id: string | null
-    default_shift_id:  string | null
+    timezone:                    string
+    default_roster_id:           string | null
+    default_rotation_policy_id:  string | null
+    default_shift_id:            string | null
   }>()
 
   if (uniqueSiteIds.length > 0) {
     const { data: siteRows } = await supabase
       .from('sites')
-      .select('id, timezone, default_roster_id, default_shift_id')
+      .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id')
       .eq('tenant_id', tenantId)
       .in('id', uniqueSiteIds)
     for (const s of (siteRows ?? []) as {
-      id:                string
-      timezone:          string
-      default_roster_id: string | null
-      default_shift_id:  string | null
+      id:                           string
+      timezone:                     string
+      default_roster_id:            string | null
+      default_rotation_policy_id:   string | null
+      default_shift_id:             string | null
     }[]) {
       siteDetailMap.set(s.id, {
-        timezone:          s.timezone          ?? DEFAULT_TZ,
-        default_roster_id: s.default_roster_id ?? null,
-        default_shift_id:  s.default_shift_id  ?? null,
+        timezone:                   s.timezone                   ?? DEFAULT_TZ,
+        default_roster_id:          s.default_roster_id          ?? null,
+        default_rotation_policy_id: s.default_rotation_policy_id ?? null,
+        default_shift_id:           s.default_shift_id           ?? null,
       })
     }
   }
@@ -307,13 +328,14 @@ export async function resolveEmployeeOrgContextBatch(
     const siteDefR = site?.default_roster_id ?? null
 
     result.set(empId, {
-      site_id:                        org.site_id,
-      roster_id:                      org.roster_id,
-      work_location_id:               locMap.get(empId) ?? null,
-      site_timezone:                  site?.timezone ?? DEFAULT_TZ,
-      emp_roster_weekly_off:          org.roster_id ? (rosterWOMap.get(org.roster_id) ?? []) : [],
-      site_default_roster_weekly_off: siteDefR       ? (rosterWOMap.get(siteDefR)     ?? []) : [],
-      site_default_shift_id:          site?.default_shift_id ?? null,
+      site_id:                         org.site_id,
+      roster_id:                       org.roster_id,
+      work_location_id:                locMap.get(empId) ?? null,
+      site_timezone:                   site?.timezone ?? DEFAULT_TZ,
+      emp_roster_weekly_off:           org.roster_id ? (rosterWOMap.get(org.roster_id) ?? []) : [],
+      site_default_roster_weekly_off:  siteDefR       ? (rosterWOMap.get(siteDefR)     ?? []) : [],
+      site_default_rotation_policy_id: site?.default_rotation_policy_id ?? null,
+      site_default_shift_id:           site?.default_shift_id ?? null,  // deprecated
     })
   }
 
@@ -331,12 +353,13 @@ export async function resolveEmployeeOrgContext(
 ): Promise<EmployeeOrgContext> {
   const batch = await resolveEmployeeOrgContextBatch(supabase, tenantId, [employeeId], date)
   return batch.get(employeeId) ?? {
-    site_id:                        null,
-    roster_id:                      null,
-    work_location_id:               null,
-    site_timezone:                  DEFAULT_TZ,
-    emp_roster_weekly_off:          [],
-    site_default_roster_weekly_off: [],
-    site_default_shift_id:          null,
+    site_id:                         null,
+    roster_id:                       null,
+    work_location_id:                null,
+    site_timezone:                   DEFAULT_TZ,
+    emp_roster_weekly_off:           [],
+    site_default_roster_weekly_off:  [],
+    site_default_rotation_policy_id: null,
+    site_default_shift_id:           null,
   }
 }

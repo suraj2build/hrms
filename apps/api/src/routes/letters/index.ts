@@ -39,6 +39,7 @@
 import type { FastifyInstance } from 'fastify'
 import Handlebars from 'handlebars'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Variable resolver ─────────────────────────────────────────────────────────
 
@@ -186,12 +187,15 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
   const supabase = fastify.supabase
 
+  // HR admin + super_admin only — guards all letter management operations
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
   // ══════════════════════════════════════════════════════════════════════════════
   // TEMPLATE MANAGEMENT
   // ══════════════════════════════════════════════════════════════════════════════
 
   // GET /letters/templates
-  fastify.get('/letters/templates', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/letters/templates', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { category, letter_type, active } = req.query as any
 
@@ -211,7 +215,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // GET /letters/templates/:id
-  fastify.get('/letters/templates/:id', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/letters/templates/:id', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { id }       = req.params as any
 
@@ -230,7 +234,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/templates
-  fastify.post('/letters/templates', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/templates', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const body = req.body as any
     const {
@@ -281,7 +285,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // PUT /letters/templates/:id
-  fastify.put('/letters/templates/:id', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.put('/letters/templates/:id', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { id }               = req.params as any
     const body                 = req.body as any
@@ -336,7 +340,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // DELETE /letters/templates/:id  (soft delete)
-  fastify.delete('/letters/templates/:id', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.delete('/letters/templates/:id', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { id }       = req.params as any
 
@@ -354,8 +358,8 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   // VARIABLE RESOLUTION  (for live preview)
   // ══════════════════════════════════════════════════════════════════════════════
 
-  // GET /letters/variables/:employeeId
-  fastify.get('/letters/variables/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  // GET /letters/variables/:employeeId  — CRITICAL: returns PAN, salary, bank data; HR admin only
+  fastify.get('/letters/variables/:employeeId', hrAdminAuth, async (req, reply) => {
     const { tenantId }  = req as any
     const { employeeId } = req.params as any
 
@@ -368,7 +372,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════════
 
   // POST /letters/generate
-  fastify.post('/letters/generate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/generate', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { template_id, employee_id, extra_vars = {} } = req.body as any
 
@@ -421,7 +425,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // GET /letters/issued
-  fastify.get('/letters/issued', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/letters/issued', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { employee_id, status, from, to, limit = '50', offset = '0' } = req.query as any
 
@@ -448,7 +452,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // GET /letters/issued/:letterId
-  fastify.get('/letters/issued/:letterId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/letters/issued/:letterId', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { letterId } = req.params as any
 
@@ -477,7 +481,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/issued/:letterId/submit-for-approval
-  fastify.post('/letters/issued/:letterId/submit-for-approval', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/issued/:letterId/submit-for-approval', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { letterId } = req.params as any
 
@@ -493,7 +497,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/issued/:letterId/approve
-  fastify.post('/letters/issued/:letterId/approve', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/issued/:letterId/approve', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { letterId }         = req.params as any
     const { comments }         = req.body as any ?? {}
@@ -533,7 +537,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/issued/:letterId/reject
-  fastify.post('/letters/issued/:letterId/reject', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/issued/:letterId/reject', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { letterId }         = req.params as any
     const { comments = '' }    = req.body as any ?? {}
@@ -561,7 +565,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/issued/:letterId/issue  (mark as issued — sends to employee)
-  fastify.post('/letters/issued/:letterId/issue', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/issued/:letterId/issue', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { letterId }         = req.params as any
 
@@ -584,7 +588,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // DELETE /letters/issued/:letterId  (draft only)
-  fastify.delete('/letters/issued/:letterId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.delete('/letters/issued/:letterId', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { letterId } = req.params as any
 
@@ -724,7 +728,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════════
 
   // GET /letters/requests  (HR view of all ESS requests)
-  fastify.get('/letters/requests', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/letters/requests', hrAdminAuth, async (req, reply) => {
     const { tenantId } = req as any
     const { status, limit = '50', offset = '0' } = req.query as any
 
@@ -748,7 +752,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/requests/:id/fulfill  — generate + issue letter for ESS request
-  fastify.post('/letters/requests/:id/fulfill', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/requests/:id/fulfill', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { id }               = req.params as any
     const { extra_vars = {} }  = req.body as any ?? {}
@@ -806,7 +810,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   })
 
   // POST /letters/requests/:id/reject
-  fastify.post('/letters/requests/:id/reject', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/letters/requests/:id/reject', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { id }               = req.params as any
     const { reason = '' }      = req.body as any ?? {}

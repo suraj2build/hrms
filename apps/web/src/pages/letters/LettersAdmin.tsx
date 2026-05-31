@@ -87,7 +87,10 @@ interface Employee {
 
 function fmt(d: string | null | undefined) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 function statusBadge(status: string) {

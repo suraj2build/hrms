@@ -119,7 +119,7 @@ export function employeeProfileUrl(employeeId: string): string {
  * Manager dashboard.
  */
 export function managerDashboardUrl(): string {
-  return `/admin/manager-dashboard`
+  return `/manager/dashboard`
 }
 
 // ── Observability domain ──────────────────────────────────────────────────────

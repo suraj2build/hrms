@@ -1,6 +1,73 @@
 import { useAuthStore } from '@/stores/authStore'
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:2001'
+// ── Structured API error ───────────────────────────────────────────────────────
+//
+// Thrown by the request() helper whenever the server returns a non-2xx status.
+// Carries the full structured body so callers can branch on `error` codes
+// (e.g. 'MISSING_ATTENDANCE_DATA') rather than parsing free-text messages.
+//
+// Usage:
+//   import { ApiError } from '@/lib/api/client'
+//   try { await api.post(...) } catch (e) {
+//     if (e instanceof ApiError && e.error === 'MISSING_ATTENDANCE_DATA') { ... }
+//   }
+
+export class ApiError extends Error {
+  readonly statusCode: number
+  /** Machine-readable error code returned by the backend (e.g. 'NOT_FOUND'). */
+  readonly error:      string
+  /** Full response body — use to access backend-specific extra fields. */
+  readonly data:       Record<string, unknown>
+
+  constructor(
+    statusCode: number,
+    error:      string,
+    message:    string,
+    data:       Record<string, unknown> = {},
+  ) {
+    super(message)
+    this.name       = 'ApiError'
+    this.statusCode = statusCode
+    this.error      = error
+    this.data       = data
+  }
+}
+
+/**
+ * Base URL for all API calls.
+ *
+ * Development (default): '' — empty string so every call becomes a relative
+ * path (e.g. fetch('/me'), fetch('/departments')).  The Vite dev server's
+ * proxy table in vite.config.ts has an entry for every top-level API route
+ * prefix (/me, /employees, /attendance, /payroll, …) that forwards them to
+ * http://localhost:2001, so no CORS configuration is needed in dev.
+ *
+ * Production: set VITE_API_URL to the absolute API origin, e.g.
+ *   VITE_API_URL=https://api.hrms.in
+ *
+ * Use `||` (not `??`) so an explicitly-empty env var also falls through to
+ * the empty-string default ('' is falsy; undefined/null is also handled, and
+ * an empty .env line produces '' which `??` would NOT catch).
+ *
+ * WARNING: Never set VITE_API_URL to http://localhost:2001 in development.
+ * That bypasses the Vite proxy, makes direct cross-origin requests, and causes
+ * "TypeError: Failed to fetch" whenever the API server is temporarily unavailable.
+ * The proxy approach (empty VITE_API_URL) is the only safe dev setup.
+ */
+const API_URL = import.meta.env.VITE_API_URL || ''
+
+if (
+  import.meta.env.DEV &&
+  API_URL &&
+  (API_URL.includes('localhost') || API_URL.includes('127.0.0.1'))
+) {
+  console.warn(
+    '[api/client] VITE_API_URL is set to an absolute localhost URL in development:',
+    API_URL,
+    '\nThis bypasses the Vite proxy and may cause "Failed to fetch" errors.',
+    '\nUnset VITE_API_URL in your .env files to use the proxy correctly.',
+  )
+}
 
 function getAuthHeaders(): HeadersInit {
   const token = useAuthStore.getState().accessToken
@@ -14,17 +81,39 @@ async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const headers = getAuthHeaders()
+  const token = useAuthStore.getState().accessToken
+  const hasBody = options.body != null
+
+  // Only set Content-Type when there is an actual body.
+  // Sending Content-Type: application/json with an empty body causes Fastify
+  // to throw FST_ERR_CTP_EMPTY_JSON_BODY (400) on DELETE / other bodyless requests.
+  const headers: HeadersInit = {
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  }
+
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
-    headers: { ...headers, ...options.headers },
+    headers,
   })
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }))
-    throw new Error(error.message ?? `HTTP ${response.status}`)
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new ApiError(
+      response.status,
+      (body.error   as string | undefined) ?? `HTTP_${response.status}`,
+      (body.message as string | undefined) ?? `HTTP ${response.status}`,
+      body,
+    )
   }
 
+  // 204 No Content (and any other empty response) — return undefined rather than
+  // trying to JSON-parse an empty body, which throws "Unexpected end of JSON input".
+  const contentLength = response.headers.get('content-length')
+  if (response.status === 204 || contentLength === '0') {
+    return undefined as unknown as T
+  }
   return response.json() as Promise<T>
 }
 
@@ -40,8 +129,13 @@ async function requestRaw(endpoint: string): Promise<Response> {
     },
   })
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }))
-    throw new Error(error.message ?? `HTTP ${response.status}`)
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new ApiError(
+      response.status,
+      (body.error   as string | undefined) ?? `HTTP_${response.status}`,
+      (body.message as string | undefined) ?? `HTTP ${response.status}`,
+      body,
+    )
   }
   return response
 }
@@ -58,8 +152,13 @@ async function requestWithMeta<T>(
   const response = await fetch(`${API_URL}${endpoint}`, { headers: authHeaders })
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }))
-    throw new Error(error.message ?? `HTTP ${response.status}`)
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new ApiError(
+      response.status,
+      (body.error   as string | undefined) ?? `HTTP_${response.status}`,
+      (body.message as string | undefined) ?? `HTTP ${response.status}`,
+      body,
+    )
   }
 
   const data = (await response.json()) as T

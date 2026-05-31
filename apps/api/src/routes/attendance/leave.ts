@@ -422,6 +422,39 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       }
     }
 
+    // Payroll freeze guard — queue adjustment if leave overlaps a locked payroll period
+    // Non-blocking: approval is already committed above; this is a best-effort queue entry.
+    try {
+      const affectedMonths = [...new Set(leaveDates.map((d: string) => d.slice(0, 7)))]
+      for (const month of affectedMonths) {
+        const { data: freeze } = await fastify.supabase
+          .from('payroll_freeze_log')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .eq('freeze_month', month)
+          .eq('action', 'freeze')
+          .is('unfrozen_at', null)
+          .limit(1)
+          .maybeSingle()
+
+        if (freeze) {
+          await fastify.supabase.from('payroll_adjustments').insert({
+            tenant_id:       req.tenantId,
+            employee_id:     app.employee_id,
+            locked_month:    month,
+            adjustment_type: 'lop_adjustment',
+            reason:          `Leave approved for ${app.from_date}–${app.to_date} affects locked period ${month}`,
+            source_type:     'leave_approval',
+            source_id:       app.id,
+            status:          'pending',
+            created_by:      req.userId,
+          })
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err }, 'payroll freeze guard check failed — approval committed')
+    }
+
     // DB-level event + notification fan-out (non-blocking)
     emitEvent({
       supabase:   fastify.supabase,
@@ -529,11 +562,30 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   })
 
   // ── GET /attendance/leave/balance/:employeeId ─────────────────────────────────
-  fastify.get('/attendance/leave/balance/:employeeId', auth, async (req, reply) => {
+  fastify.get('/attendance/leave/balance/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const year = new Date().getFullYear()
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
 
-    // Verify employee belongs to tenant
+    // Non-admin callers may only view their own leave balance.
+    // Resolve the caller's employee_id and enforce ownership before touching DB.
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+
+      if (!callerProfile?.employee_id) {
+        return reply.code(403).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+      }
+      if (callerProfile.employee_id !== employeeId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own leave balance' })
+      }
+    }
+
+    // Verify employee belongs to tenant (still needed for admin path + defence-in-depth)
     const { data: emp } = await fastify.supabase
       .from('employees')
       .select('id')
@@ -542,15 +594,146 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const { data, error } = await fastify.supabase
-      .from('employee_leave_balance')
-      .select('id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
-      .eq('tenant_id', req.tenantId)
-      .eq('employee_id', employeeId)
-      .eq('year', year)
+    const [{ data, error }, { data: accrualRows }] = await Promise.all([
+      fastify.supabase
+        .from('employee_leave_balance')
+        .select('id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', employeeId)
+        .eq('year', year),
+
+      // Sum of all positive accrual entries this year per leave type — gives total entitlement
+      fastify.supabase
+        .from('leave_accrual_ledger')
+        .select('leave_type_id, days')
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', employeeId)
+        .eq('year', year)
+        .gt('days', 0),
+    ])
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave balances' })
-    return reply.send({ data: data ?? [] })
+
+    // Build a lookup: leave_type_id → total accrued days this year
+    const accrualByType: Record<string, number> = {}
+    for (const row of (accrualRows ?? []) as any[]) {
+      accrualByType[row.leave_type_id] = (accrualByType[row.leave_type_id] ?? 0) + Number(row.days)
+    }
+
+    const enriched = (data ?? []).map((b: any) => ({
+      ...b,
+      // annual_entitlement: total credited this year; null when ledger is empty (pre-accrual)
+      annual_entitlement: accrualByType[b.leave_type_id] ?? null,
+    }))
+
+    return reply.send({ data: enriched })
+  })
+
+  // ── GET /attendance/leave/team-balances ──────────────────────────────────────
+  // Manager-facing: returns leave balances for all direct reports of the caller.
+  // Also accessible to hr_admin / super_admin (unrestricted).
+  fastify.get('/attendance/leave/team-balances', auth, async (req: any, reply) => {
+    const year       = new Date().getFullYear()
+    const tenantId   = req.tenantId as string
+    const isHrAdmin  = ['super_admin', 'hr_admin'].includes(req.userRole)
+
+    let teamEmployeeIds: string[] = []
+
+    if (isHrAdmin) {
+      // HR admin: all active employees in tenant
+      const { data: allEmps } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+      teamEmployeeIds = ((allEmps ?? []) as any[]).map(e => e.id)
+    } else {
+      // Manager: resolve their own employee_id, then find direct reports
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', tenantId)
+        .single()
+
+      if (!callerProfile?.employee_id) {
+        return reply.code(403).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+      }
+
+      const { data: directReports } = await fastify.supabase
+        .from('employees')
+        .select('id, job_history!job_history_employee_id_fkey(manager_id, is_current)')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .eq('job_history.manager_id', callerProfile.employee_id)
+        .eq('job_history.is_current', true)
+
+      teamEmployeeIds = ((directReports ?? []) as any[]).map(e => e.id)
+    }
+
+    if (teamEmployeeIds.length === 0) {
+      return reply.send({ data: [] })
+    }
+
+    // Bulk fetch leave balances + employee info + accrual totals for the team
+    const [{ data: employees }, { data: balances }, { data: accrualRows }] = await Promise.all([
+      fastify.supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code, departments(name)')
+        .eq('tenant_id', tenantId)
+        .in('id', teamEmployeeIds),
+
+      fastify.supabase
+        .from('employee_leave_balance')
+        .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
+        .eq('tenant_id', tenantId)
+        .in('employee_id', teamEmployeeIds)
+        .eq('year', year),
+
+      fastify.supabase
+        .from('leave_accrual_ledger')
+        .select('employee_id, leave_type_id, days')
+        .eq('tenant_id', tenantId)
+        .in('employee_id', teamEmployeeIds)
+        .eq('year', year)
+        .gt('days', 0),
+    ])
+
+    // Build accrual lookup: employeeId → leaveTypeId → total days
+    const accrualMap: Record<string, Record<string, number>> = {}
+    for (const row of (accrualRows ?? []) as any[]) {
+      if (!accrualMap[row.employee_id]) accrualMap[row.employee_id] = {}
+      accrualMap[row.employee_id][row.leave_type_id] =
+        (accrualMap[row.employee_id][row.leave_type_id] ?? 0) + Number(row.days)
+    }
+
+    // Group balances by employee
+    const balanceByEmp: Record<string, any[]> = {}
+    for (const b of (balances ?? []) as any[]) {
+      if (!balanceByEmp[b.employee_id]) balanceByEmp[b.employee_id] = []
+      balanceByEmp[b.employee_id].push({
+        leave_type_id:     b.leave_type_id,
+        leave_type_name:   (b.leave_types as any)?.name ?? 'Unknown',
+        is_paid:           (b.leave_types as any)?.is_paid ?? false,
+        balance:           Number(b.balance),
+        annual_entitlement: accrualMap[b.employee_id]?.[b.leave_type_id] ?? null,
+        used:              (accrualMap[b.employee_id]?.[b.leave_type_id] ?? 0) - Number(b.balance),
+      })
+    }
+
+    // Assemble final response
+    const result = ((employees ?? []) as any[]).map(emp => {
+      const dept = Array.isArray(emp.departments) ? emp.departments[0] : emp.departments
+      return {
+        employee_id:   emp.id,
+        employee_code: emp.employee_code,
+        name:          `${emp.first_name} ${emp.last_name}`,
+        department:    dept?.name ?? null,
+        balances:      balanceByEmp[emp.id] ?? [],
+      }
+    })
+
+    return reply.send({ data: result, year })
   })
 
   // ── PUT /attendance/leave/balance ─────────────────────────────────────────────
@@ -581,13 +764,14 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to set leave balance' })
 
-    // Audit log — balance set/updated by HR admin
+    // Audit log — balance set/updated by HR admin on behalf of employee
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'employee_leave_balance',
       recordId:    parsed.data.employee_id,
       action:      'UPDATE',
       performedBy: req.userId,
+      onBehalfOf:  parsed.data.employee_id,   // HR admin always acts on behalf of target employee
       newData:     {
         employee_id:   parsed.data.employee_id,
         leave_type_id: parsed.data.leave_type_id,
@@ -693,12 +877,13 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'bulk-assign', 200, responseBody)
     }
 
-    // Audit log — bulk leave assignment by HR admin
+    // Audit log — bulk leave assignment by HR admin on behalf of multiple employees
     await logBulkAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'leave_applications',
       action:      'INSERT',
       performedBy: req.userId,
+      // onBehalfOf not set for bulk — multiple targets captured in summary.employee_ids
       summary: {
         employee_ids:     employee_ids,
         employees_count:  employee_ids.length,

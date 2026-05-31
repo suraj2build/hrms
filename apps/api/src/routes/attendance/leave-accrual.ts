@@ -263,7 +263,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
   // ── GET /leave/encashment/my ──────────────────────────────────────────────
   fastify.get('/leave/encashment/my', auth, async (req: any, reply) => {
     const { data: prof } = await fastify.supabase
-      .from('profiles').select('employee_id').eq('id', req.userId).single()
+      .from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', req.tenantId).single()
     if (!prof?.employee_id) return reply.send({ data: [] })
 
     const { data, error } = await fastify.supabase

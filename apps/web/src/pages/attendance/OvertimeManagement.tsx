@@ -132,7 +132,11 @@ function fmtMin(min: number | null): string {
 }
 
 function fmt(d: string) {
-  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  const s = d
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 // ── Policy Dialog ─────────────────────────────────────────────────────────────
@@ -396,8 +400,9 @@ function RequestsTab() {
         }
       >
         {isLoading ? (
-          <div className="space-y-2 animate-pulse py-4">
-            {[1,2,3].map(i => <div key={i} className="h-12 bg-muted rounded-lg" />)}
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading…</span>
           </div>
         ) : requests.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
@@ -408,9 +413,9 @@ function RequestsTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-border">
+                <tr className="border-b border-border bg-muted/30">
                   {['Employee', 'Date', 'Raw OT', 'Requested', 'Approved', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
+                    <th key={h} className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2.5">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -418,7 +423,7 @@ function RequestsTab() {
                 {requests.map(req => {
                   const isActing = actionRowId === req.id
                   return (
-                    <tr key={req.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <tr key={req.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                       <td className="px-3 py-2">
                         <p className="font-medium text-foreground">{req.employee_name ?? '—'}</p>
                         <p className="text-[10px] text-muted-foreground">{req.employee_code}</p>
@@ -437,7 +442,7 @@ function RequestsTab() {
                           <div className="flex items-center gap-1.5">
                             {!isActing ? (
                               <>
-                                <Button size="sm" className="h-6 text-[10px] px-2 bg-success/20 text-success hover:bg-success/30 border-0"
+                                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 text-success border-success/30 hover:bg-success/10 hover:text-success"
                                   onClick={() => setActionRowId(req.id)}>
                                   <CheckCircle2 className="h-3 w-3 mr-1" />Review
                                 </Button>
@@ -531,8 +536,9 @@ function PoliciesTab() {
         }
       >
         {isLoading ? (
-          <div className="space-y-2 animate-pulse py-4">
-            {[1,2].map(i => <div key={i} className="h-16 bg-muted rounded-lg" />)}
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading…</span>
           </div>
         ) : policies.length === 0 ? (
           <div className="flex flex-col items-center py-12 gap-3 text-muted-foreground">
@@ -687,7 +693,9 @@ function AssignmentsTab() {
         {applied && (
           <>
             {loadingAss ? (
-              <div className="text-xs text-muted-foreground animate-pulse py-3">Loading…</div>
+              <div className="flex items-center gap-1.5 py-3 text-muted-foreground text-xs">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading…
+              </div>
             ) : (assignments?.data ?? []).length > 0 ? (
               <div className="mb-4 p-3 rounded-lg border border-border bg-muted/30 flex items-center justify-between">
                 <div>

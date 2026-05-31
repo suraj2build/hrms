@@ -332,6 +332,48 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
     ],
   },
 
+  sites: {
+    label: 'Sites',
+    columns: [
+      {
+        key: 'code',
+        label: 'Code',
+        required: true,
+        type: 'string',
+        example: 'SITE-BLR',
+        description: 'Unique site code used as a reference key for work locations.',
+      },
+      {
+        key: 'name',
+        label: 'Name',
+        required: true,
+        type: 'string',
+        example: 'Bengaluru Campus',
+        description: 'Site display name.',
+      },
+      {
+        key: 'location',
+        label: 'Location',
+        required: false,
+        type: 'string',
+        example: 'Bengaluru, Karnataka',
+        description: 'City/region for display purposes.',
+      },
+      {
+        key: 'timezone',
+        label: 'Timezone',
+        required: false,
+        type: 'string',
+        example: 'Asia/Kolkata',
+        description: 'IANA timezone name. Defaults to Asia/Kolkata.',
+      },
+    ],
+    sampleRows: [
+      { code: 'SITE-BLR', name: 'Bengaluru Campus',  location: 'Bengaluru, Karnataka', timezone: 'Asia/Kolkata' },
+      { code: 'SITE-MUM', name: 'Mumbai Office',      location: 'Mumbai, Maharashtra',  timezone: 'Asia/Kolkata' },
+    ],
+  },
+
   work_locations: {
     label: 'Work Locations',
     columns: [
@@ -350,6 +392,14 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
         type: 'string',
         example: 'Bengaluru Office',
         description: 'Work location display name.',
+      },
+      {
+        key: 'site_code',
+        label: 'Site Code',
+        required: false,
+        type: 'string',
+        example: 'SITE-BLR',
+        description: 'Code of an existing site to link this work location to. Must match the code of a site already created in your organisation.',
       },
       {
         key: 'city',
@@ -385,8 +435,8 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
       },
     ],
     sampleRows: [
-      { code: 'LOC-BLR', name: 'Bengaluru Office', city: 'Bengaluru', state: 'Karnataka', country: 'India', pincode: '560001' },
-      { code: 'LOC-MUM', name: 'Mumbai Office', city: 'Mumbai', state: 'Maharashtra', country: 'India', pincode: '400001' },
+      { code: 'LOC-BLR', name: 'Bengaluru Office', site_code: 'SITE-BLR', city: 'Bengaluru', state: 'Karnataka', country: 'India', pincode: '560001' },
+      { code: 'LOC-MUM', name: 'Mumbai Office',    site_code: 'SITE-MUM', city: 'Mumbai',    state: 'Maharashtra', country: 'India', pincode: '400001' },
     ],
   },
 
@@ -563,6 +613,349 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
     sampleRows: [
       { date: '2025-01-26', name: 'Republic Day', holiday_type: 'national' },
       { date: '2025-08-15', name: 'Independence Day', holiday_type: 'national' },
+    ],
+  },
+
+  // ── Enterprise onboarding imports ──────────────────────────────────────────
+
+  employee_compensation: {
+    label: 'Employee Compensation',
+    columns: [
+      {
+        key: 'employee_code',
+        label: 'Employee Code',
+        required: true,
+        type: 'string',
+        example: 'EMP001',
+        description: 'Employee code of an existing employee.',
+      },
+      {
+        key: 'effective_from',
+        label: 'Effective From (YYYY-MM-DD)',
+        required: true,
+        type: 'date',
+        example: '2025-04-01',
+        description: 'Date from which this compensation is effective (YYYY-MM-DD).',
+      },
+      {
+        key: 'ctc_annual',
+        label: 'CTC Annual',
+        required: true,
+        type: 'number',
+        example: '600000',
+        description: 'Annual Cost-to-Company in rupees (numeric, no commas).',
+      },
+      {
+        key: 'salary_structure_code',
+        label: 'Salary Structure Code',
+        required: false,
+        type: 'string',
+        example: 'SS-DEFAULT',
+        description: 'Code of an existing salary structure. Uses tenant default if blank.',
+      },
+      {
+        key: 'notes',
+        label: 'Notes',
+        required: false,
+        type: 'string',
+        example: 'Annual revision FY2025',
+        description: 'Optional notes about this compensation revision.',
+      },
+    ],
+    sampleRows: [
+      {
+        employee_code: 'EMP001',
+        effective_from: '2025-04-01',
+        ctc_annual: '600000',
+        salary_structure_code: 'SS-DEFAULT',
+        notes: 'Annual revision FY2025',
+      },
+      {
+        employee_code: 'EMP002',
+        effective_from: '2025-04-01',
+        ctc_annual: '480000',
+        salary_structure_code: '',
+        notes: '',
+      },
+    ],
+  },
+
+  leave_opening_balances: {
+    label: 'Leave Opening Balances',
+    columns: [
+      {
+        key: 'employee_code',
+        label: 'Employee Code',
+        required: true,
+        type: 'string',
+        example: 'EMP001',
+        description: 'Employee code of an existing employee.',
+      },
+      {
+        key: 'leave_type_name',
+        label: 'Leave Type Name',
+        required: true,
+        type: 'string',
+        example: 'Annual Leave',
+        description: 'Exact name of an existing leave type.',
+      },
+      {
+        key: 'balance',
+        label: 'Balance (days)',
+        required: true,
+        type: 'number',
+        example: '12',
+        description: 'Opening balance in days (can be decimal, e.g. 0.5).',
+      },
+      {
+        key: 'year',
+        label: 'Year',
+        required: false,
+        type: 'number',
+        example: '2025',
+        description: 'Calendar year for this balance. Defaults to current year.',
+      },
+      {
+        key: 'carry_forward_balance',
+        label: 'Carry Forward Balance (days)',
+        required: false,
+        type: 'number',
+        example: '3',
+        description: 'Days carried forward from the previous year (optional, defaults to 0).',
+      },
+    ],
+    sampleRows: [
+      {
+        employee_code: 'EMP001',
+        leave_type_name: 'Annual Leave',
+        balance: '12',
+        year: '2025',
+        carry_forward_balance: '3',
+      },
+      {
+        employee_code: 'EMP001',
+        leave_type_name: 'Sick Leave',
+        balance: '6',
+        year: '2025',
+        carry_forward_balance: '0',
+      },
+    ],
+  },
+
+  shift_assignments: {
+    label: 'Shift Assignments',
+    columns: [
+      {
+        key: 'employee_code',
+        label: 'Employee Code',
+        required: true,
+        type: 'string',
+        example: 'EMP001',
+        description: 'Employee code of an existing employee.',
+      },
+      {
+        key: 'shift_code',
+        label: 'Shift Code',
+        required: true,
+        type: 'string',
+        example: 'SHIFT-GEN',
+        description: 'Code of an existing shift.',
+      },
+      {
+        key: 'effective_from',
+        label: 'Effective From (YYYY-MM-DD)',
+        required: true,
+        type: 'date',
+        example: '2025-04-01',
+        description: 'Date from which this shift assignment takes effect (YYYY-MM-DD).',
+      },
+    ],
+    sampleRows: [
+      {
+        employee_code: 'EMP001',
+        shift_code: 'SHIFT-GEN',
+        effective_from: '2025-04-01',
+      },
+      {
+        employee_code: 'EMP002',
+        shift_code: 'SHIFT-NIGHT',
+        effective_from: '2025-04-01',
+      },
+    ],
+  },
+
+  // ── Enterprise Operational Masters ─────────────────────────────────────────
+
+  grades: {
+    label: 'Grades / Bands',
+    columns: [
+      { key: 'code',           label: 'Code',              required: true,  type: 'string', example: 'GRADE-L1',  description: 'Unique grade/band code. Will be uppercased.' },
+      { key: 'name',           label: 'Name',              required: true,  type: 'string', example: 'Level 1',   description: 'Display name for the grade.' },
+      { key: 'description',    label: 'Description',       required: false, type: 'string', example: 'Junior IC', description: 'Optional description of the grade.' },
+      { key: 'level_order',    label: 'Level Order',       required: false, type: 'number', example: '1',         description: 'Numeric order for sorting grades (lower = junior).' },
+      { key: 'ctc_min_annual', label: 'Min CTC (Annual)',  required: false, type: 'number', example: '300000',    description: 'Minimum annual CTC for this grade (optional).' },
+      { key: 'ctc_max_annual', label: 'Max CTC (Annual)',  required: false, type: 'number', example: '600000',    description: 'Maximum annual CTC for this grade (optional).' },
+    ],
+    sampleRows: [
+      { code: 'GRADE-L1', name: 'Level 1',   description: 'Junior IC',       level_order: '1', ctc_min_annual: '300000',  ctc_max_annual: '600000' },
+      { code: 'GRADE-L2', name: 'Level 2',   description: 'Mid-level IC',    level_order: '2', ctc_min_annual: '600000',  ctc_max_annual: '1200000' },
+      { code: 'GRADE-M1', name: 'Manager 1', description: 'First-line Mgr',  level_order: '3', ctc_min_annual: '1200000', ctc_max_annual: '2000000' },
+    ],
+  },
+
+  payroll_groups: {
+    label: 'Payroll Groups',
+    columns: [
+      { key: 'code',             label: 'Code',            required: true,  type: 'string',                               example: 'PG-MONTHLY',  description: 'Unique payroll group code. Will be uppercased.' },
+      { key: 'name',             label: 'Name',            required: true,  type: 'string',                               example: 'Monthly Staff', description: 'Display name for the payroll group.' },
+      { key: 'cycle_type',       label: 'Cycle Type',      required: false, type: 'enum', enumValues: ['monthly','biweekly','weekly'], example: 'monthly', description: 'Payroll frequency: monthly, biweekly, or weekly.' },
+      { key: 'cycle_start_day',  label: 'Cycle Start Day', required: false, type: 'number',                               example: '1',           description: 'First day of the attendance period (1-28). Use 1 for calendar month, 21 for mid-month cycle.' },
+      { key: 'cutoff_day',       label: 'Cutoff Day',      required: false, type: 'number',                               example: '25',          description: 'Last day of the attendance period (1-28). E.g. 20 for a 21→20 mid-month cycle.' },
+      { key: 'payout_day',       label: 'Payout Day',      required: false, type: 'number',                               example: '1',           description: 'Day of month when salaries are disbursed (1-31).' },
+      { key: 'currency_code',    label: 'Currency',        required: false, type: 'string',                               example: 'INR',         description: '3-letter ISO currency code. Defaults to INR.' },
+    ],
+    sampleRows: [
+      { code: 'PG-MONTHLY',   name: 'Monthly Staff',    cycle_type: 'monthly', cycle_start_day: '1',  cutoff_day: '31', payout_day: '5',  currency_code: 'INR' },
+      { code: 'PG-MIDMONTH',  name: 'Mid-Month Cycle',  cycle_type: 'monthly', cycle_start_day: '21', cutoff_day: '20', payout_day: '1',  currency_code: 'INR' },
+      { code: 'PG-WEEKLY',    name: 'Weekly Field',     cycle_type: 'weekly',  cycle_start_day: '1',  cutoff_day: '5',  payout_day: '7',  currency_code: 'INR' },
+    ],
+  },
+
+  employment_categories: {
+    label: 'Employment Categories',
+    columns: [
+      { key: 'code',               label: 'Code',              required: true,  type: 'string',  example: 'EC-PERM',  description: 'Unique category code. Will be uppercased.' },
+      { key: 'name',               label: 'Name',              required: true,  type: 'string',  example: 'Permanent Regular', description: 'Display name for the employment category.' },
+      { key: 'description',        label: 'Description',       required: false, type: 'string',  example: '',         description: 'Optional description.' },
+      { key: 'benefits_eligible',  label: 'Benefits Eligible', required: false, type: 'boolean', example: 'true',     description: 'Whether employees in this category are eligible for benefits.' },
+      { key: 'pf_applicable',      label: 'PF Applicable',     required: false, type: 'boolean', example: 'true',     description: 'Whether PF deduction applies.' },
+      { key: 'esi_applicable',     label: 'ESI Applicable',    required: false, type: 'boolean', example: 'true',     description: 'Whether ESI contribution applies.' },
+      { key: 'notice_period_days', label: 'Notice Period (Days)', required: false, type: 'number', example: '30',     description: 'Standard notice period in days.' },
+      { key: 'probation_days',     label: 'Probation (Days)',  required: false, type: 'number',  example: '90',       description: 'Probation period in days (0 = no probation).' },
+    ],
+    sampleRows: [
+      { code: 'EC-PERM',     name: 'Permanent Regular',   benefits_eligible: 'true',  pf_applicable: 'true',  esi_applicable: 'true',  notice_period_days: '30', probation_days: '90' },
+      { code: 'EC-CONTRACT', name: 'Fixed Term Contract', benefits_eligible: 'false', pf_applicable: 'true',  esi_applicable: 'true',  notice_period_days: '15', probation_days: '0' },
+      { code: 'EC-INTERN',   name: 'Intern / Trainee',    benefits_eligible: 'false', pf_applicable: 'false', esi_applicable: 'false', notice_period_days: '7',  probation_days: '0' },
+    ],
+  },
+
+  statutory_groups: {
+    label: 'Statutory Groups',
+    columns: [
+      { key: 'code',             label: 'Code',              required: true,  type: 'string',  example: 'SG-MH',   description: 'Unique statutory group code. Will be uppercased.' },
+      { key: 'name',             label: 'Name',              required: true,  type: 'string',  example: 'Maharashtra', description: 'Group display name (typically state/region).' },
+      { key: 'state',            label: 'State',             required: false, type: 'string',  example: 'Maharashtra', description: 'State or region this group covers.' },
+      { key: 'pf_enabled',       label: 'PF Enabled',        required: false, type: 'boolean', example: 'true',    description: 'Whether PF applies to employees in this group.' },
+      { key: 'esi_enabled',      label: 'ESI Enabled',       required: false, type: 'boolean', example: 'true',    description: 'Whether ESI applies to employees in this group.' },
+      { key: 'pt_enabled',       label: 'PT Enabled',        required: false, type: 'boolean', example: 'true',    description: 'Whether Professional Tax applies.' },
+      { key: 'lwf_enabled',      label: 'LWF Enabled',       required: false, type: 'boolean', example: 'false',   description: 'Whether Labour Welfare Fund applies.' },
+      { key: 'pf_wage_ceiling',  label: 'PF Wage Ceiling',   required: false, type: 'number',  example: '15000',   description: 'Monthly wage ceiling for PF computation (0 = uncapped).' },
+      { key: 'esi_wage_ceiling', label: 'ESI Wage Ceiling',  required: false, type: 'number',  example: '21000',   description: 'Monthly gross ceiling for ESI applicability.' },
+    ],
+    sampleRows: [
+      { code: 'SG-MH', name: 'Maharashtra', state: 'Maharashtra', pf_enabled: 'true', esi_enabled: 'true', pt_enabled: 'true',  lwf_enabled: 'false', pf_wage_ceiling: '15000', esi_wage_ceiling: '21000' },
+      { code: 'SG-KA', name: 'Karnataka',   state: 'Karnataka',   pf_enabled: 'true', esi_enabled: 'true', pt_enabled: 'true',  lwf_enabled: 'true',  pf_wage_ceiling: '15000', esi_wage_ceiling: '21000' },
+      { code: 'SG-DL', name: 'Delhi',       state: 'Delhi',       pf_enabled: 'true', esi_enabled: 'true', pt_enabled: 'false', lwf_enabled: 'false', pf_wage_ceiling: '15000', esi_wage_ceiling: '21000' },
+    ],
+  },
+
+  asset_categories: {
+    label: 'Asset Categories',
+    columns: [
+      { key: 'code',                label: 'Code',                required: true,  type: 'string', example: 'AC-LAPTOP', description: 'Unique asset category code. Will be uppercased.' },
+      { key: 'name',                label: 'Name',                required: true,  type: 'string', example: 'Laptop',    description: 'Asset category display name.' },
+      { key: 'description',         label: 'Description',         required: false, type: 'string', example: 'Company-issued laptops and notebooks', description: 'Optional description.' },
+      { key: 'depreciation_method', label: 'Depreciation Method', required: false, type: 'enum', enumValues: ['straight_line','declining_balance','none'], example: 'straight_line', description: 'Depreciation method: straight_line, declining_balance, or none.' },
+      { key: 'useful_life_years',   label: 'Useful Life (Years)', required: false, type: 'number', example: '3',         description: 'Expected useful life in years for depreciation.' },
+      { key: 'requires_return',     label: 'Requires Return',     required: false, type: 'boolean', example: 'true',     description: 'Whether employees must return this asset on separation.' },
+    ],
+    sampleRows: [
+      { code: 'AC-LAPTOP',  name: 'Laptop',          description: 'Company-issued laptops', depreciation_method: 'straight_line', useful_life_years: '3', requires_return: 'true' },
+      { code: 'AC-MOBILE',  name: 'Mobile Phone',    description: 'Company mobile devices',  depreciation_method: 'straight_line', useful_life_years: '2', requires_return: 'true' },
+      { code: 'AC-VEHICLE', name: 'Vehicle',         description: 'Company vehicles',        depreciation_method: 'declining_balance', useful_life_years: '5', requires_return: 'true' },
+    ],
+  },
+
+  // ── Payroll Masters ───────────────────────────────────────────────────────────
+
+  salary_structures: {
+    label: 'Salary Structures',
+    columns: [
+      { key: 'code',        label: 'Code',        required: true,  type: 'string',  example: 'SS-SENIOR',    description: 'Unique salary structure code. Will be uppercased.' },
+      { key: 'name',        label: 'Name',        required: true,  type: 'string',  example: 'Senior Engineer Package', description: 'Display name for the salary structure.' },
+      { key: 'description', label: 'Description', required: false, type: 'string',  example: 'Band L3-L4 CTC structure', description: 'Optional description.' },
+      { key: 'is_default',  label: 'Is Default',  required: false, type: 'boolean', example: 'false', description: 'Set to true to make this the tenant-default structure. Only one may be default.' },
+    ],
+    sampleRows: [
+      { code: 'SS-DEFAULT', name: 'Standard Package',   description: 'Default CTC structure', is_default: 'true' },
+      { code: 'SS-SENIOR',  name: 'Senior Engineer',    description: 'Band L3-L4',            is_default: 'false' },
+      { code: 'SS-MGMT',    name: 'Management Package', description: 'Manager band',          is_default: 'false' },
+    ],
+  },
+
+  // ── Onboarding Governance ─────────────────────────────────────────────────────
+
+  compensation_revisions: {
+    label: 'Compensation Revisions',
+    columns: [
+      { key: 'employee_code',  label: 'Employee Code',   required: true,  type: 'string', example: 'EMP001', description: 'Employee code identifying the revision target.' },
+      { key: 'revision_type',  label: 'Revision Type',   required: true,  type: 'enum',   enumValues: ['increment','promotion','restructure','correction','transfer'], example: 'increment', description: 'Type of compensation revision.' },
+      { key: 'effective_date', label: 'Effective Date',  required: true,  type: 'date',   example: '2025-04-01', description: 'Date from which the new CTC takes effect (YYYY-MM-DD).' },
+      { key: 'new_ctc_annual', label: 'New Annual CTC',  required: true,  type: 'number', example: '1200000', description: 'New annual CTC in rupees.' },
+      { key: 'reason',         label: 'Reason',          required: true,  type: 'string', example: 'Annual increment cycle FY2025', description: 'Business reason for the revision.' },
+      { key: 'notes',          label: 'Notes',           required: false, type: 'string', example: 'Approved in April review', description: 'Optional free-text notes.' },
+    ],
+    sampleRows: [
+      { employee_code: 'EMP001', revision_type: 'increment',   effective_date: '2025-04-01', new_ctc_annual: '1200000', reason: 'Annual increment FY2025' },
+      { employee_code: 'EMP002', revision_type: 'promotion',   effective_date: '2025-04-01', new_ctc_annual: '1800000', reason: 'Promotion to Senior Engineer' },
+      { employee_code: 'EMP003', revision_type: 'correction',  effective_date: '2025-01-01', new_ctc_annual: '950000',  reason: 'Joining CTC correction' },
+    ],
+  },
+
+  // ── Reference Data ─────────────────────────────────────────────────────────────
+
+  document_types: {
+    label: 'Document Types',
+    columns: [
+      { key: 'code',           label: 'Code',           required: true,  type: 'string',  example: 'DT-AADHAR',  description: 'Unique document type code. Will be uppercased.' },
+      { key: 'name',           label: 'Name',           required: true,  type: 'string',  example: 'Aadhaar Card', description: 'Display name for the document type.' },
+      { key: 'description',    label: 'Description',    required: false, type: 'string',  example: 'Government-issued identity', description: 'Optional description.' },
+      { key: 'is_mandatory',   label: 'Is Mandatory',   required: false, type: 'boolean', example: 'true',       description: 'Whether this document is mandatory for all employees.' },
+    ],
+    sampleRows: [
+      { code: 'DT-AADHAR', name: 'Aadhaar Card',   description: 'Govt identity (12-digit)',  is_mandatory: 'true' },
+      { code: 'DT-PAN',    name: 'PAN Card',        description: 'Tax identity',             is_mandatory: 'true' },
+      { code: 'DT-OFFER',  name: 'Offer Letter',    description: 'Signed offer letter',      is_mandatory: 'false' },
+    ],
+  },
+
+  identity_types: {
+    label: 'Identity Types',
+    columns: [
+      { key: 'code',        label: 'Code',        required: true,  type: 'string', example: 'ID-PASSPORT', description: 'Unique identity type code. Will be uppercased.' },
+      { key: 'name',        label: 'Name',        required: true,  type: 'string', example: 'Passport',    description: 'Display name for the identity type.' },
+      { key: 'description', label: 'Description', required: false, type: 'string', example: 'International travel document', description: 'Optional description.' },
+    ],
+    sampleRows: [
+      { code: 'ID-PASSPORT', name: 'Passport',        description: 'International travel document' },
+      { code: 'ID-DRIVING',  name: 'Driving Licence', description: 'State-issued driving licence' },
+      { code: 'ID-VOTER',    name: 'Voter ID',         description: 'Election Commission card' },
+    ],
+  },
+
+  relationship_types: {
+    label: 'Relationship Types',
+    columns: [
+      { key: 'code', label: 'Code', required: true,  type: 'string', example: 'REL-SPOUSE',  description: 'Unique relationship type code. Will be uppercased.' },
+      { key: 'name', label: 'Name', required: true,  type: 'string', example: 'Spouse',      description: 'Display name for the relationship type.' },
+    ],
+    sampleRows: [
+      { code: 'REL-SPOUSE', name: 'Spouse' },
+      { code: 'REL-FATHER', name: 'Father' },
+      { code: 'REL-MOTHER', name: 'Mother' },
+      { code: 'REL-SON',    name: 'Son' },
+      { code: 'REL-DAUGHTER', name: 'Daughter' },
     ],
   },
 }

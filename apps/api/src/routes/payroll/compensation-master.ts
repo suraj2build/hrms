@@ -7,7 +7,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireHrAdmin] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
@@ -18,7 +19,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
   }
 
   // ── GET /payroll/compensation/components ──────────────────────────────────────
-  fastify.get('/components', auth, async (req: any, reply) => {
+  fastify.get('/components', hrAdminAuth, async (req: any, reply) => {
     const querySchema = z.object({
       is_active: z.enum(['true', 'false']).optional(),
     })
@@ -150,7 +151,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
   })
 
   // ── GET /payroll/compensation/structures ──────────────────────────────────────
-  fastify.get('/structures', auth, async (req: any, reply) => {
+  fastify.get('/structures', hrAdminAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('salary_structures')
       .select('*, salary_structure_components(count)')
@@ -222,7 +223,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
   })
 
   // ── GET /payroll/compensation/structures/:id/components ───────────────────────
-  fastify.get('/structures/:id/components', auth, async (req: any, reply) => {
+  fastify.get('/structures/:id/components', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase
@@ -288,8 +289,22 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
   })
 
   // ── GET /payroll/compensation/employee/:employeeId ────────────────────────────
+  // HR admins see any employee; regular employees see only their own compensation.
   fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
+
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+      if (!callerProfile?.employee_id || callerProfile.employee_id !== employeeId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own compensation' })
+      }
+    }
 
     const { data, error } = await fastify.supabase
       .from('employee_compensations')
@@ -335,19 +350,13 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
 
     const { components, ...compensationData } = parsed.data
 
-    // Deactivate previous active compensation
-    await fastify.supabase
-      .from('employee_compensations')
-      .update({
-        is_active: false,
-        effective_to: compensationData.effective_from,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('employee_id', employeeId)
-      .eq('tenant_id', req.tenantId)
-      .eq('is_active', true)
+    // ── Safe activation order ──────────────────────────────────────────────────
+    // IMPORTANT: Insert the new compensation FIRST, then deactivate the old one.
+    // Reversing this order (deactivate-then-insert) leaves the employee with zero
+    // active compensation if the insert fails, which would cause phantom LOP on
+    // the next payroll run.
 
-    // Insert new compensation
+    // Step 1: Insert new compensation (employee has two active records briefly)
     const { data: newComp, error: compError } = await fastify.supabase
       .from('employee_compensations')
       .insert({
@@ -364,11 +373,12 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       return reply.code(500).send({ error: 'INSERT_FAILED', message: compError?.message ?? 'Failed to insert compensation' })
     }
 
-    // Insert components
+    // Step 2: Insert components (while new comp exists but old is still active)
     if (components.length > 0) {
       const componentRows = components.map(c => ({
         ...c,
-        employee_compensation_id: (newComp as any).id,
+        // Must match the column name used in payroll-engine.ts and employees/compensation.ts
+        compensation_id: (newComp as any).id,
         employee_id: employeeId,
         tenant_id: req.tenantId,
       }))
@@ -378,9 +388,38 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
         .insert(componentRows)
 
       if (cmpErr) {
+        // Roll back the new comp so we don't leave an orphaned active record.
+        // If the rollback itself fails, log it — the employee ends up with an
+        // incomplete compensation record that fetchActiveCompensation will pick
+        // up as the "latest" with zero components → payroll will show warning.
+        const { error: rollbackErr } = await fastify.supabase
+          .from('employee_compensations')
+          .delete()
+          .eq('id', (newComp as any).id)
+
+        if (rollbackErr) {
+          req.log.error(
+            { rollbackErr, newCompId: (newComp as any).id, employeeId },
+            'compensation-master: component insert failed AND rollback failed — orphaned active comp record',
+          )
+        }
         return reply.code(500).send({ error: 'COMPONENT_INSERT_FAILED', message: cmpErr.message })
       }
     }
+
+    // Step 3: Only now deactivate the previous compensation (new record is safely persisted)
+    await fastify.supabase
+      .from('employee_compensations')
+      .update({
+        is_active: false,
+        effective_to: compensationData.effective_from,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', req.tenantId)
+      .eq('is_active', true)
+      // Exclude the newly inserted record so we don't immediately deactivate it
+      .neq('id', (newComp as any).id)
 
     return reply.code(201).send({ data: newComp })
   })

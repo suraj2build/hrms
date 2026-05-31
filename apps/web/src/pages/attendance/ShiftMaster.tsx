@@ -15,7 +15,7 @@ import { useState }                                        from 'react'
 import { useQuery, useMutation, useQueryClient }           from '@tanstack/react-query'
 import {
   Clock, Moon, Plus, Pencil, Trash2,
-  AlertCircle, ShieldAlert, Info,
+  AlertCircle, ShieldAlert, Info, Loader2,
 }                                                          from 'lucide-react'
 
 import { toast }                                            from 'sonner'
@@ -367,8 +367,9 @@ export function ShiftMaster() {
         />
 
         {isLoading ? (
-          <div className="p-8 text-center text-sm text-muted-foreground animate-pulse">
-            Loading shifts…
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading…</span>
           </div>
         ) : filteredShifts.length === 0 ? (
           <EmptyTableState

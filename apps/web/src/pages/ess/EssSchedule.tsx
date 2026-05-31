@@ -98,9 +98,11 @@ function fmtTime(t: string | null) {
 }
 
 function fmtDate(d: string) {
-  return new Date(`${d}T12:00:00Z`).toLocaleDateString('default', {
-    weekday: 'short', month: 'short', day: 'numeric',
-  })
+  const dt = new Date(d + 'T12:00:00Z')
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const W = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  if (isNaN(dt.getTime())) return '—'
+  return `${W[dt.getUTCDay()]}, ${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}`
 }
 
 // ── Cell determination ────────────────────────────────────────────────────────

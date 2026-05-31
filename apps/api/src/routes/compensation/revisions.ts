@@ -73,6 +73,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         .from('profiles')
         .select('employee_id')
         .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
         .maybeSingle()
       if (!profile?.employee_id) {
         return reply.send({ data: [], total: 0 })
@@ -250,19 +251,110 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       return reply.code(500).send({ error: 'COMP_CREATE_FAILED', message: 'Failed to create compensation record' })
     }
 
-    // Create compensation components from overrides if provided
+    const newCTCMonthly = Number(rev.new_ctc_annual) / 12
+
     if (rev.component_overrides?.length) {
-      const compComponents = (rev.component_overrides as any[]).map((ov: any, i: number) => ({
-        tenant_id:           req.tenantId,
-        compensation_id:     newComp.id,
-        salary_component_id: ov.salary_component_id,
-        calculation_type:    ov.calculation_type,
-        value:               ov.value,
-        computed_monthly:    0,
-        computed_annual:     0,
-        sequence:            i + 1,
-      }))
+      // Explicit overrides provided — use them directly.
+      const compComponents = (rev.component_overrides as any[]).map((ov: any, i: number) => {
+        let computed_monthly: number
+        let computed_annual:  number
+        if (ov.calculation_type === 'fixed') {
+          // ov.value IS the fixed monthly amount for fixed-type components.
+          computed_monthly = Math.round(Number(ov.value ?? 0) * 100) / 100
+          computed_annual  = Math.round(computed_monthly * 12 * 100) / 100
+        } else {
+          // percentage-based: ov.value is the percentage (e.g. 40 = 40 % of CTC)
+          computed_monthly = Math.round((Number(ov.value) / 100) * newCTCMonthly * 100) / 100
+          computed_annual  = Math.round(computed_monthly * 12 * 100) / 100
+        }
+        return {
+          tenant_id:           req.tenantId,
+          compensation_id:     newComp.id,
+          salary_component_id: ov.salary_component_id,
+          calculation_type:    ov.calculation_type,
+          value:               ov.value,
+          computed_monthly,
+          computed_annual,
+          sequence:            i + 1,
+        }
+      })
       await fastify.supabase.from('employee_compensation_components').insert(compComponents)
+    } else {
+      // No overrides — copy and proportionally scale components from the previous
+      // active compensation.  This prevents the new record from having zero components
+      // which would cause payroll to compute ₹0 gross for the employee.
+      const previousCtcAnnual = Number(rev.before_ctc_annual ?? 0)
+      const scale = previousCtcAnnual > 0 ? Number(rev.new_ctc_annual) / previousCtcAnnual : 1
+
+      // Resolve the previous compensation ID.
+      // Prefer rev.before_compensation_id (set at revision submission time) because
+      // by this point the DB trigger has already closed the old record (is_active → false),
+      // so querying is_active=true would return the new empty record.
+      // Fallback: most recent closed record with effective_from < rev.effective_date.
+      let prevCompId: string | null = rev.before_compensation_id ?? null
+
+      if (!prevCompId) {
+        const { data: closedComp } = await fastify.supabase
+          .from('employee_compensations')
+          .select('id')
+          .eq('employee_id',  rev.employee_id)
+          .eq('tenant_id',    req.tenantId)
+          .eq('is_active',    false)
+          .lt('effective_from', rev.effective_date)
+          .order('effective_from', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        prevCompId = (closedComp as any)?.id ?? null
+      }
+
+      if (prevCompId) {
+        const { data: prevComponents } = await fastify.supabase
+          .from('employee_compensation_components')
+          .select('salary_component_id, calculation_type, value, computed_monthly, computed_annual, sequence')
+          .eq('compensation_id', prevCompId)
+          .eq('tenant_id',       req.tenantId)
+
+        if (prevComponents?.length) {
+          const scaledRows = (prevComponents as any[]).map((c: any) => {
+            if (c.calculation_type === 'fixed') {
+              // Fixed amounts stay the same — not scaled with CTC.
+              return {
+                tenant_id:           req.tenantId,
+                compensation_id:     newComp.id,
+                salary_component_id: c.salary_component_id,
+                calculation_type:    c.calculation_type,
+                value:               c.value,
+                sequence:            c.sequence,
+                computed_monthly:    c.computed_monthly ?? 0,
+                computed_annual:     c.computed_annual  ?? 0,
+              }
+            }
+            // Percentage-based: scale proportionally to new CTC.
+            // If previous computed_monthly was 0 (structure never run through engine),
+            // derive directly from value × new CTC.
+            const prevMonthly   = c.computed_monthly ?? 0
+            const derivedMonthly = prevMonthly > 0
+              ? Math.round(prevMonthly * scale * 100) / 100
+              : Math.round((Number(c.value) / 100) * newCTCMonthly * 100) / 100
+            return {
+              tenant_id:           req.tenantId,
+              compensation_id:     newComp.id,
+              salary_component_id: c.salary_component_id,
+              calculation_type:    c.calculation_type,
+              value:               c.value,
+              sequence:            c.sequence,
+              computed_monthly:    derivedMonthly,
+              computed_annual:     Math.round(derivedMonthly * 12 * 100) / 100,
+            }
+          })
+          const { error: copyErr } = await fastify.supabase
+            .from('employee_compensation_components')
+            .insert(scaledRows)
+          if (copyErr) {
+            req.log.warn({ err: copyErr }, 'Failed to copy compensation components on revision approval')
+          }
+        }
+      }
     }
 
     // Update revision status
@@ -365,8 +457,25 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
   })
 
   // ── GET /compensation/revisions/employee/:empId ──────────────────────────────
+  // HR admins can view any employee's revisions. Non-admins can only view their own.
   fastify.get('/compensation/revisions/employee/:empId', auth, async (req: any, reply) => {
     const { empId } = req.params as { empId: string }
+
+    if (!isAdmin(req.userRole)) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+
+      if (callerProfile?.employee_id !== empId) {
+        return reply.code(403).send({
+          error:   'FORBIDDEN',
+          message: 'You can only view your own compensation revision history',
+        })
+      }
+    }
 
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase

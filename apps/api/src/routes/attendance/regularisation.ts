@@ -17,14 +17,26 @@ import { approveRegularisation, rejectRegularisation } from '../../lib/approval-
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { emitEvent } from '../../lib/event-emitter.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
+import { orchestrateWorkforceEvent } from '../../lib/workforce-orchestrator.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
+// All accepted regularization_type values.
+// Legacy abstract types kept for backward compat; ESS descriptive types added in migration 150.
+const REGULARIZATION_TYPES = [
+  // ESS descriptive types (used by EssRegularization.tsx)
+  'missed_punch', 'forgot_checkout', 'onsite_duty',
+  'biometric_issue', 'client_visit', 'wfh', 'field_work', 'system_issue',
+  // Legacy abstract types (backward compat)
+  'check_in', 'check_out', 'both', 'absence', 'other',
+] as const
+
 const submitSchema = z.object({
-  date:                z.string().regex(dateRe, 'date must be YYYY-MM-DD'),
-  requested_check_in:  z.string().datetime({ offset: true }).nullable().optional(),
-  requested_check_out: z.string().datetime({ offset: true }).nullable().optional(),
-  reason:              z.string().min(1, 'reason is required').max(500),
+  date:                  z.string().regex(dateRe, 'date must be YYYY-MM-DD'),
+  regularization_type:   z.enum(REGULARIZATION_TYPES).optional(),
+  requested_check_in:    z.string().datetime({ offset: true }).nullable().optional(),
+  requested_check_out:   z.string().datetime({ offset: true }).nullable().optional(),
+  reason:                z.string().min(1, 'reason is required').max(500),
 })
 
 export default async function regularisationRoute(fastify: FastifyInstance) {
@@ -58,7 +70,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       })
     }
 
-    const { date, requested_check_in, requested_check_out, reason } = parsed.data
+    const { date, regularization_type, requested_check_in, requested_check_out, reason } = parsed.data
 
     // ── Load tenant regularisation policy ──────────────────────────────────────
     const { data: policy } = await fastify.supabase
@@ -112,6 +124,21 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       })
     }
 
+    // ── Period lock check ──────────────────────────────────────────────────────
+    const { data: periodLock } = await fastify.supabase
+      .from('attendance_period_locks')
+      .select('state')
+      .eq('tenant_id', req.tenantId)
+      .eq('period_month', date.slice(0, 7))
+      .maybeSingle()
+
+    if (periodLock && periodLock.state !== 'OPEN') {
+      return reply.code(422).send({
+        error:   'PERIOD_LOCKED',
+        message: 'Regularisation submissions are closed for this pay period.',
+      })
+    }
+
     // ── Compute SLA deadline ───────────────────────────────────────────────────
     const slaDeadline = new Date(Date.now() + slaHours * 3_600_000).toISOString()
 
@@ -121,12 +148,13 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
         tenant_id:           req.tenantId,
         employee_id:         profile.employee_id,
         date,
+        regularization_type: regularization_type ?? null,
         requested_check_in:  requested_check_in  ?? null,
         requested_check_out: requested_check_out ?? null,
         reason,
         sla_deadline:        slaDeadline,
       })
-      .select('id, date, status, reason, sla_deadline, created_at')
+      .select('id, date, status, regularization_type, reason, sla_deadline, created_at')
       .single()
 
     if (error) {
@@ -155,7 +183,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     let query = fastify.supabase
       .from('attendance_regularisation')
-      .select('id, date, requested_check_in, requested_check_out, reason, status, approved_at, created_at')
+      .select('id, date, regularization_type, requested_check_in, requested_check_out, reason, status, rejection_reason, approved_at, created_at', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', profile.employee_id)
       .order('date', { ascending: false })
@@ -163,14 +191,14 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     if (from) query = query.gte('date', from)
     if (to)   query = query.lte('date', to)
 
-    const { data, error } = await query
+    const { data, count, error } = await query
 
     if (error) {
       req.log.error({ err: error }, 'regularisation my-list query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch requests' })
     }
 
-    return reply.send(data ?? [])
+    return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
   // ── GET /attendance/regularisation/pending ────────────────────────────────────
@@ -222,6 +250,157 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     })
 
     return reply.send(rows)
+  })
+
+  // ── GET /attendance/regularisation/team ──────────────────────────────────────
+  // Manager views direct reports' pending regularisation requests.
+  fastify.get('/attendance/regularisation/team', auth, async (req: any, reply) => {
+    // Find the manager's employee_id from their profile
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!profile?.employee_id) {
+      return reply.send({ data: [], total: 0 })
+    }
+
+    const { from, to, status: statusFilter } = req.query as { from?: string; to?: string; status?: string }
+
+    // Get direct reports
+    const { data: directReports } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('reporting_manager_id', profile.employee_id)
+      .eq('employment_status', 'active')
+
+    if (!directReports || directReports.length === 0) {
+      return reply.send({ data: [], total: 0 })
+    }
+
+    const reportIds = directReports.map((e: any) => e.id)
+
+    let query = fastify.supabase
+      .from('attendance_regularisation')
+      .select(`
+        id, date, regularization_type, requested_check_in, requested_check_out,
+        reason, status, rejection_reason, sla_deadline, sla_breached, created_at, approved_at,
+        employees!inner(id, first_name, last_name, employee_code)
+      `, { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .in('employee_id', reportIds)
+      .order('created_at', { ascending: false })
+
+    if (statusFilter) query = query.eq('status', statusFilter)
+    else query = query.eq('status', 'pending')
+    if (from) query = query.gte('date', from)
+    if (to)   query = query.lte('date', to)
+
+    const { data, count, error } = await query
+
+    if (error) {
+      req.log.error({ err: error }, 'regularisation team-list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch team requests' })
+    }
+
+    const now = new Date()
+    const rows = (data ?? []).map((r: any) => {
+      const emp = r.employees as { id: string; first_name: string; last_name: string; employee_code: string } | null
+      const slaDeadline = r.sla_deadline ? new Date(r.sla_deadline) : null
+      const hoursRemaining = slaDeadline ? Math.round((slaDeadline.getTime() - now.getTime()) / 3_600_000) : null
+      return {
+        id: r.id, date: r.date,
+        regularization_type: r.regularization_type,
+        requested_check_in:  r.requested_check_in,
+        requested_check_out: r.requested_check_out,
+        reason: r.reason, status: r.status,
+        rejection_reason: r.rejection_reason,
+        sla_deadline: r.sla_deadline,
+        sla_breached: (r.sla_breached as boolean) || (slaDeadline ? now > slaDeadline : false),
+        hours_remaining: hoursRemaining,
+        created_at: r.created_at, approved_at: r.approved_at,
+        employee_id:   emp?.id ?? null,
+        employee_name: emp ? `${emp.first_name} ${emp.last_name}` : null,
+        employee_code: emp?.employee_code ?? null,
+      }
+    })
+
+    return reply.send({ data: rows, total: count ?? 0 })
+  })
+
+  // ── POST /attendance/regularisation/bulk-approve ──────────────────────────────
+  // Manager bulk approves team requests.
+  fastify.post('/attendance/regularisation/bulk-approve', auth, async (req: any, reply) => {
+    const schema = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const results: Array<{ id: string; ok: boolean; error?: string }> = []
+
+    for (const id of parsed.data.ids) {
+      try {
+        const result = await approveRegularisation(fastify.supabase, {
+          tenantId:         req.tenantId,
+          regularisationId: id,
+          ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
+        })
+        if (result.ok) {
+          const approved = result.value
+          const punchRows: any[] = []
+          if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
+          if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
+          if (punchRows.length > 0) {
+            await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
+          }
+          await recomputeRange(fastify.supabase, {
+            tenant_id: req.tenantId, employee_id: approved.employee_id,
+            from_date: approved.date, to_date: approved.date, changed_by: req.userId,
+          }).catch(() => {})
+          results.push({ id, ok: true })
+        } else {
+          results.push({ id, ok: false, error: result.error.message })
+        }
+      } catch (err: any) {
+        results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
+      }
+    }
+
+    const approved = results.filter(r => r.ok).length
+    const failed   = results.filter(r => !r.ok).length
+    return reply.send({ results, summary: { approved, failed, total: parsed.data.ids.length } })
+  })
+
+  // ── POST /attendance/regularisation/bulk-reject ───────────────────────────────
+  // Manager bulk rejects team requests.
+  fastify.post('/attendance/regularisation/bulk-reject', auth, async (req: any, reply) => {
+    const schema = z.object({
+      ids: z.array(z.string().uuid()).min(1).max(50),
+      rejection_reason: z.string().max(500).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const results: Array<{ id: string; ok: boolean; error?: string }> = []
+
+    for (const id of parsed.data.ids) {
+      try {
+        const result = await rejectRegularisation(fastify.supabase, {
+          tenantId: req.tenantId, regularisationId: id,
+          ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
+          rejectionReason: parsed.data.rejection_reason,
+        })
+        results.push({ id, ok: result.ok, error: result.ok ? undefined : (result as any).error?.message })
+      } catch (err: any) {
+        results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
+      }
+    }
+
+    const rejected = results.filter(r => r.ok).length
+    const failed   = results.filter(r => !r.ok).length
+    return reply.send({ results, summary: { rejected, failed, total: parsed.data.ids.length } })
   })
 
   // ── POST /attendance/regularisation/:id/approve ───────────────────────────────
@@ -337,6 +516,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       created_by:         req.userId,
     }, req.log).catch(() => {/* non-fatal */})
 
+    // Workforce orchestrator — fire-and-forget cascade sequencing (attendance → leave → payroll)
+    orchestrateWorkforceEvent(fastify.supabase, {
+      tenantId:         req.tenantId,
+      eventType:        'attendance_corrected',
+      sourceEventId:    id,
+      employeeId:       approved.employee_id,
+      affectedFromDate: approved.date,
+      affectedToDate:   approved.date,
+      triggeredBy:      req.userId,
+      metadata: { regularisation_id: id, approver_id: req.userId },
+    }).catch((err) => {
+      req.log.warn({ err, regularisationId: id }, 'workforce orchestration failed for regularisation approval')
+    })
+
     return reply.send({ message: 'Approved successfully', data: { id: approved.id, status: approved.status } })
   })
 
@@ -395,6 +588,63 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     return reply.send({ message: 'Rejected successfully', data: result.value })
+  })
+
+  // ── POST /attendance/regularisation/:id/cancel ───────────────────────────────
+  // Employee withdraws their own pending request (sets status = 'withdrawn').
+  // Only allowed while status = 'pending'; only the owning employee may cancel.
+  fastify.post('/attendance/regularisation/:id/cancel', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    // Resolve employee_id of the caller
+    const { data: callerProfile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!callerProfile?.employee_id) {
+      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+    }
+
+    // Fetch the regularisation to verify ownership + current status
+    const { data: reg, error: fetchErr } = await fastify.supabase
+      .from('attendance_regularisation')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (fetchErr || !reg) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Regularisation request not found' })
+    }
+
+    if (reg.employee_id !== callerProfile.employee_id) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only cancel your own requests' })
+    }
+
+    if (reg.status !== 'pending') {
+      return reply.code(409).send({
+        error:   'INVALID_STATUS_TRANSITION',
+        message: `Cannot cancel a request with status '${reg.status}'. Only pending requests can be withdrawn.`,
+      })
+    }
+
+    const { data: updated, error: updateErr } = await fastify.supabase
+      .from('attendance_regularisation')
+      .update({ status: 'withdrawn' })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select('id, status, date')
+      .single()
+
+    if (updateErr) {
+      req.log.error({ err: updateErr }, 'regularisation cancel failed')
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel request' })
+    }
+
+    return reply.send({ message: 'Request withdrawn successfully', data: updated })
   })
 
   // ── GET /attendance/regularisation/summary ────────────────────────────────────

@@ -33,11 +33,13 @@ import { PeriodLockBanner } from '@/components/layout/PeriodLockBanner'
 import { Badge }            from '@/components/ui/badge'
 import { Button }           from '@/components/ui/button'
 import { Input }            from '@/components/ui/input'
+import { DateInput }        from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
+import { toast }            from 'sonner'
 import { cn }               from '@/lib/utils'
 import { usePeriodLock }    from '@/hooks/usePeriodLock'
 import { ForensicsDrawer } from '@/components/operational/ForensicsDrawer'
@@ -351,7 +353,7 @@ export function ShiftRoster() {
   const year     = viewDate.getFullYear()
   const month    = viewDate.getMonth()
   const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`
-  const monthLabel = new Date(year, month, 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+  const monthLabel = (() => { const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${_M[month]}-${year}` })()
   const days       = allDaysInMonth(year, month)
   const todayStr   = new Date().toISOString().slice(0, 10)
   const weekPresets = buildWeekPresets(year, month)
@@ -484,6 +486,7 @@ export function ShiftRoster() {
       setActionKey(null)
       queryClient.invalidateQueries({ queryKey: ['roster', monthStr] })
     },
+    onError: (e: Error) => toast.error('Failed to assign shift', { description: e.message }),
   })
 
   const clearMutation = useMutation({
@@ -492,6 +495,7 @@ export function ShiftRoster() {
       setActionKey(null)
       queryClient.invalidateQueries({ queryKey: ['roster', monthStr] })
     },
+    onError: (e: Error) => toast.error('Failed to clear shift override', { description: e.message }),
   })
 
   async function handleBulkApply() {
@@ -792,24 +796,22 @@ export function ShiftRoster() {
                   <div className="space-y-2">
                     <div>
                       <label className="text-xs text-muted-foreground">From</label>
-                      <Input
-                        type="date"
+                      <DateInput
                         className="h-8 text-xs mt-0.5"
                         value={bulkForm.fromDate}
                         min={monthStart(year, month)}
                         max={monthEnd(year, month)}
-                        onChange={(e) => setBulkForm((p) => ({ ...p, fromDate: e.target.value }))}
+                        onChange={(v) => setBulkForm((p) => ({ ...p, fromDate: v }))}
                       />
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground">To</label>
-                      <Input
-                        type="date"
+                      <DateInput
                         className="h-8 text-xs mt-0.5"
                         value={bulkForm.toDate}
                         min={bulkForm.fromDate || monthStart(year, month)}
                         max={monthEnd(year, month)}
-                        onChange={(e) => setBulkForm((p) => ({ ...p, toDate: e.target.value }))}
+                        onChange={(v) => setBulkForm((p) => ({ ...p, toDate: v }))}
                       />
                     </div>
                   </div>
@@ -969,24 +971,22 @@ export function ShiftRoster() {
                     <div className="space-y-2">
                       <div>
                         <label className="text-xs text-muted-foreground">From</label>
-                        <Input
-                          type="date"
+                        <DateInput
                           className="h-8 text-xs mt-0.5"
                           value={bulkForm.fromDate}
                           min={monthStart(year, month)}
                           max={monthEnd(year, month)}
-                          onChange={(e) => setBulkForm((p) => ({ ...p, fromDate: e.target.value }))}
+                          onChange={(v) => setBulkForm((p) => ({ ...p, fromDate: v }))}
                         />
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground">To</label>
-                        <Input
-                          type="date"
+                        <DateInput
                           className="h-8 text-xs mt-0.5"
                           value={bulkForm.toDate}
                           min={bulkForm.fromDate || monthStart(year, month)}
                           max={monthEnd(year, month)}
-                          onChange={(e) => setBulkForm((p) => ({ ...p, toDate: e.target.value }))}
+                          onChange={(v) => setBulkForm((p) => ({ ...p, toDate: v }))}
                         />
                       </div>
                     </div>
@@ -1382,7 +1382,7 @@ export function ShiftRoster() {
                       {gapDays.slice(0, 5).map((d, i) => (
                         <span key={d}>
                           {i > 0 && ', '}
-                          {new Date(`${d}T12:00:00Z`).toLocaleDateString('default', { day: 'numeric', month: 'short' })}
+                          {(() => { const _d = new Date(`${d}T12:00:00Z`); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}` })()}
                         </span>
                       ))}
                       {gapDays.length > 5 && ` and ${gapDays.length - 5} more`}.

@@ -81,6 +81,69 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to lock period' })
+
+    // Fire-and-forget: auto-close pending regularisations as LOP
+    setImmediate(async () => {
+      try {
+        // 1. Find all pending regularisations for this period
+        const periodStart = `${month}-01`
+        const nextMonth = new Date(`${month}-01`)
+        nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1)
+        const periodEnd = nextMonth.toISOString().slice(0, 10)
+
+        const { data: pendingRegs } = await fastify.supabase
+          .from('attendance_regularisation')
+          .select('id, employee_id, date')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'pending')
+          .gte('date', periodStart)
+          .lt('date', periodEnd)
+
+        if (!pendingRegs || pendingRegs.length === 0) return
+
+        // 2. Auto-reject all pending regs with system reason
+        const regIds = pendingRegs.map((r: any) => r.id)
+        await fastify.supabase
+          .from('attendance_regularisation')
+          .update({
+            status: 'rejected',
+            rejection_reason: 'Period locked — regularisation window closed. Attendance marked as Absent (LOP).',
+            approved_at: new Date().toISOString(),
+          })
+          .eq('tenant_id', req.tenantId)
+          .in('id', regIds)
+
+        // 3. For each unique employee+date, update attendance_daily status to 'absent' (LOP)
+        const uniquePairs = Array.from(
+          new Map(pendingRegs.map((r: any) => [`${r.employee_id}|${r.date}`, r])).values()
+        ) as Array<{ employee_id: string; date: string }>
+
+        for (const { employee_id, date } of uniquePairs) {
+          await fastify.supabase
+            .from('attendance_daily')
+            .update({
+              status: 'absent',
+              is_payable: false,
+              remarks: 'Auto-marked absent: regularisation window closed at period lock',
+            })
+            .eq('tenant_id', req.tenantId)
+            .eq('employee_id', employee_id)
+            .eq('date', date)
+            // Only update if currently anomalous — don't overwrite approved/present records
+            .in('status', ['unknown', 'anomaly', 'no_punch', 'missing_punch', 'half_day'])
+
+          fastify.log.info({ tenant_id: req.tenantId, employee_id, date }, 'auto-LOP: marked absent at period lock')
+        }
+
+        fastify.log.info(
+          { tenant_id: req.tenantId, month, count: uniquePairs.length },
+          'auto-LOP: period lock closed pending regularisations'
+        )
+      } catch (err) {
+        fastify.log.warn({ err, month, tenant_id: req.tenantId }, 'auto-LOP background job failed')
+      }
+    })
+
     return reply.send({ data })
   })
 

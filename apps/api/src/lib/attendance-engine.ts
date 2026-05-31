@@ -52,6 +52,8 @@ import { writeAuditLogs }                    from './attendance-processor.js'
 import { eventService }                      from './event-service.js'
 import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-service.js'
 import { resolveEmployeeOrgContext, getWeeklyOffDays } from './org-context.js'
+import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
+import { resolveViaRotationPolicy }                    from './rotation-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,19 @@ export type AttendanceStatus =
   | 'holiday'
   | 'weekly_off'
 
+/**
+ * Ownership source for an attendance_daily row.
+ *
+ * 'engine'          — written by the automated attendance processing engine (default)
+ * 'leave_approval'  — set by the leave-approval pipeline (PROTECTED from engine recompute)
+ * 'regularization'  — set by an HR regularisation action
+ * 'manual'          — set by a direct HR manual override (PROTECTED from engine recompute)
+ *
+ * The engine MUST NOT overwrite rows with source 'leave_approval' or 'manual'.
+ * See recomputeRange for the enforcement filter.
+ */
+export type AttendanceComputedSource = 'engine' | 'leave_approval' | 'regularization' | 'manual'
+
 /** DB-shaped row — exactly what is written to attendance_daily. */
 export interface AttendanceDailyRecord {
   tenant_id:            string
@@ -84,6 +99,8 @@ export interface AttendanceDailyRecord {
   day_fraction:         number       // 0.0 | 0.5 | 1.0
   worked_on_weekly_off: boolean
   worked_on_holiday:    boolean
+  /** Ownership: identifies the subsystem that last wrote this row. Default 'engine'. */
+  computed_source:      AttendanceComputedSource
 }
 
 /**
@@ -151,9 +168,11 @@ export interface RecomputeRangeOpts {
 }
 
 export interface RecomputeResult {
-  rows_computed: number
-  rows_upserted: number
-  dates:         string[]
+  rows_computed:  number
+  rows_upserted:  number
+  /** Dates skipped because existing rows have a protected computed_source (leave_approval | manual). */
+  rows_protected: number
+  dates:          string[]
 }
 
 export interface UpsertOpts {
@@ -263,7 +282,7 @@ function getFormatter(tz: string): Intl.DateTimeFormat {
  * @param time     HH:MM or HH:MM:SS  (tenant local time)
  * @param tz       IANA timezone identifier
  */
-function localToUtc(date: string, time: string, tz: string): Date {
+export function localToUtc(date: string, time: string, tz: string): Date {
   const t  = normalizeTime(time)
   const naive  = new Date(`${date}T${t}Z`)           // treat local time as UTC
   const tzRepr = parseSvSe(getFormatter(tz).format(naive))  // what tz displays for naive
@@ -506,16 +525,37 @@ async function syncAnomalies(
     }
   }
 
-  // Delete unresolved anomalies whose type is no longer present
+  // Delete unresolved anomalies whose type is no longer present.
+  //
+  // ── Empty-array guard ──────────────────────────────────────────────────────
+  // When newAnomalies = [] (all clear — e.g. CSV recomputed a previously-absent
+  // row to present/late), we must delete ALL unresolved anomalies for this
+  // employee+date.
+  //
+  // The previous approach of `.not('type', 'in', '()')` (empty IN list) is
+  // invalid SQL and a silent no-op in PostgREST — stale no_punch anomalies were
+  // never cleaned up after a CSV recompute, producing false positives.
+  //
+  // Fix: branch explicitly on whether there are active types to retain.
   const activeTypes = newAnomalies.map((a) => a.type)
-  const { error: deleteErr } = await supabase
+
+  let deleteQ = supabase
     .from('attendance_anomalies')
     .delete()
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('date', date)
     .eq('resolved', false)
-    .not('type', 'in', `(${activeTypes.map((t) => `"${t}"`).join(',')})`)
+
+  if (activeTypes.length > 0) {
+    // Keep anomaly types that are still valid — delete the rest
+    deleteQ = deleteQ.not('type', 'in', `(${activeTypes.map((t) => `"${t}"`).join(',')})`)
+  }
+  // When activeTypes.length === 0 the query has no extra filter, so it deletes
+  // ALL unresolved anomalies for this employee+date — which is exactly correct
+  // (no active anomalies means the day is clean).
+
+  const { error: deleteErr } = await deleteQ
 
   if (deleteErr) {
     console.warn(JSON.stringify({
@@ -525,6 +565,7 @@ async function syncAnomalies(
       tenant_id:   tenantId,
       employee_id: employeeId,
       date,
+      active_types: activeTypes,
       error: deleteErr.message,
     }))
   }
@@ -562,7 +603,21 @@ async function resolveShift(
 
   let shiftId: string | null = (rosterRow as { shift_id: string } | null)?.shift_id ?? null
 
-  // 2. Fall back to standing assignment
+  // 2. Rotation Policy — employee override → site default → condition from date
+  if (!shiftId) {
+    const rotMeta = await resolveViaRotationPolicy(supabase, tenantId, employeeId, date)
+    if (rotMeta) {
+      return {
+        startTime:    rotMeta.startTime,
+        endTime:      rotMeta.endTime,
+        graceMinutes: rotMeta.graceMinutes,
+        isNightShift: rotMeta.isNightShift,
+        durationMin:  rotMeta.durationMin,
+      }
+    }
+  }
+
+  // 3. Fall back to standing assignment
   if (!shiftId) {
     const { data: standing } = await supabase
       .from('employee_shifts')
@@ -576,7 +631,7 @@ async function resolveShift(
 
   if (!shiftId) return null
 
-  // 3. Fetch shift details
+  // 4. Fetch shift details
   const { data: shift } = await supabase
     .from('shifts')
     .select('id, start_time, end_time, grace_minutes, is_night_shift')
@@ -803,6 +858,7 @@ export async function computeDay(
       day_fraction:         half_day ? 0.5 : (is_paid ? 1.0 : 0.0),
       worked_on_weekly_off: false,
       worked_on_holiday:    false,
+      computed_source:      'engine' as const,
       reason:               `Approved leave on ${date}`,
       meta:                 { punchesCount: punches.length, hasUnpunchedOut: false },
     }
@@ -822,6 +878,7 @@ export async function computeDay(
         day_fraction:         1.0,
         worked_on_weekly_off: false,
         worked_on_holiday:    false,
+        computed_source:      'engine' as const,
         reason:               `Holiday: ${holiday.name}`,
         meta:                 { punchesCount: 0, hasUnpunchedOut: false },
       }
@@ -832,12 +889,22 @@ export async function computeDay(
 
   // 3. Weekly off without punches → WEEKLY_OFF
   // Weekly-off days come exclusively from rosters (not shifts).
-  const weeklyOffDays = getWeeklyOffDays(
+  // The advanced roster-calendar-engine evaluates rule-based off patterns
+  // (alternate Saturdays, cyclic schedules, rotational offs, etc.) first;
+  // falls back to the legacy pattern_json.weekly_off_days array if no rules exist.
+  const legacyWeeklyOffDays = getWeeklyOffDays(
     [],   // shift weekly_off_days deprecated — roster is the sole source
     orgCtx.emp_roster_weekly_off,
     orgCtx.site_default_roster_weekly_off,
   )
-  const isWeeklyOff = weeklyOffDays.includes(dayOfWeek)
+  const weeklyOffStatus = await resolveIsWeeklyOff(
+    supabase,
+    tenant_id,
+    orgCtx.roster_id,
+    legacyWeeklyOffDays,
+    date,
+  )
+  const isWeeklyOff = weeklyOffStatus.is_weekly_off
 
   if (isWeeklyOff && punches.length === 0) {
     return {
@@ -850,6 +917,7 @@ export async function computeDay(
       day_fraction:         1.0,
       worked_on_weekly_off: false,
       worked_on_holiday:    false,
+      computed_source:      'engine' as const,
       reason:               'Weekly off — no punches',
       meta:                 { punchesCount: 0, hasUnpunchedOut: false },
     }
@@ -937,6 +1005,7 @@ export async function computeDay(
       day_fraction:         1.0,
       worked_on_weekly_off: true,
       worked_on_holiday:    false,
+      computed_source:      'engine' as const,
       reason:               `Worked on weekly off — ${workHours}h`,
       meta:                 punchMeta,
     }
@@ -954,6 +1023,7 @@ export async function computeDay(
       day_fraction:         1.0,
       worked_on_weekly_off: false,
       worked_on_holiday:    true,
+      computed_source:      'engine' as const,
       reason:               `Worked on holiday (${holiday!.name}) — ${workHours}h`,
       meta:                 punchMeta,
     }
@@ -969,6 +1039,7 @@ export async function computeDay(
     day_fraction:         dayFraction,
     worked_on_weekly_off: false,
     worked_on_holiday:    workedOnHoliday,
+    computed_source:      'engine' as const,
     reason,
     meta:                 punchMeta,
   }
@@ -1096,7 +1167,7 @@ export async function recomputeRange(
   }
 
   if (dates.length === 0) {
-    return { rows_computed: 0, rows_upserted: 0, dates: [] }
+    return { rows_computed: 0, rows_upserted: 0, rows_protected: 0, dates: [] }
   }
 
   // Pre-fetch shared values — timezone + policy — once per recomputeRange call.
@@ -1111,32 +1182,73 @@ export async function recomputeRange(
     dates.map((date) => computeDay(supabase, { tenant_id, employee_id, date, tenantTz, policy })),
   )
 
-  // Batch-fetch existing {status, day_fraction} for delta detection
+  // Batch-fetch existing {status, day_fraction, computed_source} for delta detection
+  // and recompute-protection filtering.
   const { data: existing } = await supabase
     .from('attendance_daily')
-    .select('employee_id, date, status, day_fraction')
+    .select('employee_id, date, status, day_fraction, computed_source')
     .eq('tenant_id', tenant_id)
     .eq('employee_id', employee_id)
     .in('date', dates)
 
-  const beforeMap = new Map<string, { status: string; day_fraction: number }>(
-    ((existing ?? []) as Array<{ employee_id: string; date: string; status: string; day_fraction: number }>)
-      .map((r) => [`${r.employee_id}:${r.date}`, { status: r.status, day_fraction: r.day_fraction }]),
+  const beforeMap = new Map<string, { status: string; day_fraction: number; computed_source: string }>(
+    ((existing ?? []) as Array<{ employee_id: string; date: string; status: string; day_fraction: number; computed_source: string }>)
+      .map((r) => [`${r.employee_id}:${r.date}`, {
+        status:          r.status,
+        day_fraction:    r.day_fraction,
+        computed_source: r.computed_source ?? 'engine',
+      }]),
   )
 
-  // Batch upsert — strip reason and meta (neither is a DB column)
-  const dbRows = computed.map(({ reason: _r, meta: _m, ...dbRow }) => dbRow)
+  // ── Recompute protection ────────────────────────────────────────────────────
+  // Never overwrite rows owned by 'leave_approval' or 'manual'.
+  // These rows were written by controlled pipelines (leave-approval, HR manual
+  // entry) and reflect intentional human decisions. An automated engine recompute
+  // MUST NOT silently undo them — that would create phantom LOP deductions on
+  // the next payroll run.
+  //
+  // 'regularization' rows ARE re-evaluated: an HR regularisation submission
+  // means the HR admin wants the engine to re-derive attendance from corrected
+  // punch data.
+  const PROTECTED_SOURCES = new Set(['leave_approval', 'manual'])
 
-  const { error } = await supabase
-    .from('attendance_daily')
-    .upsert(dbRows, { onConflict: 'tenant_id,employee_id,date' })
-
-  if (error) {
-    throw new Error(`attendance_daily batch upsert failed: ${error.message}`)
+  const datesToSkip = new Set<string>()
+  for (const [key, before] of beforeMap) {
+    if (PROTECTED_SOURCES.has(before.computed_source)) {
+      const date = key.split(':')[1]!
+      datesToSkip.add(date)
+    }
   }
 
-  // Audit log — one call for all rows whose status changed
-  const statusChanges = computed
+  // Filter out protected dates before upsert
+  const safeComputed = computed.filter(r => !datesToSkip.has(r.date))
+
+  if (datesToSkip.size > 0) {
+    // Log skipped dates so operators can audit the protection decisions
+    const skippedDates = [...datesToSkip].sort()
+    // Use a synchronous log call — this is inside an async function so we have
+    // no logger reference; write to console and let the caller's try/catch wrap it
+    console.info(
+      `[recomputeRange] skipped ${datesToSkip.size} protected dates for employee ${employee_id} ` +
+      `(computed_source in [leave_approval, manual]): ${skippedDates.join(', ')}`
+    )
+  }
+
+  // Batch upsert — strip reason and meta (neither is a DB column)
+  const dbRows = safeComputed.map(({ reason: _r, meta: _m, ...dbRow }) => dbRow)
+
+  if (dbRows.length > 0) {
+    const { error } = await supabase
+      .from('attendance_daily')
+      .upsert(dbRows, { onConflict: 'tenant_id,employee_id,date' })
+
+    if (error) {
+      throw new Error(`attendance_daily batch upsert failed: ${error.message}`)
+    }
+  }
+
+  // Audit log — only for rows that were actually upserted (not skipped due to protection)
+  const statusChanges = safeComputed
     .filter((r) => beforeMap.get(`${r.employee_id}:${r.date}`)?.status !== r.status)
     .map((r) => ({
       employee_id:   r.employee_id,
@@ -1156,8 +1268,8 @@ export async function recomputeRange(
     )
   }
 
-  // Events — one per row where status or day_fraction changed
-  for (const r of computed) {
+  // Events — only for rows that were actually written (not protected ones)
+  for (const r of safeComputed) {
     const key    = `${r.employee_id}:${r.date}`
     const before = beforeMap.get(key)
     if (before?.status !== r.status || before?.day_fraction !== r.day_fraction) {
@@ -1194,8 +1306,9 @@ export async function recomputeRange(
   })
 
   return {
-    rows_computed: computed.length,
-    rows_upserted: dbRows.length,
+    rows_computed:  computed.length,
+    rows_upserted:  dbRows.length,
+    rows_protected: datesToSkip.size,   // how many dates were skipped due to ownership protection
     dates,
   }
 }

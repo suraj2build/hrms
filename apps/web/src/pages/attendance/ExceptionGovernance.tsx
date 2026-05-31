@@ -111,15 +111,20 @@ const STATUS_VARIANT: Record<ExceptionStatus, BadgeVariant> = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function slaLabel(sla_due_at: string | null, sla_breached: boolean): string {

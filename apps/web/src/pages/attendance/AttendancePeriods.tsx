@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Lock, Unlock, PlayCircle, CheckCircle2, ChevronLeft, ChevronRight, ShieldAlert, RefreshCw } from 'lucide-react'
+import { Lock, Unlock, PlayCircle, CheckCircle2, ChevronLeft, ChevronRight, ShieldAlert, RefreshCw, Loader2, Calendar, AlertTriangle, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageContainer }   from '@/components/layout/PageContainer'
 import { PageHeader }      from '@/components/layout/PageHeader'
@@ -39,12 +39,19 @@ interface ActionDialogState {
 
 function fmtMonth(ym: string): string {
   const [y, m] = ym.split('-')
-  return new Date(Number(y), Number(m) - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const d = new Date(ym.slice(0,7) + '-01T12:00:00Z')
+  if (isNaN(d.getTime())) return '—'
+  return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 // ── State config ──────────────────────────────────────────────────────────────
@@ -54,6 +61,16 @@ const STATE_CONFIG: Record<PeriodState, { label: string; variant: 'success' | 'w
   LOCKED:             { label: 'Locked',             variant: 'warning',   description: 'Attendance data is locked for review' },
   PAYROLL_PROCESSING: { label: 'Payroll Processing', variant: 'info',      description: 'Payroll is being processed' },
   PAYROLL_FINALIZED:  { label: 'Finalized',          variant: 'secondary', description: 'Period is closed and finalized' },
+}
+
+/** Safe lookup — normalises lowercase/unknown DB values and never returns undefined */
+function stateCfg(state: string | null | undefined) {
+  if (!state) return STATE_CONFIG['OPEN']
+  const upper = state.toUpperCase()
+  // handle shortened DB values like 'processing' → 'PAYROLL_PROCESSING'
+  if (upper === 'PROCESSING')        return STATE_CONFIG['PAYROLL_PROCESSING']
+  if (upper === 'FINALIZED')         return STATE_CONFIG['PAYROLL_FINALIZED']
+  return STATE_CONFIG[upper as PeriodState] ?? { label: state, variant: 'secondary' as const, description: '' }
 }
 
 // ── Dialog config ─────────────────────────────────────────────────────────────
@@ -101,6 +118,20 @@ export function AttendancePeriods() {
     staleTime: 30_000,
   })
   const currentPeriod: PeriodLock = currentData?.data ?? { period_month: selectedMonth, state: 'OPEN' as PeriodState }
+
+  // Fetch anomaly impact for the selected month — used in the lock confirmation dialog
+  const { data: anomalySummary } = useQuery({
+    queryKey: ['anomaly-summary-lock', selectedMonth],
+    queryFn:  () => api.get(`/attendance/anomalies/summary?month=${selectedMonth}`),
+    enabled:  isAdmin && dialog.open && dialog.action === 'lock',
+    staleTime: 60_000,
+  })
+
+  const lopImpact = {
+    anomalyCount:      (anomalySummary as any)?.summary?.unresolved ?? 0,
+    departmentCount:   ((anomalySummary as any)?.by_department ?? []).filter((d: any) => d.unresolved_count > 0).length,
+    affectedEmployees: ((anomalySummary as any)?.by_department ?? []).reduce((sum: number, d: any) => sum + (d.affected_employees ?? 0), 0),
+  }
 
   // ── Mutation ───────────────────────────────────────────────────────────────
 
@@ -234,15 +265,15 @@ export function AttendancePeriods() {
             }
           >
             {currentLoading ? (
-              <div className="py-8 text-xs text-muted-foreground text-center animate-pulse">Loading…</div>
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading…</span></div>
             ) : (
               <div className="space-y-4">
                 {/* State badge + description */}
                 <div className="flex items-center gap-3">
-                  <Badge variant={STATE_CONFIG[currentPeriod.state].variant} className="rounded-full text-xs px-3">
-                    {STATE_CONFIG[currentPeriod.state].label}
+                  <Badge variant={stateCfg(currentPeriod.state).variant} className="rounded-full text-xs px-3">
+                    {stateCfg(currentPeriod.state).label}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">{STATE_CONFIG[currentPeriod.state].description}</span>
+                  <span className="text-xs text-muted-foreground">{stateCfg(currentPeriod.state).description}</span>
                 </div>
 
                 {/* State timeline */}
@@ -262,7 +293,7 @@ export function AttendancePeriods() {
                             'text-[10px] mt-1 font-medium whitespace-nowrap',
                             isActive ? 'text-primary' : isPast ? 'text-success' : 'text-muted-foreground',
                           )}>
-                            {STATE_CONFIG[state].label}
+                            {stateCfg(state).label}
                           </span>
                         </div>
                         {i < arr.length - 1 && (
@@ -322,9 +353,12 @@ export function AttendancePeriods() {
             }
           >
             {histLoading ? (
-              <div className="py-8 text-xs text-muted-foreground animate-pulse text-center">Loading history…</div>
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading…</span></div>
             ) : history.length === 0 ? (
-              <div className="py-12 text-xs text-muted-foreground text-center">No period lock records yet.</div>
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <Calendar className="h-10 w-10 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No period lock records yet.</p>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -340,8 +374,8 @@ export function AttendancePeriods() {
                       <tr key={row.period_month} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                         <td className="px-3 py-2 font-medium text-xs">{fmtMonth(row.period_month)}</td>
                         <td className="px-3 py-2">
-                          <Badge variant={STATE_CONFIG[row.state].variant} className="rounded-full text-[10px]">
-                            {STATE_CONFIG[row.state].label}
+                          <Badge variant={stateCfg(row.state).variant} className="rounded-full text-[10px]">
+                            {stateCfg(row.state).label}
                           </Badge>
                         </td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{fmtDate(row.locked_at)}</td>
@@ -386,6 +420,42 @@ export function AttendancePeriods() {
                   <span className="text-muted-foreground">Period: </span>
                   <span className="font-medium">{fmtMonth(dialog.month)}</span>
                 </div>
+
+                {/* LOP impact warning — only shown for lock action */}
+                {dialog.action === 'lock' && lopImpact.anomalyCount > 0 && (
+                  <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
+                      <p className="text-sm font-semibold text-destructive">Payroll Impact Warning</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Locking this period will <strong className="text-foreground">auto-mark {lopImpact.anomalyCount} unresolved {lopImpact.anomalyCount === 1 ? 'anomaly' : 'anomalies'} as Absent (LOP)</strong> for employees who did not submit a regularisation request.
+                    </p>
+                    <div className="flex items-center gap-4 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-foreground font-semibold">{lopImpact.affectedEmployees}</span>
+                        <span className="text-muted-foreground">employees affected</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-foreground font-semibold">{lopImpact.departmentCount}</span>
+                        <span className="text-muted-foreground">departments</span>
+                      </div>
+                    </div>
+                    <p className="text-[10.5px] text-muted-foreground border-t border-destructive/15 pt-2">
+                      This cannot be undone without manually unlocking the period. Pending regularisation requests will be auto-rejected.
+                    </p>
+                  </div>
+                )}
+
+                {dialog.action === 'lock' && lopImpact.anomalyCount === 0 && (
+                  <div className="rounded-xl border border-success/25 bg-success/5 p-3 flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-success flex-shrink-0" />
+                    <p className="text-xs text-success font-medium">All anomalies resolved — no LOP impact on lock</p>
+                  </div>
+                )}
+
                 {DIALOG_CONFIG[dialog.action].needsReason && (
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Reason</label>

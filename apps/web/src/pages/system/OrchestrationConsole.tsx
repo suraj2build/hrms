@@ -142,9 +142,12 @@ const JOB_STATUS_VARIANT: Record<JobStatus, BadgeVariant> = {
 
 function fmtDatetime(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function fmtDuration(ms: number | null) {

@@ -8,21 +8,24 @@ interface StatCardProps {
   icon: LucideIcon
   iconColor: string
   iconBg: string
+  accent?: string        // Tailwind bg-* class — renders as colored left-border wire
   change?: number
   changeLabel?: string
   subtitle?: string
 }
 
-export function StatCard({ title, value, icon: Icon, iconColor, iconBg, change, changeLabel, subtitle }: StatCardProps) {
+export function StatCard({ title, value, icon: Icon, iconColor, iconBg, accent, change, changeLabel, subtitle }: StatCardProps) {
   const isPositive = (change ?? 0) >= 0
 
   return (
     <Card className="relative overflow-hidden">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
-            <p className="text-2xl font-bold text-foreground">{value}</p>
+      {/* Colored left-border wire */}
+      {accent && <div className={cn('absolute left-0 top-0 bottom-0 w-[3px]', accent)} />}
+      <CardContent className={cn('p-4', accent && 'pl-5')}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{title}</p>
+            <p className="text-2xl font-bold text-foreground leading-none">{value}</p>
             {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
             {change !== undefined && (
               <div className={cn('flex items-center gap-1 text-xs font-medium', isPositive ? 'text-success' : 'text-destructive')}>
@@ -31,8 +34,8 @@ export function StatCard({ title, value, icon: Icon, iconColor, iconBg, change, 
               </div>
             )}
           </div>
-          <div className={cn('p-2.5 rounded-lg flex-shrink-0', iconBg)}>
-            <Icon className={cn('h-5 w-5', iconColor)} />
+          <div className={cn('p-2 rounded-lg flex-shrink-0', iconBg)}>
+            <Icon className={cn('h-4 w-4', iconColor)} />
           </div>
         </div>
       </CardContent>

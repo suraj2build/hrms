@@ -7,7 +7,7 @@
  * Columns:
  *   employee_code — must match an active employee in the tenant
  *   date          — YYYY-MM-DD
- *   in_time       — HH:MM or HH:MM:SS  (treated as UTC; adjust for your timezone)
+ *   in_time       — HH:MM or HH:MM:SS  (tenant local time, e.g. 09:00 for 9 AM IST — NOT UTC)
  *   out_time      — HH:MM or HH:MM:SS
  *   source        — optional; defaults to "csv_upload"
  *

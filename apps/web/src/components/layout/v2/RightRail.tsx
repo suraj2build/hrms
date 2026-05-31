@@ -12,7 +12,7 @@
  * No mutations — read-only informational panel.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   AlertTriangle, Clock, ClipboardList,
   CalendarDays, DollarSign, BookOpen,
@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api/client'
 import { RailSection, PriorityItem, DeadlineItem, HealthRow, HelpfulLink } from '@/components/dashboard/primitives'
+import { ContextualInsightsPanel } from '@/components/panels/ContextualInsightsPanel'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,11 +46,19 @@ interface LastRun {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string) {
-  return new Date(s + 'T12:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 
 function fmtDateTime(s: string) {
-  return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const d = new Date(s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function daysUntil(dateStr: string): number {
@@ -65,47 +74,71 @@ interface RightRailProps {
 
 export function RightRail({ show = true }: RightRailProps) {
   const today = new Date().toISOString().slice(0, 10)
+  const qc    = useQueryClient()
+
+  // staleTime === refetchInterval on every polling query so that shell-level
+  // mount (which fires on every page navigation) never triggers an extra fetch
+  // while the cached value is still fresh.  keepPreviousData on the two queries
+  // that drive the spinner prevents the icon from flashing during background polls.
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ['dashboard-stats-rail'],
     queryFn:  () => api.get('/analytics/dashboard'),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,         // ← was 60_000 (misaligned)
     refetchInterval: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const { data: anomalyResp } = useQuery<AnomalyResp>({
     queryKey: ['anomaly-count-rail'],
     queryFn:  () => api.get('/attendance/anomalies?resolved=false&limit=1'),
-    staleTime: 2 * 60_000,
+    staleTime: 5 * 60_000,         // ← was 2 * 60_000 (misaligned)
     refetchInterval: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const { data: correctionsResp } = useQuery<CorrectionsResp>({
     queryKey: ['corrections-count-rail'],
     queryFn:  () => api.get('/attendance/corrections?status=pending&limit=1'),
-    staleTime: 2 * 60_000,
+    staleTime: 5 * 60_000,         // ← was 2 * 60_000 (misaligned)
     refetchInterval: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const { data: regResp } = useQuery<RegResp>({
     queryKey: ['reg-count-rail'],
     queryFn:  () => api.get('/attendance/regularisation/pending'),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,         // ← was 60_000 (misaligned)
     refetchInterval: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const { data: holidaysResp } = useQuery<{ data: Holiday[] }>({
     queryKey: ['holidays-rail'],
     queryFn:  () => api.get('/masters/holidays'),
-    staleTime: 60 * 60_000,
+    staleTime: 60 * 60_000,        // no interval — fine as-is
   })
 
-  const { data: lastRunResp, isLoading: runLoading, refetch } = useQuery<{ run: LastRun | null }>({
+  const { data: lastRunResp, isLoading: runLoading } = useQuery<{ run: LastRun | null }>({
     queryKey: ['last-run-rail'],
     queryFn:  () => api.get('/attendance/process/last'),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,         // ← was 60_000 (misaligned)
     refetchInterval: 5 * 60_000,
+    placeholderData: keepPreviousData,
   })
+
+  // Refresh button: invalidate all rail queries through RQ deduplication pipeline
+  // (instead of calling refetch() on a single query as before)
+  function handleRefresh() {
+    const railKeys = [
+      ['dashboard-stats-rail'],
+      ['anomaly-count-rail'],
+      ['corrections-count-rail'],
+      ['reg-count-rail'],
+      ['last-run-rail'],
+    ]
+    railKeys.forEach(key => qc.invalidateQueries({ queryKey: key, exact: true }))
+  }
 
   if (!show) return null
 
@@ -142,6 +175,11 @@ export function RightRail({ show = true }: RightRailProps) {
         'scrollbar-none',
       )}
     >
+      {/* ── Contextual Insights (route-aware live panel) ────────────── */}
+      <div className="border-b border-border/60">
+        <ContextualInsightsPanel />
+      </div>
+
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-border/60">
         <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 select-none">
@@ -149,7 +187,7 @@ export function RightRail({ show = true }: RightRailProps) {
         </p>
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={handleRefresh}
           title="Refresh rail"
           className="text-muted-foreground hover:text-foreground transition-colors"
         >

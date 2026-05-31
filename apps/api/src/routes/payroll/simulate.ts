@@ -112,7 +112,7 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
       .from('employee_compensations')
       .select(`
         id, employee_id, ctc_monthly, ctc_annual,
-        employees!inner(id, status, job_history!inner(department_id, is_current, departments(id, name)))
+        employees!inner(id, status, job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name)))
       `)
       .eq('tenant_id', tenantId)
       .eq('is_active', true)

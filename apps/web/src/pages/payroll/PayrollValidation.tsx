@@ -7,12 +7,14 @@
  */
 
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShieldAlert, Play, Eye, Loader2,
   XCircle, AlertTriangle, Info,
   ToggleLeft, ToggleRight,
   Search, CheckCircle2, Filter,
+  Lock, ShieldCheck,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -28,222 +30,81 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast }        from 'sonner'
-import { api }          from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Matches payroll_validation_rules table (seeded via migration 143) */
 interface ValidationRule {
-  id: string
-  rule_code: string
-  rule_name: string
-  description: string | null
-  severity: 'error' | 'warning' | 'info'
-  is_active: boolean
-  rule_config: Record<string, unknown>
+  id:                  string
+  code:                string
+  name:                string
+  description:         string | null
+  severity:            'critical' | 'warning' | 'info'
+  enabled:             boolean
+  blocking:            boolean
+  stage:               string | null
+  remediation_route:   string | null
 }
 
-interface ValidationRun {
-  id: string
-  payroll_month: string
-  status: 'running' | 'completed' | 'failed'
-  started_at: string
-  completed_at: string | null
-  total_employees: number
-  passed_count: number
-  failed_count: number
-  warning_count: number
-}
-
-interface ValidationResult {
-  id: string
-  rule_id: string
-  employee_id: string
-  severity: string
-  message: string
-  resolved: boolean
-  employee_name?: string
-  rule_name?: string
+/** Matches PayrollRun shape returned by GET /payroll/runs */
+interface PayrollRun {
+  id:               string
+  month:            string
+  status:           'draft' | 'partial_failed' | 'processing' | 'finalized' | 'failed'
+  employee_count:   number
+  total_gross:      number
+  total_net:        number
+  failure_summary:  { total_failed: number; total_employees: number } | null
+  created_at:       string
+  finalized_at:     string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string) {
-  return new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
-function duration(started: string, completed: string | null) {
-  if (!completed) return '—'
-  const ms = new Date(completed).getTime() - new Date(started).getTime()
-  const secs = Math.round(ms / 1000)
-  if (secs < 60) return `${secs}s`
-  const mins = Math.floor(secs / 60)
-  return `${mins}m ${secs % 60}s`
+function fmtCurrency(n: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
   const map: Record<string, { cls: string; label: string }> = {
-    error:   { cls: 'text-destructive border-border', label: 'Error'   },
-    warning: { cls: 'text-warning border-border',     label: 'Warning' },
-    info:    { cls: 'text-info border-border',        label: 'Info'    },
+    critical: { cls: 'text-destructive border-border', label: 'Critical' },
+    warning:  { cls: 'text-warning border-border',     label: 'Warning'  },
+    info:     { cls: 'text-info border-border',        label: 'Info'     },
+    // legacy alias kept for safety
+    error:    { cls: 'text-destructive border-border', label: 'Error'    },
   }
   const cfg = map[severity] ?? { cls: 'text-muted-foreground border-border', label: severity }
   return <Badge variant="outline" className={cfg.cls}>{cfg.label}</Badge>
 }
 
 function SeverityIcon({ severity }: { severity: string }) {
-  if (severity === 'error')   return <XCircle      className="h-4 w-4 text-destructive" />
-  if (severity === 'warning') return <AlertTriangle className="h-4 w-4 text-warning"     />
-  return                             <Info          className="h-4 w-4 text-info"         />
+  if (severity === 'critical' || severity === 'error')
+    return <XCircle       className="h-4 w-4 text-destructive" />
+  if (severity === 'warning')
+    return <AlertTriangle className="h-4 w-4 text-warning"     />
+  return       <Info      className="h-4 w-4 text-info"         />
 }
 
-function RunStatusBadge({ status }: { status: ValidationRun['status'] }) {
-  const map = {
-    running:   { cls: 'text-info border-border',        label: 'Running'   },
-    completed: { cls: 'text-success border-border',     label: 'Completed' },
-    failed:    { cls: 'text-destructive border-border', label: 'Failed'    },
+function RunStatusBadge({ status }: { status: PayrollRun['status'] }) {
+  const map: Record<PayrollRun['status'], { cls: string; label: string }> = {
+    draft:           { cls: 'text-muted-foreground border-border', label: 'Draft'          },
+    processing:      { cls: 'text-info border-border',             label: 'Processing'     },
+    finalized:       { cls: 'text-success border-border',          label: 'Finalized'      },
+    failed:          { cls: 'text-destructive border-border',      label: 'Failed'         },
+    partial_failed:  { cls: 'text-warning border-border',          label: 'Partial Fail'   },
   }
-  const { cls, label } = map[status]
+  const { cls, label } = map[status] ?? { cls: 'text-muted-foreground border-border', label: status }
   return <Badge variant="outline" className={cls}>{label}</Badge>
-}
-
-// ── Results Dialog ────────────────────────────────────────────────────────────
-
-function ResultsDialog({
-  run,
-  open,
-  onOpenChange,
-}: {
-  run: ValidationRun | null
-  open: boolean
-  onOpenChange: (v: boolean) => void
-}) {
-  const queryClient = useQueryClient()
-  const [severityFilter, setSeverityFilter] = useState<'all' | 'error' | 'warning' | 'info'>('all')
-
-  const { data: results, isLoading } = useQuery<ValidationResult[]>({
-    queryKey: ['validation-results', run?.id],
-    queryFn: () => api.get(`/payroll/validation/runs/${run!.id}/results`).then((r: any) => r.data),
-    enabled: !!run && open,
-  })
-
-  const toggleMutation = useMutation({
-    mutationFn: ({ resultId, resolved }: { resultId: string; resolved: boolean }) =>
-      api.put(`/payroll/validation/results/${resultId}`, { resolved }).then((r: any) => r.data),
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['validation-results', run?.id] })
-      toast.success(vars.resolved ? 'Issue marked as resolved' : 'Issue reopened')
-    },
-    onError: (e: Error) => toast.error('Failed to update issue status', { description: e.message }),
-  })
-
-  if (!run) return null
-
-  const filtered = severityFilter === 'all' ? results ?? [] : (results ?? []).filter(r => r.severity === severityFilter)
-
-  const errorCount   = (results ?? []).filter(r => r.severity === 'error').length
-  const warningCount = (results ?? []).filter(r => r.severity === 'warning').length
-  const infoCount    = (results ?? []).filter(r => r.severity === 'info').length
-  const unresolvedCount = (results ?? []).filter(r => !r.resolved).length
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v) setSeverityFilter('all'); onOpenChange(v) }}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Validation Results — {run.payroll_month}</DialogTitle>
-        </DialogHeader>
-        <div className="pt-2">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-10 text-muted-foreground">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading results…
-            </div>
-          ) : !results?.length ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">No results found for this run.</p>
-          ) : (
-            <>
-              {/* Severity summary + filter tabs */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-1.5">
-                  {([
-                    { key: 'all',     label: `All (${results.length})`,        cls: 'text-foreground' },
-                    { key: 'error',   label: `Errors (${errorCount})`,         cls: errorCount   > 0 ? 'text-destructive' : 'text-muted-foreground' },
-                    { key: 'warning', label: `Warnings (${warningCount})`,     cls: warningCount > 0 ? 'text-warning'     : 'text-muted-foreground' },
-                    { key: 'info',    label: `Info (${infoCount})`,            cls: 'text-info' },
-                  ] as const).map(({ key, label, cls }) => (
-                    <button
-                      key={key}
-                      onClick={() => setSeverityFilter(key)}
-                      className={cn(
-                        'px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors',
-                        severityFilter === key
-                          ? 'border-primary/40 bg-primary/10 text-primary'
-                          : `border-border bg-transparent ${cls} hover:bg-muted/40`,
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {unresolvedCount > 0 && (
-                  <span className="text-[11px] text-muted-foreground">
-                    <span className="text-warning font-medium">{unresolvedCount}</span> unresolved
-                  </span>
-                )}
-              </div>
-
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-muted-foreground">
-                    <th className="px-3 pb-3 font-medium">Employee</th>
-                    <th className="px-3 pb-3 font-medium">Rule</th>
-                    <th className="px-3 pb-3 font-medium">Severity</th>
-                    <th className="px-3 pb-3 font-medium">Message</th>
-                    <th className="px-3 pb-3 font-medium">Resolved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                        No {severityFilter !== 'all' ? severityFilter : ''} results.
-                      </td>
-                    </tr>
-                  ) : filtered.map(r => (
-                    <tr key={r.id} className={cn('border-b border-border transition-colors', r.resolved ? 'opacity-50' : 'hover:bg-muted/40')}>
-                      <td className="px-3 py-2.5 text-foreground">{r.employee_name ?? r.employee_id}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{r.rule_name ?? r.rule_id}</td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <SeverityIcon severity={r.severity} />
-                          <SeverityBadge severity={r.severity} />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-foreground max-w-[280px]">
-                        <p className="truncate" title={r.message}>{r.message}</p>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <button
-                          onClick={() => toggleMutation.mutate({ resultId: r.id, resolved: !r.resolved })}
-                          disabled={toggleMutation.isPending}
-                          className="focus:outline-none"
-                          title={r.resolved ? 'Mark unresolved' : 'Mark resolved'}
-                        >
-                          {r.resolved
-                            ? <ToggleRight className="h-5 w-5 text-success" />
-                            : <ToggleLeft  className="h-5 w-5 text-muted-foreground" />}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
 }
 
 // ── Run Validation Dialog ─────────────────────────────────────────────────────
@@ -255,40 +116,59 @@ function RunValidationDialog({
   open: boolean
   onOpenChange: (v: boolean) => void
 }) {
-  const queryClient = useQueryClient()
-  const [month, setMonth] = useState('')
+  const navigate     = useNavigate()
+  const queryClient  = useQueryClient()
+  // Default to current month so the field is never blank
+  const todayYM      = new Date().toISOString().slice(0, 7)
+  const [month, setMonth] = useState(todayYM)
   const [error, setError] = useState<string | null>(null)
 
   const mutation = useMutation({
-    mutationFn: (m: string) => api.post('/payroll/validation/run', { month: m }).then((r: any) => r.data),
-    onSuccess: (_data, m) => {
-      queryClient.invalidateQueries({ queryKey: ['validation-runs'] })
+    mutationFn: (m: string) =>
+      api.post('/payroll/runs', { month: m }).then((r: any) => r.data),
+    onSuccess: (data, _m) => {
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs-history'] })
       onOpenChange(false)
-      setMonth('')
+      setMonth(todayYM)
       setError(null)
-      toast.success('Validation run started', { description: m })
+      const runId = data?.id ?? data?.data?.id
+      toast.success('Payroll run started', {
+        description: `Month: ${_m}`,
+        action: runId
+          ? { label: 'View Run', onClick: () => navigate(`/admin/payroll`) }
+          : undefined,
+      })
     },
     onError: (e: unknown) => {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (e as Error)?.message
-      setError(msg ?? 'Failed to start validation run.')
-      toast.error('Failed to start validation run', { description: msg ?? undefined })
+      const msg = e instanceof ApiError
+        ? e.message
+        : (e as Error)?.message ?? 'Failed to start payroll run.'
+      setError(msg)
+      toast.error('Failed to start run', { description: msg })
     },
   })
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  function handleSubmit(ev: React.FormEvent) {
+    ev.preventDefault()
     if (!month) { setError('Month is required.'); return }
+    setError(null)
     mutation.mutate(month)
   }
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) { setMonth(''); setError(null) } onOpenChange(v) }}>
+    <Dialog open={open} onOpenChange={v => { if (!v) { setMonth(todayYM); setError(null) } onOpenChange(v) }}>
       <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>Run Validation</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Run Payroll</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div className="space-y-1">
-            <label className="text-sm font-medium text-foreground">Payroll Month <span className="text-destructive">*</span></label>
-            <Input type="month" value={month} onChange={e => setMonth(e.target.value)} />
+            <label className="text-sm font-medium text-foreground">
+              Payroll Month <span className="text-destructive">*</span>
+            </label>
+            <Input
+              type="month"
+              value={month}
+              onChange={e => { setMonth(e.target.value); setError(null) }}
+            />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
@@ -309,18 +189,30 @@ function RunValidationDialog({
 
 function ValidationRulesTab() {
   const queryClient = useQueryClient()
-  const [ruleSearch,      setRuleSearch]      = useState('')
-  const [severityFilter,  setSeverityFilter]  = useState<'all' | 'error' | 'warning' | 'info'>('all')
+  const { profile } = useAuthStore()
+  const isSuperAdmin = profile?.role === 'super_admin'
+
+  const [ruleSearch,     setRuleSearch]     = useState('')
+  const [severityFilter, setSeverityFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all')
+  const [stageFilter,    setStageFilter]    = useState<'all' | string>('all')
 
   const { data: rules, isLoading } = useQuery<ValidationRule[]>({
     queryKey: ['validation-rules'],
-    queryFn: () => api.get('/payroll/validation/rules').then((r: any) => r.data),
+    queryFn:  () =>
+      api.get('/payroll/validation-rules').then((r: any) => r.data?.data ?? r.data ?? []),
   })
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      api.put(`/payroll/validation/rules/${id}`, { is_active }).then((r: any) => r.data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['validation-rules'] }),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.patch(`/payroll/validation-rules/${id}`, { enabled }).then((r: any) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['validation-rules'] })
+      toast.success('Rule updated')
+    },
+    onError: (e: unknown) => {
+      const msg = e instanceof ApiError ? e.message : (e as Error)?.message
+      toast.error('Failed to update rule', { description: msg })
+    },
   })
 
   if (isLoading) return (
@@ -330,20 +222,48 @@ function ValidationRulesTab() {
   )
 
   if (!rules?.length) return (
-    <p className="py-10 text-center text-sm text-muted-foreground">No validation rules configured.</p>
+    <div className="py-10 flex flex-col items-center gap-4 text-center">
+      <ShieldAlert className="h-8 w-8 text-muted-foreground/30" />
+      <div>
+        <p className="text-sm font-medium text-foreground">No validation rules configured yet.</p>
+        <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+          Default rules are seeded automatically. If none appear, run the database migration or contact your system administrator.
+        </p>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-left max-w-md w-full">
+        {[
+          { code: 'COMP_MISSING',  label: 'Missing compensation',   desc: 'No active CTC record for employee' },
+          { code: 'BANK_MISSING',  label: 'Missing bank account',   desc: 'No valid bank details on file' },
+          { code: 'ATTEND_MISSING',label: 'Attendance incomplete',  desc: 'No attendance data for the period' },
+          { code: 'NET_INVALID',   label: 'Invalid net pay',        desc: 'Net pay is zero or negative' },
+        ].map(r => (
+          <div key={r.code} className="p-3 rounded-md border border-border bg-muted/30 space-y-0.5">
+            <p className="text-[10px] font-mono text-muted-foreground">{r.code}</p>
+            <p className="text-xs font-medium text-foreground">{r.label}</p>
+            <p className="text-[10px] text-muted-foreground/70">{r.desc}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground/50">These rules and 7 others are seeded automatically via migration.</p>
+    </div>
   )
 
   // Derived counters
-  const activeCount   = rules.filter(r => r.is_active).length
-  const errorCount    = rules.filter(r => r.severity === 'error'   && r.is_active).length
-  const warningCount  = rules.filter(r => r.severity === 'warning' && r.is_active).length
-  const infoCount     = rules.filter(r => r.severity === 'info'    && r.is_active).length
+  const enabledCount   = rules.filter(r => r.enabled).length
+  const criticalCount  = rules.filter(r => r.severity === 'critical' && r.enabled).length
+  const warningCount   = rules.filter(r => r.severity === 'warning'  && r.enabled).length
+  const infoCount      = rules.filter(r => r.severity === 'info'     && r.enabled).length
+  const blockingCount  = rules.filter(r => r.blocking && r.enabled).length
+
+  // Available stages for filter
+  const stages = Array.from(new Set(rules.map(r => r.stage).filter(Boolean))) as string[]
 
   const filtered = rules.filter(r => {
-    const q = ruleSearch.toLowerCase()
-    const matchSearch = !q || r.rule_name.toLowerCase().includes(q) || r.rule_code.toLowerCase().includes(q)
+    const q           = ruleSearch.toLowerCase()
+    const matchSearch = !q || r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q)
     const matchSev    = severityFilter === 'all' || r.severity === severityFilter
-    return matchSearch && matchSev
+    const matchStage  = stageFilter   === 'all' || r.stage === stageFilter
+    return matchSearch && matchSev && matchStage
   })
 
   return (
@@ -351,32 +271,40 @@ function ValidationRulesTab() {
       {/* Summary strip */}
       <div className="flex flex-wrap items-center gap-2 px-1">
         <span className="text-xs text-muted-foreground">
-          <span className="font-semibold text-foreground">{activeCount}</span> of {rules.length} rules active
+          <span className="font-semibold text-foreground">{enabledCount}</span> of {rules.length} rules enabled
         </span>
         <span className="text-muted-foreground/40">·</span>
-        {errorCount > 0 && (
+        {criticalCount > 0 && (
           <span className="flex items-center gap-1 text-xs text-destructive">
-            <XCircle className="h-3 w-3" />{errorCount} error-type
+            <XCircle className="h-3 w-3" />{criticalCount} critical
           </span>
         )}
         {warningCount > 0 && (
           <span className="flex items-center gap-1 text-xs text-warning">
-            <AlertTriangle className="h-3 w-3" />{warningCount} warning-type
+            <AlertTriangle className="h-3 w-3" />{warningCount} warning
           </span>
         )}
         {infoCount > 0 && (
           <span className="flex items-center gap-1 text-xs text-info">
-            <Info className="h-3 w-3" />{infoCount} info-type
+            <Info className="h-3 w-3" />{infoCount} info
           </span>
         )}
-        {activeCount === rules.length && (
+        {blockingCount > 0 && (
+          <>
+            <span className="text-muted-foreground/40">·</span>
+            <span className="flex items-center gap-1 text-xs text-destructive font-medium">
+              <Lock className="h-3 w-3" />{blockingCount} blocking
+            </span>
+          </>
+        )}
+        {enabledCount === rules.length && (
           <span className="flex items-center gap-1 text-xs text-success ml-1">
-            <CheckCircle2 className="h-3 w-3" />All rules active
+            <CheckCircle2 className="h-3 w-3" />All rules enabled
           </span>
         )}
       </div>
 
-      {/* Search + severity filter */}
+      {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -395,10 +323,20 @@ function ValidationRulesTab() {
             className="h-8 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
           >
             <option value="all">All Severity</option>
-            <option value="error">Error</option>
+            <option value="critical">Critical</option>
             <option value="warning">Warning</option>
             <option value="info">Info</option>
           </select>
+          {stages.length > 0 && (
+            <select
+              value={stageFilter}
+              onChange={e => setStageFilter(e.target.value)}
+              className="h-8 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
+            >
+              <option value="all">All Stages</option>
+              {stages.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
         </div>
       </div>
 
@@ -409,47 +347,85 @@ function ValidationRulesTab() {
               <th className="px-4 pb-3 font-medium">Code</th>
               <th className="px-4 pb-3 font-medium">Name</th>
               <th className="px-4 pb-3 font-medium">Severity</th>
-              <th className="px-4 pb-3 font-medium">Active</th>
+              <th className="px-4 pb-3 font-medium">Stage</th>
+              <th className="px-4 pb-3 font-medium">Blocking</th>
+              <th className="px-4 pb-3 font-medium">Enabled</th>
               <th className="px-4 pb-3 font-medium">Description</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
                   No rules match your filter.
                 </td>
               </tr>
             ) : filtered.map(rule => (
-              <tr key={rule.id} className={cn('border-b border-border transition-colors', !rule.is_active ? 'opacity-50' : 'hover:bg-muted/40')}>
-                <td className="px-4 py-3 font-mono text-muted-foreground">{rule.rule_code}</td>
-                <td className="px-4 py-3 font-medium text-foreground">{rule.rule_name}</td>
+              <tr
+                key={rule.id}
+                className={cn(
+                  'border-b border-border transition-colors',
+                  !rule.enabled ? 'opacity-50' : 'hover:bg-muted/40',
+                )}
+              >
+                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{rule.code}</td>
+                <td className="px-4 py-3 font-medium text-foreground">{rule.name}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
                     <SeverityIcon severity={rule.severity} />
                     <SeverityBadge severity={rule.severity} />
                   </div>
                 </td>
+                <td className="px-4 py-3 text-xs text-muted-foreground capitalize">
+                  {rule.stage ?? '—'}
+                </td>
+                <td className="px-4 py-3">
+                  {rule.blocking ? (
+                    <span className="flex items-center gap-1 text-xs text-destructive font-medium">
+                      <Lock className="h-3 w-3" /> Yes
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">No</span>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <button
-                    onClick={() => toggleMutation.mutate({ id: rule.id, is_active: !rule.is_active })}
+                    onClick={() => {
+                      if (!isSuperAdmin) {
+                        toast.error('Only super admins can toggle rules')
+                        return
+                      }
+                      toggleMutation.mutate({ id: rule.id, enabled: !rule.enabled })
+                    }}
                     disabled={toggleMutation.isPending}
                     className="focus:outline-none"
-                    title={rule.is_active ? 'Disable rule' : 'Enable rule'}
+                    title={
+                      !isSuperAdmin
+                        ? 'Super admin only'
+                        : rule.enabled ? 'Disable rule' : 'Enable rule'
+                    }
                   >
-                    {rule.is_active
+                    {rule.enabled
                       ? <ToggleRight className="h-5 w-5 text-success" />
                       : <ToggleLeft  className="h-5 w-5 text-muted-foreground" />}
                   </button>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground max-w-[300px]">
-                  <p className="truncate" title={rule.description ?? undefined}>{rule.description ?? '—'}</p>
+                  <p className="truncate" title={rule.description ?? undefined}>
+                    {rule.description ?? '—'}
+                  </p>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {!isSuperAdmin && (
+        <p className="text-xs text-muted-foreground text-right px-1">
+          Rule toggles are restricted to super admins.
+        </p>
+      )}
     </div>
   )
 }
@@ -457,20 +433,19 @@ function ValidationRulesTab() {
 // ── Run History Tab ───────────────────────────────────────────────────────────
 
 function RunHistoryTab() {
-  const [runDialogOpen, setRunDialogOpen]   = useState(false)
-  const [selectedRun, setSelectedRun]       = useState<ValidationRun | null>(null)
-  const [resultsOpen, setResultsOpen]       = useState(false)
+  const navigate             = useNavigate()
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
 
-  const { data: runs, isLoading } = useQuery<ValidationRun[]>({
-    queryKey: ['validation-runs'],
-    queryFn: () => api.get('/payroll/validation/runs').then((r: any) => r.data),
+  const { data: runs = [], isLoading } = useQuery<PayrollRun[]>({
+    queryKey: ['payroll-runs-history'],
+    queryFn:  () => api.get('/payroll/runs').then((r: any) => r.data ?? []),
   })
 
   return (
     <div>
       <div className="mb-4 flex justify-end">
         <Button onClick={() => setRunDialogOpen(true)} className="gap-2">
-          <Play className="h-4 w-4" /> Run Validation
+          <Play className="h-4 w-4" /> Run Payroll
         </Button>
       </div>
 
@@ -479,7 +454,9 @@ function RunHistoryTab() {
           <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading history…
         </div>
       ) : !runs?.length ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">No validation runs found. Run your first validation above.</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          No payroll runs found. Use the button above to start the first run.
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -488,71 +465,62 @@ function RunHistoryTab() {
                 <th className="px-4 pb-3 font-medium">Month</th>
                 <th className="px-4 pb-3 font-medium">Status</th>
                 <th className="px-4 pb-3 font-medium">Started</th>
-                <th className="px-4 pb-3 font-medium">Duration</th>
                 <th className="px-4 pb-3 font-medium text-right">Employees</th>
-                <th className="px-4 pb-3 font-medium text-right">
-                  <span className="text-success">Passed</span>
-                </th>
-                <th className="px-4 pb-3 font-medium text-right">
-                  <span className="text-destructive">Failed</span>
-                </th>
-                <th className="px-4 pb-3 font-medium text-right">
-                  <span className="text-warning">Warnings</span>
-                </th>
-                <th className="px-4 pb-3 font-medium text-right">Pass Rate</th>
+                <th className="px-4 pb-3 font-medium text-right">Gross</th>
+                <th className="px-4 pb-3 font-medium text-right">Net</th>
                 <th className="px-4 pb-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {runs.map(run => {
-                const passRate = run.total_employees > 0
-                  ? Math.round((run.passed_count / run.total_employees) * 100)
-                  : null
-                return (
+              {runs.map(run => (
                 <tr key={run.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                  <td className="px-4 py-3 font-mono text-foreground">{run.payroll_month}</td>
+                  <td className="px-4 py-3 font-mono text-foreground">{run.month}</td>
                   <td className="px-4 py-3"><RunStatusBadge status={run.status} /></td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(run.started_at)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{duration(run.started_at, run.completed_at)}</td>
-                  <td className="px-4 py-3 text-right text-foreground">{run.total_employees}</td>
-                  <td className="px-4 py-3 text-right text-success font-medium">{run.passed_count}</td>
-                  <td className="px-4 py-3 text-right text-destructive font-medium">{run.failed_count}</td>
-                  <td className="px-4 py-3 text-right text-warning font-medium">{run.warning_count}</td>
-                  <td className="px-4 py-3 text-right">
-                    {passRate !== null ? (
-                      <span className={cn(
-                        'text-sm font-semibold tabular-nums',
-                        passRate === 100 ? 'text-success' : passRate >= 80 ? 'text-warning' : 'text-destructive',
-                      )}>
-                        {passRate}%
-                      </span>
-                    ) : <span className="text-muted-foreground">—</span>}
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(run.created_at)}</td>
+                  <td className="px-4 py-3 text-right text-foreground">{run.employee_count}</td>
+                  <td className="px-4 py-3 text-right text-muted-foreground">
+                    {run.total_gross > 0 ? fmtCurrency(run.total_gross) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right text-foreground font-medium">
+                    {run.total_net > 0 ? fmtCurrency(run.total_net) : '—'}
                   </td>
                   <td className="px-4 py-3">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="gap-1 text-muted-foreground"
-                      disabled={run.status === 'running'}
-                      onClick={() => { setSelectedRun(run); setResultsOpen(true) }}
-                    >
-                      <Eye className="h-4 w-4" /> View Results
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      {(run.status === 'failed' || run.status === 'partial_failed') ? (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => navigate(`/admin/payroll/blockers/${run.id}`)}
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          Review Blockers
+                          {run.failure_summary?.total_failed != null && (
+                            <span className="ml-0.5 rounded-full bg-white/20 px-1 text-[9px] font-bold">
+                              {run.failure_summary.total_failed}
+                            </span>
+                          )}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 text-xs text-muted-foreground"
+                          onClick={() => navigate(`/admin/payroll`)}
+                        >
+                          <Eye className="h-3.5 w-3.5" /> View Slips
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
       )}
 
       <RunValidationDialog open={runDialogOpen} onOpenChange={setRunDialogOpen} />
-      <ResultsDialog
-        run={selectedRun}
-        open={resultsOpen}
-        onOpenChange={v => { if (!v) setSelectedRun(null); setResultsOpen(v) }}
-      />
     </div>
   )
 }

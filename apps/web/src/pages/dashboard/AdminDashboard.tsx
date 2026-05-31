@@ -6,14 +6,13 @@
  *   · KPI row     — 6 compact OperationalKPICard cards (full width)
  *   · Charts row  — Absent trend (area) + Employment types (donut), 2-col
  *   · Attention   — AlertRow panel + Quick Actions grid
- *   · RegQueue    — OperationalTable with approve/reject inline actions
+ *   · RegQueue    — OperationalTable showing SLA-breached escalations only (Review → link)
  *
  * Data: same queries as before — no API changes.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
 import {
   Users, UserCheck, Clock, AlertTriangle,
   ArrowRight, RefreshCw,
@@ -58,10 +57,18 @@ interface MusterResp     { month: string; employees: MusterEmployee[] }
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string) {
-  return new Date(s + 'T12:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 function fmtDateTime(s: string) {
-  return new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const d = new Date(s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 function monthRange() {
   const now = new Date()
@@ -71,20 +78,11 @@ function monthRange() {
   return { from, to, label: now.toLocaleString('default', { month: 'long', year: 'numeric' }) }
 }
 
-// ── RegQueue column config (defined outside component for stability) ──────────
-
-const REG_STATUS_VARIANT: Record<string, 'warning' | 'success' | 'destructive' | 'secondary'> = {
-  pending:  'warning',
-  approved: 'success',
-  rejected: 'destructive',
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function AdminDashboard() {
   const { tenant }  = useAuthStore()
   const navigate    = useNavigate()
-  const qc          = useQueryClient()
   const { label }   = monthRange()
   const today       = new Date().toISOString().slice(0, 10)
 
@@ -132,25 +130,6 @@ export function AdminDashboard() {
     queryKey: ['muster-dash', musterMonth],
     queryFn:  () => api.get(`/attendance/muster?month=${musterMonth}`),
     staleTime: 5 * 60_000,
-  })
-
-  // ── Mutations ─────────────────────────────────────────────────────────────────
-
-  const { mutate: approveReg, variables: approvingId } = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
-    onSuccess:  () => {
-      qc.invalidateQueries({ queryKey: ['reg-pending'] })
-      toast.success('Regularisation approved')
-    },
-    onError: (e: Error) => toast.error('Failed to approve regularisation', { description: e.message }),
-  })
-  const { mutate: rejectReg, variables: rejectingId } = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/reject`, {}),
-    onSuccess:  () => {
-      qc.invalidateQueries({ queryKey: ['reg-pending'] })
-      toast.success('Regularisation rejected')
-    },
-    onError: (e: Error) => toast.error('Failed to reject regularisation', { description: e.message }),
   })
 
   // ── Derived ───────────────────────────────────────────────────────────────────
@@ -201,18 +180,34 @@ export function AdminDashboard() {
   // Upcoming holidays (next 5)
   const upcomingHolidays = (holidaysResp?.data ?? []).filter(h => h.date >= today).slice(0, 5)
 
+  // ── SLA escalation filter ─────────────────────────────────────────────────────
+  // HR admin's dashboard queue shows ONLY items that have breached manager SLA
+  // (pending for ≥2 days). Fresh items belong to the manager's approval queue.
+  // HR resolves exceptions; managers own first-level approvals.
+  const SLA_BREACH_DAYS = 2
+  const escalatedRegList = regList.filter(r => {
+    if (r.status !== 'pending') return false
+    const submittedAt  = new Date(r.created_at).getTime()
+    const ageMs        = Date.now() - submittedAt
+    const ageDays      = ageMs / (1_000 * 60 * 60 * 24)
+    return ageDays >= SLA_BREACH_DAYS
+  })
+
   // Reg table rows (typed as Record for OperationalTable)
   type RegRow = Record<string, unknown> & {
-    id: string; employee: string; date_display: string; reason: string; submitted: string; status: string
+    id: string; employee: string; date_display: string; reason: string; submitted: string; age_label: string
   }
-  const regRows: RegRow[] = regList.slice(0, 12).map(r => ({
-    id:           r.id,
-    employee:     r.employee_name ? `${r.employee_name}${r.employee_code ? ` · ${r.employee_code}` : ''}` : 'Employee',
-    date_display: fmtDate(r.date),
-    reason:       r.reason.slice(0, 55) + (r.reason.length > 55 ? '…' : ''),
-    submitted:    fmtDate(r.created_at),
-    status:       r.status,
-  }))
+  const regRows: RegRow[] = escalatedRegList.slice(0, 12).map(r => {
+    const ageDays = Math.floor((Date.now() - new Date(r.created_at).getTime()) / (1_000 * 60 * 60 * 24))
+    return {
+      id:           r.id,
+      employee:     r.employee_name ? `${r.employee_name}${r.employee_code ? ` · ${r.employee_code}` : ''}` : 'Employee',
+      date_display: fmtDate(r.date),
+      reason:       r.reason.slice(0, 55) + (r.reason.length > 55 ? '…' : ''),
+      submitted:    fmtDate(r.created_at),
+      age_label:    ageDays === 1 ? '1 day' : `${ageDays} days`,
+    }
+  })
 
   const regColumns: OpsTableColumn[] = [
     { header: 'Employee',  key: 'employee',     className: 'min-w-[140px]' },
@@ -220,44 +215,30 @@ export function AdminDashboard() {
     { header: 'Reason',    key: 'reason',       className: 'text-muted-foreground' },
     { header: 'Submitted', key: 'submitted',    width: '70px', className: 'text-muted-foreground' },
     {
-      header: 'Status',
-      key:    'status',
-      width:  '80px',
+      header: 'Pending',
+      key:    'age_label',
+      width:  '70px',
       render: row => (
-        <Badge
-          variant={REG_STATUS_VARIANT[row.status as string] ?? 'secondary'}
-          className="rounded-full text-[10px] capitalize"
-        >
-          {row.status as string}
+        <Badge variant="destructive" className="rounded-full text-[10px]">
+          {row.age_label as string}
         </Badge>
       ),
     },
     {
       header: '',
-      key:    '_actions',
-      width:  '120px',
+      key:    '_link',
+      width:  '80px',
       align:  'right',
-      render: row => row.status === 'pending' ? (
-        <div className="flex items-center gap-1 justify-end">
-          <Button
-            size="sm"
-            className="h-6 text-[11px] px-2"
-            disabled={approvingId === row.id}
-            onClick={(e) => { e.stopPropagation(); approveReg(row.id as string) }}
-          >
-            {approvingId === row.id ? '…' : 'Approve'}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 text-[11px] px-2 text-muted-foreground"
-            disabled={rejectingId === row.id}
-            onClick={(e) => { e.stopPropagation(); rejectReg(row.id as string) }}
-          >
-            Reject
-          </Button>
-        </div>
-      ) : null,
+      render: () => (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 text-[11px] px-2 text-primary"
+          onClick={(e) => { e.stopPropagation(); navigate('/admin/attendance/regularisation') }}
+        >
+          Review →
+        </Button>
+      ),
     },
   ]
 
@@ -277,7 +258,7 @@ export function AdminDashboard() {
         <div className="flex items-center gap-2">
           <Button
             size="sm" variant="outline" className="h-7 text-xs gap-1.5"
-            onClick={() => { refetchStats(); qc.invalidateQueries({ queryKey: ['last-run-dash'] }) }}
+            onClick={() => { refetchStats() }}
           >
             <RefreshCw className="h-3 w-3" /> Refresh
           </Button>
@@ -521,12 +502,12 @@ export function AdminDashboard() {
         </OperationalSurface>
       )}
 
-      {/* ── Regularisation Queue ──────────────────────────────────────── */}
+      {/* ── Escalated Corrections ────────────────────────────────────── */}
       <OperationalSurface noPad>
         <div className="px-4 pt-4 pb-2">
           <SectionHeader
-            title="Regularisation Queue"
-            subtitle="Pending attendance correction requests"
+            title="Escalated Corrections"
+            subtitle="Manager SLA breached — pending ≥2 days"
             action={
               <Button
                 size="sm" variant="ghost" className="h-6 text-[11px]"

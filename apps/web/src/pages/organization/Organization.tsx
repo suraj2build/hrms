@@ -7,8 +7,11 @@ import {
   Plus, GitBranch, ChevronRight, ChevronDown, Loader2, Pencil, Briefcase,
   Layers, Trash2, Users, FileText,
 } from 'lucide-react'
+import { OrgGovernancePanel }  from '@/components/org/OrgGovernancePanel'
+import { ReadinessGuidance }   from '@/components/readiness/ReadinessGuidance'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,24 +20,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { MergeDeleteDialog } from '@/components/ui/merge-delete-dialog'
 import type { Department, Designation, Grade } from '@/types'
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const deptSchema = z.object({
   name: z.string().min(1, 'Required'),
-  code: z.string().optional(),
   parent_id: z.string().optional(),
 })
 
 const desigSchema = z.object({
   name: z.string().min(1, 'Required'),
-  level: z.coerce.number().optional(),
-  department_id: z.string().optional(),
 })
 
 const gradeSchema = z.object({
   name: z.string().min(1, 'Required'),
-  code: z.string().optional(),
   min_salary: z.coerce.number().optional(),
   max_salary: z.coerce.number().optional(),
 })
@@ -122,7 +122,16 @@ function DeptNode({
 
 // ── Main Component ───────────────────────────────────────────────────────────
 export function Organization() {
+  const { profile } = useAuthStore()
   const queryClient = useQueryClient()
+
+  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
 
   // Dialog states
   const [deptAddOpen, setDeptAddOpen] = useState(false)
@@ -132,8 +141,8 @@ export function Organization() {
   const [gradeAddOpen, setGradeAddOpen] = useState(false)
   const [editingGrade, setEditingGrade] = useState<Grade | null>(null)
 
-  // Delete confirm state
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'dept' | 'desig' | 'grade'; id: string; name: string } | null>(null)
+  // Delete / merge-delete state
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'desig' | 'grade'; id: string; name: string } | null>(null)
 
   // Queries
   const { data: deptData, isLoading: deptLoading } = useQuery<{ data: Department[] }>({
@@ -157,61 +166,94 @@ export function Organization() {
   const gradeAddForm = useForm<GradeForm>({ resolver: zodResolver(gradeSchema) })
   const gradeEditForm = useForm<GradeForm>({ resolver: zodResolver(gradeSchema) })
 
-  // Watched values for controlled selects in edit forms
+  // Watched value for controlled select in edit dept form
   const deptEditW = deptEditForm.watch()
-  const desigEditW = desigEditForm.watch()
 
   function openEditDept(d: Department) {
-    deptEditForm.reset({ name: d.name, code: d.code ?? '', parent_id: d.parent_id ?? '' })
+    deptEditForm.reset({ name: d.name, parent_id: d.parent_id ?? '' })
     setEditingDept(d)
   }
   function openEditDesig(d: Designation) {
-    desigEditForm.reset({ name: d.name, level: d.level, department_id: d.department_id ?? '' })
+    desigEditForm.reset({ name: d.name })
     setEditingDesig(d)
   }
   function openEditGrade(g: Grade) {
-    gradeEditForm.reset({ name: g.name, code: g.code ?? '', min_salary: g.min_salary, max_salary: g.max_salary })
+    gradeEditForm.reset({ name: g.name, min_salary: g.min_salary, max_salary: g.max_salary })
     setEditingGrade(g)
+  }
+
+  // Strip empty-string optional fields before sending — empty string fails UUID validation on parent_id
+  function cleanDept(data: DeptForm) {
+    return {
+      name:       data.name,
+      ...(data.parent_id ? { parent_id: data.parent_id } : {}),
+    }
   }
 
   // ── Dept mutations ──
   const createDept = useMutation({
-    mutationFn: (data: DeptForm) => api.post('/departments', data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['departments'] }); toast.success('Department created'); setDeptAddOpen(false); deptAddForm.reset() },
+    mutationFn: (data: DeptForm) => api.post('/departments', cleanDept(data)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['departments'] })
+      toast.success('Department created')
+      setDeptAddOpen(false)
+      deptAddForm.reset()
+    },
     onError: (e: Error) => toast.error('Failed to create department', { description: e.message }),
   })
   const updateDept = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: DeptForm }) => api.put(`/departments/${id}`, data),
+    mutationFn: ({ id, data }: { id: string; data: DeptForm }) => api.put(`/departments/${id}`, cleanDept(data)),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['departments'] }); toast.success('Department updated'); setEditingDept(null) },
     onError: (e: Error) => toast.error('Failed to update department', { description: e.message }),
   })
   const deleteDept = useMutation({
-    mutationFn: (id: string) => api.delete(`/departments/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['departments'] }); toast.success('Department deleted'); setDeleteConfirm(null) },
+    mutationFn: ({ id, mergeTo }: { id: string; mergeTo?: string }) =>
+      api.delete(`/departments/${id}`, mergeTo ? { merge_to: mergeTo } : undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['departments'] })
+      queryClient.invalidateQueries({ queryKey: ['usage'] })
+      toast.success('Department deleted')
+      setDeleteTarget(null)
+    },
     onError: (e: Error) => toast.error('Cannot delete department', { description: e.message }),
   })
 
   // ── Desig mutations ──
+  function cleanDesig(data: DesigForm) {
+    return { name: data.name }
+  }
+
   const createDesig = useMutation({
-    mutationFn: (data: DesigForm) => api.post('/designations', data),
+    mutationFn: (data: DesigForm) => api.post('/designations', cleanDesig(data)),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['designations'] }); toast.success('Designation created'); setDesigAddOpen(false); desigAddForm.reset() },
     onError: (e: Error) => toast.error('Failed to create designation', { description: e.message }),
   })
   const updateDesig = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: DesigForm }) => api.put(`/designations/${id}`, data),
+    mutationFn: ({ id, data }: { id: string; data: DesigForm }) => api.put(`/designations/${id}`, cleanDesig(data)),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['designations'] }); toast.success('Designation updated'); setEditingDesig(null) },
     onError: (e: Error) => toast.error('Failed to update designation', { description: e.message }),
   })
   const deleteDesig = useMutation({
-    mutationFn: (id: string) => api.delete(`/designations/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['designations'] }); toast.success('Designation deleted'); setDeleteConfirm(null) },
+    mutationFn: ({ id, mergeTo }: { id: string; mergeTo?: string }) =>
+      api.delete(`/designations/${id}`, mergeTo ? { merge_to: mergeTo } : undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['designations'] })
+      queryClient.invalidateQueries({ queryKey: ['usage'] })
+      toast.success('Designation deleted')
+      setDeleteTarget(null)
+    },
     onError: (e: Error) => toast.error('Cannot delete designation', { description: e.message }),
   })
 
   // ── Grade mutations ──
   const createGrade = useMutation({
     mutationFn: (data: GradeForm) => api.post('/grades', data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['grades'] }); toast.success('Grade created'); setGradeAddOpen(false); gradeAddForm.reset() },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['grades'] })
+      toast.success('Grade created')
+      setGradeAddOpen(false)
+      gradeAddForm.reset()
+    },
     onError: (e: Error) => toast.error('Failed to create grade', { description: e.message }),
   })
   const updateGrade = useMutation({
@@ -220,18 +262,16 @@ export function Organization() {
     onError: (e: Error) => toast.error('Failed to update grade', { description: e.message }),
   })
   const deleteGrade = useMutation({
-    mutationFn: (id: string) => api.delete(`/grades/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['grades'] }); toast.success('Grade deleted'); setDeleteConfirm(null) },
+    mutationFn: ({ id, mergeTo }: { id: string; mergeTo?: string }) =>
+      api.delete(`/grades/${id}`, mergeTo ? { merge_to: mergeTo } : undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['grades'] })
+      queryClient.invalidateQueries({ queryKey: ['usage'] })
+      toast.success('Grade deleted')
+      setDeleteTarget(null)
+    },
     onError: (e: Error) => toast.error('Cannot delete grade', { description: e.message }),
   })
-
-  // ── Confirm delete handler ──
-  function handleConfirmDelete() {
-    if (!deleteConfirm) return
-    if (deleteConfirm.type === 'dept') deleteDept.mutate(deleteConfirm.id)
-    if (deleteConfirm.type === 'desig') deleteDesig.mutate(deleteConfirm.id)
-    if (deleteConfirm.type === 'grade') deleteGrade.mutate(deleteConfirm.id)
-  }
 
   // Build tree from flat list
   function buildTree(depts: Department[]): Department[] {
@@ -261,10 +301,6 @@ export function Organization() {
           {deptAddForm.formState.errors.name && <p className="text-xs text-destructive">{deptAddForm.formState.errors.name.message}</p>}
         </div>
         <div className="space-y-1.5">
-          <Label>Code</Label>
-          <Input placeholder="e.g. ENG" {...deptAddForm.register('code')} />
-        </div>
-        <div className="space-y-1.5">
           <Label>Parent Department</Label>
           <Select onValueChange={(v) => deptAddForm.setValue('parent_id', v === 'none' ? '' : v)}>
             <SelectTrigger><SelectValue placeholder="Root level" /></SelectTrigger>
@@ -286,20 +322,6 @@ export function Organization() {
           <Input placeholder="e.g. Senior Engineer" {...desigAddForm.register('name')} />
           {desigAddForm.formState.errors.name && <p className="text-xs text-destructive">{desigAddForm.formState.errors.name.message}</p>}
         </div>
-        <div className="space-y-1.5">
-          <Label>Level</Label>
-          <Input type="number" placeholder="e.g. 5" {...desigAddForm.register('level')} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Department</Label>
-          <Select onValueChange={(v) => desigAddForm.setValue('department_id', v === 'none' ? '' : v)}>
-            <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">— None</SelectItem>
-              {deptData?.data?.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
       </>
     )
   }
@@ -307,16 +329,10 @@ export function Organization() {
   function GradeAddFields() {
     return (
       <>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Grade Name *</Label>
-            <Input placeholder="e.g. L5" {...gradeAddForm.register('name')} />
-            {gradeAddForm.formState.errors.name && <p className="text-xs text-destructive">{gradeAddForm.formState.errors.name.message}</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label>Code</Label>
-            <Input placeholder="e.g. BAND-C" {...gradeAddForm.register('code')} />
-          </div>
+        <div className="space-y-1.5">
+          <Label>Grade Name *</Label>
+          <Input placeholder="e.g. L5" {...gradeAddForm.register('name')} />
+          {gradeAddForm.formState.errors.name && <p className="text-xs text-destructive">{gradeAddForm.formState.errors.name.message}</p>}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
@@ -334,12 +350,17 @@ export function Organization() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">Organization</h1>
           <p className="text-sm text-muted-foreground">Manage departments, designations, grades, and master data</p>
         </div>
+        {/* Org hierarchy summary — links to Sites / Work Locations / Cost Centers */}
+        <OrgGovernancePanel className="shrink-0 w-56" />
       </div>
+
+      {/* Org readiness — only shown when there are issues */}
+      <ReadinessGuidance domain="organization" issueOnly />
 
       <Tabs defaultValue="departments">
         <TabsList className="bg-card border border-border">
@@ -379,7 +400,7 @@ export function Organization() {
                   <DeptNode
                     key={d.id} dept={d}
                     onEdit={(dept) => openEditDept(dept)}
-                    onDelete={(id, name) => setDeleteConfirm({ type: 'dept', id, name })}
+                    onDelete={(id, name) => setDeleteTarget({ type: 'dept', id, name })}
                   />
                 ))
               )}
@@ -407,8 +428,6 @@ export function Organization() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Name</th>
-                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Level</th>
-                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Department</th>
                       <th className="px-4 py-2.5 w-20" />
                     </tr>
                   </thead>
@@ -416,10 +435,6 @@ export function Organization() {
                     {desigData?.data?.map((d) => (
                       <tr key={d.id} className="border-b border-border hover:bg-muted/30 group">
                         <td className="px-4 py-2.5 font-medium">{d.name}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{d.level ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">
-                          {deptData?.data?.find((dep) => dep.id === d.department_id)?.name ?? '—'}
-                        </td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDesig(d)}>
@@ -427,7 +442,7 @@ export function Organization() {
                             </Button>
                             <Button
                               variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => setDeleteConfirm({ type: 'desig', id: d.id, name: d.name })}
+                              onClick={() => setDeleteTarget({ type: 'desig', id: d.id, name: d.name })}
                             >
                               <Trash2 className="h-3.5 w-3.5 text-destructive" />
                             </Button>
@@ -486,7 +501,7 @@ export function Organization() {
                             </Button>
                             <Button
                               variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => setDeleteConfirm({ type: 'grade', id: g.id, name: g.name })}
+                              onClick={() => setDeleteTarget({ type: 'grade', id: g.id, name: g.name })}
                             >
                               <Trash2 className="h-3.5 w-3.5 text-destructive" />
                             </Button>
@@ -595,10 +610,6 @@ export function Organization() {
               {deptEditForm.formState.errors.name && <p className="text-xs text-destructive">{deptEditForm.formState.errors.name.message}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label>Code</Label>
-              <Input placeholder="e.g. ENG" {...deptEditForm.register('code')} />
-            </div>
-            <div className="space-y-1.5">
               <Label>Parent Department</Label>
               <Select
                 value={deptEditW.parent_id || 'none'}
@@ -649,23 +660,6 @@ export function Organization() {
               <Input placeholder="e.g. Senior Engineer" {...desigEditForm.register('name')} />
               {desigEditForm.formState.errors.name && <p className="text-xs text-destructive">{desigEditForm.formState.errors.name.message}</p>}
             </div>
-            <div className="space-y-1.5">
-              <Label>Level</Label>
-              <Input type="number" placeholder="e.g. 5" {...desigEditForm.register('level')} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Department</Label>
-              <Select
-                value={desigEditW.department_id || 'none'}
-                onValueChange={(v) => desigEditForm.setValue('department_id', v === 'none' ? '' : v)}
-              >
-                <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— None</SelectItem>
-                  {deptData?.data?.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditingDesig(null)}>Cancel</Button>
               <Button type="submit" disabled={updateDesig.isPending}>
@@ -697,16 +691,10 @@ export function Organization() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Edit Pay Grade</DialogTitle></DialogHeader>
           <form onSubmit={gradeEditForm.handleSubmit((d) => updateGrade.mutate({ id: editingGrade!.id, data: d }))} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Grade Name *</Label>
-                <Input placeholder="e.g. L5" {...gradeEditForm.register('name')} />
-                {gradeEditForm.formState.errors.name && <p className="text-xs text-destructive">{gradeEditForm.formState.errors.name.message}</p>}
-              </div>
-              <div className="space-y-1.5">
-                <Label>Code</Label>
-                <Input placeholder="e.g. BAND-C" {...gradeEditForm.register('code')} />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Grade Name *</Label>
+              <Input placeholder="e.g. L5" {...gradeEditForm.register('name')} />
+              {gradeEditForm.formState.errors.name && <p className="text-xs text-destructive">{gradeEditForm.formState.errors.name.message}</p>}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -728,31 +716,43 @@ export function Organization() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Delete Confirm Dialog ── */}
-      <Dialog open={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete {deleteConfirm?.type === 'dept' ? 'Department' : deleteConfirm?.type === 'desig' ? 'Designation' : 'Grade'}</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to delete <span className="font-semibold text-foreground">"{deleteConfirm?.name}"</span>?
-            This action cannot be undone.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              onClick={handleConfirmDelete}
-              disabled={deleteDept.isPending || deleteDesig.isPending || deleteGrade.isPending}
-            >
-              {(deleteDept.isPending || deleteDesig.isPending || deleteGrade.isPending) && (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              )}
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ── Merge-Delete Dialog ── */}
+      {deleteTarget && (
+        <MergeDeleteDialog
+          open={!!deleteTarget}
+          onOpenChange={(o) => !o && setDeleteTarget(null)}
+          entityType={
+            deleteTarget.type === 'dept' ? 'Department'
+            : deleteTarget.type === 'desig' ? 'Designation'
+            : 'Grade'
+          }
+          entityName={deleteTarget.name}
+          id={deleteTarget.id}
+          usageUrl={
+            deleteTarget.type === 'dept'  ? `/departments/${deleteTarget.id}/usage`
+            : deleteTarget.type === 'desig' ? `/designations/${deleteTarget.id}/usage`
+            : `/grades/${deleteTarget.id}/usage`
+          }
+          usageLabel={
+            deleteTarget.type === 'dept'
+              ? 'employees / child departments'
+              : 'employee records'
+          }
+          mergeOptions={
+            deleteTarget.type === 'dept'
+              ? (deptData?.data ?? []).filter(d => d.id !== deleteTarget.id).map(d => ({ id: d.id, name: d.name }))
+              : deleteTarget.type === 'desig'
+                ? (desigData?.data ?? []).filter(d => d.id !== deleteTarget.id).map(d => ({ id: d.id, name: d.name }))
+                : (gradeData?.data ?? []).filter(g => g.id !== deleteTarget.id).map(g => ({ id: g.id, name: g.name }))
+          }
+          onConfirm={(mergeTo) => {
+            if (deleteTarget.type === 'dept')  deleteDept.mutate({ id: deleteTarget.id, mergeTo })
+            if (deleteTarget.type === 'desig') deleteDesig.mutate({ id: deleteTarget.id, mergeTo })
+            if (deleteTarget.type === 'grade') deleteGrade.mutate({ id: deleteTarget.id, mergeTo })
+          }}
+          isPending={deleteDept.isPending || deleteDesig.isPending || deleteGrade.isPending}
+        />
+      )}
     </div>
   )
 }

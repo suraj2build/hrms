@@ -54,6 +54,25 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency guard: prevent duplicate active freeze records for the same month.
+    // Multiple active freeze rows require multiple unfreeze calls to clear — confusing
+    // and invisible in the UI.  Return 409 instead of silently stacking freeze records.
+    const { data: existingFreeze } = await fastify.supabase
+      .from('payroll_freeze_log')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('freeze_month', parsed.data.freeze_month)
+      .eq('action', 'freeze')
+      .is('unfrozen_at', null)
+      .maybeSingle()
+
+    if (existingFreeze) {
+      return reply.code(409).send({
+        error:   'ALREADY_FROZEN',
+        message: `Payroll for ${parsed.data.freeze_month} is already frozen. Unfreeze it before re-freezing.`,
+      })
+    }
+
     const { data, error } = await fastify.supabase
       .from('payroll_freeze_log')
       .insert({
@@ -84,7 +103,18 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
 
-    // Find the latest freeze record for this month
+    // ── Atomic unfreeze: update the freeze record FIRST ──────────────────────────
+    //
+    // checkFreezeGuard queries WHERE action='freeze' AND unfrozen_at IS NULL.
+    // Setting unfrozen_at on the freeze row is the SINGLE operation that lifts the
+    // freeze.  We do this before inserting the audit record so that a partial write
+    // never leaves the month frozen with the caller believing it is unfrozen.
+    //
+    // Recovery contract:
+    //   • If UPDATE fails  → return 500; month stays frozen; caller retries safely.
+    //   • If INSERT fails  → freeze is ALREADY lifted; warn in response; no data loss.
+
+    // Step 1: Find and verify there is an active freeze to lift
     const { data: latestFreeze } = await fastify.supabase
       .from('payroll_freeze_log')
       .select('id')
@@ -96,35 +126,62 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    // Insert unfreeze record
-    const { data, error } = await fastify.supabase
+    if (!latestFreeze) {
+      return reply.code(409).send({
+        error:   'NOT_FROZEN',
+        message: `Payroll for ${parsed.data.freeze_month} is not currently frozen.`,
+      })
+    }
+
+    // Step 2: Stamp unfrozen_at on the freeze record (critical — this is what lifts the freeze)
+    const { error: updateErr } = await fastify.supabase
       .from('payroll_freeze_log')
-      .insert({
-        tenant_id: req.tenantId,
-        freeze_month: parsed.data.freeze_month,
-        action: 'unfreeze',
-        reason: parsed.data.reason,
-        frozen_by: req.userId,
-        frozen_at: now,
+      .update({
         unfrozen_by: req.userId,
         unfrozen_at: now,
+        updated_at:  now,
+      })
+      .eq('id', (latestFreeze as any).id)
+      .eq('tenant_id', req.tenantId)
+
+    if (updateErr) {
+      req.log.error(
+        { err: updateErr, freeze_id: (latestFreeze as any).id, freeze_month: parsed.data.freeze_month },
+        'governance: unfreeze — freeze record update failed; month remains frozen',
+      )
+      return reply.code(500).send({
+        error:   'UNFREEZE_FAILED',
+        message: 'Failed to lift freeze — the month remains frozen. Retry the unfreeze operation.',
+      })
+    }
+
+    // Step 3: Insert unfreeze audit record (non-critical — freeze is already lifted by step 2)
+    const { data, error: insertErr } = await fastify.supabase
+      .from('payroll_freeze_log')
+      .insert({
+        tenant_id:    req.tenantId,
+        freeze_month: parsed.data.freeze_month,
+        action:       'unfreeze',
+        reason:       parsed.data.reason,
+        frozen_by:    req.userId,
+        frozen_at:    now,
+        unfrozen_by:  req.userId,
+        unfrozen_at:  now,
       })
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
-
-    // Update previous freeze record with unfrozen_by and unfrozen_at
-    if (latestFreeze) {
-      await fastify.supabase
-        .from('payroll_freeze_log')
-        .update({
-          unfrozen_by: req.userId,
-          unfrozen_at: now,
-          updated_at: now,
-        })
-        .eq('id', (latestFreeze as any).id)
-        .eq('tenant_id', req.tenantId)
+    if (insertErr) {
+      // Non-fatal: the freeze IS already lifted (step 2 committed).
+      // Log the audit gap and return success with a warning so the caller knows.
+      req.log.warn(
+        { err: insertErr, freeze_month: parsed.data.freeze_month },
+        'governance: unfreeze — audit record insert failed; freeze is lifted but audit entry is missing',
+      )
+      return reply.send({
+        data:    { freeze_month: parsed.data.freeze_month, action: 'unfreeze', reason: parsed.data.reason },
+        warning: 'Freeze lifted successfully but the audit log entry could not be created.',
+      })
     }
 
     return reply.send({ data })
@@ -182,11 +239,14 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      // Guard: only update if still pending — prevents concurrent double-approval
+      // overwriting the audit trail if two checkers act simultaneously.
+      .eq('status', 'pending')
       .select()
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This entry has already been approved or rejected' })
 
     return reply.send({ data })
   })
@@ -217,11 +277,13 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      // Guard: only update if still pending — prevents concurrent double-rejection
+      .eq('status', 'pending')
       .select()
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This entry has already been approved or rejected' })
 
     return reply.send({ data })
   })
@@ -266,11 +328,13 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      // Guard: only update if still pending
+      .eq('status', 'pending')
       .select()
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Variance approval not found' })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This variance has already been approved or rejected' })
 
     return reply.send({ data })
   })
@@ -301,11 +365,13 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      // Guard: only update if still pending
+      .eq('status', 'pending')
       .select()
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Variance approval not found' })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This variance has already been approved or rejected' })
 
     return reply.send({ data })
   })

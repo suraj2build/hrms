@@ -16,6 +16,8 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
+import { PRESENT_STATUSES }          from '../../lib/attendance-read-model.js'
 
 const querySchema = z.object({
   /** Override — HR admin can inspect another manager's dashboard */
@@ -200,7 +202,8 @@ export default async function managerDashboardRoute(fastify: FastifyInstance) {
     // ── Build team_members array ────────────────────────────────────────────────
     const teamMembersOut = teamMembers.map(emp => {
       const daily  = dailyMap.get(emp.id)
-      const status = daily?.status ?? 'not_marked'
+      // Normalize status at the boundary — DB may store mixed case
+      const status = normalizeAttendanceStatus(daily?.status ?? null) ?? 'not_marked'
       return {
         employee_id:    emp.id,
         employee_code:  emp.employee_code,
@@ -214,7 +217,7 @@ export default async function managerDashboardRoute(fastify: FastifyInstance) {
     })
 
     // ── Today summary ───────────────────────────────────────────────────────────
-    const PRESENT_STATUSES = new Set(['present', 'late', 'half_day', 'holiday', 'weekend', 'weekly_off'])
+    // PRESENT_STATUSES imported from attendance-read-model.ts — canonical definition
     let presentCount  = 0
     let lateCount     = 0
     let absentCount   = 0

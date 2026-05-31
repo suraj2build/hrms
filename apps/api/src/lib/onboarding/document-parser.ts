@@ -1,4 +1,10 @@
-import { PDFParse } from 'pdf-parse'
+import { createRequire } from 'module'
+
+// pdf-parse is CommonJS — must use createRequire in an ESM project
+const require = createRequire(import.meta.url)
+const pdfParse = require('pdf-parse') as (
+  buffer: Buffer,
+) => Promise<{ text: string; numpages: number }>
 
 export interface ParseResult {
   text: string
@@ -13,14 +19,15 @@ export async function parseDocumentToText(
 ): Promise<ParseResult> {
   const mime = mimeType.toLowerCase().trim()
 
-  // PDF — use pdf-parse to extract full text
+  // PDF — use pdf-parse to extract embedded text.
+  // Scanned/image-based PDFs may return empty text here; the extraction engine
+  // will send the PDF as a native document block to Claude in that case.
   if (mime === 'application/pdf') {
     try {
-      const parser = new PDFParse({ data: fileBuffer })
-      const result = await parser.getText()
+      const result = await pdfParse(fileBuffer)
       return {
-        text: result.text,
-        pageCount: result.total,
+        text: result.text ?? '',
+        pageCount: result.numpages ?? 0,
         method: 'pdf-parse',
       }
     } catch (err: unknown) {
@@ -44,24 +51,11 @@ export async function parseDocumentToText(
     }
   }
 
-  // Images — return empty text; extraction engine handles these via Claude vision
-  if (
-    mime === 'image/jpeg' ||
-    mime === 'image/jpg' ||
-    mime === 'image/png' ||
-    mime === 'image/webp'
-  ) {
-    return {
-      text: '',
-      pageCount: 1,
-      method: 'empty',
-    }
-  }
-
-  // DOCX and other unsupported types — Claude vision fallback
+  // Images and everything else — return empty text;
+  // extraction engine handles these via Claude vision / document blocks
   return {
     text: '',
-    pageCount: 0,
+    pageCount: 1,
     method: 'empty',
   }
 }

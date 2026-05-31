@@ -52,7 +52,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
   // List risk profiles for the tenant (admin only).
   const listQuerySchema = z.object({
     risk_level: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-    period_end: z.string().regex(DATE_RE).optional(),
+    period_end: z.string().optional(),   // accepts YYYY-MM-DD or any period string; non-dates fall back to today
     limit:      z.coerce.number().int().min(1).max(500).default(100),
     offset:     z.coerce.number().int().min(0).default(0),
   })
@@ -69,7 +69,8 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
     }
 
     const { risk_level, period_end, limit, offset } = parsed.data
-    const effectivePeriodEnd = period_end ?? todayIso()
+    // Accept YYYY-MM-DD only for DB comparison; anything else (e.g. "2026-Q2") falls back to today
+    const effectivePeriodEnd = (period_end && DATE_RE.test(period_end)) ? period_end : todayIso()
 
     let q = fastify.supabase
       .from('attendance_risk_profiles')
@@ -103,17 +104,24 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       return {
         id:                      r.id,
         employee_id:             r.employee_id,
-        employee_name:           emp ? `${emp.first_name} ${emp.last_name}` : null,
-        employee_code:           emp?.employee_code ?? null,
+        // nested employees object expected by frontend
+        employees:               emp ? {
+          first_name:    emp.first_name,
+          last_name:     emp.last_name,
+          employee_code: emp.employee_code,
+        } : null,
+        period:                  r.period_end ?? r.period_start,
         period_start:            r.period_start,
         period_end:              r.period_end,
         risk_score:              r.risk_score,
         risk_level:              r.risk_level,
         computed_at:             r.computed_at,
         chronic_late_count:      r.chronic_late_count,
+        // absence_streak_days mapped from punch_anomaly_count (closest available metric)
+        absence_streak_days:     r.punch_anomaly_count ?? 0,
         correction_abuse_count:  r.correction_abuse_count,
-        punch_anomaly_count:     r.punch_anomaly_count,
-        attendance_volatility:   r.attendance_volatility,
+        // volatility_score mapped from attendance_volatility
+        volatility_score:        r.attendance_volatility ?? 0,
       }
     })
 
@@ -123,7 +131,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
   // ── GET /attendance/risk/summary ──────────────────────────────────────────
   // Tenant-wide risk summary — latest profile per employee, aggregated by level.
   const summaryQuerySchema = z.object({
-    period_end: z.string().regex(DATE_RE).optional(),
+    period_end: z.string().optional(),   // accepts any string; non-dates fall back to today
   })
 
   fastify.get('/attendance/risk/summary', auth, async (req: any, reply) => {
@@ -137,7 +145,8 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       })
     }
 
-    const effectivePeriodEnd = parsed.data.period_end ?? todayIso()
+    const rawEnd = parsed.data.period_end
+    const effectivePeriodEnd = (rawEnd && DATE_RE.test(rawEnd)) ? rawEnd : todayIso()
 
     // Fetch all latest profiles per employee (latest computed_at for each employee_id)
     const { data, error } = await fastify.supabase

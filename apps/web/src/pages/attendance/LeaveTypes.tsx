@@ -33,19 +33,25 @@ import { cn }            from '@/lib/utils'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface LeaveType {
-  id:             string
-  name:           string
-  is_paid:        boolean
-  allow_sandwich: boolean
-  is_active:      boolean
-  created_at:     string
+  id:                string
+  name:              string
+  is_paid:           boolean
+  allow_sandwich:    boolean
+  allow_half_day:    boolean
+  allow_hourly:      boolean
+  max_hours_per_day: number | null
+  is_active:         boolean
+  created_at:        string
 }
 
 interface LeaveTypeForm {
-  name:           string
-  is_paid:        boolean
-  allow_sandwich: boolean
-  is_active:      boolean
+  name:              string
+  is_paid:           boolean
+  allow_sandwich:    boolean
+  allow_half_day:    boolean
+  allow_hourly:      boolean
+  max_hours_per_day: number | null
+  is_active:         boolean
 }
 
 interface BalanceRow {
@@ -57,10 +63,13 @@ interface BalanceRow {
 }
 
 const EMPTY_FORM: LeaveTypeForm = {
-  name:           '',
-  is_paid:        true,
-  allow_sandwich: false,
-  is_active:      true,
+  name:              '',
+  is_paid:           true,
+  allow_sandwich:    false,
+  allow_half_day:    false,
+  allow_hourly:      false,
+  max_hours_per_day: null,
+  is_active:         true,
 }
 
 // ── Toggle helper ─────────────────────────────────────────────────────────────
@@ -186,10 +195,13 @@ export function LeaveTypes() {
   function startEdit(lt: LeaveType) {
     setEditId(lt.id)
     setForm({
-      name:           lt.name,
-      is_paid:        lt.is_paid,
-      allow_sandwich: lt.allow_sandwich,
-      is_active:      lt.is_active,
+      name:              lt.name,
+      is_paid:           lt.is_paid,
+      allow_sandwich:    lt.allow_sandwich,
+      allow_half_day:    lt.allow_half_day,
+      allow_hourly:      lt.allow_hourly,
+      max_hours_per_day: lt.max_hours_per_day,
+      is_active:         lt.is_active,
     })
     setErrors({})
     setSuccess('')
@@ -304,7 +316,7 @@ export function LeaveTypes() {
                       <tr
                         key={lt.id}
                         className={cn(
-                          'border-b border-border/50 transition-colors hover:bg-muted/10',
+                          'border-b border-border/50 transition-colors hover:bg-muted/20',
                           !lt.is_active && 'opacity-50',
                         )}
                       >
@@ -513,15 +525,15 @@ export function LeaveTypes() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border">
+                    <tr className="border-b border-border bg-muted/30">
                       {['Leave Type', 'Paid', 'Balance (days)', ''].map(h => (
-                        <th key={h} className="text-left text-xs text-muted-foreground font-semibold px-3 py-2">{h}</th>
+                        <th key={h} className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2.5">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {(balanceData?.data ?? []).map(row => (
-                      <tr key={row.id} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
+                      <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="px-3 py-2 font-medium text-foreground">{row.leave_types.name}</td>
                         <td className="px-3 py-2">
                           <Badge

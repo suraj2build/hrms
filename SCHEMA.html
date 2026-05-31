@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HRMS — Data Schema Reference</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --card: #21263a;
+    --border: #2e3450;
+    --accent: #6c63ff;
+    --accent2: #00d4aa;
+    --accent3: #ff6b6b;
+    --accent4: #ffc107;
+    --accent5: #4fc3f7;
+    --accent6: #ce93d8;
+    --accent7: #80cbc4;
+    --text: #e0e4f0;
+    --muted: #7a82a4;
+    --tag-bg: #2a3060;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── HEADER ── */
+  header {
+    background: linear-gradient(135deg, #1a1d27 0%, #0f1117 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 28px 40px 20px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  header h1 { font-size: 1.6rem; font-weight: 700; color: #fff; }
+  header p  { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+  .stats { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 18px; }
+  .stat span { font-size: 1.4rem; font-weight: 700; color: var(--accent); display: block; line-height: 1; }
+  .stat label { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+  /* ── SEARCH + FILTER ── */
+  .toolbar { padding: 18px 40px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .toolbar input {
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 14px; border-radius: 8px; font-size: .88rem; width: 280px; outline: none;
+  }
+  .toolbar input:focus { border-color: var(--accent); }
+  .filter-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--muted);
+    padding: 7px 16px; border-radius: 8px; font-size: .8rem; cursor: pointer; transition: all .15s;
+  }
+  .filter-btn.active, .filter-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ── LAYOUT ── */
+  .content { padding: 32px 40px; }
+  .domain-section { margin-bottom: 48px; }
+  .domain-title {
+    font-size: 1.05rem; font-weight: 700; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .domain-title .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+
+  /* ── TABLE CARD ── */
+  .tcard {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; transition: border-color .15s, box-shadow .15s;
+  }
+  .tcard:hover { border-color: var(--accent); box-shadow: 0 4px 20px rgba(108,99,255,.15); }
+  .tcard-header {
+    padding: 14px 18px 10px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 1px solid var(--border);
+  }
+  .tcard-header h3 { font-size: .92rem; font-weight: 700; font-family: 'Courier New', monospace; color: #fff; }
+  .tcard-header p  { font-size: .75rem; color: var(--muted); margin-top: 3px; }
+  .tcard-badge { font-size: .65rem; padding: 3px 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; flex-shrink: 0; margin-top: 2px; }
+  .tcard-body { padding: 12px 18px 14px; }
+
+  /* ── COLUMN ROWS ── */
+  .col-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: .78rem; }
+  .col-name { font-family: 'Courier New', monospace; color: var(--accent5); min-width: 130px; }
+  .col-type { color: var(--muted); font-size: .72rem; min-width: 80px; }
+  .tag { font-size: .62rem; padding: 1px 6px; border-radius: 4px; background: var(--tag-bg); color: var(--muted); font-weight: 600; }
+  .tag.pk { background: #2a1f5a; color: #a78bfa; }
+  .tag.fk { background: #1a3a3a; color: var(--accent2); }
+  .tag.nn { background: #1f2a1a; color: #86efac; }
+  .tag.uq { background: #3a2a1a; color: var(--accent4); }
+  .tag.idx { background: #1a2a3a; color: var(--accent5); }
+  .tag.gen { background: #2a1a2a; color: var(--accent6); }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+  .more { font-size: .72rem; color: var(--muted); margin-top: 6px; font-style: italic; }
+
+  /* ── DOMAIN COLORS ── */
+  .d-core    { background: #6c63ff22; color: var(--accent); }
+  .d-attend  { background: #00d4aa22; color: var(--accent2); }
+  .d-leave   { background: #ff6b6b22; color: var(--accent3); }
+  .d-payroll { background: #ffc10722; color: var(--accent4); }
+  .d-comp    { background: #4fc3f722; color: var(--accent5); }
+  .d-stat    { background: #ce93d822; color: var(--accent6); }
+  .d-ops     { background: #80cbc422; color: var(--accent7); }
+
+  /* ── ERD LEGEND ── */
+  .legend { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 28px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--muted); }
+
+  /* ── RELATIONSHIPS SECTION ── */
+  .rel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+  .rel-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; font-size: .8rem; }
+  .rel-card h4 { font-size: .82rem; color: var(--accent); margin-bottom: 8px; font-family: monospace; }
+  .rel-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--muted); }
+  .rel-arrow { color: var(--accent4); }
+  .rel-table { color: var(--text); font-family: monospace; font-size: .78rem; }
+
+  /* hidden state */
+  .tcard.hidden { display: none; }
+
+  @media (max-width: 600px) {
+    header, .toolbar, .content { padding-left: 16px; padding-right: 16px; }
+    .grid { grid-template-columns: 1fr; }
+    .rel-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏢 HRMS — Data Schema Reference</h1>
+  <p>Supabase PostgreSQL · 148 migrations · Multi-tenant (RLS enforced)</p>
+  <div class="stats">
+    <div class="stat"><span>~80</span><label>Tables</label></div>
+    <div class="stat"><span>148</span><label>Migrations</label></div>
+    <div class="stat"><span>7</span><label>Domains</label></div>
+    <div class="stat"><span>RLS</span><label>Row-Level Security</label></div>
+    <div class="stat"><span>UUID</span><label>Primary Keys</label></div>
+  </div>
+</header>
+
+<div class="toolbar">
+  <input type="text" id="search" placeholder="🔍  Search tables or columns…" oninput="filterCards()"/>
+  <button class="filter-btn active" onclick="filterDomain('all', this)">All</button>
+  <button class="filter-btn" onclick="filterDomain('core', this)">Core</button>
+  <button class="filter-btn" onclick="filterDomain('attend', this)">Attendance</button>
+  <button class="filter-btn" onclick="filterDomain('leave', this)">Leave</button>
+  <button class="filter-btn" onclick="filterDomain('payroll', this)">Payroll</button>
+  <button class="filter-btn" onclick="filterDomain('comp', this)">Compensation</button>
+  <button class="filter-btn" onclick="filterDomain('stat', this)">Statutory</button>
+  <button class="filter-btn" onclick="filterDomain('ops', this)">Operations</button>
+</div>
+
+<div class="content">
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <strong style="font-size:.8rem;color:var(--text)">Key:</strong>
+    <div class="legend-item"><span class="tag pk">PK</span> Primary Key</div>
+    <div class="legend-item"><span class="tag fk">FK</span> Foreign Key</div>
+    <div class="legend-item"><span class="tag nn">NN</span> Not Null</div>
+    <div class="legend-item"><span class="tag uq">UQ</span> Unique</div>
+    <div class="legend-item"><span class="tag idx">IDX</span> Indexed</div>
+    <div class="legend-item"><span class="tag gen">GEN</span> Generated / Computed</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 1: CORE / IDENTITY
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="core">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent)"></div>
+      Core & Identity
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— tenants, users, org structure, employees</span>
+    </div>
+    <div class="grid">
+
+      <!-- tenants -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>tenants</h3><p>Root multi-tenant anchor — every row belongs to a tenant</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">slug</span><span class="col-type">TEXT</span><span class="tag nn">NN</span><span class="tag uq">UQ</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">plan</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">country</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">settings</span><span class="col-type">JSONB</span></div>
+          <div class="col-row"><span class="col-name">logo_url, industry, size_range</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">TIMESTAMPTZ</span></div>
+        </div>
+      </div>
+
+      <!-- profiles -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>profiles</h3><p>Auth users extended with tenant + role</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span><span class="tag fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">role</span><span class="col-type">TEXT</span><span class="tag nn">NN</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">super_admin | hr_admin | manager | employee</span></div>
+          <div class="col-row"><span class="col-name">full_name, avatar_url</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span><span class="tag nn">NN</span></div>
+        </div>
+      </div>
+
+      <!-- employees -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>employees</h3><p>Central employee master — PII + statutory fields</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">employee_code</span><span class="col-type">TEXT</span><span class="tag nn">NN</span><span class="tag uq">UQ(tenant)</span></div>
+          <div class="col-row"><span class="col-name">first_name, last_name</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">email</span><span class="col-type">TEXT</span><span class="tag nn">NN</span><span class="tag uq">UQ(tenant)</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">active | inactive | on_notice | separated</span></div>
+          <div class="col-row"><span class="col-name">employment_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">joining_date, confirmation_date</span><span class="col-type">DATE</span></div>
+          <div class="col-row"><span class="col-name">department_id</span><span class="col-type">UUID</span><span class="tag fk">FK → departments</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">designation_id</span><span class="col-type">UUID</span><span class="tag fk">FK → designations</span></div>
+          <div class="col-row"><span class="col-name">grade_id</span><span class="col-type">UUID</span><span class="tag fk">FK → grades</span></div>
+          <div class="col-row"><span class="col-name">manager_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees (self)</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">pan_number, uan_number, esi_number</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">aadhaar_last4</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">bank_details, address, emergency_contact</span><span class="col-type">JSONB</span></div>
+          <p class="more">+ gender, dob, blood_group, nationality, phone, profile_photo</p>
+        </div>
+      </div>
+
+      <!-- departments -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>departments</h3><p>Self-referential hierarchy (tree via parent_id)</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name, code</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">parent_id</span><span class="col-type">UUID</span><span class="tag fk">FK → departments (self)</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">head_id</span><span class="col-type">UUID</span></div>
+        </div>
+      </div>
+
+      <!-- designations -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>designations</h3><p>Job titles with optional department linkage</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">level</span><span class="col-type">INT</span></div>
+          <div class="col-row"><span class="col-name">department_id</span><span class="col-type">UUID</span><span class="tag fk">FK → departments</span></div>
+        </div>
+      </div>
+
+      <!-- grades -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>grades</h3><p>Pay bands with min/max salary range</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name, code</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">min_salary, max_salary</span><span class="col-type">NUMERIC(12,2)</span></div>
+        </div>
+      </div>
+
+      <!-- work_locations -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>work_locations</h3><p>Physical office / branch locations</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name, code</span><span class="col-type">TEXT</span><span class="tag uq">UQ(tenant,code)</span></div>
+          <div class="col-row"><span class="col-name">city, state, country, pincode</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <!-- sites -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>sites</h3><p>Named physical campus/building with timezone</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name, location</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">timezone</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+        </div>
+      </div>
+
+      <!-- cost_centers -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>cost_centers</h3><p>Financial cost allocation centers</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name, code, description</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <!-- shifts -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>shifts</h3><p>Work shift definitions with timing</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name, code</span><span class="col-type">TEXT</span><span class="tag uq">UQ(tenant,code)</span></div>
+          <div class="col-row"><span class="col-name">start_time, end_time</span><span class="col-type">TIME</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">work_hours</span><span class="col-type">NUMERIC(4,2)</span></div>
+          <div class="col-row"><span class="col-name">is_night_shift</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <!-- job_history -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>job_history</h3><p>Immutable audit trail of every job change</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">department_id, designation_id, grade_id</span><span class="col-type">UUID</span><span class="tag fk">FK</span></div>
+          <div class="col-row"><span class="col-name">shift_id, cost_center_id, work_location_id</span><span class="col-type">UUID</span><span class="tag fk">FK</span></div>
+          <div class="col-row"><span class="col-name">manager_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">effective_from, effective_to</span><span class="col-type">DATE</span></div>
+          <div class="col-row"><span class="col-name">is_current</span><span class="col-type">BOOLEAN</span><span class="tag uq">Partial UQ</span></div>
+          <div class="col-row"><span class="col-name">reason_for_change</span><span class="col-type">TEXT</span></div>
+          <p class="more">Trigger: auto-closes previous current row on INSERT</p>
+        </div>
+      </div>
+
+      <!-- documents -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>documents</h3><p>Employee document storage (Aadhaar, PAN, letters…)</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">doc_type</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">storage_path, name</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">expires_at</span><span class="col-type">DATE</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">file_size</span><span class="col-type">BIGINT</span></div>
+        </div>
+      </div>
+
+      <!-- audit_logs -->
+      <div class="tcard" data-domain="core">
+        <div class="tcard-header">
+          <div><h3>audit_logs</h3><p>Immutable change log — INSERT/UPDATE/DELETE events</p></div>
+          <span class="tcard-badge d-core">Core</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">table_name, record_id</span><span class="col-type">TEXT / UUID</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">action</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">old_data, new_data</span><span class="col-type">JSONB</span></div>
+          <div class="col-row"><span class="col-name">performed_by</span><span class="col-type">UUID</span><span class="tag fk">FK → profiles</span></div>
+          <div class="col-row"><span class="col-name">ip_address</span><span class="col-type">INET</span></div>
+        </div>
+      </div>
+
+    </div><!-- /grid -->
+  </div><!-- /domain core -->
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 2: ATTENDANCE
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="attend">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent2)"></div>
+      Attendance
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— biometric devices, raw logs, daily summary, shifts, rosters</span>
+    </div>
+    <div class="grid">
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>attendance_devices</h3><p>Registered biometric/access devices</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">api_key</span><span class="col-type">TEXT</span><span class="tag uq">UQ</span><span class="tag idx">IDX(active)</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>attendance_raw_logs</h3><p>Immutable punch events from devices (source of truth)</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">device_id</span><span class="col-type">UUID</span><span class="tag fk">FK → attendance_devices</span></div>
+          <div class="col-row"><span class="col-name">employee_code</span><span class="col-type">TEXT</span><span class="tag nn">NN</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">timestamp</span><span class="col-type">TIMESTAMPTZ</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">direction</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">in | out</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>attendance_logs</h3><p>Processed check-in / check-out pairs</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">check_in, check_out</span><span class="col-type">TIMESTAMPTZ</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>attendance_daily</h3><p>Aggregated daily summary — 1 row per employee per date</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">date</span><span class="col-type">DATE</span><span class="tag nn">NN</span><span class="tag uq">UQ(tenant,emp,date)</span></div>
+          <div class="col-row"><span class="col-name">work_hours</span><span class="col-type">NUMERIC(5,2)</span></div>
+          <div class="col-row"><span class="col-name">late_minutes, overtime_minutes</span><span class="col-type">INT</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">present | absent | half_day | late | holiday | weekend | weekly_off | leave</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>attendance_punch_logs</h3><p>Extended punch capture with location/source</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">punched_at</span><span class="col-type">TIMESTAMPTZ</span></div>
+          <div class="col-row"><span class="col-name">punch_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">source</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">latitude, longitude</span><span class="col-type">NUMERIC</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>holiday_calendar</h3><p>Tenant holiday list used by attendance processor</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">date</span><span class="col-type">DATE</span><span class="tag nn">NN</span><span class="tag idx">IDX(tenant,date)</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">TEXT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">is_optional</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>attendance_regularisation</h3><p>Employee requests to correct missed punches</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">date</span><span class="col-type">DATE</span></div>
+          <div class="col-row"><span class="col-name">requested_check_in, requested_check_out</span><span class="col-type">TIMESTAMPTZ</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">reason, rejection_reason</span><span class="col-type">TEXT</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="attend">
+        <div class="tcard-header">
+          <div><h3>shift_roster / employee_shifts</h3><p>Shift scheduling and per-employee assignments</p></div>
+          <span class="tcard-badge d-attend">Attendance</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">shift_id</span><span class="col-type">UUID</span><span class="tag fk">FK → shifts</span></div>
+          <div class="col-row"><span class="col-name">effective_from, effective_to</span><span class="col-type">DATE</span></div>
+          <div class="col-row"><span class="col-name">week_days</span><span class="col-type">INT[]</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 3: LEAVE MANAGEMENT
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="leave">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent3)"></div>
+      Leave Management
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— types, balances, requests, approval workflow</span>
+    </div>
+    <div class="grid">
+
+      <div class="tcard" data-domain="leave">
+        <div class="tcard-header">
+          <div><h3>leave_types</h3><p>Tenant-level leave master (CL, SL, EL, etc.)</p></div>
+          <span class="tcard-badge d-leave">Leave</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">TEXT</span><span class="tag uq">UQ(tenant)</span></div>
+          <div class="col-row"><span class="col-name">is_paid, allow_sandwich, is_active</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="leave">
+        <div class="tcard-header">
+          <div><h3>employee_leave_balance</h3><p>Running balance per employee per leave type per year</p></div>
+          <span class="tcard-badge d-leave">Leave</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">leave_type_id</span><span class="col-type">UUID</span><span class="tag fk">FK → leave_types</span></div>
+          <div class="col-row"><span class="col-name">year</span><span class="col-type">INT</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">entitled, used, carried_forward, encashed</span><span class="col-type">NUMERIC(6,2)</span></div>
+          <div class="col-row"><span class="col-name">balance</span><span class="col-type">NUMERIC(6,2)</span><span class="tag gen">Generated</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="leave">
+        <div class="tcard-header">
+          <div><h3>leave_requests</h3><p>Manager-approval workflow model (new)</p></div>
+          <span class="tcard-badge d-leave">Leave</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">leave_type_id</span><span class="col-type">UUID</span><span class="tag fk">FK → leave_types</span></div>
+          <div class="col-row"><span class="col-name">from_date, to_date</span><span class="col-type">DATE</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">computed_days</span><span class="col-type">DECIMAL(5,1)</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">half_day</span><span class="col-type">BOOLEAN</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">PENDING | APPROVED | REJECTED | CANCELLED</span></div>
+          <div class="col-row"><span class="col-name">reason, rejection_reason</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">approved_by, approved_at</span><span class="col-type">UUID / TIMESTAMPTZ</span></div>
+          <p class="more">Trigger: auto-update updated_at</p>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="leave">
+        <div class="tcard-header">
+          <div><h3>leave_applications</h3><p>Original direct-apply model (legacy)</p></div>
+          <span class="tcard-badge d-leave">Leave</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">leave_type_id</span><span class="col-type">UUID</span><span class="tag fk">FK → leave_types</span></div>
+          <div class="col-row"><span class="col-name">from_date, to_date, reason</span><span class="col-type">DATE/TEXT</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">pending | approved | rejected</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="leave">
+        <div class="tcard-header">
+          <div><h3>approval_workflow_config</h3><p>Multi-level approval chain configuration</p></div>
+          <span class="tcard-badge d-leave">Leave</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">workflow_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">leave | correction | regularisation</span></div>
+          <div class="col-row"><span class="col-name">level</span><span class="col-type">INT</span><span class="tag uq">UQ(tenant,type,level)</span></div>
+          <div class="col-row"><span class="col-name">approver_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">direct_manager | hr_admin | super_admin | specific_role</span></div>
+          <div class="col-row"><span class="col-name">auto_approve_after_hours</span><span class="col-type">INT</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="leave">
+        <div class="tcard-header">
+          <div><h3>leave_accrual_ledger</h3><p>Line-by-line accrual / deduction journal</p></div>
+          <span class="tcard-badge d-leave">Leave</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">leave_type_id</span><span class="col-type">UUID</span><span class="tag fk">FK → leave_types</span></div>
+          <div class="col-row"><span class="col-name">transaction_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">days, balance_after</span><span class="col-type">NUMERIC</span></div>
+          <div class="col-row"><span class="col-name">reference_id, notes</span><span class="col-type">UUID/TEXT</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 4: COMPENSATION & SALARY
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="comp">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent5)"></div>
+      Compensation & Salary Structure
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— components, structures, employee CTC history</span>
+    </div>
+    <div class="grid">
+
+      <div class="tcard" data-domain="comp">
+        <div class="tcard-header">
+          <div><h3>salary_components</h3><p>Atomic pay elements — Basic, HRA, PF, etc.</p></div>
+          <span class="tcard-badge d-comp">Comp</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">code</span><span class="col-type">TEXT</span><span class="tag uq">UQ(tenant)</span></div>
+          <div class="col-row"><span class="col-name">component_type</span><span class="col-type">TEXT</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">earning | deduction | employer_contribution</span></div>
+          <div class="col-row"><span class="col-name">is_taxable, is_pf_applicable</span><span class="col-type">BOOLEAN</span></div>
+          <div class="col-row"><span class="col-name">is_esi_applicable, is_pt_applicable</span><span class="col-type">BOOLEAN</span></div>
+          <div class="col-row"><span class="col-name">is_variable, is_lwf_applicable</span><span class="col-type">BOOLEAN</span></div>
+          <div class="col-row"><span class="col-name">display_order</span><span class="col-type">INT</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="comp">
+        <div class="tcard-header">
+          <div><h3>salary_structures</h3><p>Named pay packages (e.g. "Sr. Eng CTC Band A")</p></div>
+          <span class="tcard-badge d-comp">Comp</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">code</span><span class="col-type">TEXT</span><span class="tag uq">UQ(tenant)</span></div>
+          <div class="col-row"><span class="col-name">name, description</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="comp">
+        <div class="tcard-header">
+          <div><h3>salary_structure_components</h3><p>Structure → Component mapping with default calc rules</p></div>
+          <span class="tcard-badge d-comp">Comp</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">salary_structure_id</span><span class="col-type">UUID</span><span class="tag fk">FK → salary_structures</span></div>
+          <div class="col-row"><span class="col-name">salary_component_id</span><span class="col-type">UUID</span><span class="tag fk">FK → salary_components</span></div>
+          <div class="col-row"><span class="col-name">calculation_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">fixed | pct_of_basic | pct_of_ctc | pct_of_gross</span></div>
+          <div class="col-row"><span class="col-name">default_value, sequence</span><span class="col-type">NUMERIC / INT</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="comp">
+        <div class="tcard-header">
+          <div><h3>employee_compensations</h3><p>Employee CTC history — one row per revision</p></div>
+          <span class="tcard-badge d-comp">Comp</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span><span class="tag idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">salary_structure_id</span><span class="col-type">UUID</span><span class="tag fk">FK → salary_structures</span></div>
+          <div class="col-row"><span class="col-name">effective_from, effective_to</span><span class="col-type">DATE</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span><span class="tag uq">Partial UQ</span></div>
+          <div class="col-row"><span class="col-name">ctc_annual</span><span class="col-type">NUMERIC(14,2)</span><span class="tag nn">NN</span></div>
+          <div class="col-row"><span class="col-name">ctc_monthly</span><span class="col-type">NUMERIC(14,2)</span><span class="tag gen">Generated (÷12)</span></div>
+          <p class="more">Trigger: auto-closes previous active record on INSERT</p>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="comp">
+        <div class="tcard-header">
+          <div><h3>employee_compensation_components</h3><p>Per-component breakdown stored at write time</p></div>
+          <span class="tcard-badge d-comp">Comp</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">compensation_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employee_compensations</span></div>
+          <div class="col-row"><span class="col-name">salary_component_id</span><span class="col-type">UUID</span><span class="tag fk">FK → salary_components</span></div>
+          <div class="col-row"><span class="col-name">calculation_type, value</span><span class="col-type">TEXT / NUMERIC</span></div>
+          <div class="col-row"><span class="col-name">computed_monthly, computed_annual</span><span class="col-type">NUMERIC(14,2)</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 5: PAYROLL ENGINE
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="payroll">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent4)"></div>
+      Payroll Engine
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— runs, slips, advances, loans, reimbursements, variable pay, arrears</span>
+    </div>
+    <div class="grid">
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>payroll_runs</h3><p>One per tenant × month. Idempotent re-run safe</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">UUID</span><span class="tag pk">PK</span></div>
+          <div class="col-row"><span class="col-name">tenant_id + month</span><span class="col-type"></span><span class="tag uq">UQ</span></div>
+          <div class="col-row"><span class="col-name">month</span><span class="col-type">TEXT (YYYY-MM)</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">draft → processing → finalized | failed</span></div>
+          <div class="col-row"><span class="col-name">employee_count</span><span class="col-type">INT</span></div>
+          <div class="col-row"><span class="col-name">total_gross, total_deductions, total_net</span><span class="col-type">NUMERIC(14,2)</span></div>
+          <div class="col-row"><span class="col-name">total_lop_amount</span><span class="col-type">NUMERIC(14,2)</span></div>
+          <div class="col-row"><span class="col-name">finalized_by, finalized_at</span><span class="col-type">UUID / TIMESTAMPTZ</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>payroll_slips</h3><p>Per-employee computed payslip with JSONB snapshot</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">run_id</span><span class="col-type">UUID</span><span class="tag fk">FK → payroll_runs</span></div>
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">total_working_days, payable_days, lop_days</span><span class="col-type">INT</span></div>
+          <div class="col-row"><span class="col-name">ctc_monthly, gross_pay, lop_amount</span><span class="col-type">NUMERIC(12,2)</span></div>
+          <div class="col-row"><span class="col-name">total_deductions, net_pay</span><span class="col-type">NUMERIC(12,2)</span></div>
+          <div class="col-row"><span class="col-name">employer_contributions</span><span class="col-type">NUMERIC(12,2)</span></div>
+          <div class="col-row"><span class="col-name">component_breakdown</span><span class="col-type">JSONB</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">draft | finalized | held</span></div>
+          <p class="more">UNIQUE (run_id, employee_id)</p>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>advance_salary_requests</h3><p>Salary advance lifecycle with EMI recovery</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">requested_amount, approved_amount, disbursed_amount</span><span class="col-type">DECIMAL(14,2)</span></div>
+          <div class="col-row"><span class="col-name">recovery_months</span><span class="col-type">INT (1–12)</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">pending→approved→disbursed→recovering→recovered</span></div>
+          <div class="col-row"><span class="col-name">is_recovery_paused</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>employee_loans</h3><p>Full loan lifecycle with amortisation schedule</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">loan_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">personal | education | vehicle | home | emergency | other</span></div>
+          <div class="col-row"><span class="col-name">principal_amount, interest_rate_pct</span><span class="col-type">DECIMAL</span></div>
+          <div class="col-row"><span class="col-name">tenure_months, emi_amount</span><span class="col-type">INT / DECIMAL</span></div>
+          <div class="col-row"><span class="col-name">outstanding_balance</span><span class="col-type">DECIMAL(14,2)</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">pending→approved→disbursed→active→completed|foreclosed</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>reimbursement_claims</h3><p>Employee expense claims with multi-step approval</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">category_id</span><span class="col-type">UUID</span><span class="tag fk">FK → reimbursement_categories</span></div>
+          <div class="col-row"><span class="col-name">claimed_amount, approved_amount</span><span class="col-type">DECIMAL(14,2)</span></div>
+          <div class="col-row"><span class="col-name">expense_date, claim_date</span><span class="col-type">DATE</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">draft→submitted→under_review→approved→paid</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>reimbursement_categories</h3><p>Configured expense types with monthly/annual caps</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">code, name, category_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">fuel | travel | mobile | internet | food | medical | other</span></div>
+          <div class="col-row"><span class="col-name">monthly_limit, annual_limit</span><span class="col-type">DECIMAL(14,2)</span></div>
+          <div class="col-row"><span class="col-name">is_taxable, requires_receipt</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="payroll">
+        <div class="tcard-header">
+          <div><h3>variable_pay / arrear_engine</h3><p>Bonus/incentive components and arrear calculations</p></div>
+          <span class="tcard-badge d-payroll">Payroll</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">component_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">amount, effective_month</span><span class="col-type">DECIMAL / TEXT</span></div>
+          <div class="col-row"><span class="col-name">payroll_run_id</span><span class="col-type">UUID</span><span class="tag fk">FK → payroll_runs</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 6: STATUTORY COMPLIANCE
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="stat">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent6)"></div>
+      Statutory Compliance (India)
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— EPF, ESI, Professional Tax, TDS</span>
+    </div>
+    <div class="grid">
+
+      <div class="tcard" data-domain="stat">
+        <div class="tcard-header">
+          <div><h3>epf_config</h3><p>Tenant-level EPF rates & PF account details</p></div>
+          <span class="tcard-badge d-stat">Statutory</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span><span class="tag uq">UQ</span></div>
+          <div class="col-row"><span class="col-name">employee_contribution_pct</span><span class="col-type">DECIMAL (default 12%)</span></div>
+          <div class="col-row"><span class="col-name">employer_pf_pct (3.67%), employer_eps_pct (8.33%)</span><span class="col-type">DECIMAL</span></div>
+          <div class="col-row"><span class="col-name">wage_ceiling</span><span class="col-type">DECIMAL (default ₹15,000)</span></div>
+          <div class="col-row"><span class="col-name">pf_account_number, establishment_code</span><span class="col-type">TEXT</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="stat">
+        <div class="tcard-header">
+          <div><h3>epf_contributions</h3><p>Monthly EPF contribution records</p></div>
+          <span class="tcard-badge d-stat">Statutory</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">payroll_run_id</span><span class="col-type">UUID</span></div>
+          <div class="col-row"><span class="col-name">contribution_month</span><span class="col-type">TEXT (YYYY-MM)</span></div>
+          <div class="col-row"><span class="col-name">pf_wages, employee_contribution</span><span class="col-type">DECIMAL(14,2)</span></div>
+          <div class="col-row"><span class="col-name">employer_pf, employer_eps, total_employer</span><span class="col-type">DECIMAL(14,2)</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="stat">
+        <div class="tcard-header">
+          <div><h3>esi_config + esi_contributions</h3><p>ESI rates (employee 0.75%, employer 3.25%) & monthly records</p></div>
+          <span class="tcard-badge d-stat">Statutory</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">esi_config.wage_ceiling</span><span class="col-type">DECIMAL (default ₹21,000)</span></div>
+          <div class="col-row"><span class="col-name">esi_eligibility_timeline</span><span class="col-type">Tracks ceiling crossings</span></div>
+          <div class="col-row"><span class="col-name">esi_contributions.gross_wages</span><span class="col-type">DECIMAL(14,2)</span></div>
+          <div class="col-row"><span class="col-name">employee_contribution, employer_contribution</span><span class="col-type">DECIMAL(14,2)</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="stat">
+        <div class="tcard-header">
+          <div><h3>ptax_slabs + ptax_contributions</h3><p>State-specific Professional Tax slab tables</p></div>
+          <span class="tcard-badge d-stat">Statutory</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">state_code, financial_year</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">gender</span><span class="col-type">TEXT (male|female|other|all)</span></div>
+          <div class="col-row"><span class="col-name">monthly_income_from, monthly_income_to</span><span class="col-type">DECIMAL</span></div>
+          <div class="col-row"><span class="col-name">monthly_ptax, annual_ptax</span><span class="col-type">DECIMAL</span></div>
+          <div class="col-row"><span class="col-name">ptax_state_config</span><span class="col-type">Per-employee state assignment</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="stat">
+        <div class="tcard-header">
+          <div><h3>tds_foundation</h3><p>TDS regime, investment declarations, computation</p></div>
+          <span class="tcard-badge d-stat">Statutory</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">employee_id</span><span class="col-type">UUID</span><span class="tag fk">FK → employees</span></div>
+          <div class="col-row"><span class="col-name">financial_year</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">regime</span><span class="col-type">TEXT (old|new)</span></div>
+          <div class="col-row"><span class="col-name">declared_investments</span><span class="col-type">JSONB</span></div>
+          <div class="col-row"><span class="col-name">taxable_income, tds_amount</span><span class="col-type">DECIMAL</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       DOMAIN 7: OPERATIONS & INFRASTRUCTURE
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section" data-domain="ops">
+    <div class="domain-title">
+      <div class="dot" style="background:var(--accent7)"></div>
+      Operations & Infrastructure
+      <span style="color:var(--muted);font-weight:400;font-size:.85rem">— onboarding, notifications, webhooks, durable queue, compliance</span>
+    </div>
+    <div class="grid">
+
+      <div class="tcard" data-domain="ops">
+        <div class="tcard-header">
+          <div><h3>onboarding_sessions</h3><p>AI-assisted onboarding — document → draft employee</p></div>
+          <span class="tcard-badge d-ops">Ops</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">candidate_name</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">active → extracting → draft_ready → hr_review → approved → employee_created</span></div>
+          <div class="col-row"><span class="col-name">extraction_progress</span><span class="col-type">INT (0–100)</span></div>
+          <div class="col-row"><span class="col-name">assigned_to</span><span class="col-type">UUID</span><span class="tag fk">FK → profiles</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="ops">
+        <div class="tcard-header">
+          <div><h3>onboarding_documents</h3><p>Per-document metadata with AI extraction status</p></div>
+          <span class="tcard-badge d-ops">Ops</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">session_id</span><span class="col-type">UUID</span><span class="tag fk">FK → onboarding_sessions</span></div>
+          <div class="col-row"><span class="col-name">document_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name" style="font-size:.7rem">aadhaar | pan | passport | resume | offer_letter | …</span></div>
+          <div class="col-row"><span class="col-name">storage_path</span><span class="col-type">TEXT (Supabase Storage)</span></div>
+          <div class="col-row"><span class="col-name">extraction_status</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">confidence_score</span><span class="col-type">DECIMAL(4,3) 0–1</span></div>
+          <div class="col-row"><span class="col-name">extraction_version</span><span class="col-type">TEXT (claude-3-5-haiku)</span></div>
+          <div class="col-row"><span class="col-name">extracted_text</span><span class="col-type">TEXT (OCR audit)</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="ops">
+        <div class="tcard-header">
+          <div><h3>notification_templates</h3><p>Tenant-customisable notification templates</p></div>
+          <span class="tcard-badge d-ops">Ops</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">event_type</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">channel</span><span class="col-type">TEXT (email|sms|push)</span></div>
+          <div class="col-row"><span class="col-name">subject_template, body_template</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="ops">
+        <div class="tcard-header">
+          <div><h3>durable_queue</h3><p>Guaranteed-delivery async task queue (PostgreSQL-native)</p></div>
+          <span class="tcard-badge d-ops">Ops</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">queue_name</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">payload</span><span class="col-type">JSONB</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT (pending|processing|done|failed)</span></div>
+          <div class="col-row"><span class="col-name">retry_count, max_retries</span><span class="col-type">INT</span></div>
+          <div class="col-row"><span class="col-name">scheduled_at, processed_at</span><span class="col-type">TIMESTAMPTZ</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="ops">
+        <div class="tcard-header">
+          <div><h3>webhooks</h3><p>Outbound webhook endpoint registry</p></div>
+          <span class="tcard-badge d-ops">Ops</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">tenant_id</span><span class="col-type">UUID</span><span class="tag fk">FK → tenants</span></div>
+          <div class="col-row"><span class="col-name">event_types</span><span class="col-type">TEXT[]</span></div>
+          <div class="col-row"><span class="col-name">endpoint_url</span><span class="col-type">TEXT</span></div>
+          <div class="col-row"><span class="col-name">secret_hash, is_active</span><span class="col-type">TEXT / BOOLEAN</span></div>
+        </div>
+      </div>
+
+      <div class="tcard" data-domain="ops">
+        <div class="tcard-header">
+          <div><h3>import_jobs / upload_sessions</h3><p>Bulk data import pipeline tracking</p></div>
+          <span class="tcard-badge d-ops">Ops</span>
+        </div>
+        <div class="tcard-body">
+          <div class="col-row"><span class="col-name">master_type</span><span class="col-type">TEXT (employees|grades|…)</span></div>
+          <div class="col-row"><span class="col-name">file_path, total_rows, processed_rows</span><span class="col-type">TEXT / INT</span></div>
+          <div class="col-row"><span class="col-name">error_rows, error_log</span><span class="col-type">INT / JSONB</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">TEXT (pending→running→done|failed)</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       KEY RELATIONSHIPS SUMMARY
+  ════════════════════════════════════════════════════ -->
+  <div class="domain-section">
+    <div class="domain-title">
+      <div class="dot" style="background:#fff"></div>
+      Key Relationships Summary
+    </div>
+    <div class="rel-grid">
+
+      <div class="rel-card">
+        <h4>tenant → everything</h4>
+        <div class="rel-row"><span class="rel-table">tenants</span><span class="rel-arrow">━━▶</span><span class="rel-table">profiles, employees, departments, designations, grades, shifts, sites, work_locations, cost_centers …</span></div>
+        <div style="margin-top:6px;color:var(--muted);font-size:.75rem">All rows carry tenant_id for strict data isolation (RLS enforced on every table)</div>
+      </div>
+
+      <div class="rel-card">
+        <h4>employee → org</h4>
+        <div class="rel-row"><span class="rel-table">employees.department_id</span><span class="rel-arrow">→</span><span class="rel-table">departments</span></div>
+        <div class="rel-row"><span class="rel-table">employees.designation_id</span><span class="rel-arrow">→</span><span class="rel-table">designations</span></div>
+        <div class="rel-row"><span class="rel-table">employees.grade_id</span><span class="rel-arrow">→</span><span class="rel-table">grades</span></div>
+        <div class="rel-row"><span class="rel-table">employees.manager_id</span><span class="rel-arrow">→</span><span class="rel-table">employees (self-ref)</span></div>
+      </div>
+
+      <div class="rel-card">
+        <h4>compensation chain</h4>
+        <div class="rel-row"><span class="rel-table">salary_structures</span><span class="rel-arrow">→</span><span class="rel-table">salary_structure_components</span></div>
+        <div class="rel-row"><span class="rel-table">salary_structure_components</span><span class="rel-arrow">→</span><span class="rel-table">salary_components</span></div>
+        <div class="rel-row"><span class="rel-table">employee_compensations</span><span class="rel-arrow">→</span><span class="rel-table">salary_structures</span></div>
+        <div class="rel-row"><span class="rel-table">employee_compensation_components</span><span class="rel-arrow">→</span><span class="rel-table">employee_compensations</span></div>
+      </div>
+
+      <div class="rel-card">
+        <h4>payroll chain</h4>
+        <div class="rel-row"><span class="rel-table">payroll_runs</span><span class="rel-arrow">━━▶</span><span class="rel-table">payroll_slips (1:many)</span></div>
+        <div class="rel-row"><span class="rel-table">payroll_slips</span><span class="rel-arrow">→</span><span class="rel-table">employees + payroll_runs</span></div>
+        <div class="rel-row"><span class="rel-table">epf/esi/ptax_contributions</span><span class="rel-arrow">→</span><span class="rel-table">payroll_runs</span></div>
+        <div class="rel-row"><span class="rel-table">advance/loan recovery</span><span class="rel-arrow">→</span><span class="rel-table">payroll_runs</span></div>
+      </div>
+
+      <div class="rel-card">
+        <h4>attendance pipeline</h4>
+        <div class="rel-row"><span class="rel-table">attendance_raw_logs (immutable)</span></div>
+        <div class="rel-row" style="padding-left:12px"><span class="rel-arrow">▼ processor</span></div>
+        <div class="rel-row"><span class="rel-table">attendance_logs (check-in/out pairs)</span></div>
+        <div class="rel-row" style="padding-left:12px"><span class="rel-arrow">▼ aggregator</span></div>
+        <div class="rel-row"><span class="rel-table">attendance_daily (1 row / emp / date)</span></div>
+        <div class="rel-row" style="padding-left:12px"><span class="rel-arrow">▼ payroll</span></div>
+        <div class="rel-row"><span class="rel-table">payroll_slips.lop_days</span></div>
+      </div>
+
+      <div class="rel-card">
+        <h4>leave → balance</h4>
+        <div class="rel-row"><span class="rel-table">leave_requests (APPROVED)</span><span class="rel-arrow">→ atomic fn →</span><span class="rel-table">employee_leave_balance</span></div>
+        <div class="rel-row"><span class="rel-table">leave_accrual_ledger</span><span class="rel-arrow">→</span><span class="rel-table">running balance journal</span></div>
+        <div class="rel-row"><span class="rel-table">attendance_daily.status = 'leave'</span><span class="rel-arrow">→</span><span class="rel-table">excludes from LOP</span></div>
+      </div>
+
+      <div class="rel-card">
+        <h4>approval workflow</h4>
+        <div class="rel-row"><span class="rel-table">approval_workflow_config (levels)</span></div>
+        <div class="rel-row"><span class="rel-arrow">▼</span></div>
+        <div class="rel-row"><span class="rel-table">approval_instances (active chains)</span></div>
+        <div class="rel-row"><span class="rel-arrow">▼</span></div>
+        <div class="rel-row"><span class="rel-table">approval_actions (audit log)</span></div>
+        <div style="margin-top:6px;color:var(--muted);font-size:.75rem">Drives leave_requests, attendance_regularisation. DB-level locking prevents concurrent double-approvals.</div>
+      </div>
+
+      <div class="rel-card">
+        <h4>job history pattern</h4>
+        <div class="rel-row" style="font-size:.75rem;color:var(--muted)">Both job_history and employee_compensations use the same "close-previous-current" trigger pattern — only one row per employee can have is_current=true (partial unique index). All changes are append-only; history is never deleted.</div>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- /content -->
+
+<script>
+  let activeDomain = 'all';
+
+  function filterCards() {
+    const q = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.tcard').forEach(card => {
+      const text = card.innerText.toLowerCase();
+      const domainMatch = activeDomain === 'all' || card.dataset.domain === activeDomain;
+      const textMatch   = !q || text.includes(q);
+      card.classList.toggle('hidden', !(domainMatch && textMatch));
+    });
+    document.querySelectorAll('.domain-section').forEach(sec => {
+      const domainMatch = activeDomain === 'all' || sec.dataset.domain === activeDomain;
+      const hasVisible  = [...sec.querySelectorAll('.tcard')].some(c => !c.classList.contains('hidden'));
+      sec.style.display = (domainMatch || activeDomain === 'all') && (hasVisible || !q) ? '' : 'none';
+    });
+  }
+
+  function filterDomain(domain, btn) {
+    activeDomain = domain;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filterCards();
+  }
+</script>
+</body>
+</html>

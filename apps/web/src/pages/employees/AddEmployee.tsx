@@ -5,20 +5,25 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Controller } from 'react-hook-form'
 import { ArrowLeft, Check, ChevronRight, Info, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { FormField, FormRow, FormSection, FormActions } from '@/components/forms'
 import { PageContainer, PageHeader } from '@/components/layout'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate } from '@/lib/utils'
 import type { Department, Designation, Grade } from '@/types'
 
-interface Site   { id: string; name: string; location: string | null }
-interface Roster { id: string; name: string; cycle_days: number }
+interface Site         { id: string; name: string; location: string | null }
+interface Roster       { id: string; name: string; cycle_days: number }
+interface WorkLocation { id: string; name: string; city: string | null; is_active: boolean }
+interface CostCenter   { id: string; name: string; code: string | null; is_active: boolean }
 
 // ── Step schemas ─────────────────────────────────────────────────────────────
 const step1Schema = z.object({
@@ -30,12 +35,14 @@ const step1Schema = z.object({
 })
 
 const step2Schema = z.object({
-  employment_type: z.enum(['permanent', 'contract', 'intern', 'probation']),
-  department_id:   z.string().optional(),
-  designation_id:  z.string().optional(),
-  grade_id:        z.string().optional(),
-  site_id:         z.string().optional(),
-  roster_id:       z.string().optional(),
+  employment_type:  z.enum(['permanent', 'contract', 'intern', 'probation']),
+  department_id:    z.string().optional(),
+  designation_id:   z.string().optional(),
+  grade_id:         z.string().optional(),
+  site_id:          z.string().optional(),
+  roster_id:        z.string().optional(),
+  work_location_id: z.string().optional(),
+  cost_center_id:   z.string().optional(),
 })
 
 type Step1 = z.infer<typeof step1Schema>
@@ -51,6 +58,16 @@ export function AddEmployee() {
   const navigate     = useNavigate()
   const queryClient  = useQueryClient()
   const basePath     = useBasePath()
+  const { profile }  = useAuthStore()
+
+  // HR admin-only page — employees and managers cannot create new employees
+  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
   const [step, setStep]           = useState(1)
   const [step1Data, setStep1Data] = useState<Step1 | null>(null)
   const [step2Data, setStep2Data] = useState<Step2 | null>(null)
@@ -58,8 +75,10 @@ export function AddEmployee() {
   const { data: departments }  = useQuery<{ data: Department[] }>({ queryKey: ['departments'],  queryFn: () => api.get('/departments')  })
   const { data: designations } = useQuery<{ data: Designation[] }>({ queryKey: ['designations'], queryFn: () => api.get('/designations') })
   const { data: grades }       = useQuery<{ data: Grade[] }>({ queryKey: ['grades'],       queryFn: () => api.get('/grades')       })
-  const { data: sitesData }    = useQuery<{ data: Site[] }>({ queryKey: ['sites'],         queryFn: () => api.get('/masters/sites'),   staleTime: 60_000 })
-  const { data: rostersData }  = useQuery<{ data: Roster[] }>({ queryKey: ['rosters'],      queryFn: () => api.get('/masters/rosters'), staleTime: 60_000 })
+  const { data: sitesData }      = useQuery<{ data: Site[] }>({ queryKey: ['sites'],          queryFn: () => api.get('/masters/sites'),          staleTime: 60_000 })
+  const { data: rostersData }    = useQuery<{ data: Roster[] }>({ queryKey: ['rosters'],        queryFn: () => api.get('/masters/rosters'),        staleTime: 60_000 })
+  const { data: workLocsData }   = useQuery<{ data: WorkLocation[] }>({ queryKey: ['work-locations'], queryFn: () => api.get('/masters/work-locations'), staleTime: 60_000 })
+  const { data: costCentersData }= useQuery<{ data: CostCenter[] }>({ queryKey: ['cost-centers'],   queryFn: () => api.get('/masters/cost-centers'),  staleTime: 60_000 })
 
   const form1 = useForm<Step1>({ resolver: zodResolver(step1Schema), mode: 'onChange' })
   const form2 = useForm<Step2>({ resolver: zodResolver(step2Schema), mode: 'onChange' })
@@ -77,9 +96,11 @@ export function AddEmployee() {
         department_id:   step2Data.department_id   || undefined,
         designation_id:  step2Data.designation_id  || undefined,
         grade_id:        step2Data.grade_id        || undefined,
-        site_id:         step2Data.site_id                                              || undefined,
-        roster_id:       (step2Data.roster_id && step2Data.roster_id !== '__none__')
-                           ? step2Data.roster_id : undefined,
+        site_id:          step2Data.site_id          || undefined,
+        roster_id:        (step2Data.roster_id && step2Data.roster_id !== '__none__')
+                            ? step2Data.roster_id : undefined,
+        work_location_id: step2Data.work_location_id || undefined,
+        cost_center_id:   step2Data.cost_center_id   || undefined,
         effective_from:  step1Data.joining_date,
       })
       return result.employee
@@ -182,7 +203,19 @@ export function AddEmployee() {
                     required
                     error={form1.formState.errors.joining_date?.message}
                   >
-                    <Input id="joining_date" type="date" {...form1.register('joining_date')} />
+                    <Controller
+                      control={form1.control}
+                      name="joining_date"
+                      render={({ field, fieldState }) => (
+                        <DateInput
+                          id="joining_date"
+                          value={field.value}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          aria-invalid={!!fieldState.error}
+                        />
+                      )}
+                    />
                   </FormField>
                 </FormRow>
               </FormSection>
@@ -279,6 +312,34 @@ export function AddEmployee() {
                     </Select>
                   </FormField>
                 </FormRow>
+
+                <FormRow cols={2}>
+                  <FormField label="Work Location" htmlFor="work_location_id">
+                    <Select onValueChange={(v) => form2.setValue('work_location_id', v)}>
+                      <SelectTrigger id="work_location_id"><SelectValue placeholder="Select work location" /></SelectTrigger>
+                      <SelectContent>
+                        {workLocsData?.data?.filter(w => w.is_active !== false).map((w) => (
+                          <SelectItem key={w.id} value={w.id}>
+                            {w.name}{w.city ? ` · ${w.city}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+
+                  <FormField label="Cost Center" htmlFor="cost_center_id">
+                    <Select onValueChange={(v) => form2.setValue('cost_center_id', v)}>
+                      <SelectTrigger id="cost_center_id"><SelectValue placeholder="Select cost center" /></SelectTrigger>
+                      <SelectContent>
+                        {costCentersData?.data?.filter(c => c.is_active !== false).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}{c.code ? ` (${c.code})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                </FormRow>
               </FormSection>
 
               <FormActions stretch>
@@ -302,21 +363,45 @@ export function AddEmployee() {
           <CardContent className="space-y-4">
             {/* Summary */}
             <div className="rounded-md border border-border bg-muted/30 p-4 space-y-1 text-sm">
-              <p><span className="text-muted-foreground">Name:</span> {step1Data.first_name} {step1Data.last_name}</p>
-              <p><span className="text-muted-foreground">Email:</span> {step1Data.email}</p>
-              {step1Data.phone && <p><span className="text-muted-foreground">Phone:</span> {step1Data.phone}</p>}
-              <p><span className="text-muted-foreground">Joining Date:</span> {step1Data.joining_date}</p>
+              {/* Basic */}
+              <p><span className="text-muted-foreground w-32 inline-block">Name</span>{step1Data.first_name} {step1Data.last_name}</p>
+              <p><span className="text-muted-foreground w-32 inline-block">Email</span>{step1Data.email}</p>
+              {step1Data.phone && <p><span className="text-muted-foreground w-32 inline-block">Phone</span>{step1Data.phone}</p>}
+              <p><span className="text-muted-foreground w-32 inline-block">Joining Date</span>{fmtDate(step1Data.joining_date)}</p>
+
               {step2Data && (
                 <>
-                  <p><span className="text-muted-foreground">Employment Type:</span> {step2Data.employment_type}</p>
-                  {step2Data.site_id && sitesData?.data && (
-                    <p><span className="text-muted-foreground">Site:</span> {sitesData.data.find(s => s.id === step2Data.site_id)?.name ?? step2Data.site_id}</p>
-                  )}
+                  <div className="border-t border-border/60 my-2" />
+                  {/* Job */}
                   <p>
-                    <span className="text-muted-foreground">Roster:</span>{' '}
+                    <span className="text-muted-foreground w-32 inline-block">Employment</span>
+                    <span className="capitalize">{step2Data.employment_type}</span>
+                  </p>
+                  {step2Data.department_id && departments?.data && (
+                    <p><span className="text-muted-foreground w-32 inline-block">Department</span>{departments.data.find(d => d.id === step2Data.department_id)?.name ?? '—'}</p>
+                  )}
+                  {step2Data.designation_id && designations?.data && (
+                    <p><span className="text-muted-foreground w-32 inline-block">Designation</span>{designations.data.find(d => d.id === step2Data.designation_id)?.name ?? '—'}</p>
+                  )}
+                  {step2Data.grade_id && grades?.data && (
+                    <p><span className="text-muted-foreground w-32 inline-block">Grade</span>{grades.data.find(g => g.id === step2Data.grade_id)?.name ?? '—'}</p>
+                  )}
+                  {step2Data.site_id && sitesData?.data && (
+                    <p><span className="text-muted-foreground w-32 inline-block">Site</span>{sitesData.data.find(s => s.id === step2Data.site_id)?.name ?? '—'}</p>
+                  )}
+                  {step2Data.work_location_id && workLocsData?.data && (() => {
+                    const w = workLocsData.data.find(w => w.id === step2Data.work_location_id)
+                    return <p><span className="text-muted-foreground w-32 inline-block">Work Location</span>{w ? (w.city ? `${w.name} · ${w.city}` : w.name) : '—'}</p>
+                  })()}
+                  {step2Data.cost_center_id && costCentersData?.data && (() => {
+                    const c = costCentersData.data.find(c => c.id === step2Data.cost_center_id)
+                    return <p><span className="text-muted-foreground w-32 inline-block">Cost Center</span>{c ? (c.code ? `${c.name} (${c.code})` : c.name) : '—'}</p>
+                  })()}
+                  <p>
+                    <span className="text-muted-foreground w-32 inline-block">Roster</span>
                     {step2Data.roster_id && step2Data.roster_id !== '__none__' && rostersData?.data
-                      ? (rostersData.data.find(r => r.id === step2Data.roster_id)?.name ?? step2Data.roster_id)
-                      : <span className="italic text-muted-foreground">Inherit from site</span>
+                      ? (rostersData.data.find(r => r.id === step2Data.roster_id)?.name ?? '—')
+                      : <span className="italic text-muted-foreground text-xs">Inherit from site</span>
                     }
                   </p>
                 </>

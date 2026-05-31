@@ -23,6 +23,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
+import { DateInput }     from '@/components/ui/date-input'
 import {
   Select,
   SelectContent,
@@ -57,7 +58,11 @@ function monthStart() {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function severityVariant(sev: string): 'destructive' | 'warning' | 'secondary' | 'success' {
@@ -206,19 +211,17 @@ function DateRangeInputs({
     <div className="flex flex-wrap items-center gap-2 mb-4">
       <div className="flex items-center gap-1.5">
         <span className="text-xs text-muted-foreground">From</span>
-        <Input
-          type="date"
+        <DateInput
           value={value.from}
-          onChange={e => onChange({ ...value, from: e.target.value })}
+          onChange={v => onChange({ ...value, from: v })}
           className="h-8 text-xs w-36"
         />
       </div>
       <div className="flex items-center gap-1.5">
         <span className="text-xs text-muted-foreground">To</span>
-        <Input
-          type="date"
+        <DateInput
           value={value.to}
-          onChange={e => onChange({ ...value, to: e.target.value })}
+          onChange={v => onChange({ ...value, to: v })}
           className="h-8 text-xs w-36"
         />
       </div>
@@ -607,10 +610,9 @@ function StaffingHintsTab() {
     <div>
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xs text-muted-foreground">Date</span>
-        <Input
-          type="date"
+        <DateInput
           value={date}
-          onChange={e => setDate(e.target.value)}
+          onChange={setDate}
           className="h-8 text-xs w-36"
         />
       </div>
@@ -808,11 +810,11 @@ function ComputeDialog({
         <div className="space-y-3 py-2">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">From</label>
-            <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-8 text-xs" />
+            <DateInput value={from} onChange={setFrom} className="h-8 text-xs" />
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">To</label>
-            <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="h-8 text-xs" />
+            <DateInput value={to} onChange={setTo} className="h-8 text-xs" />
           </div>
 
           {result && (

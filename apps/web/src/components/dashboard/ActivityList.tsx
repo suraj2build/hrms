@@ -30,7 +30,7 @@ function fmtRelTime(ts: string): string {
     if (hrs < 24)   return `${hrs}h ago`
     const days = Math.floor(hrs / 24)
     if (days < 7)   return `${days}d ago`
-    return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' })
+    const _d = new Date(ts); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? ts : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}`
   } catch {
     return ts
   }

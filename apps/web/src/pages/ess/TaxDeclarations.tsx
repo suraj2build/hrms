@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Lock, Plus } from 'lucide-react'
+import { Plus, Loader2, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -15,36 +15,84 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/authStore'
+import { uploadEmployeeFile } from '@/lib/supabase-storage'
 import { cn } from '@/lib/utils'
 
-interface TaxRegimeElection {
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type DeclarationStatus =
+  | 'draft'
+  | 'declared'
+  | 'submitted'
+  | 'under_review'
+  | 'approved'
+  | 'rejected'
+  | 'revision_requested'
+  | 'locked'
+  | 'payroll_applied'
+  | 'archived'
+
+type DocumentState = 'uploaded' | 'under_review' | 'verified' | 'rejected'
+
+interface DeclarationProof {
   id: string
-  financial_year: string
-  elected_regime: 'old' | 'new'
-  locked: boolean
-  locked_at: string | null
+  file_name: string
+  document_state: DocumentState
+  uploaded_at: string
 }
 
 interface Declaration {
   id: string
   financial_year: string
-  declaration_type: string
-  section_code: string
-  section_name: string
+  declaration_category: string
+  section: string
+  description: string
   declared_amount: number
-  status: 'pending' | 'verified' | 'rejected'
+  approved_amount: number | null
+  status: DeclarationStatus
   rejection_reason: string | null
-  proof_submitted: boolean
+  submitted_at: string | null
+  reviewed_at: string | null
+  declaration_proofs: DeclarationProof[]
+}
+
+interface TaxRegimeElection {
+  id: string
+  financial_year: string
+  regime: 'old' | 'new'
+  effective_from: string
 }
 
 interface TDSProjection {
-  month: string
-  projected_tds: number
+  id: string
+  projection_month: string
+  tds_this_month: number
   regime: 'old' | 'new'
+  taxable_income_projected: number
+  gross_income_projected: number
 }
 
-type SectionCode = '80C' | '80D' | '80CCD' | 'HRA' | 'LTA' | 'other'
-const SECTION_CODES: SectionCode[] = ['80C', '80D', '80CCD', 'HRA', 'LTA', 'other']
+// Declaration category → display label mapping (matches DB enum)
+const CATEGORY_LABELS: Record<string, string> = {
+  '80C':               'Section 80C',
+  '80D':               'Section 80D (Medical Insurance)',
+  '80E':               'Section 80E (Education Loan)',
+  '80G':               'Section 80G (Donations)',
+  '80TTA':             'Section 80TTA (Savings Interest)',
+  'HRA':               'HRA (House Rent Allowance)',
+  'LTA':               'LTA (Leave Travel Allowance)',
+  'home_loan_principal': 'Home Loan Principal',
+  'home_loan_interest':  'Home Loan Interest (Sec 24)',
+  'NPS':               'NPS (Section 80CCD)',
+  'standard_deduction': 'Standard Deduction',
+  'professional_tax':  'Professional Tax',
+  'other':             'Other',
+}
+
+const CATEGORIES = Object.keys(CATEGORY_LABELS) as Array<keyof typeof CATEGORY_LABELS>
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getCurrentFinancialYear(): string {
   const now = new Date()
@@ -59,68 +107,119 @@ function getPreviousFinancialYear(fy: string): string {
   return `${startYear - 1}-${String(startYear).slice(2)}`
 }
 
-function declarationStatusVariant(status: Declaration['status']): string {
+function statusBadgeVariant(status: DeclarationStatus): string {
   switch (status) {
-    case 'pending': return 'warning'
-    case 'verified': return 'success'
-    case 'rejected': return 'destructive'
-    default: return 'secondary'
+    case 'approved':        return 'success'
+    case 'payroll_applied': return 'success'
+    case 'rejected':        return 'destructive'
+    case 'revision_requested': return 'destructive'
+    case 'submitted':       return 'secondary'
+    case 'under_review':    return 'secondary'
+    case 'locked':          return 'secondary'
+    default:                return 'outline'
   }
 }
 
+function statusLabel(status: DeclarationStatus): string {
+  switch (status) {
+    case 'declared':           return 'Declared'
+    case 'submitted':          return 'Submitted'
+    case 'under_review':       return 'Under Review'
+    case 'approved':           return 'Approved'
+    case 'rejected':           return 'Rejected'
+    case 'revision_requested': return 'Needs Revision'
+    case 'locked':             return 'Locked'
+    case 'payroll_applied':    return 'Payroll Applied'
+    case 'archived':           return 'Archived'
+    default:                   return status
+  }
+}
+
+function proofStateBadgeVariant(state: DocumentState): string {
+  switch (state) {
+    case 'verified':    return 'success'
+    case 'rejected':    return 'destructive'
+    case 'under_review': return 'secondary'
+    default:            return 'outline'
+  }
+}
+
+function fmtINR(n: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style:                 'currency',
+    currency:              'INR',
+    maximumFractionDigits: 0,
+  }).format(n)
+}
+
+// ── Form types ────────────────────────────────────────────────────────────────
+
 interface DeclForm {
-  section_code: SectionCode
-  section_name: string
+  declaration_category: string
+  section: string
+  description: string
   declared_amount: string
 }
 
 const defaultDeclForm: DeclForm = {
-  section_code: '80C',
-  section_name: '',
-  declared_amount: '',
+  declaration_category: '80C',
+  section:              '',
+  description:          '',
+  declared_amount:      '',
 }
 
+// =============================================================================
 export function TaxDeclarations() {
   const qc = useQueryClient()
-  const currentFY = getCurrentFinancialYear()
+  const { profile } = useAuthStore()
+  const currentFY  = getCurrentFinancialYear()
   const previousFY = getPreviousFinancialYear(currentFY)
 
-  const [selectedFY, setSelectedFY] = useState(currentFY)
+  const [selectedFY, setSelectedFY]       = useState(currentFY)
   const [declDialogOpen, setDeclDialogOpen] = useState(false)
-  const [declForm, setDeclForm] = useState<DeclForm>(defaultDeclForm)
+  const [declForm, setDeclForm]           = useState<DeclForm>(defaultDeclForm)
 
-  const { data: regime } = useQuery<TaxRegimeElection>({
-    queryKey: ['tds', 'regime', selectedFY],
-    queryFn: () => api.get(`/payroll/statutory/tds/regime?financial_year=${selectedFY}`).then((r: any) => r.data),
+  // Proof upload state
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadTarget, setUploadTarget]   = useState<string | null>(null)
+  const [uploadingId, setUploadingId]     = useState<string | null>(null)
+
+  // ── Queries ─────────────────────────────────────────────────────────────────
+
+  const { data: regime } = useQuery<TaxRegimeElection | null>({
+    queryKey: ['tds', 'regime', 'my', selectedFY],
+    queryFn:  () => api.get(`/payroll/statutory/tds/regime/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? null),
   })
 
   const { data: declarations = [] } = useQuery<Declaration[]>({
-    queryKey: ['tds', 'declarations', selectedFY],
-    queryFn: () =>
-      api.get(`/payroll/statutory/tds/declarations/my?financial_year=${selectedFY}`).then((r: any) => r.data),
+    queryKey: ['tds', 'declarations', 'my', selectedFY],
+    queryFn:  () =>
+      api.get(`/payroll/statutory/tds/declarations/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? []),
   })
 
   const { data: projections = [] } = useQuery<TDSProjection[]>({
-    queryKey: ['tds', 'projections', selectedFY],
-    queryFn: () =>
-      api.get(`/payroll/statutory/tds/projections/my?financial_year=${selectedFY}`).then((r: any) => r.data),
+    queryKey: ['tds', 'projections', 'my', selectedFY],
+    queryFn:  () =>
+      api.get(`/payroll/statutory/tds/projections/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? []),
   })
 
+  // ── Mutations ────────────────────────────────────────────────────────────────
+
   const electRegime = useMutation({
-    mutationFn: (elected_regime: 'old' | 'new') =>
-      api.post('/payroll/statutory/tds/regime', { financial_year: selectedFY, elected_regime }),
+    mutationFn: (regime: 'old' | 'new') =>
+      api.put('/payroll/statutory/tds/regime/my', { financial_year: selectedFY, regime }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tds', 'regime', selectedFY] })
+      qc.invalidateQueries({ queryKey: ['tds', 'regime', 'my', selectedFY] })
       toast.success('Tax regime updated')
     },
     onError: (e: Error) => toast.error('Failed to update tax regime', { description: e.message }),
   })
 
   const addDeclaration = useMutation({
-    mutationFn: (body: { section_code: string; section_name: string; declared_amount: number; financial_year: string }) =>
-      api.post('/payroll/statutory/tds/declarations', body),
+    mutationFn: (body: Omit<DeclForm, 'declared_amount'> & { declared_amount: number; financial_year: string }) =>
+      api.post('/payroll/statutory/tds/declarations/my', body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tds', 'declarations', selectedFY] })
+      qc.invalidateQueries({ queryKey: ['tds', 'declarations', 'my', selectedFY] })
       setDeclDialogOpen(false)
       setDeclForm(defaultDeclForm)
       toast.success('Declaration added')
@@ -128,28 +227,105 @@ export function TaxDeclarations() {
     onError: (e: Error) => toast.error('Failed to add declaration', { description: e.message }),
   })
 
-  // Group declarations by section_code
+  const submitDeclaration = useMutation({
+    mutationFn: (id: string) =>
+      api.post(`/payroll/statutory/tds/declarations/${id}/submit`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tds', 'declarations', 'my', selectedFY] })
+      toast.success('Declaration submitted for review')
+    },
+    onError: (e: Error) => toast.error('Failed to submit declaration', { description: e.message }),
+  })
+
+  const uploadProof = useMutation({
+    mutationFn: async ({ declId, file }: { declId: string; file: File }) => {
+      if (!profile?.tenant_id || !profile?.employee_id) {
+        throw new Error('Profile not linked to an employee record')
+      }
+      const storagePath = await uploadEmployeeFile(
+        profile.tenant_id,
+        profile.employee_id,
+        'documents',
+        file,
+      )
+      return api.post(`/payroll/statutory/tds/declarations/${declId}/proof`, {
+        file_name:       file.name,
+        storage_path:    storagePath,
+        mime_type:       file.type || undefined,
+        file_size_bytes: file.size || undefined,
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tds', 'declarations', 'my', selectedFY] })
+      setUploadingId(null)
+      setUploadTarget(null)
+      toast.success('Proof uploaded successfully')
+    },
+    onError: (e: Error) => {
+      setUploadingId(null)
+      setUploadTarget(null)
+      toast.error('Proof upload failed', { description: e.message })
+    },
+  })
+
+  // ── Computed ─────────────────────────────────────────────────────────────────
+
+  // Group by category
   const grouped = declarations.reduce<Record<string, Declaration[]>>((acc, d) => {
-    const key = d.section_code
+    const key = d.declaration_category
     if (!acc[key]) acc[key] = []
     acc[key].push(d)
     return acc
   }, {})
 
+  const totalDeclared  = declarations.reduce((s, d) => s + d.declared_amount, 0)
+  const totalApproved  = declarations.reduce((s, d) => s + (d.approved_amount ?? 0), 0)
+  const pendingCount   = declarations.filter(d => d.status === 'submitted' || d.status === 'under_review').length
+  const needsRevision  = declarations.filter(d => d.status === 'revision_requested')
+
+  // ── Handlers ─────────────────────────────────────────────────────────────────
+
   function handleDeclSubmit(e: React.FormEvent) {
     e.preventDefault()
     addDeclaration.mutate({
-      section_code: declForm.section_code,
-      section_name: declForm.section_name,
-      declared_amount: parseFloat(declForm.declared_amount),
-      financial_year: selectedFY,
+      declaration_category: declForm.declaration_category,
+      section:              declForm.section,
+      description:          declForm.description,
+      declared_amount:      parseFloat(declForm.declared_amount),
+      financial_year:       selectedFY,
     })
   }
 
   const fyOptions = [currentFY, previousFY]
 
+  // Can the employee submit this declaration for review?
+  function canSubmit(d: Declaration): boolean {
+    return d.status === 'declared' || d.status === 'revision_requested'
+  }
+
+  // Can the employee upload proof for this declaration?
+  function canUploadProof(d: Declaration): boolean {
+    return ['declared', 'submitted', 'revision_requested'].includes(d.status)
+      && !d.declaration_proofs?.some(p => p.document_state === 'verified')
+  }
+
   return (
     <PageContainer>
+      {/* Hidden file input for proof uploads */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".pdf,.jpg,.jpeg,.png"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (!file || !uploadTarget) return
+          setUploadingId(uploadTarget)
+          uploadProof.mutate({ declId: uploadTarget, file })
+          e.target.value = ''
+        }}
+      />
+
       <PageHeader
         title="Tax Declarations"
         subtitle="Manage your tax regime election, declarations, and projected TDS"
@@ -166,45 +342,71 @@ export function TaxDeclarations() {
         }
       />
 
-      {/* Section 1: Tax Regime Election */}
+      {/* Needs Revision banner */}
+      {needsRevision.length > 0 && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 mb-4">
+          <div className="flex items-center gap-2 text-destructive mb-1">
+            <AlertCircle className="h-4 w-4" />
+            <span className="text-sm font-medium">
+              {needsRevision.length} declaration{needsRevision.length > 1 ? 's' : ''} need{needsRevision.length === 1 ? 's' : ''} revision
+            </span>
+          </div>
+          {needsRevision.map(d => (
+            <div key={d.id} className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
+              <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                <span className="font-medium">{CATEGORY_LABELS[d.declaration_category] ?? d.declaration_category}</span>
+                {d.rejection_reason ? ` — ${d.rejection_reason}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Summary chips ───────────────────────────────────────────────────── */}
+      {declarations.length > 0 && (
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-xs text-muted-foreground mb-1">Total Declared</p>
+            <p className="text-base font-semibold">{fmtINR(totalDeclared)}</p>
+          </div>
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-xs text-muted-foreground mb-1">Total Approved</p>
+            <p className="text-base font-semibold text-success">{fmtINR(totalApproved)}</p>
+          </div>
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-xs text-muted-foreground mb-1">Pending Review</p>
+            <p className="text-base font-semibold">{pendingCount}</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tax Regime Election ─────────────────────────────────────────────── */}
       <SectionCard title="Tax Regime Election" className="mb-6">
         <div className="space-y-4">
-          {regime?.locked ? (
-            <div className="flex items-center gap-2 mb-4">
-              <Badge variant="secondary" className="flex items-center gap-1">
-                <Lock className="h-3 w-3" />
-                Locked
-              </Badge>
-              {regime.locked_at && (
-                <span className="text-xs text-muted-foreground">
-                  as of {new Date(regime.locked_at).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-          ) : null}
-
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {(['old', 'new'] as const).map(r => {
-              const isSelected = regime?.elected_regime === r
-              const isLocked = regime?.locked ?? false
+              const isSelected = regime?.regime === r
               return (
                 <button
                   key={r}
-                  disabled={isLocked || electRegime.isPending}
-                  onClick={() => !isLocked && electRegime.mutate(r)}
+                  disabled={electRegime.isPending}
+                  onClick={() => electRegime.mutate(r)}
                   className={cn(
                     'rounded-lg border-2 p-4 text-left transition-all',
                     isSelected
                       ? 'border-primary bg-sidebar-accent'
                       : 'border-border hover:border-primary/50',
-                    isLocked && 'cursor-not-allowed opacity-70'
                   )}
                 >
-                  <p className="text-sm font-semibold text-foreground mb-1 capitalize">{r} Regime</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-semibold text-foreground capitalize">{r} Regime</p>
+                    {isSelected && <CheckCircle2 className="h-4 w-4 text-primary" />}
+                  </div>
                   {r === 'old' ? (
                     <p className="text-xs text-muted-foreground">
-                      Allows deductions under 80C, 80D, HRA, LTA and other sections. Suitable if you have high
-                      investments and eligible deductions.
+                      Allows deductions under 80C, 80D, HRA, LTA, and other sections. Suitable if you have
+                      high investments and eligible deductions.
                     </p>
                   ) : (
                     <p className="text-xs text-muted-foreground">
@@ -219,10 +421,15 @@ export function TaxDeclarations() {
               )
             })}
           </div>
+          {!regime && (
+            <p className="text-xs text-muted-foreground">
+              No regime elected for FY {selectedFY}. New regime is applied by default.
+            </p>
+          )}
         </div>
       </SectionCard>
 
-      {/* Section 2: My Declarations */}
+      {/* ── My Declarations ─────────────────────────────────────────────────── */}
       <SectionCard
         title="My Declarations"
         className="mb-6"
@@ -237,65 +444,102 @@ export function TaxDeclarations() {
           <p className="text-muted-foreground text-sm py-4">No declarations for FY {selectedFY}.</p>
         ) : (
           <div className="space-y-6">
-            {Object.entries(grouped).map(([section, decls]) => (
-              <div key={section}>
-                <h4 className="text-sm font-semibold text-foreground mb-2">Section {section}</h4>
-                <div className="overflow-x-auto">
+            {Object.entries(grouped).map(([category, decls]) => (
+              <div key={category}>
+                <h4 className="text-sm font-semibold text-foreground mb-2">
+                  {CATEGORY_LABELS[category] ?? category}
+                </h4>
+                <div className="overflow-x-auto rounded-md border border-border">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border text-muted-foreground">
-                        <th className="text-left py-2 px-3 font-medium">Section</th>
-                        <th className="text-left py-2 px-3 font-medium">Description</th>
-                        <th className="text-right py-2 px-3 font-medium">Declared Amount</th>
-                        <th className="text-left py-2 px-3 font-medium">Status</th>
-                        <th className="text-left py-2 px-3 font-medium">Proof</th>
-                        <th className="text-left py-2 px-3 font-medium">Actions</th>
+                      <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                        <th className="text-left py-2 px-3 text-xs font-medium">Section / Description</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium">Declared</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium">Approved</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Status</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Proof</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {decls.map(d => (
-                        <tr key={d.id} className="border-b border-border hover:bg-muted/30 transition-colors">
-                          <td className="py-2 px-3 font-mono text-xs">{d.section_code}</td>
-                          <td className="py-2 px-3 text-foreground">{d.section_name}</td>
-                          <td className="py-2 px-3 text-right font-medium text-foreground">
-                            ₹{d.declared_amount.toLocaleString('en-IN')}
-                          </td>
-                          <td className="py-2 px-3">
-                            <Badge variant={declarationStatusVariant(d.status) as any}>
-                              {d.status}
-                            </Badge>
-                            {d.status === 'rejected' && d.rejection_reason && (
-                              <p className="text-xs text-destructive mt-1">{d.rejection_reason}</p>
-                            )}
-                          </td>
-                          <td className="py-2 px-3">
-                            {d.proof_submitted ? (
-                              <Badge variant="success" className="text-xs">Submitted</Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs text-muted-foreground">Not submitted</Badge>
-                            )}
-                          </td>
-                          <td className="py-2 px-3">
-                            {!d.proof_submitted && (d.status === 'pending' || d.status === 'verified') && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  // Deferred: show proof_submitted = true optimistically
-                                  qc.setQueryData<Declaration[]>(
-                                    ['tds', 'declarations', selectedFY],
-                                    prev => prev?.map(item =>
-                                      item.id === d.id ? { ...item, proof_submitted: true } : item
-                                    )
-                                  )
-                                }}
-                              >
-                                Upload Proof
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {decls.map(d => {
+                        const proofCount  = d.declaration_proofs?.length ?? 0
+                        const verifiedProof = d.declaration_proofs?.find(p => p.document_state === 'verified')
+                        return (
+                          <tr key={d.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                            <td className="py-2 px-3">
+                              <p className="text-xs font-medium text-foreground">{d.section}</p>
+                              <p className="text-[10px] text-muted-foreground">{d.description}</p>
+                            </td>
+                            <td className="py-2 px-3 text-right text-xs font-mono">
+                              {fmtINR(d.declared_amount)}
+                            </td>
+                            <td className="py-2 px-3 text-right text-xs font-mono">
+                              {d.approved_amount != null
+                                ? <span className="text-success font-medium">{fmtINR(d.approved_amount)}</span>
+                                : <span className="text-muted-foreground">—</span>
+                              }
+                            </td>
+                            <td className="py-2 px-3">
+                              <Badge variant={statusBadgeVariant(d.status) as any} className="text-[10px] capitalize">
+                                {statusLabel(d.status)}
+                              </Badge>
+                              {d.status === 'revision_requested' && d.rejection_reason && (
+                                <p className="text-[10px] text-destructive mt-0.5">{d.rejection_reason}</p>
+                              )}
+                              {d.status === 'rejected' && d.rejection_reason && (
+                                <p className="text-[10px] text-destructive mt-0.5">{d.rejection_reason}</p>
+                              )}
+                            </td>
+                            <td className="py-2 px-3">
+                              {proofCount === 0 ? (
+                                <Badge variant="outline" className="text-[10px] text-muted-foreground">None</Badge>
+                              ) : verifiedProof ? (
+                                <Badge variant="success" className="text-[10px]">Verified</Badge>
+                              ) : (
+                                <Badge variant={proofStateBadgeVariant(d.declaration_proofs[0].document_state) as any} className="text-[10px] capitalize">
+                                  {d.declaration_proofs[0].document_state}
+                                </Badge>
+                              )}
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center gap-1">
+                                {canSubmit(d) && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 text-[10px]"
+                                    disabled={submitDeclaration.isPending && submitDeclaration.variables === d.id}
+                                    onClick={() => submitDeclaration.mutate(d.id)}
+                                  >
+                                    {submitDeclaration.isPending && submitDeclaration.variables === d.id
+                                      ? <Loader2 className="h-3 w-3 animate-spin mr-0.5 inline" />
+                                      : null}
+                                    Submit
+                                  </Button>
+                                )}
+                                {canUploadProof(d) && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 text-[10px]"
+                                    disabled={uploadingId === d.id}
+                                    onClick={() => {
+                                      setUploadTarget(d.id)
+                                      fileInputRef.current?.click()
+                                    }}
+                                  >
+                                    {uploadingId === d.id
+                                      ? <Loader2 className="h-3 w-3 animate-spin mr-0.5 inline" />
+                                      : null}
+                                    Upload Proof
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -305,68 +549,89 @@ export function TaxDeclarations() {
         )}
       </SectionCard>
 
-      {/* Section 3: Projected TDS */}
+      {/* ── Projected TDS ───────────────────────────────────────────────────── */}
       <SectionCard title="Projected TDS">
         {projections.length === 0 ? (
           <p className="text-muted-foreground text-sm py-4">No projections available for FY {selectedFY}.</p>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left py-2 px-3 font-medium">Month</th>
-                    <th className="text-right py-2 px-3 font-medium">Projected TDS</th>
-                    <th className="text-left py-2 px-3 font-medium">Regime</th>
+                  <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                    <th className="text-left py-2 px-3 text-xs font-medium">Month</th>
+                    <th className="text-right py-2 px-3 text-xs font-medium">TDS This Month</th>
+                    <th className="text-right py-2 px-3 text-xs font-medium">Projected Taxable Income</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium">Regime</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {projections.map((p, idx) => (
-                    <tr key={idx} className="border-b border-border hover:bg-muted/30 transition-colors">
-                      <td className="py-2 px-3 text-foreground">{p.month}</td>
-                      <td className="py-2 px-3 text-right font-medium text-foreground">
-                        ₹{p.projected_tds.toLocaleString('en-IN')}
+                  {projections.map((p) => (
+                    <tr key={p.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                      <td className="py-2 px-3 text-foreground text-xs">{p.projection_month}</td>
+                      <td className="py-2 px-3 text-right font-medium text-foreground text-xs font-mono">
+                        {fmtINR(p.tds_this_month)}
                       </td>
-                      <td className="py-2 px-3 capitalize text-muted-foreground">{p.regime}</td>
+                      <td className="py-2 px-3 text-right text-xs font-mono text-muted-foreground">
+                        {fmtINR(p.taxable_income_projected)}
+                      </td>
+                      <td className="py-2 px-3">
+                        <Badge variant={p.regime === 'new' ? 'success' : 'secondary'} className="text-[10px] capitalize">
+                          {p.regime}
+                        </Badge>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <p className="text-xs text-muted-foreground mt-3 italic">
-              Projections are estimates based on your current declarations
+              Projections are estimates based on your current declarations and may change as income or declarations update.
             </p>
           </>
         )}
       </SectionCard>
 
-      {/* Add Declaration Dialog */}
-      <Dialog open={declDialogOpen} onOpenChange={open => { if (!open) { setDeclDialogOpen(false); setDeclForm(defaultDeclForm) } }}>
+      {/* ── Add Declaration Dialog ──────────────────────────────────────────── */}
+      <Dialog
+        open={declDialogOpen}
+        onOpenChange={open => { if (!open) { setDeclDialogOpen(false); setDeclForm(defaultDeclForm) } }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Add Declaration</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleDeclSubmit} className="space-y-4 mt-2">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Section Code *</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Category *</label>
               <select
-                value={declForm.section_code}
-                onChange={e => setDeclForm(f => ({ ...f, section_code: e.target.value as SectionCode }))}
+                value={declForm.declaration_category}
+                onChange={e => setDeclForm(f => ({ ...f, declaration_category: e.target.value }))}
                 className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground"
                 required
               >
-                {SECTION_CODES.map(s => (
-                  <option key={s} value={s}>{s}</option>
+                {CATEGORIES.map(c => (
+                  <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>
                 ))}
               </select>
             </div>
 
             <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Section *</label>
+              <Input
+                value={declForm.section}
+                onChange={e => setDeclForm(f => ({ ...f, section: e.target.value }))}
+                placeholder="e.g. 80C"
+                required
+              />
+            </div>
+
+            <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Description *</label>
               <Input
-                value={declForm.section_name}
-                onChange={e => setDeclForm(f => ({ ...f, section_name: e.target.value }))}
-                placeholder="e.g. Life Insurance Premium"
+                value={declForm.description}
+                onChange={e => setDeclForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="e.g. LIC Premium, PPF, ELSS Mutual Fund"
                 required
               />
             </div>
@@ -375,7 +640,7 @@ export function TaxDeclarations() {
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Declared Amount (₹) *</label>
               <Input
                 type="number"
-                min="0"
+                min="1"
                 step="1"
                 value={declForm.declared_amount}
                 onChange={e => setDeclForm(f => ({ ...f, declared_amount: e.target.value }))}
@@ -385,10 +650,15 @@ export function TaxDeclarations() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => { setDeclDialogOpen(false); setDeclForm(defaultDeclForm) }}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setDeclDialogOpen(false); setDeclForm(defaultDeclForm) }}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={addDeclaration.isPending}>
+                {addDeclaration.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 Add Declaration
               </Button>
             </div>

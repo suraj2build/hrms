@@ -42,6 +42,37 @@ async function releaseAdvisoryLock(supabase: SupabaseClient, tenantId: string): 
   await supabase.rpc('release_attendance_advisory_lock', { p_tenant_id: tenantId })
 }
 
+// ── Ghost advisory lock detection ────────────────────────────────────────────
+// When pg_try_advisory_lock returns false the lock is held by a PostgreSQL
+// session.  In Supabase (PgBouncer transaction-mode), the release RPC runs on a
+// DIFFERENT connection than the one that acquired the lock, so the release is a
+// silent no-op — the lock stays on the original session until that connection is
+// recycled by the pool.  This creates a "ghost" advisory lock that blocks all
+// subsequent runs indefinitely.
+//
+// Recovery: read the table lock.  If it is NOT running, or IS running but past
+// its TTL, the previous job is definitely gone and the advisory lock is a ghost.
+// In that case we fall through to the table-lock layer, which handles TTL
+// takeover itself.  Only reject 409 when the table lock shows an ACTIVE run
+// still within its TTL — meaning a real concurrent process is genuinely running.
+
+async function isAdvisoryLockGhost(
+  supabase:  SupabaseClient,
+  tenantId:  string,
+): Promise<boolean> {
+  const { data: row } = await supabase
+    .from('attendance_processing_lock')
+    .select('is_running, started_at, lock_ttl_seconds')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (!row || !row.is_running || !row.started_at) return true  // table says not running → ghost
+
+  const ageMs = Date.now() - new Date(row.started_at).getTime()
+  const ttlMs = (row.lock_ttl_seconds ?? 900) * 1_000
+  return ageMs > ttlMs  // table lock stale → ghost
+}
+
 // ── Layer 2: Table lock with TTL takeover ─────────────────────────────────────
 
 /**
@@ -161,22 +192,44 @@ export default async function processRoute(fastify: FastifyInstance) {
       }
 
       // Track which locks were acquired so finally only releases what it holds
-      let advisoryAcquired = false
-      let tableAcquired    = false
+      let advisoryAcquired  = false
+      let advisoryRpcFailed = false   // RPC infrastructure failure vs. lock genuinely held
+      let tableAcquired     = false
 
       // ── Layer 1: Advisory lock ──────────────────────────────────────────────
+      // acquireAdvisoryLock returns false when the lock IS held (another instance running).
+      // It throws when the RPC itself fails (DB connection, function missing, etc.).
+      // These two cases must be treated differently:
+      //   false → 409 ALREADY_RUNNING (another job is genuinely running)
+      //   throw → fall through to table lock (infrastructure error, not a running job)
       try {
         advisoryAcquired = await acquireAdvisoryLock(fastify.supabase, tenantId)
       } catch (err) {
-        req.log.error({ err, module: 'attendance', route: 'process' }, 'advisory lock RPC error')
-        // Non-fatal: advisory lock failure falls through to table lock
+        req.log.error(
+          { err, module: 'attendance', route: 'process' },
+          'advisory lock RPC error — advisory lock unavailable, falling through to table lock',
+        )
+        advisoryRpcFailed = true
       }
 
-      if (!advisoryAcquired) {
-        return reply.code(409).send({
-          error:   'ALREADY_RUNNING',
-          message: 'Attendance processing is already running for this tenant. Try again shortly.',
-        })
+      // Lock held by another instance — but check for ghost before rejecting.
+      // PgBouncer transaction-mode sends the release RPC to a different session,
+      // so pg_advisory_unlock is a no-op and the lock lingers on the dead session.
+      // Ghost check: if the table lock is stale or not running, the advisory lock
+      // belongs to a crashed job → fall through to table-lock TTL takeover.
+      if (!advisoryAcquired && !advisoryRpcFailed) {
+        const ghost = await isAdvisoryLockGhost(fastify.supabase, tenantId).catch(() => false)
+        if (!ghost) {
+          return reply.code(409).send({
+            error:   'ALREADY_RUNNING',
+            message: 'Attendance processing is already running for this tenant. Try again shortly.',
+          })
+        }
+        req.log.warn(
+          { tenantId, module: 'attendance', route: 'process' },
+          'ghost advisory lock detected (PgBouncer session leak) — table lock stale, falling through to TTL takeover',
+        )
+        // advisoryAcquired stays false — finally block skips advisory release (correct)
       }
 
       // ── Layer 2: Table lock (with TTL takeover) ─────────────────────────────

@@ -7,6 +7,7 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -34,7 +35,15 @@ function formatBytes(bytes?: number) {
 }
 
 export function Documents() {
-  const { tenant } = useAuthStore()
+  const { tenant, profile } = useAuthStore()
+
+  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -320,10 +329,9 @@ export function Documents() {
             {/* Expiry */}
             <div className="space-y-1.5">
               <Label>Expiry Date <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Input
-                type="date"
+              <DateInput
                 value={uploadMeta.expires_at}
-                onChange={(e) => setUploadMeta((p) => ({ ...p, expires_at: e.target.value }))}
+                onChange={(v) => setUploadMeta((p) => ({ ...p, expires_at: v }))}
               />
             </div>
 

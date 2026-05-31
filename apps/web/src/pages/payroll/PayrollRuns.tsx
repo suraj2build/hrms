@@ -35,6 +35,24 @@ import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import { toast }         from 'sonner'
+import {
+  IntelligenceLoadingSkeleton,
+  IntelligenceEmptyState,
+} from '@/components/ui/intelligence/index.js'
+import {
+  PFModeBadge,
+  ESIStatusBadge,
+  StatutoryExplainer,
+  StatutorySummaryStrip,
+  InfoTooltip,
+  TooltipProvider,
+  PF_MODE_TOOLTIP,
+  ESI_STATUS_TOOLTIP,
+  PF_MODE_EXPLAIN,
+  ESI_STATUS_EXPLAIN,
+  type PFMode,
+  type ESIStatusType,
+} from '@/components/payroll/StatutoryBadges'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,6 +152,24 @@ interface SlipListResponse {
   offset: number
 }
 
+// ── Statutory contribution types (for slip detail statutory section) ─────────
+
+interface EPFContributionRow {
+  pf_wages:              number
+  employee_contribution: number
+  employer_pf:           number
+  employer_eps:          number
+  edli_contribution:     number
+  is_capped:             boolean
+}
+
+interface ESIContributionRow {
+  esi_wages:             number
+  is_eligible:           boolean
+  employee_contribution: number
+  employer_contribution: number
+}
+
 // ── Force-finalize types ──────────────────────────────────────────────────────
 
 interface MissingAttendanceEmployee {
@@ -212,9 +248,10 @@ function fmtCurrency(n: number): string {
 }
 
 function fmtMonth(m: string): string {
-  const [y, mo] = m.split('-')
-  const d = new Date(Number(y), Number(mo) - 1, 1)
-  return d.toLocaleString('default', { month: 'long', year: 'numeric' })
+  const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function prevMonthStr(m: string): string {
@@ -565,6 +602,30 @@ function SlipDetailDialog({
   const deductions  = slip.component_breakdown.filter(c => c.component_type === 'deduction')
   const empContribs = slip.component_breakdown.filter(c => c.component_type === 'employer_contribution')
 
+  // Statutory detail — lazy-fetched per employee+month for PF mode + ESI status
+  const { data: epfData } = useQuery<{ data: EPFContributionRow[] }>({
+    queryKey: ['epf-contrib-slip', slip.employee_id, slip.month],
+    queryFn:  () => api.get(`/payroll/statutory/epf/contributions?month=${slip.month}&employee_id=${slip.employee_id}`),
+    staleTime: 120_000,
+  })
+  const { data: esiData } = useQuery<{ data: ESIContributionRow[] }>({
+    queryKey: ['esi-contrib-slip', slip.employee_id, slip.month],
+    queryFn:  () => api.get(`/payroll/statutory/esi/contributions?month=${slip.month}&employee_id=${slip.employee_id}`),
+    staleTime: 120_000,
+  })
+
+  const epfRow = epfData?.data?.[0] ?? null
+  const esiRow = esiData?.data?.[0] ?? null
+
+  // Derive PF mode and ESI status from contribution records
+  const pfMode: PFMode | null = epfRow
+    ? (epfRow.is_capped ? 'capped' : 'actual')
+    : null
+
+  const esiStatus: ESIStatusType | null = esiRow
+    ? (esiRow.is_eligible ? 'eligible' : 'not_applicable')
+    : null
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -647,6 +708,83 @@ function SlipDetailDialog({
               </div>
             ))}
           </div>
+        )}
+
+        {/* Statutory Deductions — EPF & ESI visibility */}
+        {(epfRow || esiRow) && (
+          <TooltipProvider>
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+
+            {/* Compact summary strip */}
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                Statutory Deductions
+              </p>
+              <StatutorySummaryStrip
+                items={[
+                  ...(pfMode ? [{ label: 'PF', value: pfMode === 'capped' ? 'Capped' : 'Actual', accent: false }] : []),
+                  ...(esiStatus ? [{ label: 'ESI', value: esiStatus === 'eligible' ? 'Active' : 'N/A', accent: false }] : []),
+                ]}
+              />
+            </div>
+
+            {/* EPF section — only show detail when there's something to explain */}
+            {epfRow && pfMode && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-foreground">EPF</span>
+                  <PFModeBadge mode={pfMode} />
+                  <InfoTooltip text={PF_MODE_TOOLTIP[pfMode]} />
+                </div>
+                {/* "Why?" explainer — only shown for exceptions */}
+                {pfMode !== 'actual' && (
+                  <p className="text-[10px] text-muted-foreground leading-snug pl-0.5">
+                    {PF_MODE_EXPLAIN[pfMode]}
+                  </p>
+                )}
+                <div className="space-y-1 pl-0.5">
+                  <StatutoryExplainer
+                    label="PF Wage Basis"
+                    value={`${fmtCurrency(epfRow.pf_wages)}${epfRow.is_capped ? ' (capped)' : ''}`}
+                    tooltip="Wages on which PF is calculated. May differ from gross pay when HRA or other non-PF components are excluded."
+                  />
+                  <StatutoryExplainer label="Employee PF"  value={fmtCurrency(epfRow.employee_contribution)} />
+                  <StatutoryExplainer label="Employer EPF" value={fmtCurrency(epfRow.employer_pf)}          muted tooltip="Employer's PF contribution (3.67% of PF wages, ceiling-capped)." />
+                  <StatutoryExplainer label="Employer EPS" value={fmtCurrency(epfRow.employer_eps)}         muted tooltip="Employees' Pension Scheme — 8.33% of PF wages, always capped at ₹15,000." />
+                  {epfRow.edli_contribution > 0 && (
+                    <StatutoryExplainer label="EDLI" value={fmtCurrency(epfRow.edli_contribution)} muted tooltip="Employees' Deposit Linked Insurance — 0.5% of PF wages, max ₹75/month." />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {epfRow && esiRow && <div className="border-t border-border/40" />}
+
+            {/* ESI section */}
+            {esiRow && esiStatus && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-foreground">ESI</span>
+                  <ESIStatusBadge status={esiStatus} />
+                  <InfoTooltip text={ESI_STATUS_TOOLTIP[esiStatus]} />
+                </div>
+                {/* "Why?" explainer for exceptions only */}
+                {esiStatus === 'not_applicable' && (
+                  <p className="text-[10px] leading-snug pl-0.5 text-muted-foreground">
+                    {ESI_STATUS_EXPLAIN[esiStatus]}
+                  </p>
+                )}
+                {esiRow.is_eligible ? (
+                  <div className="space-y-1 pl-0.5">
+                    <StatutoryExplainer label="ESI Wage Basis"  value={fmtCurrency(esiRow.esi_wages)}             tooltip="Gross wages on which ESI is calculated — should equal gross pay for ESI-eligible employees." />
+                    <StatutoryExplainer label="Employee ESI"    value={fmtCurrency(esiRow.employee_contribution)} />
+                    <StatutoryExplainer label="Employer ESI"    value={fmtCurrency(esiRow.employer_contribution)} muted tooltip="Employer ESI at 3.25% of ESI wages." />
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+          </TooltipProvider>
         )}
 
         {slip.held_reason && (
@@ -743,14 +881,14 @@ function SlipsPanel({
         {/* Table */}
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
-            <div className="flex items-center justify-center py-12 text-xs text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />Loading slips…
+            <div className="px-4 pt-4">
+              <IntelligenceLoadingSkeleton rows={6} />
             </div>
           ) : slips.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-xs text-muted-foreground gap-2">
-              <FileText className="h-8 w-8 opacity-30" />
-              No slips found.
-            </div>
+            <IntelligenceEmptyState
+              title="No slips found"
+              description="No pay slips match your search criteria for this run."
+            />
           ) : (
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-muted/80 backdrop-blur">
@@ -1721,7 +1859,7 @@ function PayrollAuditTimeline({ run }: { run: PayrollRun }) {
             {ev.label}
             {' '}
             <span className="text-foreground font-medium">
-              {new Date(ev.time).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+              {(() => { const _s = ev.time; const _dt = new Date(_s.length === 10 ? _s + 'T12:00:00Z' : _s); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_dt.getTime()) ? '—' : `${String(_dt.getUTCDate()).padStart(2,'0')}-${_M[_dt.getUTCMonth()]}-${_dt.getUTCFullYear()}` })()}
             </span>
             {ev.actor && <span className="text-muted-foreground"> · {ev.actor}</span>}
           </span>
@@ -2145,15 +2283,12 @@ export function PayrollRuns() {
             icon={<FileText className="h-4 w-4 text-muted-foreground" />}
           >
             {runsLoading ? (
-              <div className="flex items-center justify-center py-8 text-xs text-muted-foreground gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />Loading runs…
-              </div>
+              <IntelligenceLoadingSkeleton rows={4} />
             ) : runs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-3 text-muted-foreground">
-                <DollarSign className="h-10 w-10 opacity-30" />
-                <p className="text-sm">No payroll runs yet.</p>
-                <p className="text-xs opacity-70">Use the panel on the left to process your first payroll.</p>
-              </div>
+              <IntelligenceEmptyState
+                title="No payroll runs yet"
+                description="Use the panel on the left to process your first payroll run."
+              />
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {runs.map(run => (

@@ -12,6 +12,38 @@ export interface NotificationCenterProps {
   onNavigate:    (link: string) => void
 }
 
+// ── Time-bucket helpers ───────────────────────────────────────────────────────
+
+type TimeBucket = 'Today' | 'Yesterday' | 'This Week' | 'Older'
+
+function getTimeBucket(iso: string): TimeBucket {
+  const now     = new Date()
+  const date    = new Date(iso)
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const diffMs  = todayStart.getTime() - new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const diffDays = Math.round(diffMs / 86_400_000)
+  if (diffDays === 0)        return 'Today'
+  if (diffDays === 1)        return 'Yesterday'
+  if (diffDays < 7)          return 'This Week'
+  return 'Older'
+}
+
+const BUCKET_ORDER: TimeBucket[] = ['Today', 'Yesterday', 'This Week', 'Older']
+
+function groupByBucket(notifications: NotificationData[]): Array<{ label: TimeBucket; items: NotificationData[] }> {
+  const map = new Map<TimeBucket, NotificationData[]>()
+  for (const n of notifications) {
+    const bucket = getTimeBucket(n.created_at)
+    const existing = map.get(bucket)
+    if (existing) {
+      existing.push(n)
+    } else {
+      map.set(bucket, [n])
+    }
+  }
+  return BUCKET_ORDER.filter(b => map.has(b)).map(b => ({ label: b, items: map.get(b)! }))
+}
+
 export function NotificationCenter({
   notifications,
   unreadCount,
@@ -54,13 +86,20 @@ export function NotificationCenter({
             <p className="text-xs text-muted-foreground">No notifications</p>
           </div>
         ) : (
-          notifications.map((n) => (
-            <NotificationItem
-              key={n.id}
-              notification={n}
-              onRead={onReadOne}
-              onNavigate={onNavigate}
-            />
+          groupByBucket(notifications).map(({ label, items }) => (
+            <div key={label}>
+              <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted/30 border-b border-border/40">
+                {label}
+              </div>
+              {items.map((n) => (
+                <NotificationItem
+                  key={n.id}
+                  notification={n}
+                  onRead={onReadOne}
+                  onNavigate={onNavigate}
+                />
+              ))}
+            </div>
           ))
         )}
       </div>

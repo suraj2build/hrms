@@ -35,8 +35,8 @@ export interface LeavePolicy {
   id:                     string
   tenant_id:              string
   leave_type_id:          string
-  /** 'monthly' | 'yearly' | 'upfront' */
-  accrual_type:           'monthly' | 'yearly' | 'upfront'
+  /** 'monthly' | 'quarterly' | 'yearly' | 'upfront' */
+  accrual_type:           'monthly' | 'quarterly' | 'yearly' | 'upfront'
   /** Total days per year the policy awards */
   accrual_days_per_year:  number
   /** Maximum balance that can accumulate — null = unlimited */
@@ -212,6 +212,14 @@ export function computeEntitlement(
  */
 export function computeMonthlyAccrualAmount(policy: LeavePolicy): number {
   return round1(policy.accrual_days_per_year / 12)
+}
+
+/**
+ * Quarterly accrual amount = annual / 4, rounded to 1 decimal place.
+ * Only runs in quarter-start months: Jan (1), Apr (4), Jul (7), Oct (10).
+ */
+export function computeQuarterlyAccrualAmount(policy: LeavePolicy): number {
+  return round1(policy.accrual_days_per_year / 4)
 }
 
 // ── Policy fetch ───────────────────────────────────────────────────────────────
@@ -674,10 +682,10 @@ async function writeLedgerEntry(
 }
 
 /**
- * Compute quarterly accrual days for a given quarter number (1-4).
+ * Compute quarterly accrual days for an engine policy rule.
  * Each quarter = accrual_days_per_year / 4, rounded to 1 dp.
  */
-function computeQuarterlyAccrualAmount(rule: EnginePolicyRule): number {
+function computeEngineQuarterlyAmount(rule: EnginePolicyRule): number {
   return round1(rule.accrual_days_per_year / 4)
 }
 
@@ -855,7 +863,7 @@ export async function runEngineMonthlyAccrual(
         if (!(QUARTER_START_MONTHS as readonly number[]).includes(month)) {
           result.skipped++; continue
         }
-        accrualAmount = computeQuarterlyAccrualAmount(rule)
+        accrualAmount = computeEngineQuarterlyAmount(rule)
       }
 
       if (accrualAmount <= 0) { result.skipped++; continue }

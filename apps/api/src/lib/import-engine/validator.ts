@@ -53,6 +53,48 @@ function parseNumber(val: string): number | null {
   return isNaN(n) ? null : n
 }
 
+// ── Lookup helpers (resolve code → UUID, stored in normalizedData) ────────────
+
+/**
+ * Resolve a set of employee_codes to { code → employee_id } map.
+ * Invalid codes are not included — callers emit errors for missing entries.
+ */
+async function resolveEmployeeCodes(
+  supabase: SupabaseClient,
+  tenantId: string,
+  codes: string[],
+): Promise<Map<string, string>> {
+  if (codes.length === 0) return new Map()
+  const { data } = await supabase
+    .from('employees')
+    .select('id, employee_code')
+    .eq('tenant_id', tenantId)
+    .in('employee_code', codes)
+  if (!data) return new Map()
+  return new Map((data as any[]).map((r) => [String(r.employee_code).toUpperCase(), r.id as string]))
+}
+
+/**
+ * Resolve a set of code values from any tenant-scoped table to { code → id } map.
+ * Returns empty map on error — callers decide whether missing codes are errors or warnings.
+ */
+async function resolveCodeToId(
+  supabase: SupabaseClient,
+  tenantId: string,
+  table: string,
+  codeColumn: string,
+  codes: string[],
+): Promise<Map<string, string>> {
+  if (codes.length === 0) return new Map()
+  const { data } = await supabase
+    .from(table)
+    .select(`id, ${codeColumn}`)
+    .eq('tenant_id', tenantId)
+    .in(codeColumn, codes)
+  if (!data) return new Map()
+  return new Map((data as any[]).map((r) => [String(r[codeColumn] ?? '').toUpperCase(), r.id as string]))
+}
+
 // ── Per-type normalisers & validators ─────────────────────────────────────────
 
 function validateEmployee(
@@ -294,6 +336,301 @@ function validateGenericMaster(
   }
 }
 
+// ── Enterprise import validators ─────────────────────────────────────────────
+
+function validateEmployeeCompensation(
+  rowNumber: number,
+  raw: Record<string, string>,
+  batchKeys: Set<string>,
+): ValidatedRow {
+  const errors: RowError[]   = []
+  const warnings: RowError[] = []
+  const norm: Record<string, unknown> = {}
+
+  const d: Record<string, string> = {}
+  for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
+
+  // employee_code — required, uppercase
+  if (!d.employee_code) {
+    errors.push({ field: 'employee_code', message: 'Employee code is required', severity: 'error' })
+  } else {
+    norm.employee_code = d.employee_code.toUpperCase()
+  }
+
+  // effective_from — required, YYYY-MM-DD
+  if (!d.effective_from) {
+    errors.push({ field: 'effective_from', message: 'Effective from date is required', severity: 'error' })
+  } else if (!DATE_REGEX.test(d.effective_from) || isNaN(Date.parse(d.effective_from))) {
+    errors.push({
+      field: 'effective_from',
+      message: `Invalid date format "${d.effective_from}" — expected YYYY-MM-DD`,
+      severity: 'error',
+    })
+  } else {
+    norm.effective_from = d.effective_from
+  }
+
+  // ctc_annual — required, positive number
+  if (!d.ctc_annual) {
+    errors.push({ field: 'ctc_annual', message: 'CTC Annual is required', severity: 'error' })
+  } else {
+    const ctc = parseNumber(d.ctc_annual)
+    if (ctc === null || ctc <= 0) {
+      errors.push({ field: 'ctc_annual', message: `Invalid CTC "${d.ctc_annual}" — must be a positive number`, severity: 'error' })
+    } else {
+      norm.ctc_annual = ctc
+    }
+  }
+
+  // salary_structure_code — optional
+  if (d.salary_structure_code) norm.salary_structure_code = d.salary_structure_code
+
+  // notes — optional
+  if (d.notes) norm.notes = d.notes
+
+  // Batch duplicate check: same employee_code + effective_from pair
+  const batchKey = `${(norm.employee_code as string) ?? ''}|${(norm.effective_from as string) ?? ''}`
+  let isDuplicate = false
+  if (norm.employee_code && norm.effective_from) {
+    if (batchKeys.has(batchKey)) {
+      errors.push({
+        field: 'employee_code',
+        message: `Duplicate employee_code + effective_from "${d.employee_code} / ${d.effective_from}" within this batch`,
+        severity: 'error',
+      })
+      isDuplicate = true
+    } else {
+      batchKeys.add(batchKey)
+    }
+  }
+
+  return { rowNumber, originalData: raw, normalizedData: norm, errors, warnings, isValid: errors.length === 0, isDuplicate }
+}
+
+function validateLeaveOpeningBalance(
+  rowNumber: number,
+  raw: Record<string, string>,
+  batchKeys: Set<string>,
+): ValidatedRow {
+  const errors: RowError[]   = []
+  const warnings: RowError[] = []
+  const norm: Record<string, unknown> = {}
+
+  const d: Record<string, string> = {}
+  for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
+
+  // employee_code — required
+  if (!d.employee_code) {
+    errors.push({ field: 'employee_code', message: 'Employee code is required', severity: 'error' })
+  } else {
+    norm.employee_code = d.employee_code.toUpperCase()
+  }
+
+  // leave_type_name — required
+  if (!d.leave_type_name) {
+    errors.push({ field: 'leave_type_name', message: 'Leave type name is required', severity: 'error' })
+  } else {
+    norm.leave_type_name = d.leave_type_name
+  }
+
+  // balance — required, non-negative
+  if (!d.balance) {
+    errors.push({ field: 'balance', message: 'Balance is required', severity: 'error' })
+  } else {
+    const bal = parseNumber(d.balance)
+    if (bal === null || bal < 0) {
+      errors.push({ field: 'balance', message: `Invalid balance "${d.balance}" — must be a non-negative number`, severity: 'error' })
+    } else {
+      norm.balance = bal
+    }
+  }
+
+  // year — optional, defaults to current year
+  if (d.year) {
+    const y = parseNumber(d.year)
+    if (y === null || !Number.isInteger(y) || y < 2000 || y > 2100) {
+      errors.push({ field: 'year', message: `Invalid year "${d.year}" — expected a 4-digit year`, severity: 'error' })
+    } else {
+      norm.year = y
+    }
+  } else {
+    norm.year = new Date().getFullYear()
+  }
+
+  // carry_forward_balance — optional, defaults to 0
+  if (d.carry_forward_balance) {
+    const cf = parseNumber(d.carry_forward_balance)
+    if (cf === null || cf < 0) {
+      errors.push({ field: 'carry_forward_balance', message: `Invalid carry_forward_balance "${d.carry_forward_balance}"`, severity: 'error' })
+    } else {
+      norm.carry_forward_balance = cf
+    }
+  } else {
+    norm.carry_forward_balance = 0
+  }
+
+  // Batch duplicate check: same employee + leave_type + year
+  const batchKey = `${(norm.employee_code as string) ?? ''}|${(norm.leave_type_name as string) ?? ''}|${norm.year ?? ''}`
+  let isDuplicate = false
+  if (norm.employee_code && norm.leave_type_name) {
+    if (batchKeys.has(batchKey)) {
+      errors.push({
+        field: 'employee_code',
+        message: `Duplicate employee + leave type + year combination "${d.employee_code} / ${d.leave_type_name} / ${norm.year}" in this batch`,
+        severity: 'error',
+      })
+      isDuplicate = true
+    } else {
+      batchKeys.add(batchKey)
+    }
+  }
+
+  return { rowNumber, originalData: raw, normalizedData: norm, errors, warnings, isValid: errors.length === 0, isDuplicate }
+}
+
+function validateShiftAssignment(
+  rowNumber: number,
+  raw: Record<string, string>,
+  batchKeys: Set<string>,
+): ValidatedRow {
+  const errors: RowError[]   = []
+  const warnings: RowError[] = []
+  const norm: Record<string, unknown> = {}
+
+  const d: Record<string, string> = {}
+  for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
+
+  // employee_code — required
+  if (!d.employee_code) {
+    errors.push({ field: 'employee_code', message: 'Employee code is required', severity: 'error' })
+  } else {
+    norm.employee_code = d.employee_code.toUpperCase()
+  }
+
+  // shift_code — required
+  if (!d.shift_code) {
+    errors.push({ field: 'shift_code', message: 'Shift code is required', severity: 'error' })
+  } else {
+    norm.shift_code = d.shift_code.toUpperCase()
+  }
+
+  // effective_from — required, YYYY-MM-DD
+  if (!d.effective_from) {
+    errors.push({ field: 'effective_from', message: 'Effective from date is required', severity: 'error' })
+  } else if (!DATE_REGEX.test(d.effective_from) || isNaN(Date.parse(d.effective_from))) {
+    errors.push({
+      field: 'effective_from',
+      message: `Invalid date format "${d.effective_from}" — expected YYYY-MM-DD`,
+      severity: 'error',
+    })
+  } else {
+    norm.effective_from = d.effective_from
+  }
+
+  // Batch duplicate: same employee + effective_from (one shift per employee per date)
+  const batchKey = `${(norm.employee_code as string) ?? ''}|${(norm.effective_from as string) ?? ''}`
+  let isDuplicate = false
+  if (norm.employee_code && norm.effective_from) {
+    if (batchKeys.has(batchKey)) {
+      errors.push({
+        field: 'employee_code',
+        message: `Duplicate employee + effective_from "${d.employee_code} / ${d.effective_from}" in this batch — only one shift per employee per date allowed`,
+        severity: 'error',
+      })
+      isDuplicate = true
+    } else {
+      batchKeys.add(batchKey)
+    }
+  }
+
+  return { rowNumber, originalData: raw, normalizedData: norm, errors, warnings, isValid: errors.length === 0, isDuplicate }
+}
+
+// ── Compensation Revision validator ───────────────────────────────────────────
+
+function validateCompensationRevision(
+  rowNumber: number,
+  raw: Record<string, string>,
+  batchKeys: Set<string>,
+): ValidatedRow {
+  const errors: RowError[]   = []
+  const warnings: RowError[] = []
+  const norm: Record<string, unknown> = {}
+
+  const d: Record<string, string> = {}
+  for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
+
+  // employee_code — required
+  if (!d.employee_code) {
+    errors.push({ field: 'employee_code', message: 'Employee code is required', severity: 'error' })
+  } else {
+    norm.employee_code = d.employee_code.toUpperCase()
+  }
+
+  // revision_type — required enum
+  const REVISION_TYPES = ['increment','promotion','restructure','correction','transfer']
+  if (!d.revision_type) {
+    errors.push({ field: 'revision_type', message: 'Revision type is required', severity: 'error' })
+  } else if (!REVISION_TYPES.includes(d.revision_type.toLowerCase())) {
+    errors.push({
+      field: 'revision_type',
+      message: `Invalid revision_type "${d.revision_type}". Allowed: ${REVISION_TYPES.join(', ')}`,
+      severity: 'error',
+    })
+  } else {
+    norm.revision_type = d.revision_type.toLowerCase()
+  }
+
+  // effective_date — required YYYY-MM-DD
+  if (!d.effective_date) {
+    errors.push({ field: 'effective_date', message: 'Effective date is required', severity: 'error' })
+  } else if (!DATE_REGEX.test(d.effective_date) || isNaN(Date.parse(d.effective_date))) {
+    errors.push({ field: 'effective_date', message: `Invalid date "${d.effective_date}" — expected YYYY-MM-DD`, severity: 'error' })
+  } else {
+    norm.effective_date = d.effective_date
+  }
+
+  // new_ctc_annual — required positive number
+  if (!d.new_ctc_annual) {
+    errors.push({ field: 'new_ctc_annual', message: 'New annual CTC is required', severity: 'error' })
+  } else {
+    const ctc = parseNumber(d.new_ctc_annual)
+    if (ctc === null || ctc <= 0) {
+      errors.push({ field: 'new_ctc_annual', message: `Invalid CTC "${d.new_ctc_annual}" — must be a positive number`, severity: 'error' })
+    } else {
+      norm.new_ctc_annual = ctc
+    }
+  }
+
+  // reason — required
+  if (!d.reason) {
+    errors.push({ field: 'reason', message: 'Reason is required', severity: 'error' })
+  } else {
+    norm.reason = d.reason
+  }
+
+  // notes — optional
+  if (d.notes) norm.notes = d.notes
+
+  // Batch duplicate: same employee + effective_date + revision_type (DB UNIQUE constraint)
+  const batchKey = `${(norm.employee_code as string) ?? ''}|${(norm.effective_date as string) ?? ''}|${(norm.revision_type as string) ?? ''}`
+  let isDuplicate = false
+  if (norm.employee_code && norm.effective_date && norm.revision_type) {
+    if (batchKeys.has(batchKey)) {
+      errors.push({
+        field: 'employee_code',
+        message: `Duplicate employee + effective_date + revision_type in this batch — only one ${d.revision_type} revision per employee per date is allowed`,
+        severity: 'error',
+      })
+      isDuplicate = true
+    } else {
+      batchKeys.add(batchKey)
+    }
+  }
+
+  return { rowNumber, originalData: raw, normalizedData: norm, errors, warnings, isValid: errors.length === 0, isDuplicate }
+}
+
 // ── DB existence checks ───────────────────────────────────────────────────────
 
 async function checkExistingCodes(
@@ -331,6 +668,14 @@ export async function validateImportRows(
 
     if (masterType === 'employees') {
       vr = validateEmployee(rowNumber, rows[i], batchCodes)
+    } else if (masterType === 'employee_compensation') {
+      vr = validateEmployeeCompensation(rowNumber, rows[i], batchCodes)
+    } else if (masterType === 'leave_opening_balances') {
+      vr = validateLeaveOpeningBalance(rowNumber, rows[i], batchCodes)
+    } else if (masterType === 'shift_assignments') {
+      vr = validateShiftAssignment(rowNumber, rows[i], batchCodes)
+    } else if (masterType === 'compensation_revisions') {
+      vr = validateCompensationRevision(rowNumber, rows[i], batchCodes)
     } else {
       const spec = MASTER_TEMPLATES[masterType]
       if (!spec) {
@@ -353,57 +698,405 @@ export async function validateImportRows(
   // ── DB Checks ────────────────────────────────────────────────────────────────
 
   if (masterType === 'employees') {
-    // Get all employee_codes that passed basic validation
+    // Collect all valid codes in the batch for DB lookups
     const codesInBatch = validatedRows
-      .filter((r) => r.normalizedData.employee_code)
+      .filter((r) => r.isValid && r.normalizedData.employee_code)
       .map((r) => (r.normalizedData.employee_code as string).toUpperCase())
 
-    const existingEmployeeCodes = await checkExistingCodes(
-      supabase, tenantId, 'employees', 'employee_code', codesInBatch,
-    )
-
-    // Collect ref codes for batch lookup
-    const deptCodes = [
+    // Collect optional ref codes for batch UUID resolution
+    const pick = (field: string) => [
       ...new Set(
         validatedRows
-          .filter((r) => r.normalizedData.department_code)
-          .map((r) => r.normalizedData.department_code as string),
-      ),
-    ]
-    const desgCodes = [
-      ...new Set(
-        validatedRows
-          .filter((r) => r.normalizedData.designation_code)
-          .map((r) => r.normalizedData.designation_code as string),
+          .filter((r) => r.isValid && r.normalizedData[field])
+          .map((r) => r.normalizedData[field] as string),
       ),
     ]
 
-    const existingDeptCodes  = await checkExistingCodes(supabase, tenantId, 'departments',  'code', deptCodes)
-    const existingDesgCodes  = await checkExistingCodes(supabase, tenantId, 'designations', 'code', desgCodes)
+    // Resolve all lookups in parallel
+    const [
+      empCodeMap,
+      deptIdMap,
+      desgIdMap,
+      gradeIdMap,
+      locIdMap,
+      mgrCodeMap,
+    ] = await Promise.all([
+      resolveEmployeeCodes(supabase, tenantId, codesInBatch),
+      resolveCodeToId(supabase, tenantId, 'departments',  'code', pick('department_code')),
+      resolveCodeToId(supabase, tenantId, 'designations', 'code', pick('designation_code')),
+      resolveCodeToId(supabase, tenantId, 'grades',       'code', pick('grade_code')),
+      resolveCodeToId(supabase, tenantId, 'work_locations', 'code', pick('work_location_code')),
+      resolveEmployeeCodes(supabase, tenantId, pick('manager_employee_code')),
+    ])
 
     for (const vr of validatedRows) {
       if (!vr.isValid) continue
 
+      // Mark duplicate & store employee_id (needed for update path in importer)
       const code = (vr.normalizedData.employee_code as string | undefined)?.toUpperCase()
-      if (code && existingEmployeeCodes.has(code)) {
-        vr.isDuplicate = true
-        // Not an error — caller uses mode to decide upsert vs skip
+      if (code) {
+        const empId = empCodeMap.get(code)
+        if (empId) {
+          vr.isDuplicate = true
+          vr.normalizedData.employee_id = empId
+        }
       }
 
+      // Resolve department_code → department_id
       const deptCode = vr.normalizedData.department_code as string | undefined
-      if (deptCode && !existingDeptCodes.has(deptCode.toUpperCase())) {
-        vr.warnings.push({
-          field: 'department_code',
-          message: `Department "${deptCode}" not found — will be ignored`,
-          severity: 'warning',
-        })
+      if (deptCode) {
+        const deptId = deptIdMap.get(deptCode.toUpperCase())
+        if (deptId) {
+          vr.normalizedData.department_id = deptId
+        } else {
+          vr.warnings.push({ field: 'department_code', message: `Department "${deptCode}" not found — will be ignored`, severity: 'warning' })
+        }
       }
 
+      // Resolve designation_code → designation_id
       const desgCode = vr.normalizedData.designation_code as string | undefined
-      if (desgCode && !existingDesgCodes.has(desgCode.toUpperCase())) {
+      if (desgCode) {
+        const desgId = desgIdMap.get(desgCode.toUpperCase())
+        if (desgId) {
+          vr.normalizedData.designation_id = desgId
+        } else {
+          vr.warnings.push({ field: 'designation_code', message: `Designation "${desgCode}" not found — will be ignored`, severity: 'warning' })
+        }
+      }
+
+      // Resolve grade_code → grade_id
+      const gradeCode = vr.normalizedData.grade_code as string | undefined
+      if (gradeCode) {
+        const gradeId = gradeIdMap.get(gradeCode.toUpperCase())
+        if (gradeId) {
+          vr.normalizedData.grade_id = gradeId
+        } else {
+          vr.warnings.push({ field: 'grade_code', message: `Grade "${gradeCode}" not found — will be ignored`, severity: 'warning' })
+        }
+      }
+
+      // Resolve work_location_code → work_location_id
+      const locCode = vr.normalizedData.work_location_code as string | undefined
+      if (locCode) {
+        const locId = locIdMap.get(locCode.toUpperCase())
+        if (locId) {
+          vr.normalizedData.work_location_id = locId
+        } else {
+          vr.warnings.push({ field: 'work_location_code', message: `Work location "${locCode}" not found — will be ignored`, severity: 'warning' })
+        }
+      }
+
+      // Resolve manager_employee_code → manager_id
+      const mgrCode = vr.normalizedData.manager_employee_code as string | undefined
+      if (mgrCode) {
+        const mgrId = mgrCodeMap.get(mgrCode.toUpperCase())
+        if (mgrId) {
+          vr.normalizedData.manager_id = mgrId
+        } else {
+          vr.warnings.push({ field: 'manager_employee_code', message: `Manager "${mgrCode}" not found — will be ignored`, severity: 'warning' })
+        }
+      }
+    }
+  } else if (masterType === 'employee_compensation') {
+    // Validate employee_codes exist + resolve to UUIDs
+    const empCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.employee_code)
+          .map((r) => r.normalizedData.employee_code as string),
+      ),
+    ]
+    const empCodeMap = await resolveEmployeeCodes(supabase, tenantId, empCodes)
+
+    // Resolve salary_structure_codes (optional)
+    const ssCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.salary_structure_code)
+          .map((r) => r.normalizedData.salary_structure_code as string),
+      ),
+    ]
+    let ssCodeMap = new Map<string, string>()
+    if (ssCodes.length > 0) {
+      const { data: ssData } = await supabase
+        .from('salary_structures')
+        .select('id, code')
+        .eq('tenant_id', tenantId)
+        .in('code', ssCodes)
+      if (ssData) {
+        ssCodeMap = new Map((ssData as any[]).map((r) => [String(r.code).toUpperCase(), r.id as string]))
+      }
+    }
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+
+      const code = vr.normalizedData.employee_code as string
+      const empId = empCodeMap.get(code.toUpperCase())
+      if (!empId) {
+        vr.errors.push({ field: 'employee_code', message: `Employee "${code}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      // Store resolved UUID for importer
+      vr.normalizedData.employee_id = empId
+
+      const ssCode = vr.normalizedData.salary_structure_code as string | undefined
+      if (ssCode) {
+        const ssId = ssCodeMap.get(ssCode.toUpperCase())
+        if (!ssId) {
+          vr.warnings.push({ field: 'salary_structure_code', message: `Salary structure "${ssCode}" not found — salary_structure_id will be left blank (assign manually after import)`, severity: 'warning' })
+          delete vr.normalizedData.salary_structure_code
+        } else {
+          vr.normalizedData.salary_structure_id = ssId
+          delete vr.normalizedData.salary_structure_code
+        }
+      }
+
+      // Check if an active compensation already exists for this employee + effective_from
+      const { data: existingComp } = await supabase
+        .from('employee_compensations')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', empId)
+        .eq('effective_from', vr.normalizedData.effective_from as string)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (existingComp) {
+        vr.isDuplicate = true
+        // Not an error — importer will deactivate old and create new (upsert semantics)
+      }
+    }
+  } else if (masterType === 'leave_opening_balances') {
+    // Resolve employee_codes
+    const empCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.employee_code)
+          .map((r) => r.normalizedData.employee_code as string),
+      ),
+    ]
+    const empCodeMap = await resolveEmployeeCodes(supabase, tenantId, empCodes)
+
+    // Resolve leave_type names
+    const leaveTypeNames = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.leave_type_name)
+          .map((r) => r.normalizedData.leave_type_name as string),
+      ),
+    ]
+    let leaveTypeMap = new Map<string, string>()
+    if (leaveTypeNames.length > 0) {
+      const { data: ltData } = await supabase
+        .from('leave_types')
+        .select('id, name')
+        .eq('tenant_id', tenantId)
+        .in('name', leaveTypeNames)
+      if (ltData) {
+        leaveTypeMap = new Map((ltData as any[]).map((r) => [String(r.name).toLowerCase(), r.id as string]))
+      }
+    }
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+
+      const empCode = vr.normalizedData.employee_code as string
+      const empId   = empCodeMap.get(empCode.toUpperCase())
+      if (!empId) {
+        vr.errors.push({ field: 'employee_code', message: `Employee "${empCode}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.employee_id = empId
+
+      const ltName = vr.normalizedData.leave_type_name as string
+      const ltId   = leaveTypeMap.get(ltName.toLowerCase())
+      if (!ltId) {
+        vr.errors.push({ field: 'leave_type_name', message: `Leave type "${ltName}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.leave_type_id = ltId
+
+      // Check for existing balance (upsert will overwrite)
+      const { data: existingBal } = await supabase
+        .from('employee_leave_balance')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', empId)
+        .eq('leave_type_id', ltId)
+        .eq('year', vr.normalizedData.year as number)
+        .maybeSingle()
+
+      if (existingBal) {
+        vr.isDuplicate = true // Will overwrite existing opening balance
+      }
+    }
+  } else if (masterType === 'shift_assignments') {
+    // Resolve employee_codes
+    const empCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.employee_code)
+          .map((r) => r.normalizedData.employee_code as string),
+      ),
+    ]
+    const empCodeMap = await resolveEmployeeCodes(supabase, tenantId, empCodes)
+
+    // Resolve shift_codes
+    const shiftCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.shift_code)
+          .map((r) => r.normalizedData.shift_code as string),
+      ),
+    ]
+    let shiftCodeMap = new Map<string, string>()
+    if (shiftCodes.length > 0) {
+      const { data: shiftData } = await supabase
+        .from('shifts')
+        .select('id, code')
+        .eq('tenant_id', tenantId)
+        .in('code', shiftCodes)
+      if (shiftData) {
+        shiftCodeMap = new Map((shiftData as any[]).map((r) => [String(r.code).toUpperCase(), r.id as string]))
+      }
+    }
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+
+      const empCode = vr.normalizedData.employee_code as string
+      const empId   = empCodeMap.get(empCode.toUpperCase())
+      if (!empId) {
+        vr.errors.push({ field: 'employee_code', message: `Employee "${empCode}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.employee_id = empId
+
+      const shiftCode = vr.normalizedData.shift_code as string
+      const shiftId   = shiftCodeMap.get(shiftCode.toUpperCase())
+      if (!shiftId) {
+        vr.errors.push({ field: 'shift_code', message: `Shift "${shiftCode}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.shift_id = shiftId
+
+      // Check for existing assignment at the same effective_from (warn, will replace)
+      const { data: existingAssign } = await supabase
+        .from('employee_shifts')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', empId)
+        .eq('effective_from', vr.normalizedData.effective_from as string)
+        .maybeSingle()
+
+      if (existingAssign) {
+        vr.isDuplicate = true // Will overwrite
+      }
+    }
+  } else if (masterType === 'work_locations') {
+    // ── Resolve optional site_code → site_id ────────────────────────────────
+    // site_code maps to sites.code (added by migration 116).
+    const siteCodesInBatch = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.site_code)
+          .map((r) => (r.normalizedData.site_code as string).toUpperCase()),
+      ),
+    ]
+    let siteCodeMap = new Map<string, string>()
+    if (siteCodesInBatch.length > 0) {
+      const { data: siteRows } = await supabase
+        .from('sites')
+        .select('id, code')
+        .eq('tenant_id', tenantId)
+        .in('code', siteCodesInBatch)
+      if (siteRows) {
+        siteCodeMap = new Map(
+          (siteRows as Array<{ id: string; code: string }>)
+            .filter((s) => s.code)
+            .map((s) => [s.code.toUpperCase(), s.id]),
+        )
+      }
+    }
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+      const siteCode = vr.normalizedData.site_code as string | undefined
+      if (siteCode) {
+        const siteId = siteCodeMap.get(siteCode.toUpperCase())
+        if (siteId) {
+          vr.normalizedData.site_id = siteId
+        } else {
+          vr.warnings.push({
+            field:    'site_code',
+            message:  `Site "${siteCode}" not found — work location will be created without a site assignment`,
+            severity: 'warning',
+          })
+        }
+      }
+    }
+
+    // Generic duplicate check (same as else-branch below)
+    const codesInBatch = validatedRows
+      .filter((r) => r.normalizedData.code)
+      .map((r) => r.normalizedData.code as string)
+    if (codesInBatch.length > 0) {
+      const existingCodes = await checkExistingCodes(
+        supabase, tenantId, 'work_locations', 'code', codesInBatch,
+      )
+      for (const vr of validatedRows) {
+        if (!vr.isValid) continue
+        const code = vr.normalizedData.code as string | undefined
+        if (code && existingCodes.has(code.toUpperCase())) {
+          vr.isDuplicate = true
+        }
+      }
+    }
+
+  } else if (masterType === 'compensation_revisions') {
+    // Resolve employee_codes → employee_ids (required)
+    const empCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.employee_code)
+          .map((r) => r.normalizedData.employee_code as string),
+      ),
+    ]
+    const empCodeMap = await resolveEmployeeCodes(supabase, tenantId, empCodes)
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+      const code  = vr.normalizedData.employee_code as string
+      const empId = empCodeMap.get(code.toUpperCase())
+      if (!empId) {
+        vr.errors.push({ field: 'employee_code', message: `Employee "${code}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.employee_id = empId
+
+      // Warn if a pending revision already exists for the same employee + effective_date
+      const { data: existing } = await supabase
+        .from('compensation_revisions')
+        .select('id, status')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', empId)
+        .eq('effective_date', vr.normalizedData.effective_date as string)
+        .in('status', ['pending', 'approved'])
+        .limit(1)
+        .maybeSingle()
+
+      if (existing) {
+        vr.isDuplicate = true
         vr.warnings.push({
-          field: 'designation_code',
-          message: `Designation "${desgCode}" not found — will be ignored`,
+          field: 'effective_date',
+          message: `A ${(existing as { status: string }).status} revision already exists for this employee on ${vr.normalizedData.effective_date} — will create an additional revision`,
           severity: 'warning',
         })
       }
@@ -412,14 +1105,27 @@ export async function validateImportRows(
     // Generic code-level DB check
     const uniqueKey = masterType === 'leave_types' ? 'name' : 'code'
     const tableMap: Record<string, string> = {
-      shifts:            'shifts',
-      departments:       'departments',
-      designations:      'designations',
-      work_locations:    'work_locations',
-      cost_centers:      'cost_centers',
-      salary_components: 'salary_components',
-      leave_types:       'leave_types',
-      holiday_calendar:  'holiday_calendar',
+      sites:                 'sites',
+      shifts:                'shifts',
+      departments:           'departments',
+      designations:          'designations',
+      work_locations:        'work_locations',
+      cost_centers:          'cost_centers',
+      salary_components:     'salary_components',
+      leave_types:           'leave_types',
+      holiday_calendar:      'holiday_calendar',
+      // Enterprise operational masters
+      grades:                'grades',
+      payroll_groups:        'payroll_groups',
+      employment_categories: 'employment_categories',
+      statutory_groups:      'statutory_groups',
+      asset_categories:      'asset_categories',
+      // Payroll masters
+      salary_structures:     'salary_structures',
+      // Reference data
+      document_types:        'document_types',
+      identity_types:        'identity_types',
+      relationship_types:    'relationship_types',
     }
     const table = tableMap[masterType]
 
@@ -437,6 +1143,70 @@ export async function validateImportRows(
           const val = (vr.normalizedData[uniqueKey] as string | undefined)
           if (val && existingCodes.has(val.toUpperCase())) {
             vr.isDuplicate = true
+          }
+        }
+      }
+    }
+
+    // Designations: resolve department_code → department_id
+    if (masterType === 'designations') {
+      const deptCodes = [
+        ...new Set(
+          validatedRows
+            .filter((r) => r.isValid && r.normalizedData.department_code)
+            .map((r) => (r.normalizedData.department_code as string).toUpperCase()),
+        ),
+      ]
+      if (deptCodes.length > 0) {
+        const deptIdMap = await resolveCodeToId(
+          supabase, tenantId, 'departments', 'code', deptCodes,
+        )
+        for (const vr of validatedRows) {
+          if (!vr.isValid) continue
+          const deptCode = vr.normalizedData.department_code as string | undefined
+          if (deptCode) {
+            const deptId = deptIdMap.get(deptCode.toUpperCase())
+            if (deptId) {
+              vr.normalizedData.department_id = deptId
+            } else {
+              vr.warnings.push({
+                field: 'department_code',
+                message: `Department "${deptCode}" not found — department will be ignored`,
+                severity: 'warning',
+              })
+            }
+          }
+        }
+      }
+    }
+
+    // Departments: resolve parent_code → parent_id (self-referential FK)
+    if (masterType === 'departments') {
+      const parentCodes = [
+        ...new Set(
+          validatedRows
+            .filter((r) => r.isValid && r.normalizedData.parent_code)
+            .map((r) => (r.normalizedData.parent_code as string).toUpperCase()),
+        ),
+      ]
+      if (parentCodes.length > 0) {
+        const parentIdMap = await resolveCodeToId(
+          supabase, tenantId, 'departments', 'code', parentCodes,
+        )
+        for (const vr of validatedRows) {
+          if (!vr.isValid) continue
+          const parentCode = vr.normalizedData.parent_code as string | undefined
+          if (parentCode) {
+            const parentId = parentIdMap.get(parentCode.toUpperCase())
+            if (parentId) {
+              vr.normalizedData.parent_id = parentId
+            } else {
+              vr.warnings.push({
+                field: 'parent_code',
+                message: `Parent department "${parentCode}" not found — parent will be ignored`,
+                severity: 'warning',
+              })
+            }
           }
         }
       }

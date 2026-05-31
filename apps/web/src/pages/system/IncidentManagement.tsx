@@ -128,6 +128,13 @@ const SEVERITY_VARIANT: Record<IncidentSeverity, BadgeVariant> = {
   critical: 'destructive',
 }
 
+const SEVERITY_BORDER: Record<IncidentSeverity, string> = {
+  low:      'border-l-4 border-l-blue-400',
+  medium:   'border-l-4 border-l-amber-400',
+  high:     'border-l-4 border-l-orange-500',
+  critical: 'border-l-4 border-l-red-500',
+}
+
 const STATUS_VARIANT: Record<IncidentStatus, BadgeVariant> = {
   open:           'warning',
   investigating:  'default',
@@ -141,9 +148,12 @@ const STATUS_VARIANT: Record<IncidentStatus, BadgeVariant> = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function humanLabel(s: string) {
@@ -994,6 +1004,7 @@ export function IncidentManagement() {
                     selectedId === inc.id
                       ? 'border-primary/60 bg-primary/5'
                       : 'border-border bg-card',
+                    SEVERITY_BORDER[inc.severity],
                   )}
                 >
                   {/* Top badges */}

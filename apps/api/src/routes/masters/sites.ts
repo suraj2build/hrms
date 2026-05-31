@@ -4,31 +4,49 @@
  * A "site" is a named physical location (branch / campus / floor) with its
  * own timezone.  Sites scope holidays and drive multi-location attendance.
  *
- * GET    /masters/sites        — list all sites for the tenant
- * POST   /masters/sites        — create a new site (hr_admin / super_admin)
- * PUT    /masters/sites/:id    — update a site   (hr_admin / super_admin)
- * DELETE /masters/sites/:id    — delete a site   (hr_admin / super_admin)
+ * ── Workforce Governance (migration 154) ─────────────────────────────────────
  *
- * Note: deleting a site that has employees or holidays linked will fail if
- * ON DELETE RESTRICT is used; migration 057 uses ON DELETE SET NULL for
- * both holiday_calendar.site_id and employees.site_id, so deletions are safe.
+ * Each site now carries two governance defaults that ALL employees inherit:
+ *
+ *   default_roster_id            → Roster Policy (determines whether employee works)
+ *   default_rotation_policy_id   → Rotation Policy (determines which shift applies)
+ *   default_leave_policy_id      → Leave Policy FK fallback (migration 156)
+ *
+ * Employee-level overrides:
+ *   employees.roster_id          → overrides site default_roster_id
+ *   employees.rotation_policy_id → overrides site default_rotation_policy_id
+ *
+ * Legacy field (deprecated):
+ *   default_shift_id             → was 3rd-priority fallback before rotation policies.
+ *                                   Preserved read-only for backward compat.
+ *
+ * Routes:
+ *   GET    /masters/sites        — list all sites for the tenant
+ *   POST   /masters/sites        — create a new site (hr_admin / super_admin)
+ *   PUT    /masters/sites/:id    — update a site   (hr_admin / super_admin)
+ *   DELETE /masters/sites/:id    — delete a site   (hr_admin / super_admin)
  */
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 
+const SELECT_COLS =
+  'id, name, location, timezone, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, created_at'
+
 const schema = z.object({
-  name:              z.string().min(1, 'Name is required').max(120),
-  location:          z.string().max(255).optional(),
-  timezone:          z.string().max(100).default('Asia/Kolkata'),
-  default_roster_id: z.string().uuid().optional().nullable(),
+  name:                        z.string().min(1, 'Name is required').max(120),
+  location:                    z.string().max(255).optional(),
+  timezone:                    z.string().max(100).default('Asia/Kolkata'),
+  default_roster_id:           z.string().uuid().optional().nullable(),
+  default_rotation_policy_id:  z.string().uuid().optional().nullable(),
+  /** migration 156 — site-level default leave policy (FK fallback in resolution chain) */
+  default_leave_policy_id:     z.string().uuid().optional().nullable(),
   /**
-   * Default shift for employees at this site who have no personal shift assignment.
-   * Used as the 3rd-priority fallback in attendance processing after
-   * shift_roster (override) and employee_shifts (standing assignment).
-   * Added by migration 112.
+   * DEPRECATED (migration 154): Legacy default shift fallback.
+   * Replaced by default_rotation_policy_id + rotation_policy_rules.
+   * Accepted on write for backward compat only.
    */
-  default_shift_id:  z.string().uuid().optional().nullable(),
+  default_shift_id:            z.string().uuid().optional().nullable(),
 })
 
 export default async function sitesRoutes(fastify: FastifyInstance) {
@@ -51,7 +69,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('sites')
-      .select('id, name, location, timezone, default_roster_id, default_shift_id, created_at')
+      .select(SELECT_COLS)
       .eq('tenant_id', req.tenantId)
       .order('name')
 
@@ -82,13 +100,47 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       if (!roster) {
         return reply.code(400).send({
           error:   'VALIDATION',
-          message: 'Roster not found in your organisation',
+          message: 'Roster policy not found in your organisation',
           field:   'default_roster_id',
         })
       }
     }
 
-    // Validate default_shift_id belongs to this tenant
+    // Validate default_rotation_policy_id belongs to this tenant
+    if (parsed.data.default_rotation_policy_id) {
+      const { data: rotPolicy } = await fastify.supabase
+        .from('rotation_policies')
+        .select('id')
+        .eq('id', parsed.data.default_rotation_policy_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!rotPolicy) {
+        return reply.code(400).send({
+          error:   'VALIDATION',
+          message: 'Rotation policy not found in your organisation',
+          field:   'default_rotation_policy_id',
+        })
+      }
+    }
+
+    // Validate default_leave_policy_id belongs to this tenant (migration 156)
+    if (parsed.data.default_leave_policy_id) {
+      const { data: leavePolicy } = await fastify.supabase
+        .from('leave_policy_masters')
+        .select('id')
+        .eq('id', parsed.data.default_leave_policy_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!leavePolicy) {
+        return reply.code(400).send({
+          error:   'VALIDATION',
+          message: 'Leave policy not found in your organisation',
+          field:   'default_leave_policy_id',
+        })
+      }
+    }
+
+    // Validate default_shift_id belongs to this tenant (deprecated field)
     if (parsed.data.default_shift_id) {
       const { data: shift } = await fastify.supabase
         .from('shifts')
@@ -108,7 +160,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('sites')
       .insert({ ...parsed.data, tenant_id: req.tenantId })
-      .select('id, name, location, timezone, default_roster_id, default_shift_id, created_at')
+      .select(SELECT_COLS)
       .single()
 
     if (error) {
@@ -145,13 +197,47 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       if (!roster) {
         return reply.code(400).send({
           error:   'VALIDATION',
-          message: 'Roster not found in your organisation',
+          message: 'Roster policy not found in your organisation',
           field:   'default_roster_id',
         })
       }
     }
 
-    // Validate default_shift_id belongs to this tenant (only when supplied)
+    // Validate default_rotation_policy_id belongs to this tenant (only when supplied)
+    if (parsed.data.default_rotation_policy_id) {
+      const { data: rotPolicy } = await fastify.supabase
+        .from('rotation_policies')
+        .select('id')
+        .eq('id', parsed.data.default_rotation_policy_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!rotPolicy) {
+        return reply.code(400).send({
+          error:   'VALIDATION',
+          message: 'Rotation policy not found in your organisation',
+          field:   'default_rotation_policy_id',
+        })
+      }
+    }
+
+    // Validate default_leave_policy_id belongs to this tenant (migration 156)
+    if (parsed.data.default_leave_policy_id) {
+      const { data: leavePolicy } = await fastify.supabase
+        .from('leave_policy_masters')
+        .select('id')
+        .eq('id', parsed.data.default_leave_policy_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!leavePolicy) {
+        return reply.code(400).send({
+          error:   'VALIDATION',
+          message: 'Leave policy not found in your organisation',
+          field:   'default_leave_policy_id',
+        })
+      }
+    }
+
+    // Validate default_shift_id belongs to this tenant (deprecated field)
     if (parsed.data.default_shift_id) {
       const { data: shift } = await fastify.supabase
         .from('shifts')
@@ -173,7 +259,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .update(parsed.data)
       .eq('id', (req.params as any).id)
       .eq('tenant_id', req.tenantId)
-      .select('id, name, location, timezone, default_roster_id, default_shift_id, created_at')
+      .select(SELECT_COLS)
       .single()
 
     if (error) {
@@ -186,17 +272,65 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  // ── DELETE /masters/sites/:id ─────────────────────────────────────────────
+  // ── GET /masters/sites/:id/usage ─────────────────────────────────────────────
+  fastify.get('/:id/usage', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { count, error } = await fastify.supabase
+      .from('work_locations')
+      .select('id', { count: 'exact', head: true })
+      .eq('site_id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    return reply.send({ data: { work_locations: count ?? 0, total: count ?? 0 } })
+  })
+
+  // ── DELETE /masters/sites/:id ─────────────────────────────────────────────────
   fastify.delete('/:id', adminAuth, async (req: any, reply) => {
+    const { id } = (req.params as any)
+    const mergeTo = (req.body as any)?.merge_to as string | undefined
+
+    // Validate merge_to is a UUID if provided
+    if (mergeTo && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(mergeTo)) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
+    }
+
+    const { count, error: countErr } = await fastify.supabase
+      .from('work_locations')
+      .select('id', { count: 'exact', head: true })
+      .eq('site_id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check site usage' })
+
+    const usageCount = count ?? 0
+
+    if (usageCount > 0 && !mergeTo) {
+      return reply.code(409).send({
+        error: 'IN_USE',
+        usageCount,
+        message: `Site has ${usageCount} work location${usageCount !== 1 ? 's' : ''}. Provide merge_to to reassign them.`,
+      })
+    }
+
+    if (mergeTo && usageCount > 0) {
+      const { error: reassignErr } = await fastify.supabase
+        .from('work_locations')
+        .update({ site_id: mergeTo })
+        .eq('site_id', id)
+        .eq('tenant_id', req.tenantId)
+      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+    }
+
     const { error } = await fastify.supabase
       .from('sites')
       .delete()
-      .eq('id', (req.params as any).id)
+      .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    }
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.code(204).send()
   })
 }

@@ -28,7 +28,8 @@ const componentSchema = z.object({
 })
 
 const createCompensationSchema = z.object({
-  salary_structure_id: z.string().uuid('Invalid structure ID'),
+  /** Optional — can set up compensation without assigning a named structure */
+  salary_structure_id: z.string().uuid('Invalid structure ID').optional(),
   effective_from:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
   ctc_annual:          z.number().positive('CTC must be positive'),
   is_active:           z.boolean().optional().default(true),

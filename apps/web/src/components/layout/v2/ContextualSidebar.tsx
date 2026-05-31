@@ -21,6 +21,20 @@ import { getDomainForPath, type Domain, type DomainNavGroup } from './nav-config
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// Colored icon container tokens — one accent per domain
+const DOMAIN_ICON_COLORS: Record<string, { bg: string; text: string }> = {
+  'home':         { bg: 'bg-slate-100',   text: 'text-slate-500'   },
+  'workforce':    { bg: 'bg-indigo-50',   text: 'text-indigo-600'  },
+  'attendance':   { bg: 'bg-amber-50',    text: 'text-amber-600'   },
+  'leave':        { bg: 'bg-emerald-50',  text: 'text-emerald-600' },
+  'payroll':      { bg: 'bg-violet-50',   text: 'text-violet-600'  },
+  'compliance':   { bg: 'bg-rose-50',     text: 'text-rose-600'    },
+  'operations':   { bg: 'bg-sky-50',      text: 'text-sky-600'     },
+  'reports':      { bg: 'bg-blue-50',     text: 'text-blue-600'    },
+  'advanced-ops': { bg: 'bg-fuchsia-50',  text: 'text-fuchsia-600' },
+  'setup':        { bg: 'bg-slate-100',   text: 'text-slate-500'   },
+}
+
 const SESSION_KEY = (domainId: string) => `sidebar-v2-expanded-${domainId}`
 
 function loadExpanded(domainId: string, groups: DomainNavGroup[]): Set<string> {
@@ -48,10 +62,14 @@ interface NavGroupProps {
   expanded:   boolean
   collapsed:  boolean   // sidebar icon-rail mode
   pathname:   string
+  search:     string    // location.search (e.g. "?tab=work-locations")
   onToggle:   () => void
+  domainId:   string
 }
 
-function NavGroupItem({ group, expanded, collapsed, pathname, onToggle }: NavGroupProps) {
+function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, domainId }: NavGroupProps) {
+  const iconColors = DOMAIN_ICON_COLORS[domainId] ?? { bg: 'bg-muted', text: 'text-foreground' }
+
   return (
     <div>
       {/* Group header — hidden in icon-rail mode */}
@@ -59,12 +77,12 @@ function NavGroupItem({ group, expanded, collapsed, pathname, onToggle }: NavGro
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground transition-colors select-none"
+          className="flex items-center justify-between w-full px-3 pt-2 pb-1 text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground/55 hover:text-muted-foreground transition-colors select-none"
         >
           {group.label}
           {expanded
-            ? <ChevronDown className="h-3 w-3" />
-            : <ChevronRight className="h-3 w-3" />
+            ? <ChevronDown className="h-3 w-3 opacity-60" />
+            : <ChevronRight className="h-3 w-3 opacity-60" />
           }
         </button>
       )}
@@ -73,9 +91,18 @@ function NavGroupItem({ group, expanded, collapsed, pathname, onToggle }: NavGro
       {(expanded || collapsed) && (
         <div className={cn('space-y-0.5', !collapsed && 'px-2')}>
           {group.items.map(item => {
-            const isActive = item.exact
-              ? pathname === item.route
-              : pathname === item.route || pathname.startsWith(item.route + '/')
+            // Support routes with query params (e.g. "/admin/masters?tab=work-locations")
+            const isActive = (() => {
+              const qi = item.route.indexOf('?')
+              if (qi !== -1) {
+                const itemPath  = item.route.slice(0, qi)
+                const itemQuery = item.route.slice(qi)   // includes '?'
+                return pathname === itemPath && search === itemQuery
+              }
+              return item.exact
+                ? pathname === item.route
+                : pathname === item.route || pathname.startsWith(item.route + '/')
+            })()
 
             return (
               <Link
@@ -83,20 +110,30 @@ function NavGroupItem({ group, expanded, collapsed, pathname, onToggle }: NavGro
                 to={item.route}
                 title={collapsed ? item.label : undefined}
                 className={cn(
-                  'flex items-center gap-2.5 rounded-lg py-2 text-[13px] transition-colors',
-                  collapsed ? 'justify-center px-0 w-9 mx-auto' : 'px-2.5',
+                  'relative flex items-center gap-2 rounded-lg py-1.5 text-[12.5px] transition-colors',
+                  collapsed ? 'justify-center px-0 w-10 mx-auto' : 'px-1.5',
                   isActive
-                    ? 'bg-primary text-primary-foreground font-medium'
-                    : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                    ? 'bg-primary/[0.12] text-primary font-semibold'
+                    : 'text-sidebar-foreground/75 hover:bg-muted/60 hover:text-sidebar-foreground',
                 )}
               >
-                <item.icon
+                {/* Left active indicator pill */}
+                {isActive && !collapsed && (
+                  <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-[3px] h-[18px] rounded-full bg-primary" />
+                )}
+
+                {/* Colored icon container */}
+                <span
                   className={cn(
-                    'flex-shrink-0',
-                    collapsed ? 'h-5 w-5' : 'h-4 w-4',
-                    isActive ? 'opacity-100' : 'opacity-70',
+                    'flex items-center justify-center rounded-md flex-shrink-0 transition-opacity',
+                    collapsed ? 'h-7 w-7' : 'h-6 w-6',
+                    iconColors.bg,
+                    iconColors.text,
+                    isActive ? 'opacity-100' : 'opacity-75',
                   )}
-                />
+                >
+                  <item.icon className={collapsed ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
+                </span>
                 {!collapsed && (
                   <span className="flex-1 truncate">{item.label}</span>
                 )}
@@ -147,7 +184,7 @@ export function ContextualSidebar() {
       <aside
         className={cn(
           'flex flex-col h-full bg-sidebar border-r border-sidebar-border flex-shrink-0 transition-all duration-300',
-          sidebarCollapsed ? 'w-[52px]' : 'w-[200px]',
+          sidebarCollapsed ? 'w-[52px]' : 'w-[224px]',
         )}
       />
     )
@@ -157,7 +194,7 @@ export function ContextualSidebar() {
     <aside
       className={cn(
         'flex flex-col h-full bg-sidebar border-r border-sidebar-border flex-shrink-0 transition-all duration-300',
-        sidebarCollapsed ? 'w-[52px]' : 'w-[200px]',
+        sidebarCollapsed ? 'w-[52px]' : 'w-[224px]',
       )}
     >
       {/* ── Domain label header ──────────────────────────────────── */}
@@ -182,9 +219,12 @@ export function ContextualSidebar() {
             expanded={expanded.has(group.label)}
             collapsed={sidebarCollapsed}
             pathname={location.pathname}
+            search={location.search}
             onToggle={() => toggleGroup(group.label)}
+            domainId={domain.id}
           />
         ))}
+
       </nav>
 
       {/* ── Collapse toggle ──────────────────────────────────────── */}

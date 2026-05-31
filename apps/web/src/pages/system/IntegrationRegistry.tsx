@@ -11,7 +11,7 @@ import { useState }                              from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plug, Loader2, Plus, ShieldAlert, Activity,
-  ArrowDownLeft, ArrowUpRight, XCircle, CheckCircle2,
+  ArrowDownLeft, ArrowUpRight, XCircle, CheckCircle2, Pencil,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -131,9 +131,12 @@ function authLabel(a: AuthType): string {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 // ── Create dialog ──────────────────────────────────────────────────────────────
@@ -278,6 +281,165 @@ function CreateIntegrationDialog({ onClose, onCreate, isPending }: CreateDialogP
   )
 }
 
+// ── Edit dialog ────────────────────────────────────────────────────────────────
+
+interface EditDialogProps {
+  integration: Integration
+  onClose:     () => void
+  onEdit:      (body: Partial<CreateIntegrationBody & { status: IntegrationStatus }>) => void
+  isPending:   boolean
+}
+
+function EditIntegrationDialog({ integration, onClose, onEdit, isPending }: EditDialogProps) {
+  const [form, setForm] = useState<{
+    name:             string
+    integration_type: IntegrationType
+    endpoint_url:     string
+    auth_type:        AuthType
+    description:      string
+    status:           IntegrationStatus
+  }>({
+    name:             integration.name,
+    integration_type: integration.integration_type,
+    endpoint_url:     integration.endpoint_url,
+    auth_type:        integration.auth_type,
+    description:      integration.description ?? '',
+    status:           integration.status,
+  })
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    onEdit({
+      name:             form.name,
+      integration_type: form.integration_type,
+      endpoint_url:     form.endpoint_url,
+      auth_type:        form.auth_type,
+      description:      form.description || undefined,
+      status:           form.status,
+    })
+  }
+
+  const inputCls =
+    'flex w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 ring-primary/50 placeholder:text-muted-foreground/50'
+  const labelCls = 'block text-xs font-medium text-muted-foreground mb-1'
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+        <div className="w-full max-w-lg rounded-xl border border-border bg-card shadow-xl">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div>
+              <p className="font-semibold text-foreground">Edit Integration</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Update configuration for {integration.name}
+              </p>
+            </div>
+            <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
+            <div>
+              <label className={labelCls}>Name *</label>
+              <input
+                required
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="SAP HR Export"
+                className={inputCls}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Integration Type *</label>
+                <select
+                  required
+                  value={form.integration_type}
+                  onChange={e =>
+                    setForm(f => ({ ...f, integration_type: e.target.value as IntegrationType }))
+                  }
+                  className={inputCls}
+                >
+                  {INTEGRATION_TYPES.map(t => (
+                    <option key={t} value={t}>{typeLabel(t)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Auth Type *</label>
+                <select
+                  required
+                  value={form.auth_type}
+                  onChange={e =>
+                    setForm(f => ({ ...f, auth_type: e.target.value as AuthType }))
+                  }
+                  className={inputCls}
+                >
+                  {AUTH_TYPES.map(a => (
+                    <option key={a} value={a}>{authLabel(a)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className={labelCls}>Endpoint URL *</label>
+              <input
+                required
+                type="url"
+                value={form.endpoint_url}
+                onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))}
+                placeholder="https://api.example.com/v1"
+                className={inputCls}
+              />
+            </div>
+
+            <div>
+              <label className={labelCls}>Status</label>
+              <select
+                value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value as IntegrationStatus }))}
+                className={inputCls}
+              >
+                {(['active', 'inactive', 'maintenance', 'error'] as IntegrationStatus[]).map(s => (
+                  <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelCls}>Description</label>
+              <textarea
+                rows={2}
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="Optional description"
+                className={cn(inputCls, 'resize-none')}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={isPending} className="gap-1.5">
+                {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Save Changes
+              </Button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ── Integration card (list) ────────────────────────────────────────────────────
 
 interface IntegrationCardProps {
@@ -338,6 +500,7 @@ export function IntegrationRegistry() {
 
   const [selectedId,      setSelectedId]      = useState<string | null>(null)
   const [showCreate,      setShowCreate]      = useState(false)
+  const [showEdit,        setShowEdit]        = useState(false)
   const [filterStatus,    setFilterStatus]    = useState('')
   const [filterType,      setFilterType]      = useState('')
   const [healthResult,    setHealthResult]    = useState<HealthCheckResult | null>(null)
@@ -377,6 +540,27 @@ export function IntegrationRegistry() {
       toast.success('Integration registered')
     },
     onError: (e: Error) => toast.error('Failed to register integration', { description: e.message }),
+  })
+
+  const editMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<CreateIntegrationBody & { status: IntegrationStatus }> }) =>
+      api.put(`/system/integrations/${id}`, body),
+    onSuccess: () => {
+      setShowEdit(false)
+      qc.invalidateQueries({ queryKey: ['integrations'] })
+      toast.success('Integration updated')
+    },
+    onError: (e: Error) => toast.error('Failed to update integration', { description: e.message }),
+  })
+
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/system/integrations/${id}`),
+    onSuccess: () => {
+      setSelectedId(null)
+      qc.invalidateQueries({ queryKey: ['integrations'] })
+      toast.success('Integration deactivated')
+    },
+    onError: (e: Error) => toast.error('Failed to deactivate', { description: e.message }),
   })
 
   const healthCheckMutation = useMutation<HealthCheckResult, Error, string>({
@@ -630,6 +814,36 @@ export function IntegrationRegistry() {
                     </div>
                   )}
                 </div>
+
+                {isAdmin && (
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => setShowEdit(true)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </Button>
+                    {selected.status !== 'inactive' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 text-destructive hover:text-destructive"
+                        disabled={deactivateMutation.isPending}
+                        onClick={() => {
+                          if (confirm(`Deactivate "${selected.name}"?`)) {
+                            deactivateMutation.mutate(selected.id)
+                          }
+                        }}
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        Deactivate
+                      </Button>
+                    )}
+                  </div>
+                )}
               </SectionCard>
 
               {/* Audit log */}
@@ -719,6 +933,16 @@ export function IntegrationRegistry() {
           onClose={() => setShowCreate(false)}
           onCreate={body => createMutation.mutate(body)}
           isPending={createMutation.isPending}
+        />
+      )}
+
+      {/* ── Edit dialog ── */}
+      {showEdit && selected && (
+        <EditIntegrationDialog
+          integration={selected}
+          onClose={() => setShowEdit(false)}
+          onEdit={body => editMutation.mutate({ id: selected.id, body })}
+          isPending={editMutation.isPending}
         />
       )}
     </PageContainer>

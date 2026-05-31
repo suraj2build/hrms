@@ -15,7 +15,7 @@ import {
   Clock, Wifi, AlarmClock, CalendarDays, ShieldCheck,
   ClipboardEdit, ClipboardCheck, XCircle, CheckCircle2,
   Zap, Terminal, Info, GitBranch, User, ChevronDown, ChevronUp,
-  ExternalLink,
+  ExternalLink, Upload, RefreshCw,
 } from 'lucide-react'
 import { Link }        from 'react-router-dom'
 import { useState }    from 'react'
@@ -50,9 +50,15 @@ interface DailyRecord {
 interface ForensicsResponse {
   employee:     { id: string; name: string; code: string }
   date:         string
+  // Unified provenance fields
+  source_type:  'biometric' | 'csv_upload' | 'mixed' | 'none'
+  computed_source: string | null
   daily_record: DailyRecord | null
   timeline:     TimelineEvent[]
+  // Pipeline A (biometric)
   raw_punches:  Array<{ id: string; punch_time: string; direction: string | null }>
+  // Pipeline B (CSV upload)
+  csv_punches:  Array<{ id: string; punched_at: string; direction: string | null; source: string }>
   corrections:  Array<{ id: string; status: string; reason: string | null; created_at: string }>
 }
 
@@ -80,6 +86,8 @@ const STATUS_BADGE: Record<string, 'success' | 'warning' | 'destructive' | 'seco
 function iconForType(type: string): React.ComponentType<{ className?: string }> {
   const m: Record<string, React.ComponentType<{ className?: string }>> = {
     raw_punch:            Wifi,
+    csv_punch:            Upload,
+    recompute_job:        RefreshCw,
     session_paired:       Clock,
     shift_resolved:       AlarmClock,
     holiday:              CalendarDays,
@@ -157,7 +165,7 @@ type FilterMode = 'all' | 'anomalies' | 'approvals' | 'policy'
 function filterEvents(events: TimelineEvent[], mode: FilterMode): TimelineEvent[] {
   if (mode === 'all') return events
   if (mode === 'anomalies')
-    return events.filter(e => ['raw_punch', 'session_paired', 'shift_resolved', 'computation_result', 'status_change'].includes(e.type) || e.severity === 'warning' || e.severity === 'error')
+    return events.filter(e => ['raw_punch', 'csv_punch', 'session_paired', 'recompute_job', 'shift_resolved', 'computation_result', 'status_change'].includes(e.type) || e.severity === 'warning' || e.severity === 'error')
   if (mode === 'approvals')
     return events.filter(e => ['leave_applied', 'leave_approved', 'leave_rejected', 'correction_requested', 'correction_approved', 'correction_rejected'].includes(e.type))
   if (mode === 'policy')
@@ -220,11 +228,17 @@ export function ForensicsDrawer({ target, onClose }: ForensicsDrawerProps) {
           {data?.daily_record && (
             <div className="flex gap-3 mt-2 pt-2 border-t border-border/50">
               {[
-                { l: 'Hours',    v: `${data.daily_record.work_hours}h` },
-                { l: 'Late',     v: `${data.daily_record.late_minutes}m` },
-                { l: 'OT',       v: `${data.daily_record.overtime_minutes}m` },
-                { l: 'Payable',  v: data.daily_record.is_payable ? 'Yes' : 'No' },
-                { l: 'Punches',  v: data.raw_punches.length },
+                { l: 'Hours',   v: `${data.daily_record.work_hours}h` },
+                { l: 'Late',    v: `${data.daily_record.late_minutes}m` },
+                { l: 'OT',      v: `${data.daily_record.overtime_minutes}m` },
+                { l: 'Payable', v: data.daily_record.is_payable ? 'Yes' : 'No' },
+                // Show total punches across both pipelines — biometric + CSV
+                {
+                  l: data?.source_type === 'csv_upload' ? 'CSV Pnch'
+                   : data?.source_type === 'biometric'  ? 'Dev Pnch'
+                   : 'Punches',
+                  v: (data?.raw_punches?.length ?? 0) + (data?.csv_punches?.length ?? 0),
+                },
               ].map(({ l, v }) => (
                 <div key={l} className="text-center">
                   <p className="text-[9px] text-muted-foreground">{l}</p>

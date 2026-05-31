@@ -11,8 +11,24 @@
  * Approval / rejection is handled by ApprovalService (Step 3).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { computeLeaveDays, computeLeaveSession, type LeaveSession } from './leave-engine.js'
+import type { LeaveSession }  from './leave-engine.js'
+import {
+  computeLeaveDuration,
+  buildPolicyFromRule,
+  buildPolicyFromLegacy,
+  buildDateRange,
+  isDefaultWeekoff,
+  DEFAULT_POLICY,
+  type DurationPolicy,
+  type DayContext,
+  type LeaveSessionSpan,
+} from './leave-duration-engine.js'
 import { eventService }    from './event-service.js'
+import {
+  captureRuleSnapshot,
+  captureLegacySnapshot,
+  captureDefaultSnapshot,
+} from './leave-policy-snapshot-service.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -30,6 +46,15 @@ export interface CreateLeaveRequestOpts {
   /** Required when session = 'hourly'. Hours in DECIMAL(4,2) increments (min 0.25). */
   hoursRequested?: number
   requestedBy:    string   // profiles.id of the requester (usually the employee's own profile)
+  /**
+   * New duration-engine session fields.
+   * When provided, these override the legacy `session` field for start/end day
+   * multiplier calculation and are persisted to start_session / end_session columns.
+   * Cross-date half-day requests are allowed via these fields (unlike the legacy
+   * `session` path which requires fromDate === toDate for half-day sessions).
+   */
+  startSession?:  'full_day' | 'first_half' | 'second_half' | 'hourly'
+  endSession?:    'full_day' | 'first_half' | 'second_half' | 'hourly'
 }
 
 export interface LeaveRequestRow {
@@ -53,6 +78,14 @@ export interface LeaveRequestRow {
   approved_at:      string | null
   created_at:       string
   updated_at:       string
+  /** Duration-engine fields (added alongside engine v1) */
+  start_session:    'full_day' | 'first_half' | 'second_half' | 'hourly' | null
+  end_session:      'full_day' | 'first_half' | 'second_half' | 'hourly' | null
+  calculated_days:  number | null
+  duration_breakdown: Record<string, unknown> | null
+  engine_version:   string | null
+  /** Replay infrastructure (migration 163) — snapshot of the policy that governed this request */
+  policy_snapshot_id: string | null
   // Joined fields (may be present depending on query)
   leave_types?:     { id: string; name: string; is_paid: boolean; allow_sandwich: boolean; allow_half_day: boolean; allow_hourly: boolean } | null
   employees?:       { id: string; first_name: string; last_name: string; employee_code: string } | null
@@ -74,6 +107,8 @@ const SELECT_FIELDS = `
   id, tenant_id, employee_id, leave_type_id,
   from_date, to_date, computed_days, half_day,
   session, hours_requested,
+  start_session, end_session, calculated_days, duration_breakdown, engine_version,
+  policy_snapshot_id,
   status, reason, rejection_reason,
   requested_by, approved_by, approved_at,
   created_at, updated_at,
@@ -99,10 +134,16 @@ export async function createLeaveRequest(
     halfDay = false,
     session: rawSession,
     hoursRequested,
+    startSession,
+    endSession,
   } = opts
 
   // Resolve session: new field takes priority; fall back to legacy halfDay flag
   const session: LeaveSession = rawSession ?? (halfDay ? 'first_half' : 'full_day')
+
+  // Determine whether the caller is using the new duration-engine path.
+  // The new path is active when startSession or endSession is explicitly supplied.
+  const usingNewSessionPath = startSession !== undefined || endSession !== undefined
 
   // Validate session-specific constraints
   if (session === 'hourly') {
@@ -127,8 +168,10 @@ export async function createLeaveRequest(
     }
   }
 
-  // For half-day sessions, fromDate must equal toDate
-  if ((session === 'first_half' || session === 'second_half') && fromDate !== toDate) {
+  // For half-day sessions on the LEGACY path, fromDate must equal toDate.
+  // The new startSession/endSession path intentionally allows cross-date half-day
+  // requests (e.g. start second_half Monday → end first_half Wednesday).
+  if (!usingNewSessionPath && (session === 'first_half' || session === 'second_half') && fromDate !== toDate) {
     return {
       ok:    false,
       error: { type: 'VALIDATION_ERROR', message: 'Half-day leave must be on a single day (from_date must equal to_date)' },
@@ -158,19 +201,181 @@ export async function createLeaveRequest(
     return { ok: false, error: { type: 'VALIDATION_ERROR', message: 'Leave type is inactive' } }
   }
 
-  // Validate session is permitted by leave type
-  if ((session === 'first_half' || session === 'second_half') && !lt.allow_half_day) {
-    return {
-      ok:    false,
-      error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow half-day leave` },
+  // ── Policy-level governance enforcement (session + application window) ────────
+  // Fetch all columns so both the session-governance checks and the duration
+  // engine builders (buildPolicyFromRule / buildPolicyFromLegacy) have everything
+  // they need from a single round-trip.
+  const { data: policyRule } = await supabase
+    .from('leave_policy_rules')
+    .select('*, leave_policy_masters!inner(tenant_id)')
+    .eq('leave_type_id', leaveTypeId)
+    .eq('leave_policy_masters.tenant_id', tenantId)
+    .maybeSingle()
+
+  const { data: legacyPolicy } = policyRule ? { data: null } : await supabase
+    .from('leave_policies')
+    .select('*')
+    .eq('leave_type_id', leaveTypeId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  const gov = (policyRule ?? legacyPolicy) as {
+    allow_half_day:                       boolean
+    allow_hourly_leave:                   boolean
+    allow_cross_session:                  boolean
+    minimum_leave_unit:                   number
+    maximum_sessions_per_day:             number
+    allow_past_dated_leave:               boolean
+    maximum_past_days:                    number
+    allow_current_period_leave:           boolean
+    allow_future_leave:                   boolean
+    maximum_future_days:                  number | null
+    future_application_requires_approval: boolean
+    same_day_application_mode:            'allowed' | 'restricted' | 'manager_override_only'
+  } | null
+
+  // Build the full DurationPolicy for the engine.
+  // buildPolicyFromRule / buildPolicyFromLegacy map each table's column names
+  // to the canonical DurationPolicy shape — we just need to know which table won.
+  const durationPolicy: DurationPolicy = policyRule
+    ? buildPolicyFromRule(policyRule as Record<string, unknown>)
+    : legacyPolicy
+      ? buildPolicyFromLegacy(legacyPolicy as Record<string, unknown>)
+      : DEFAULT_POLICY
+
+  // ── Session validation (effective permissions: policy > type-level fallback) ──
+  // When a policy is configured, policy flags are authoritative.
+  // When no policy exists, fall back to the leave_types-level flags.
+  {
+    const effectiveAllowHalfDay = gov ? gov.allow_half_day     : lt.allow_half_day
+    const effectiveAllowHourly  = gov ? gov.allow_hourly_leave : lt.allow_hourly
+    const effectiveAllowCross   = gov ? gov.allow_cross_session : true   // no type-level cross-session flag; default allow
+
+    const effectiveStartSession = startSession ?? session
+    const effectiveEndSession   = endSession   ?? session
+
+    const isHalfDay =
+      effectiveStartSession === 'first_half'  || effectiveStartSession === 'second_half' ||
+      effectiveEndSession   === 'first_half'  || effectiveEndSession   === 'second_half'
+    const isHourly  = effectiveStartSession === 'hourly' || session === 'hourly'
+    const isMultiDay     = fromDate !== toDate
+    const isCrossSession = isMultiDay &&
+                           effectiveStartSession !== effectiveEndSession &&
+                           !(effectiveStartSession === 'full_day' && effectiveEndSession === 'full_day')
+
+    if (isHalfDay && !effectiveAllowHalfDay) {
+      return {
+        ok:    false,
+        error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow half-day leave` },
+      }
+    }
+    if (isHourly && !effectiveAllowHourly) {
+      return {
+        ok:    false,
+        error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow hourly leave` },
+      }
+    }
+    if (isCrossSession && !effectiveAllowCross) {
+      return {
+        ok:    false,
+        error: { type: 'VALIDATION_ERROR', message: `Cross-session multi-day leave is not allowed for ${lt.name}` },
+      }
     }
   }
-  if (session === 'hourly' && !lt.allow_hourly) {
-    return {
-      ok:    false,
-      error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow hourly leave` },
+
+  // ── Application window enforcement ──────────────────────────────────────────
+  // Calendar-date comparison in server-local time (YYYY-MM-DD string compare is safe
+  // since both sides are ISO date strings with no timezone component).
+  const todayStr = new Date().toISOString().slice(0, 10)
+
+  // Derive defaults when no policy is configured: allow everything
+  const windowGov = gov ?? {
+    allow_past_dated_leave:               false,  // conservative: no past leave without explicit policy
+    maximum_past_days:                    0,
+    allow_current_period_leave:           true,
+    allow_future_leave:                   true,
+    maximum_future_days:                  null,
+    future_application_requires_approval: false,
+    same_day_application_mode:            'allowed' as const,
+  }
+
+  const isPast      = fromDate < todayStr
+  const isSameDay   = fromDate === todayStr
+  const isFuture    = fromDate > todayStr
+  const currentYM   = todayStr.slice(0, 7)   // YYYY-MM
+  const fromDateYM  = fromDate.slice(0, 7)
+
+  // Past-dated leave
+  if (isPast) {
+    if (!windowGov.allow_past_dated_leave) {
+      return {
+        ok:    false,
+        error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow past-dated leave applications` },
+      }
+    }
+    // Calculate how many calendar days in the past the start date is
+    const msPerDay   = 86_400_000
+    const pastDays   = Math.round((Date.parse(todayStr) - Date.parse(fromDate)) / msPerDay)
+    if (pastDays > windowGov.maximum_past_days) {
+      return {
+        ok:    false,
+        error: {
+          type:    'VALIDATION_ERROR',
+          message: `${lt.name} allows retroactive leave up to ${windowGov.maximum_past_days} day(s) in the past. Your request starts ${pastDays} day(s) ago.`,
+        },
+      }
     }
   }
+
+  // Same-day leave
+  if (isSameDay) {
+    if (windowGov.same_day_application_mode === 'restricted') {
+      return {
+        ok:    false,
+        error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow same-day leave applications` },
+      }
+    }
+    // manager_override_only: allow submission but flag it — handled below in insert
+  }
+
+  // Future leave
+  if (isFuture) {
+    if (!windowGov.allow_future_leave) {
+      return {
+        ok:    false,
+        error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow future leave applications` },
+      }
+    }
+    if (windowGov.maximum_future_days !== null) {
+      const msPerDay    = 86_400_000
+      const futureDays  = Math.round((Date.parse(fromDate) - Date.parse(todayStr)) / msPerDay)
+      if (futureDays > windowGov.maximum_future_days) {
+        return {
+          ok:    false,
+          error: {
+            type:    'VALIDATION_ERROR',
+            message: `${lt.name} allows future leave applications up to ${windowGov.maximum_future_days} day(s) ahead. Your request starts ${futureDays} day(s) from now.`,
+          },
+        }
+      }
+    }
+  }
+
+  // Current-period lock
+  if (!windowGov.allow_current_period_leave && fromDateYM === currentYM) {
+    return {
+      ok:    false,
+      error: { type: 'VALIDATION_ERROR', message: `${lt.name} does not allow leave applications for the current calendar month` },
+    }
+  }
+
+  // Compute window metadata for persistence
+  const requiresManagerOverride = isSameDay && windowGov.same_day_application_mode === 'manager_override_only'
+  const applicationWindowNote   =
+    isPast    ? `Retroactive — ${Math.round((Date.parse(todayStr) - Date.parse(fromDate)) / 86_400_000)} day(s) past` :
+    isSameDay ? 'Same-day application' :
+    isFuture  ? `Future — ${Math.round((Date.parse(fromDate) - Date.parse(todayStr)) / 86_400_000)} day(s) ahead` :
+    null
 
   // Overlap check — prevent duplicate or overlapping PENDING/APPROVED requests
   // Overlap condition: existing.from_date <= new.to_date AND existing.to_date >= new.from_date
@@ -195,8 +400,97 @@ export async function createLeaveRequest(
     }
   }
 
-  // Compute days via LeaveEngine (session-aware)
-  const { computed_days } = computeLeaveSession(fromDate, toDate, session, hoursRequested)
+  // ── Resolve start/end sessions (needed for engine span + insert) ─────────────
+  // Prefer the explicit new-path fields; otherwise mirror the legacy session value.
+  const resolvedStartSession = startSession ?? session
+  const resolvedEndSession   = endSession   ?? session
+
+  // ── Fetch holiday calendar for the requested span ─────────────────────────
+  // Non-optional holidays only — optional holidays don't affect leave duration.
+  const { data: holidayRows } = await supabase
+    .from('holiday_calendar')
+    .select('date, name')
+    .eq('tenant_id', tenantId)
+    .eq('is_optional', false)
+    .gte('date', fromDate)
+    .lte('date', toDate)
+
+  const holidayMap = new Map<string, string>(
+    ((holidayRows ?? []) as Array<{ date: string; name: string }>)
+      .map(h => [h.date, h.name] as [string, string]),
+  )
+
+  // ── Build per-day context for the duration engine ─────────────────────────
+  const spanDates  = buildDateRange(fromDate, toDate)
+  const dayInfo: DayContext[] = spanDates.map(date => ({
+    date,
+    is_holiday:    holidayMap.has(date),
+    is_weekly_off: isDefaultWeekoff(date),
+    holiday_name:  holidayMap.get(date),
+  }))
+
+  // ── Compute duration via the authoritative duration engine (v1) ───────────
+  const durSpan: LeaveSessionSpan = {
+    start_date:      fromDate,
+    start_session:   resolvedStartSession,
+    end_date:        toDate,
+    end_session:     resolvedEndSession,
+    requested_hours: session === 'hourly' ? hoursRequested : undefined,
+  }
+
+  const durResult = computeLeaveDuration(durSpan, dayInfo, durationPolicy)
+
+  // Block-level engine errors (e.g. policy blocks sandwich, all days are holidays)
+  if (!durResult.is_valid) {
+    return {
+      ok:    false,
+      error: {
+        type:    'VALIDATION_ERROR',
+        message: durResult.errors[0] ?? 'Leave duration could not be computed with the current policy settings',
+      },
+    }
+  }
+
+  // Reject zero-duration requests (all days non-working, or fully skipped)
+  if (durResult.calculated_days <= 0) {
+    return {
+      ok:    false,
+      error: {
+        type:    'VALIDATION_ERROR',
+        message: 'Leave duration computed as 0 days — all days in the selected range are non-working days',
+      },
+    }
+  }
+
+  const computed_days = durResult.calculated_days
+
+  // ── Capture immutable policy snapshot (non-fatal) ─────────────────────────
+  // Captures the exact policy state that governed this request so replays can
+  // deterministically reconstruct what the engine computed. Failures are swallowed
+  // — the governance action must never be blocked by a snapshot write failure.
+  let policySnapshotId: string | null = null
+  if (policyRule) {
+    policySnapshotId = await captureRuleSnapshot(
+      supabase, tenantId, employeeId, leaveTypeId,
+      policyRule as Record<string, unknown>,
+      'employee',          // most specific scope that resolved — rule is already employee-level
+      fromDate,
+      'leave_request_creation',
+    )
+  } else if (legacyPolicy) {
+    policySnapshotId = await captureLegacySnapshot(
+      supabase, tenantId, employeeId, leaveTypeId,
+      legacyPolicy as Record<string, unknown>,
+      fromDate,
+      'leave_request_creation',
+    )
+  } else {
+    policySnapshotId = await captureDefaultSnapshot(
+      supabase, tenantId, employeeId, leaveTypeId,
+      fromDate,
+      'leave_request_creation',
+    )
+  }
 
   // Derive half_day boolean for backward compatibility
   const halfDayFlag = session === 'first_half' || session === 'second_half'
@@ -213,16 +507,27 @@ export async function createLeaveRequest(
       computed_days,
       half_day:       halfDayFlag,
       session,
-      hours_requested: session === 'hourly' ? hoursRequested : null,
-      reason:          reason ?? null,
-      status:          'PENDING',
-      requested_by:    requestedBy,
+      hours_requested:           session === 'hourly' ? hoursRequested : null,
+      reason:                    reason ?? null,
+      status:                    'PENDING',
+      requested_by:              requestedBy,
+      // Duration-engine v1 fields — fully populated from engine result
+      start_session:             resolvedStartSession,
+      end_session:               resolvedEndSession,
+      calculated_days:           computed_days,
+      duration_breakdown:        durResult.breakdown,
+      engine_version:            durResult.engine_version,
+      // Application window governance fields (migration 161)
+      requires_manager_override: requiresManagerOverride,
+      application_window_note:   applicationWindowNote ?? null,
+      // Replay infrastructure (migration 163) — links request to governing policy snapshot
+      policy_snapshot_id:        policySnapshotId ?? null,
     })
     .select(SELECT_FIELDS)
     .single()
 
   if (error) {
-    return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to create leave request' } }
+    return { ok: false, error: { type: 'DB_ERROR', message: error.message ?? 'Failed to create leave request' } }
   }
 
   return { ok: true, value: data as unknown as LeaveRequestRow }

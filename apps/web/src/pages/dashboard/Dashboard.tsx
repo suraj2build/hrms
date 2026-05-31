@@ -1,24 +1,22 @@
 /**
  * Dashboard — role-aware router.
- * Renders the correct dashboard based on effective role (respects dev preview).
+ * Renders the correct dashboard based on the user's real profile role.
+ * Workspace context (activeRole) does not affect which dashboard is shown —
+ * workspace switching is scoped to profile views, not the dashboard.
  */
 import { useAuthStore } from '@/stores/authStore'
-import { useUIStore }   from '@/stores/uiStore'
 import { AdminDashboard }       from './AdminDashboard'
 import { ManagerDashboardPage } from './ManagerDashboard'
 import { EmployeeDashboard }    from './EmployeeDashboard'
 
 export function Dashboard() {
-  const profile    = useAuthStore(s => s.profile)
-  const activeRole = useUIStore(s => s.activeRole)
+  const profile = useAuthStore(s => s.profile)
+  const role    = profile?.role ?? 'employee'
 
-  // Use preview role in dev; always real role in production
-  const effectiveRole = (!import.meta.env.PROD && activeRole) ? activeRole : (profile?.role ?? 'employee')
-
-  if (effectiveRole === 'super_admin' || effectiveRole === 'hr_admin') {
+  if (role === 'super_admin' || role === 'hr_admin') {
     return <AdminDashboard />
   }
-  if (effectiveRole === 'manager') {
+  if (role === 'manager') {
     return <ManagerDashboardPage />
   }
   return <EmployeeDashboard />

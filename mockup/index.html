@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HRMS UI/UX Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#F5F6FA;color:#1A1D23;font-size:13px}
+/* ── Tokens ── */
+:root{
+  --bg:#F5F6FA;--card:#fff;--border:#E8EAF0;
+  --text:#1A1D23;--muted:#6B7280;--faint:#9CA3AF;
+  --primary:#6366F1;--primary-soft:#EEF2FF;
+  --success:#10B981;--success-soft:#ECFDF5;
+  --warn:#F59E0B;--warn-soft:#FFFBEB;
+  --danger:#EF4444;--danger-soft:#FEF2F2;
+  --info:#3B82F6;--info-soft:#EFF6FF;
+  --amber:#F59E0B;--amber-soft:#FFFBEB;
+  --shadow-xs:0 1px 2px rgba(0,0,0,.05);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.04);
+  --r:8px;--r-lg:12px;
+}
+/* ── Screen switcher ── */
+.switcher{position:fixed;top:0;left:0;right:0;z-index:100;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:4px;padding:8px 16px;box-shadow:var(--shadow-xs)}
+.switcher span{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-right:8px}
+.sw-btn{padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:#fff;font-family:inherit;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .15s}
+.sw-btn:hover{background:var(--bg);color:var(--text)}
+.sw-btn.active{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 1px 4px rgba(99,102,241,.35)}
+/* ── Layout ── */
+.screen{display:none;padding-top:49px;min-height:100vh}
+.screen.visible{display:block}
+.shell{display:flex;min-height:calc(100vh - 49px)}
+/* ── Sidebar ── */
+.sidebar{width:220px;flex-shrink:0;background:#fff;border-right:1px solid var(--border);display:flex;flex-direction:column;height:calc(100vh - 49px);position:sticky;top:49px}
+.sb-logo{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.sb-logo-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0}
+.sb-logo-icon.blue{background:var(--primary)}
+.sb-logo-icon.amber{background:var(--amber)}
+.sb-logo-text{line-height:1.3}
+.sb-logo-text p{font-size:13px;font-weight:700;color:var(--text)}
+.sb-logo-text span{font-size:10px;color:var(--muted)}
+.sb-nav{flex:1;overflow-y:auto;padding:10px 8px}
+.sb-group-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);padding:4px 10px 4px;margin-top:14px;display:block}
+.sb-group-label:first-child{margin-top:0}
+.sb-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;text-decoration:none;color:var(--muted);font-size:12.5px;font-weight:500;transition:all .12s;cursor:pointer}
+.sb-item:hover{background:var(--bg);color:var(--text)}
+.sb-item.active-blue{background:var(--primary);color:#fff}
+.sb-item.active-amber{background:var(--amber);color:#fff}
+.sb-item svg,.sb-item .ico{width:15px;height:15px;flex-shrink:0;opacity:.7}
+.sb-item.active-blue svg,.sb-item.active-blue .ico,.sb-item.active-amber svg,.sb-item.active-amber .ico{opacity:1}
+.sb-badge{margin-left:auto;font-size:9px;font-weight:700;background:#EF4444;color:#fff;border-radius:99px;padding:1px 6px;line-height:1.5}
+.sb-divider{border-top:1px solid var(--border);margin:10px 4px}
+.sb-section-head{display:flex;align-items:center;gap:5px;padding:3px 10px 6px}
+.sb-section-head span{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.sb-section-head span.blue{color:var(--primary)}
+.sb-section-head span.amber{color:var(--amber)}
+/* ── Main content ── */
+.main{flex:1;overflow:auto}
+.page-header{padding:20px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.page-title{font-size:18px;font-weight:700;color:var(--text)}
+.page-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.content{padding:20px 24px}
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-xs)}
+.card-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.card-body{padding:16px}
+/* ── KPI strip ── */
+.kpi-strip{display:grid;gap:12px;margin-bottom:20px}
+.kpi-strip.cols-5{grid-template-columns:repeat(5,1fr)}
+.kpi-strip.cols-4{grid-template-columns:repeat(4,1fr)}
+.kpi-strip.cols-3{grid-template-columns:repeat(3,1fr)}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow-xs);position:relative;overflow:hidden}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
+.kpi-card.blue::before{background:var(--primary)}
+.kpi-card.green::before{background:var(--success)}
+.kpi-card.amber::before{background:var(--warn)}
+.kpi-card.red::before{background:var(--danger)}
+.kpi-card.indigo::before{background:#6366F1}
+.kpi-card.violet::before{background:#8B5CF6}
+.kpi-label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+.kpi-value{font-size:24px;font-weight:700;color:var(--text);line-height:1}
+.kpi-value.sm{font-size:18px}
+.kpi-meta{font-size:10.5px;color:var(--muted);margin-top:5px;display:flex;align-items:center;gap:4px}
+.kpi-meta .up{color:var(--success)}
+.kpi-meta .dn{color:var(--danger)}
+.kpi-icon{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:22px;opacity:.1}
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:99px}
+.badge.green{background:var(--success-soft);color:#065F46}
+.badge.amber{background:var(--warn-soft);color:#92400E}
+.badge.red{background:var(--danger-soft);color:#991B1B}
+.badge.blue{background:var(--info-soft);color:#1D4ED8}
+.badge.violet{background:#EDE9FE;color:#5B21B6}
+.badge.gray{background:#F3F4F6;color:#374151}
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:7px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 1px 3px rgba(99,102,241,.3)}
+.btn-primary:hover{background:#4F52CC}
+.btn-outline{background:#fff;color:var(--text);border:1px solid var(--border)}
+.btn-outline:hover{background:var(--bg)}
+.btn-ghost{background:transparent;color:var(--muted);border:none}
+.btn-ghost:hover{color:var(--text);background:var(--bg)}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-success{background:var(--success);color:#fff}
+.btn-danger{background:var(--danger);color:#fff}
+/* ── Table ── */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:9px 12px;text-align:left;border-bottom:2px solid var(--border)}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--text);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:#FAFBFC}
+/* ── Misc ── */
+.divider{border:none;border-top:1px solid var(--border);margin:16px 0}
+.flex{display:flex}.items-center{align-items:center}.justify-between{justify-content:space-between}.gap-2{gap:8px}.gap-3{gap:12px}.gap-4{gap:16px}.flex-1{flex:1}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mt-5{margin-top:20px}
+.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.mb-4{margin-bottom:16px}
+.text-sm{font-size:12px}.text-xs{font-size:10.5px}.text-muted{color:var(--muted)}.font-semibold{font-weight:600}.font-bold{font-weight:700}
+.rounded{border-radius:6px}.rounded-lg{border-radius:10px}.rounded-full{border-radius:99px}
+.p-3{padding:12px}.p-4{padding:16px}
+.w-full{width:100%}
+/* ── Avatar ── */
+.avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+/* ── Severity pills ── */
+.sev-critical{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:var(--danger-soft);color:var(--danger);text-transform:uppercase;letter-spacing:.04em}
+.sev-high{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:var(--warn-soft);color:#B45309;text-transform:uppercase;letter-spacing:.04em}
+.sev-medium{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:var(--info-soft);color:var(--info);text-transform:uppercase;letter-spacing:.04em}
+/* ── Health dot ── */
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.green{background:var(--success)}.dot.red{background:var(--danger)}.dot.amber{background:var(--warn)}.dot.blue{background:var(--info)}
+/* ── Tabs ── */
+.tab-bar{display:flex;gap:2px;background:#F1F2F6;border-radius:8px;padding:3px;width:fit-content;margin-bottom:16px}
+.tab-btn{padding:5px 14px;border-radius:6px;border:none;background:transparent;font-family:inherit;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .12s}
+.tab-btn.active{background:#fff;color:var(--text);font-weight:600;box-shadow:var(--shadow-xs)}
+/* ── Alert banner ── */
+.banner{border-radius:var(--r);padding:10px 14px;display:flex;align-items:flex-start;gap:10px;margin-bottom:16px}
+.banner.warn{background:var(--warn-soft);border:1px solid #FDE68A}
+.banner.danger{background:var(--danger-soft);border:1px solid #FECACA}
+.banner.info{background:var(--info-soft);border:1px solid #BFDBFE}
+/* ── Calendar heatmap ── */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:8px}
+.cal-cell{aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;cursor:default}
+.cal-cell.present{background:#D1FAE5;color:#065F46}
+.cal-cell.absent{background:#FEE2E2;color:#991B1B}
+.cal-cell.leave{background:#FEF3C7;color:#92400E}
+.cal-cell.weekend{background:#F3F4F6;color:#9CA3AF}
+.cal-cell.future{background:#F9FAFB;color:#D1D5DB}
+.cal-cell.today{background:var(--primary);color:#fff;box-shadow:0 0 0 2px rgba(99,102,241,.3)}
+.cal-day-label{font-size:9px;font-weight:600;text-align:center;color:var(--faint);padding-bottom:3px}
+/* ── Progress bar ── */
+.progress{height:6px;background:#E5E7EB;border-radius:99px;overflow:hidden}
+.progress-fill{height:100%;border-radius:99px}
+.progress-fill.green{background:var(--success)}
+.progress-fill.blue{background:var(--primary)}
+.progress-fill.amber{background:var(--warn)}
+/* ── Quick action tiles ── */
+.qa-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.qa-tile{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 12px;text-align:center;cursor:pointer;transition:all .15s}
+.qa-tile:hover{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+.qa-tile-icon{font-size:20px;margin-bottom:6px}
+.qa-tile-label{font-size:11px;font-weight:600;color:var(--text)}
+/* ── Engine card ── */
+.engine-card{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
+.engine-status{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+.pulse{width:8px;height:8px;border-radius:50%;position:relative;flex-shrink:0}
+.pulse::after{content:'';position:absolute;inset:-3px;border-radius:50%;animation:pulse 2s ease-out infinite}
+.pulse.green{background:var(--success)}.pulse.green::after{border:2px solid var(--success);opacity:.4}
+.pulse.red{background:var(--danger)}.pulse.red::after{border:2px solid var(--danger);opacity:.4}
+@keyframes pulse{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.6);opacity:0}}
+/* ── Right sidebar ── */
+.right-panel{width:280px;flex-shrink:0;border-left:1px solid var(--border);background:#fff;padding:16px;overflow-y:auto;height:calc(100vh - 49px);position:sticky;top:49px}
+/* ── Profile hero ── */
+.profile-hero{background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 100%);border-radius:var(--r-lg);padding:20px;color:#fff;margin-bottom:16px;position:relative;overflow:hidden}
+.profile-hero::after{content:'';position:absolute;right:-20px;top:-20px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.07)}
+/* ── Approval row ── */
+.approval-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.approval-row:last-child{border-bottom:none}
+/* ── Exception card ── */
+.exc-group{margin-bottom:14px}
+.exc-group-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:6px 12px;border-radius:6px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px}
+.exc-group-label.critical{background:var(--danger-soft);color:var(--danger)}
+.exc-group-label.high{background:var(--warn-soft);color:#B45309}
+.exc-group-label.medium{background:var(--info-soft);color:var(--info)}
+.exc-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:#FAFBFC;border:1px solid var(--border);border-radius:var(--r);margin-bottom:6px;cursor:pointer;transition:all .12s}
+.exc-row:hover{border-color:var(--primary);background:var(--primary-soft)}
+/* ── Mini donut ── */
+.donut-wrap{position:relative;width:80px;height:80px;flex-shrink:0}
+.donut-wrap svg{transform:rotate(-90deg)}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.2}
+</style>
+</head>
+<body>
+
+<!-- Screen Switcher -->
+<div class="switcher">
+  <span>Screen</span>
+  <button class="sw-btn active" onclick="show('admin')">Admin Control Center</button>
+  <button class="sw-btn" onclick="show('employee')">Employee Dashboard</button>
+  <button class="sw-btn" onclick="show('attendance')">My Attendance</button>
+  <button class="sw-btn" onclick="show('manager')">Manager Console</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SCREEN 1: ADMIN CONTROL CENTER                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="s-admin" class="screen visible">
+  <div class="shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sb-logo">
+        <div class="sb-logo-icon amber">HR</div>
+        <div class="sb-logo-text"><p>HRMS</p><span>Admin Console</span></div>
+      </div>
+      <nav class="sb-nav">
+        <span class="sb-group-label" style="margin-top:0">Overview</span>
+        <a class="sb-item active-amber"><span class="ico">🏠</span> Control Center</a>
+        <a class="sb-item"><span class="ico">📊</span> Analytics</a>
+
+        <span class="sb-group-label">Workforce</span>
+        <a class="sb-item"><span class="ico">👥</span> Employees</a>
+        <a class="sb-item"><span class="ico">🏢</span> Departments</a>
+        <a class="sb-item"><span class="ico">🗂️</span> Job Grades</a>
+
+        <span class="sb-group-label">Operations</span>
+        <a class="sb-item"><span class="ico">📅</span> Attendance</a>
+        <a class="sb-item"><span class="ico">🌿</span> Leave</a>
+        <a class="sb-item"><span class="ico">💰</span> Payroll <span class="sb-badge">3</span></a>
+        <a class="sb-item"><span class="ico">📋</span> Approvals <span class="sb-badge">12</span></a>
+
+        <span class="sb-group-label">Compliance</span>
+        <a class="sb-item"><span class="ico">🛡️</span> Statutory</a>
+        <a class="sb-item"><span class="ico">📑</span> Tax Filing</a>
+        <a class="sb-item"><span class="ico">⚙️</span> Automation</a>
+
+        <div class="sb-divider"></div>
+        <a class="sb-item"><span class="ico">⚙️</span> Settings</a>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Control Center</div>
+          <div class="page-sub">Live operational health — updated 2 min ago &nbsp;·&nbsp; May 2026, Week 3</div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm">⬇ Export</button>
+          <button class="btn btn-primary btn-sm">▶ Run Payroll</button>
+        </div>
+      </div>
+
+      <div class="content">
+
+        <!-- Zone A: Health Strip -->
+        <div class="kpi-strip cols-5">
+          <div class="kpi-card green">
+            <div class="kpi-label">Attendance Rate</div>
+            <div class="kpi-value">94.2%</div>
+            <div class="kpi-meta"><span class="up">↑ 1.3%</span> vs last week</div>
+            <div class="kpi-icon">📅</div>
+          </div>
+          <div class="kpi-card red">
+            <div class="kpi-label">Open Exceptions</div>
+            <div class="kpi-value" style="color:var(--danger)">47</div>
+            <div class="kpi-meta"><span class="dn">↑ 8</span> since yesterday</div>
+            <div class="kpi-icon">⚠️</div>
+          </div>
+          <div class="kpi-card amber">
+            <div class="kpi-label">Payroll Status</div>
+            <div class="kpi-value sm" style="color:var(--warn)">Draft</div>
+            <div class="kpi-meta">₹1.24 Cr · 4 issues</div>
+            <div class="kpi-icon">💰</div>
+          </div>
+          <div class="kpi-card blue">
+            <div class="kpi-label">Pending Approvals</div>
+            <div class="kpi-value">23</div>
+            <div class="kpi-meta">SLA breach: <span class="dn">5</span></div>
+            <div class="kpi-icon">✅</div>
+          </div>
+          <div class="kpi-card violet">
+            <div class="kpi-label">Active Employees</div>
+            <div class="kpi-value">312</div>
+            <div class="kpi-meta"><span class="up">+2</span> this month</div>
+            <div class="kpi-icon">👥</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="gap:16px;align-items:start">
+
+          <!-- Left col -->
+          <div>
+            <!-- Zone B: Exception Center -->
+            <div class="card mb-4">
+              <div class="card-header">
+                <span class="card-title">Exception Center</span>
+                <button class="btn btn-ghost btn-sm">View All →</button>
+              </div>
+              <div class="card-body" style="padding:12px 14px">
+                <div class="exc-group">
+                  <div class="exc-group-label critical">🔴 Critical · 4</div>
+                  <div class="exc-row">
+                    <span style="font-size:16px">⏰</span>
+                    <div class="flex-1">
+                      <div class="font-semibold text-sm">Payroll lock deadline in 2 hrs</div>
+                      <div class="text-xs text-muted">4 employees missing salary inputs</div>
+                    </div>
+                    <button class="btn btn-danger btn-sm">Fix Now</button>
+                  </div>
+                  <div class="exc-row">
+                    <span style="font-size:16px">🚫</span>
+                    <div class="flex-1">
+                      <div class="font-semibold text-sm">LOP mismatch detected</div>
+                      <div class="text-xs text-muted">3 employees · attendance vs leave discrepancy</div>
+                    </div>
+                    <button class="btn btn-danger btn-sm">Review</button>
+                  </div>
+                </div>
+
+                <div class="exc-group">
+                  <div class="exc-group-label high">🟡 High · 11</div>
+                  <div class="exc-row">
+                    <span style="font-size:16px">📋</span>
+                    <div class="flex-1">
+                      <div class="font-semibold text-sm">5 approvals breaching SLA</div>
+                      <div class="text-xs text-muted">Oldest: 3 days · Rahul Sharma, +4</div>
+                    </div>
+                    <button class="btn btn-outline btn-sm">Escalate</button>
+                  </div>
+                  <div class="exc-row">
+                    <span style="font-size:16px">📄</span>
+                    <div class="flex-1">
+                      <div class="font-semibold text-sm">TDS filing due in 6 days</div>
+                      <div class="text-xs text-muted">Q1 2026 · ₹18.4L outstanding</div>
+                    </div>
+                    <button class="btn btn-outline btn-sm">Prepare</button>
+                  </div>
+                </div>
+
+                <div class="exc-group" style="margin-bottom:0">
+                  <div class="exc-group-label medium">🔵 Medium · 32</div>
+                  <div class="exc-row">
+                    <span style="font-size:16px">🔄</span>
+                    <div class="flex-1">
+                      <div class="font-semibold text-sm">Leave balance sync needed</div>
+                      <div class="text-xs text-muted">8 employees · carry-forward gap</div>
+                    </div>
+                    <button class="btn btn-outline btn-sm">Sync</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Zone C: Engine Monitor -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Engine Status</span>
+                <span class="badge green">All Systems</span>
+              </div>
+              <div class="card-body" style="padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+                <div class="engine-card" style="padding:10px 12px">
+                  <div class="engine-status"><div class="pulse green"></div>Attendance Engine</div>
+                  <div class="text-xs text-muted">Last run: 5 min ago</div>
+                  <span class="badge green">Live</span>
+                </div>
+                <div class="engine-card" style="padding:10px 12px">
+                  <div class="engine-status"><div class="pulse green"></div>Payroll Engine</div>
+                  <div class="text-xs text-muted">Draft · ₹1.24 Cr</div>
+                  <span class="badge amber">Draft</span>
+                </div>
+                <div class="engine-card" style="padding:10px 12px">
+                  <div class="engine-status"><div class="pulse green"></div>Leave Engine</div>
+                  <div class="text-xs text-muted">Last sync: 12 min ago</div>
+                  <span class="badge green">Live</span>
+                </div>
+                <div class="engine-card" style="padding:10px 12px">
+                  <div class="engine-status"><div class="pulse red"></div>Tax Engine</div>
+                  <div class="text-xs text-muted">Stale — 48 hrs old</div>
+                  <span class="badge red">Stale</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right col -->
+          <div>
+            <!-- Zone E: Workforce Snapshot -->
+            <div class="card mb-4">
+              <div class="card-header">
+                <span class="card-title">Today's Workforce</span>
+                <span class="text-xs text-muted">Live · 10:32 AM</span>
+              </div>
+              <div class="card-body">
+                <div class="kpi-strip cols-3" style="margin-bottom:12px">
+                  <div style="text-align:center;padding:10px;background:var(--success-soft);border-radius:8px">
+                    <div style="font-size:20px;font-weight:700;color:var(--success)">247</div>
+                    <div class="text-xs text-muted mt-1">Present</div>
+                  </div>
+                  <div style="text-align:center;padding:10px;background:var(--danger-soft);border-radius:8px">
+                    <div style="font-size:20px;font-weight:700;color:var(--danger)">28</div>
+                    <div class="text-xs text-muted mt-1">Absent</div>
+                  </div>
+                  <div style="text-align:center;padding:10px;background:var(--warn-soft);border-radius:8px">
+                    <div style="font-size:20px;font-weight:700;color:var(--warn)">37</div>
+                    <div class="text-xs text-muted mt-1">On Leave</div>
+                  </div>
+                </div>
+                <div class="text-xs text-muted mb-1 font-semibold">Department Attendance</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <div><div class="flex justify-between mb-1"><span class="text-xs">Engineering</span><span class="text-xs font-semibold">96%</span></div><div class="progress"><div class="progress-fill green" style="width:96%"></div></div></div>
+                  <div><div class="flex justify-between mb-1"><span class="text-xs">Sales</span><span class="text-xs font-semibold">88%</span></div><div class="progress"><div class="progress-fill amber" style="width:88%"></div></div></div>
+                  <div><div class="flex justify-between mb-1"><span class="text-xs">Operations</span><span class="text-xs font-semibold">91%</span></div><div class="progress"><div class="progress-fill green" style="width:91%"></div></div></div>
+                  <div><div class="flex justify-between mb-1"><span class="text-xs">Finance</span><span class="text-xs font-semibold">100%</span></div><div class="progress"><div class="progress-fill green" style="width:100%"></div></div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Zone D: Reconciliation Health -->
+            <div class="card mb-4">
+              <div class="card-header"><span class="card-title">Reconciliation Health</span></div>
+              <div class="card-body" style="padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+                <div class="flex items-center justify-between" style="padding:8px 10px;border:1px solid var(--border);border-radius:7px">
+                  <div class="flex items-center gap-2"><div class="dot green"></div><span class="text-sm">Attendance ↔ Leave</span></div>
+                  <span class="badge green">Matched</span>
+                </div>
+                <div class="flex items-center justify-between" style="padding:8px 10px;border:1px solid #FECACA;border-radius:7px;background:var(--danger-soft)">
+                  <div class="flex items-center gap-2"><div class="dot red"></div><span class="text-sm">Leave ↔ Payroll</span></div>
+                  <span class="badge red">3 gaps</span>
+                </div>
+                <div class="flex items-center justify-between" style="padding:8px 10px;border:1px solid var(--border);border-radius:7px">
+                  <div class="flex items-center gap-2"><div class="dot green"></div><span class="text-sm">Payroll ↔ Bank</span></div>
+                  <span class="badge green">Matched</span>
+                </div>
+                <div class="flex items-center justify-between" style="padding:8px 10px;border:1px solid #FDE68A;border-radius:7px;background:var(--warn-soft)">
+                  <div class="flex items-center gap-2"><div class="dot amber"></div><span class="text-sm">Tax ↔ Declarations</span></div>
+                  <span class="badge amber">Stale</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Zone G: Operations Timeline -->
+            <div class="card">
+              <div class="card-header"><span class="card-title">Recent Activity</span><button class="btn btn-ghost btn-sm">All →</button></div>
+              <div class="card-body" style="padding:10px 14px;display:flex;flex-direction:column;gap:2px">
+                <div class="approval-row"><div class="dot blue"></div><div class="flex-1"><div class="text-sm font-semibold">Payroll draft generated</div><div class="text-xs text-muted">May 2026 · ₹1.24 Cr</div></div><span class="text-xs text-muted">2m</span></div>
+                <div class="approval-row"><div class="dot green"></div><div class="flex-1"><div class="text-sm font-semibold">Leave approved — Priya Menon</div><div class="text-xs text-muted">3 days CL · May 28–30</div></div><span class="text-xs text-muted">14m</span></div>
+                <div class="approval-row"><div class="dot red"></div><div class="flex-1"><div class="text-sm font-semibold">Attendance exception flagged</div><div class="text-xs text-muted">Rohit Kumar · 4 hrs short</div></div><span class="text-xs text-muted">1h</span></div>
+                <div class="approval-row" style="border-bottom:none"><div class="dot amber"></div><div class="flex-1"><div class="text-sm font-semibold">TDS challan due reminder</div><div class="text-xs text-muted">Q1 · 6 days remaining</div></div><span class="text-xs text-muted">3h</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SCREEN 2: EMPLOYEE DASHBOARD                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="s-employee" class="screen">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sb-logo">
+        <div class="sb-logo-icon blue">HR</div>
+        <div class="sb-logo-text"><p>HRMS</p><span>Employee Portal</span></div>
+      </div>
+      <nav class="sb-nav">
+        <span class="sb-group-label" style="margin-top:0">Main</span>
+        <a class="sb-item active-blue"><span class="ico">🏠</span> Dashboard</a>
+        <span class="sb-group-label">Attendance & Leave</span>
+        <a class="sb-item"><span class="ico">📅</span> My Attendance</a>
+        <a class="sb-item"><span class="ico">⚖️</span> Leave & Comp-Off</a>
+        <a class="sb-item"><span class="ico">🗓️</span> Optional Holidays</a>
+        <span class="sb-group-label">Payroll & Tax</span>
+        <a class="sb-item"><span class="ico">💰</span> Pay & Compensation</a>
+        <a class="sb-item"><span class="ico">🧮</span> Tax Planner</a>
+        <a class="sb-item"><span class="ico">📜</span> IT Statement</a>
+        <a class="sb-item"><span class="ico">📈</span> YTD Statement</a>
+        <span class="sb-group-label">Declarations & Claims</span>
+        <a class="sb-item"><span class="ico">🏠</span> HRA Declaration</a>
+        <a class="sb-item"><span class="ico">💳</span> Reimbursements</a>
+        <span class="sb-group-label">Documents & Support</span>
+        <a class="sb-item"><span class="ico">📂</span> My Documents</a>
+        <a class="sb-item"><span class="ico">📖</span> Policies</a>
+        <a class="sb-item"><span class="ico">🎧</span> HR Support</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <!-- Profile hero -->
+      <div style="padding:20px 24px 0">
+        <div class="profile-hero">
+          <div class="flex items-center gap-3">
+            <div class="avatar" style="background:rgba(255,255,255,.25);color:#fff;width:48px;height:48px;font-size:16px">RS</div>
+            <div>
+              <div style="font-size:16px;font-weight:700">Rahul Sharma</div>
+              <div style="font-size:12px;opacity:.8">Senior Engineer · Engineering · EMP-1042</div>
+            </div>
+            <div style="margin-left:auto;text-align:right">
+              <div style="font-size:11px;opacity:.7">May 2026, Week 3</div>
+              <div style="font-size:12px;font-weight:600;margin-top:3px">📅 Present Today</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px">
+            <div style="background:rgba(255,255,255,.12);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700">22</div><div style="font-size:10px;opacity:.75">Days Present</div></div>
+            <div style="background:rgba(255,255,255,.12);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700">3</div><div style="font-size:10px;opacity:.75">Leaves Used</div></div>
+            <div style="background:rgba(255,255,255,.12);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700">8</div><div style="font-size:10px;opacity:.75">Leave Balance</div></div>
+            <div style="background:rgba(255,255,255,.12);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700">₹82K</div><div style="font-size:10px;opacity:.75">Last Salary</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="content" style="padding-top:16px">
+
+        <!-- Pending actions banner -->
+        <div class="banner info mb-3">
+          <span style="font-size:16px">ℹ️</span>
+          <div class="flex-1">
+            <div class="font-semibold text-sm">2 actions need your attention</div>
+            <div class="text-xs text-muted mt-1">Income Tax Declaration due June 15 &nbsp;·&nbsp; 1 pending attendance regularization</div>
+          </div>
+          <button class="btn btn-outline btn-sm">Review</button>
+        </div>
+
+        <div class="grid-2" style="align-items:start">
+          <!-- Left -->
+          <div>
+            <!-- Compensation card -->
+            <div class="card mb-4">
+              <div class="card-header"><span class="card-title">Compensation</span><button class="btn btn-ghost btn-sm">Details →</button></div>
+              <div class="card-body">
+                <div class="flex items-center justify-between mb-3">
+                  <div><div class="text-xs text-muted mb-1">Annual CTC</div><div style="font-size:22px;font-weight:700">₹10,80,000</div></div>
+                  <div style="text-align:right"><div class="text-xs text-muted mb-1">Monthly Gross</div><div style="font-size:16px;font-weight:700">₹90,000</div></div>
+                </div>
+                <div style="background:var(--bg);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px">
+                  <div class="flex justify-between"><span class="text-xs text-muted">Basic</span><span class="text-xs font-semibold">₹36,000</span></div>
+                  <div class="flex justify-between"><span class="text-xs text-muted">HRA</span><span class="text-xs font-semibold">₹18,000</span></div>
+                  <div class="flex justify-between"><span class="text-xs text-muted">Special Allowance</span><span class="text-xs font-semibold">₹27,000</span></div>
+                  <div class="flex justify-between"><span class="text-xs text-muted">PF (Employee)</span><span class="text-xs font-semibold" style="color:var(--danger)">- ₹4,320</span></div>
+                  <hr style="border-color:var(--border);margin:2px 0">
+                  <div class="flex justify-between"><span class="text-xs font-bold">Net Take-Home</span><span class="text-xs font-bold" style="color:var(--success)">≈ ₹82,300</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Leave usage card -->
+            <div class="card">
+              <div class="card-header"><span class="card-title">Leave Summary</span><button class="btn btn-ghost btn-sm">Apply →</button></div>
+              <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+                <div><div class="flex justify-between mb-1"><span class="text-xs">Casual Leave (CL)</span><span class="text-xs font-semibold">3 used / 12</span></div><div class="progress"><div class="progress-fill blue" style="width:25%"></div></div></div>
+                <div><div class="flex justify-between mb-1"><span class="text-xs">Sick Leave (SL)</span><span class="text-xs font-semibold">1 used / 7</span></div><div class="progress"><div class="progress-fill green" style="width:14%"></div></div></div>
+                <div><div class="flex justify-between mb-1"><span class="text-xs">Earned Leave (EL)</span><span class="text-xs font-semibold">0 used / 15</span></div><div class="progress"><div class="progress-fill green" style="width:0%"></div></div></div>
+                <div style="background:var(--warn-soft);border-radius:8px;padding:10px;display:flex;align-items:center;gap:8px"><span style="font-size:14px">🗓️</span><div><div class="text-xs font-semibold">Upcoming Holiday</div><div class="text-xs text-muted">June 1 — Maharashtr Day</div></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right -->
+          <div>
+            <!-- Recent payslips -->
+            <div class="card mb-4">
+              <div class="card-header"><span class="card-title">Recent Payslips</span><button class="btn btn-ghost btn-sm">All →</button></div>
+              <div class="card-body" style="padding:8px">
+                <table class="tbl">
+                  <thead><tr><th>Month</th><th>Gross</th><th>Net</th><th>Status</th><th></th></tr></thead>
+                  <tbody>
+                    <tr><td>Apr 2026</td><td>₹90,000</td><td>₹82,300</td><td><span class="badge green">Paid</span></td><td><button class="btn btn-ghost btn-sm">⬇</button></td></tr>
+                    <tr><td>Mar 2026</td><td>₹90,000</td><td>₹82,300</td><td><span class="badge green">Paid</span></td><td><button class="btn btn-ghost btn-sm">⬇</button></td></tr>
+                    <tr><td>Feb 2026</td><td>₹90,000</td><td>₹81,900</td><td><span class="badge green">Paid</span></td><td><button class="btn btn-ghost btn-sm">⬇</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="card mb-4">
+              <div class="card-header"><span class="card-title">Quick Actions</span></div>
+              <div class="card-body" style="padding:12px">
+                <div class="qa-grid">
+                  <div class="qa-tile"><div class="qa-tile-icon">🌿</div><div class="qa-tile-label">Apply Leave</div></div>
+                  <div class="qa-tile"><div class="qa-tile-icon">🕐</div><div class="qa-tile-label">Regularize</div></div>
+                  <div class="qa-tile"><div class="qa-tile-icon">💳</div><div class="qa-tile-label">Claim</div></div>
+                  <div class="qa-tile"><div class="qa-tile-icon">📄</div><div class="qa-tile-label">Download Letter</div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pending requests -->
+            <div class="card">
+              <div class="card-header"><span class="card-title">My Requests</span><span class="badge amber">1 pending</span></div>
+              <div class="card-body" style="padding:8px">
+                <table class="tbl">
+                  <thead><tr><th>Type</th><th>Date</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Regularization</td><td>May 20</td><td><span class="badge amber">Pending</span></td></tr>
+                    <tr><td>Casual Leave</td><td>May 10–12</td><td><span class="badge green">Approved</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SCREEN 3: MY ATTENDANCE                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="s-attendance" class="screen">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sb-logo">
+        <div class="sb-logo-icon blue">HR</div>
+        <div class="sb-logo-text"><p>HRMS</p><span>Employee Portal</span></div>
+      </div>
+      <nav class="sb-nav">
+        <span class="sb-group-label" style="margin-top:0">Main</span>
+        <a class="sb-item"><span class="ico">🏠</span> Dashboard</a>
+        <span class="sb-group-label">Attendance & Leave</span>
+        <a class="sb-item active-blue"><span class="ico">📅</span> My Attendance</a>
+        <a class="sb-item"><span class="ico">⚖️</span> Leave & Comp-Off</a>
+        <a class="sb-item"><span class="ico">🗓️</span> Optional Holidays</a>
+        <span class="sb-group-label">Payroll & Tax</span>
+        <a class="sb-item"><span class="ico">💰</span> Pay & Compensation</a>
+        <a class="sb-item"><span class="ico">🧮</span> Tax Planner</a>
+        <span class="sb-group-label">Documents & Support</span>
+        <a class="sb-item"><span class="ico">📂</span> My Documents</a>
+        <a class="sb-item"><span class="ico">🎧</span> HR Support</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <div class="page-title">My Attendance</div>
+          <div class="page-sub">May 2026 · Rahul Sharma · EMP-1042</div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm">◀ Apr</button>
+          <button class="btn btn-outline btn-sm">May 2026</button>
+          <button class="btn btn-outline btn-sm" style="opacity:.4" disabled>Jun ▶</button>
+          <button class="btn btn-primary btn-sm">+ Regularize</button>
+        </div>
+      </div>
+
+      <div class="content">
+        <!-- KPI strip -->
+        <div class="kpi-strip cols-5 mb-4">
+          <div class="kpi-card green"><div class="kpi-label">Present Days</div><div class="kpi-value">22</div><div class="kpi-meta">of 23 working</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Absent</div><div class="kpi-value" style="color:var(--danger)">1</div><div class="kpi-meta">LOP applied</div></div>
+          <div class="kpi-card amber"><div class="kpi-label">On Leave</div><div class="kpi-value">3</div><div class="kpi-meta">CL: 2 · SL: 1</div></div>
+          <div class="kpi-card blue"><div class="kpi-label">Avg Login</div><div class="kpi-value sm">9:08</div><div class="kpi-meta">Standard: 9:00</div></div>
+          <div class="kpi-card violet"><div class="kpi-label">Exceptions</div><div class="kpi-value" style="color:var(--primary)">2</div><div class="kpi-meta"><span style="color:var(--warn)">1 pending</span></div></div>
+        </div>
+
+        <!-- Tab bar -->
+        <div class="tab-bar">
+          <button class="tab-btn active">📅 Attendance Log</button>
+          <button class="tab-btn">📋 My Requests <span style="background:var(--warn);color:#fff;border-radius:99px;padding:1px 6px;font-size:9px;font-weight:700;margin-left:4px">1</span></button>
+        </div>
+
+        <!-- Content below tab -->
+        <div class="flex gap-4" style="align-items:start">
+
+          <!-- Calendar + legend -->
+          <div class="card" style="flex:1">
+            <div class="card-header">
+              <span class="card-title">May 2026</span>
+              <div class="flex gap-2">
+                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><span style="width:10px;height:10px;background:#D1FAE5;border-radius:3px;display:inline-block"></span>Present</span>
+                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><span style="width:10px;height:10px;background:#FEE2E2;border-radius:3px;display:inline-block"></span>Absent</span>
+                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><span style="width:10px;height:10px;background:#FEF3C7;border-radius:3px;display:inline-block"></span>Leave</span>
+                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><span style="width:10px;height:10px;background:var(--primary);border-radius:3px;display:inline-block"></span>Today</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <!-- Day headers -->
+              <div class="cal-grid" style="margin-bottom:2px">
+                <div class="cal-day-label">Mon</div><div class="cal-day-label">Tue</div><div class="cal-day-label">Wed</div><div class="cal-day-label">Thu</div><div class="cal-day-label">Fri</div><div class="cal-day-label">Sat</div><div class="cal-day-label">Sun</div>
+              </div>
+              <!-- Week 1: May starts Thursday -->
+              <div class="cal-grid">
+                <div class="cal-cell future"></div><div class="cal-cell future"></div><div class="cal-cell future"></div>
+                <div class="cal-cell present">1</div><div class="cal-cell present">2</div><div class="cal-cell weekend">3</div><div class="cal-cell weekend">4</div>
+              </div>
+              <!-- Week 2 -->
+              <div class="cal-grid" style="margin-top:3px">
+                <div class="cal-cell present">5</div><div class="cal-cell present">6</div><div class="cal-cell present">7</div><div class="cal-cell present">8</div><div class="cal-cell present">9</div><div class="cal-cell weekend">10</div><div class="cal-cell weekend">11</div>
+              </div>
+              <!-- Week 3 -->
+              <div class="cal-grid" style="margin-top:3px">
+                <div class="cal-cell present">12</div><div class="cal-cell leave">13</div><div class="cal-cell leave">14</div><div class="cal-cell present">15</div><div class="cal-cell present">16</div><div class="cal-cell weekend">17</div><div class="cal-cell weekend">18</div>
+              </div>
+              <!-- Week 4 -->
+              <div class="cal-grid" style="margin-top:3px">
+                <div class="cal-cell present">19</div><div class="cal-cell absent">20</div><div class="cal-cell present">21</div><div class="cal-cell present">22</div><div class="cal-cell leave">23</div><div class="cal-cell weekend">24</div><div class="cal-cell weekend">25</div>
+              </div>
+              <!-- Week 5 -->
+              <div class="cal-grid" style="margin-top:3px">
+                <div class="cal-cell present">26</div><div class="cal-cell present">27</div><div class="cal-cell today">28</div><div class="cal-cell future">29</div><div class="cal-cell future">30</div><div class="cal-cell weekend">31</div><div class="cal-cell future"></div>
+              </div>
+
+              <!-- Detail table -->
+              <div class="mt-4">
+                <table class="tbl">
+                  <thead><tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Hours</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>May 28</td><td>Wed</td><td>09:02</td><td>—</td><td>—</td><td><span class="badge blue">Today</span></td></tr>
+                    <tr><td>May 27</td><td>Tue</td><td>09:15</td><td>18:30</td><td>9h 15m</td><td><span class="badge green">Present</span></td></tr>
+                    <tr><td>May 23</td><td>Fri</td><td>—</td><td>—</td><td>—</td><td><span class="badge amber">CL</span></td></tr>
+                    <tr><td>May 22</td><td>Thu</td><td>09:05</td><td>18:00</td><td>8h 55m</td><td><span class="badge green">Present</span></td></tr>
+                    <tr><td>May 21</td><td>Wed</td><td>09:10</td><td>18:15</td><td>9h 5m</td><td><span class="badge green">Present</span></td></tr>
+                    <tr><td>May 20</td><td>Tue</td><td>—</td><td>—</td><td>—</td><td><span class="badge red">Absent</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right panel: today + exceptions -->
+          <div style="width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:14px">
+            <div class="card">
+              <div class="card-header" style="padding:12px 14px"><span class="card-title">Today · May 28</span></div>
+              <div class="card-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+                <div class="flex items-center justify-between"><span class="text-xs text-muted">Check-in</span><span class="text-xs font-semibold text-success">09:02 AM ✓</span></div>
+                <div class="flex items-center justify-between"><span class="text-xs text-muted">Check-out</span><span class="text-xs text-muted">—</span></div>
+                <div class="flex items-center justify-between"><span class="text-xs text-muted">Hours</span><span class="text-xs font-semibold">3h 22m (live)</span></div>
+                <div class="flex items-center justify-between"><span class="text-xs text-muted">Location</span><span class="text-xs font-semibold">Office</span></div>
+                <div style="background:var(--success-soft);border-radius:7px;padding:8px;text-align:center;margin-top:4px"><span style="font-size:11px;font-weight:600;color:var(--success)">✓ On Track</span></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header" style="padding:12px 14px"><span class="card-title">Exceptions</span><span class="badge amber">1 open</span></div>
+              <div class="card-body" style="padding:12px 14px">
+                <div style="background:var(--warn-soft);border:1px solid #FDE68A;border-radius:7px;padding:10px;margin-bottom:8px">
+                  <div class="text-xs font-semibold" style="color:#92400E">May 20 — Absent</div>
+                  <div class="text-xs text-muted mt-1">LOP applied · No leave applied</div>
+                  <button class="btn btn-outline btn-sm mt-2 w-full" style="justify-content:center">Regularize →</button>
+                </div>
+                <div style="background:var(--success-soft);border:1px solid #A7F3D0;border-radius:7px;padding:10px">
+                  <div class="text-xs font-semibold" style="color:#065F46">May 13 — Short Hours</div>
+                  <div class="text-xs text-muted mt-1">Regularization approved</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- SCREEN 4: MANAGER CONSOLE                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="s-manager" class="screen">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sb-logo">
+        <div class="sb-logo-icon amber">HR</div>
+        <div class="sb-logo-text"><p>HRMS</p><span>Manager Console</span></div>
+      </div>
+      <nav class="sb-nav">
+        <div class="sb-section-head"><span class="blue">● Employee</span></div>
+        <a class="sb-item"><span class="ico">🏠</span> My Dashboard</a>
+        <a class="sb-item"><span class="ico">📅</span> My Attendance</a>
+        <a class="sb-item"><span class="ico">⚖️</span> Leave & Comp-Off</a>
+        <a class="sb-item"><span class="ico">💰</span> Pay & Comp</a>
+
+        <div class="sb-divider"></div>
+        <div class="sb-section-head"><span class="amber">● Manager</span></div>
+        <a class="sb-item active-amber"><span class="ico">📊</span> Team Dashboard</a>
+        <a class="sb-item"><span class="ico">📡</span> Who Is In</a>
+        <a class="sb-item"><span class="ico">📅</span> Team Attendance</a>
+        <a class="sb-item"><span class="ico">✅</span> Approvals <span class="sb-badge">7</span></a>
+        <a class="sb-item"><span class="ico">⚖️</span> Leave Balances</a>
+        <a class="sb-item"><span class="ico">📈</span> Performance</a>
+        <a class="sb-item"><span class="ico">📊</span> Team Reports</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Team Dashboard</div>
+          <div class="page-sub">Engineering · 12 direct reports · May 2026</div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm">📊 Reports</button>
+          <button class="btn btn-primary btn-sm" style="background:var(--amber);border-color:var(--amber)">+ Add Member</button>
+        </div>
+      </div>
+
+      <div class="content">
+        <!-- KPI strip -->
+        <div class="kpi-strip cols-5 mb-4">
+          <div class="kpi-card green"><div class="kpi-label">Present Today</div><div class="kpi-value">9</div><div class="kpi-meta">of 12</div></div>
+          <div class="kpi-card amber"><div class="kpi-label">On Leave</div><div class="kpi-value">2</div><div class="kpi-meta">1 planned</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Pending Approvals</div><div class="kpi-value" style="color:var(--danger)">7</div><div class="kpi-meta"><span class="dn">2 breaching SLA</span></div></div>
+          <div class="kpi-card blue"><div class="kpi-label">Avg Attendance</div><div class="kpi-value sm">96.2%</div><div class="kpi-meta"><span class="up">↑ vs last wk</span></div></div>
+          <div class="kpi-card violet"><div class="kpi-label">Exceptions</div><div class="kpi-value">4</div><div class="kpi-meta">Need review</div></div>
+        </div>
+
+        <div class="flex gap-4" style="align-items:start">
+          <!-- Left: Approvals -->
+          <div style="flex:1.4">
+            <div class="card mb-4">
+              <div class="card-header">
+                <span class="card-title">Pending Approvals</span>
+                <div class="flex gap-2 items-center">
+                  <span class="badge red">7 pending</span>
+                  <button class="btn btn-ghost btn-sm">View All</button>
+                </div>
+              </div>
+              <div class="card-body" style="padding:8px">
+                <!-- SLA breach banner -->
+                <div class="banner warn mb-2" style="padding:8px 12px">
+                  <span>⚠️</span>
+                  <span class="text-xs font-semibold" style="color:#92400E">2 approvals are breaching 48-hr SLA — Priya Menon, Amit Tiwari</span>
+                </div>
+                <table class="tbl">
+                  <thead><tr><th>Employee</th><th>Type</th><th>Details</th><th>Submitted</th><th>SLA</th><th>Action</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td><div class="flex items-center gap-2"><div class="avatar" style="background:#EDE9FE;color:#5B21B6;width:26px;height:26px;font-size:10px">PM</div>Priya Menon</div></td>
+                      <td><span class="badge violet">Leave</span></td>
+                      <td>CL · May 30–31</td>
+                      <td>May 26</td>
+                      <td><span class="badge red">Overdue</span></td>
+                      <td><div class="flex gap-1"><button class="btn btn-success btn-sm">✓</button><button class="btn btn-danger btn-sm">✗</button></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="flex items-center gap-2"><div class="avatar" style="background:#DBEAFE;color:#1D4ED8;width:26px;height:26px;font-size:10px">AT</div>Amit Tiwari</div></td>
+                      <td><span class="badge blue">Regularize</span></td>
+                      <td>May 20 · 4 hrs short</td>
+                      <td>May 26</td>
+                      <td><span class="badge red">Overdue</span></td>
+                      <td><div class="flex gap-1"><button class="btn btn-success btn-sm">✓</button><button class="btn btn-danger btn-sm">✗</button></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="flex items-center gap-2"><div class="avatar" style="background:#D1FAE5;color:#065F46;width:26px;height:26px;font-size:10px">RK</div>Rohit Kumar</div></td>
+                      <td><span class="badge amber">Comp-Off</span></td>
+                      <td>May 17 (Sat)</td>
+                      <td>May 27</td>
+                      <td><span class="badge green">1d left</span></td>
+                      <td><div class="flex gap-1"><button class="btn btn-success btn-sm">✓</button><button class="btn btn-danger btn-sm">✗</button></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="flex items-center gap-2"><div class="avatar" style="background:#FEF3C7;color:#92400E;width:26px;height:26px;font-size:10px">SR</div>Sana Rizvi</div></td>
+                      <td><span class="badge violet">Leave</span></td>
+                      <td>SL · May 29</td>
+                      <td>May 28</td>
+                      <td><span class="badge green">2d left</span></td>
+                      <td><div class="flex gap-1"><button class="btn btn-success btn-sm">✓</button><button class="btn btn-danger btn-sm">✗</button></div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Team attendance table -->
+            <div class="card">
+              <div class="card-header"><span class="card-title">Team — Today, May 28</span><button class="btn btn-ghost btn-sm">Full Log →</button></div>
+              <div class="card-body" style="padding:8px">
+                <table class="tbl">
+                  <thead><tr><th>Member</th><th>In</th><th>Out</th><th>Hours</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td><div class="flex items-center gap-2"><div class="avatar" style="background:#EDE9FE;color:#5B21B6;width:24px;height:24px;font-size:10px">RS</div>Rahul Sharma</div></td><td>09:02</td><td>—</td><td>3h 22m</td><td><span class="badge green">Present</span></td></tr>
+                    <tr><td><div class="flex items-center gap-2"><div class="avatar" style="background:#DBEAFE;color:#1D4ED8;width:24px;height:24px;font-size:10px">PM</div>Priya Menon</div></td><td>—</td><td>—</td><td>—</td><td><span class="badge amber">CL</span></td></tr>
+                    <tr><td><div class="flex items-center gap-2"><div class="avatar" style="background:#D1FAE5;color:#065F46;width:24px;height:24px;font-size:10px">AT</div>Amit Tiwari</div></td><td>08:55</td><td>—</td><td>3h 37m</td><td><span class="badge green">Present</span></td></tr>
+                    <tr><td><div class="flex items-center gap-2"><div class="avatar" style="background:#FEE2E2;color:#991B1B;width:24px;height:24px;font-size:10px">MK</div>Megha Kapoor</div></td><td>—</td><td>—</td><td>—</td><td><span class="badge red">Absent</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Donut + Leave calendar -->
+          <div style="width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:14px">
+            <!-- Attendance donut -->
+            <div class="card">
+              <div class="card-header" style="padding:12px 14px"><span class="card-title">Attendance Split</span></div>
+              <div class="card-body" style="padding:12px 14px;display:flex;flex-direction:column;align-items:center">
+                <div class="donut-wrap mb-3">
+                  <svg viewBox="0 0 80 80" width="80" height="80">
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#E5E7EB" stroke-width="12"/>
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#10B981" stroke-width="12" stroke-dasharray="113 75" stroke-linecap="round"/>
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#F59E0B" stroke-width="12" stroke-dasharray="23 165" stroke-dashoffset="-113" stroke-linecap="round"/>
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="#EF4444" stroke-width="12" stroke-dasharray="6 182" stroke-dashoffset="-136" stroke-linecap="round"/>
+                  </svg>
+                  <div class="donut-center"><div style="font-size:16px;font-weight:700">9</div><div style="font-size:9px;color:var(--muted)">Present</div></div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;width:100%">
+                  <div class="flex items-center justify-between"><div class="flex items-center gap-2"><div class="dot green"></div><span class="text-xs">Present</span></div><span class="text-xs font-semibold">9 (75%)</span></div>
+                  <div class="flex items-center justify-between"><div class="flex items-center gap-2"><div class="dot amber"></div><span class="text-xs">On Leave</span></div><span class="text-xs font-semibold">2 (17%)</span></div>
+                  <div class="flex items-center justify-between"><div class="flex items-center gap-2"><div class="dot red"></div><span class="text-xs">Absent</span></div><span class="text-xs font-semibold">1 (8%)</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Leave calendar (mini) -->
+            <div class="card">
+              <div class="card-header" style="padding:12px 14px"><span class="card-title">Upcoming Leaves</span></div>
+              <div class="card-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+                <div style="background:var(--warn-soft);border-radius:7px;padding:8px;border:1px solid #FDE68A">
+                  <div class="text-xs font-semibold" style="color:#92400E">May 30–31</div>
+                  <div class="text-xs text-muted">Priya Menon · CL · Pending</div>
+                </div>
+                <div style="background:var(--info-soft);border-radius:7px;padding:8px;border:1px solid #BFDBFE">
+                  <div class="text-xs font-semibold" style="color:#1D4ED8">Jun 2–4</div>
+                  <div class="text-xs text-muted">Rohit Kumar · EL · Approved</div>
+                </div>
+                <div style="background:var(--success-soft);border-radius:7px;padding:8px;border:1px solid #A7F3D0">
+                  <div class="text-xs font-semibold" style="color:#065F46">Jun 9</div>
+                  <div class="text-xs text-muted">Sana Rizvi · SL · Approved</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+function show(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('visible'))
+  document.querySelectorAll('.sw-btn').forEach(b=>b.classList.remove('active'))
+  document.getElementById('s-'+name).classList.add('visible')
+  event.target.classList.add('active')
+}
+</script>
+</body>
+</html>

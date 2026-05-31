@@ -18,7 +18,7 @@ import { useQuery }          from '@tanstack/react-query'
 import {
   Zap, AlertTriangle, ClipboardCheck, ShieldCheck, Target,
   CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus,
-  RefreshCw, ExternalLink, ChevronRight, Brain, Flame,
+  RefreshCw, ExternalLink, ChevronRight, Brain, Flame, Loader2,
 } from 'lucide-react'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
@@ -426,9 +426,12 @@ function OperationalHealthInner() {
           }
         >
           {(statusLoading || lastRunLoading) ? (
-            <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
+            <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
           ) : recentRuns.length === 0 ? (
-            <div className="text-xs text-muted-foreground py-6 text-center">No processing runs recorded yet.</div>
+            <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
+              <RefreshCw className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">No processing runs recorded yet.</p>
+            </div>
           ) : (
             <div>
               {recentRuns.slice(0, 8).map(run => <RunRow key={run.id} run={run} />)}

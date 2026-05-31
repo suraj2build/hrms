@@ -35,6 +35,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
+import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { toast }         from 'sonner'
@@ -127,15 +128,19 @@ const REPLAY_STATUS_VARIANT: Record<ReplayStatus, BadgeVariant> = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDatetime(iso: string) {
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function fmtDate(iso: string) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const d = new Date(iso.length === 10 ? iso + 'T12:00:00Z' : iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function truncate(str: string | null, len = 14) {
@@ -404,19 +409,17 @@ function EventLogTab() {
           </div>
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">From</label>
-            <Input
-              type="date"
+            <DateInput
               value={filters.from}
-              onChange={e => setFilters(p => ({ ...p, from: e.target.value }))}
+              onChange={v => setFilters(p => ({ ...p, from: v }))}
               className="h-7 text-xs w-34"
             />
           </div>
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">To</label>
-            <Input
-              type="date"
+            <DateInput
               value={filters.to}
-              onChange={e => setFilters(p => ({ ...p, to: e.target.value }))}
+              onChange={v => setFilters(p => ({ ...p, to: v }))}
               className="h-7 text-xs w-34"
             />
           </div>

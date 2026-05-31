@@ -25,7 +25,7 @@ import {
 import {
   Flame, AlertTriangle, Activity, CalendarRange,
   ChevronLeft, ChevronRight, ShieldAlert, Users,
-  TrendingDown, Clock, Zap, Search,
+  TrendingDown, Clock, Zap, Search, Loader2,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -373,7 +373,7 @@ export function RosterIntelligence() {
           icon={<TrendingDown className="h-4 w-4 text-muted-foreground" />}
         >
           {gapsLoading ? (
-            <p className="text-xs text-muted-foreground animate-pulse py-4">Loading gaps…</p>
+            <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -451,7 +451,7 @@ export function RosterIntelligence() {
         }
       >
         {burnoutLoading ? (
-          <p className="text-xs text-muted-foreground animate-pulse py-4">Loading burnout data…</p>
+          <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
         ) : (burnoutData?.employees.length ?? 0) === 0 ? (
           <div className="flex flex-col items-center py-10 gap-2 text-muted-foreground">
             <Zap className="h-8 w-8 opacity-30" />
@@ -544,7 +544,7 @@ export function RosterIntelligence() {
         icon={<CalendarRange className="h-4 w-4 text-muted-foreground" />}
       >
         {heatmapLoading ? (
-          <p className="text-xs text-muted-foreground animate-pulse py-4">Loading heatmap…</p>
+          <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
         ) : shiftNames.length === 0 ? (
           <p className="text-xs text-muted-foreground py-4">No heatmap data available.</p>
         ) : (

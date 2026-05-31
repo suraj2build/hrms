@@ -4,12 +4,12 @@
  * Admin portal (/admin/*): super_admin, hr_admin, manager
  * ESS portal   (/ess/*):   employee
  *
- * `activeRole` in UIStore lets admins preview the ESS portal without
- * changing their real Supabase profile role.
+ * `activeRole` in UIStore is now a WORKSPACE CONTEXT signal (Admin Portal /
+ * Manager Workspace / Employee Self Service) — it does NOT change the portal
+ * base path. Route guards and navigation always use the user's real profile role.
  */
 
 import { useAuthStore } from '@/stores/authStore'
-import { useUIStore } from '@/stores/uiStore'
 import type { UserRole } from '@/types'
 
 export type BasePath = '/admin' | '/ess'
@@ -25,20 +25,19 @@ export function getBasePath(role: UserRole | undefined): BasePath {
 }
 
 /**
- * Hook — reads the *effective* role (activeRole override → real profile role)
- * and returns the matching base path.
+ * Hook — returns the base path for the user's *real* profile role.
+ * Workspace context overrides (activeRole) do NOT affect base path —
+ * workspace switching is scoped to views within the admin portal.
  */
 export function useBasePath(): BasePath {
   const { profile } = useAuthStore()
-  const { activeRole } = useUIStore()
-  return getBasePath(activeRole ?? profile?.role)
+  return getBasePath(profile?.role)
 }
 
-/** Returns the effective role (override takes precedence). */
+/** Returns the user's real profile role (no workspace override). */
 export function useEffectiveRole(): UserRole | undefined {
   const { profile } = useAuthStore()
-  const { activeRole } = useUIStore()
-  return activeRole ?? profile?.role
+  return profile?.role
 }
 
 /** Returns true if the real profile role is an admin-portal role. */

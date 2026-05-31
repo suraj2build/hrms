@@ -3,7 +3,7 @@
  *
  * Layout:
  *  1. Processing Pipeline Strip — live status · last run summary · process action
- *  2. KPI Row — 7 compact chips (today_summary + ops stats)
+ *  2. KPI Row — 7 compact chips (active_period_summary from read model)
  *  3. Two-column: Attention Queue & Today's Distribution | Processing Health & Quick Links
  *  4. Operational Timeline — last 8 audit events (7-day window, read-only)
  *  5. Collapsible: Team Attendance
@@ -16,7 +16,7 @@
  * Two additional read-only queries added: attendance-ops-stats, attendance-recent-activity.
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
@@ -27,7 +27,8 @@ import {
   UploadCloud, FileText, X, Users, CalendarDays, ChevronLeft,
   ChevronRight, ChevronDown, Activity, TrendingUp, TrendingDown,
   ShieldCheck, ArrowRight, BarChart3, BookOpen, ClipboardCheck,
-  Bug, ListFilter,
+  Bug, ListFilter, Calendar, Eye, Database,
+  Upload as UploadIcon, Info, Fingerprint,
 } from 'lucide-react'
 import { ContextualHint } from '@/components/operational/ContextualHint'
 
@@ -39,6 +40,7 @@ import { FormField } from '@/components/forms/FormField'
 import { Badge }   from '@/components/ui/badge'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
@@ -47,6 +49,7 @@ import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
 import { ensureArray }  from '@/lib/array-utils'
+import { formatMonthShort } from '@/lib/attendance/attendance-period-context'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -130,6 +133,48 @@ interface AttendanceOpsStats {
   recompute_backlog:       number
   payroll_continuity_gaps: number
   is_processing:           boolean
+  /** YYYY-MM of the most recent month with attendance data */
+  active_period_month?: string | null
+  /**
+   * Canonical attendance period summary — the ONLY source for all KPI widgets.
+   *
+   * Derived from buildActivePeriodSummary() via attendance-read-model.ts.
+   * is_historical=true when active_month != current calendar month
+   * (e.g., imported 2025 data viewed in 2026).
+   * Null only on DB error.
+   */
+  active_period_summary?: {
+    active_month:    string   // YYYY-MM
+    is_historical:   boolean
+    present:         number
+    late:            number
+    absent:          number
+    half_day:        number
+    leave:           number
+    payable_days:    number
+    lop_days:        number
+    missing_punch:   number
+    total_employees: number
+  } | null
+}
+
+interface PipelineStats {
+  // Pipeline A — Biometric / Device
+  raw_log_count_30d:     number
+  processing_runs_30d:   number
+  last_batch_run_date:   string | null
+  last_batch_ran_at:     string | null
+  batch_employees_last:  number | null
+  batch_last_error:      string | null
+  // Pipeline B — CSV Upload Recompute
+  punch_log_count_30d:   number
+  csv_employees_30d:     number
+  daily_rows_from_csv:   number
+  csv_date_range:        { from: string; to: string } | null
+  upload_count_30d:      number
+  last_upload_at:        string | null
+  // Source detection
+  active_source:         'csv' | 'biometric' | 'hybrid' | 'none'
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -184,6 +229,12 @@ interface UploadPreviewRow {
 }
 interface UploadFailedRow  { line: number; row: string; error: string }
 interface UploadResult     { total_rows: number; success_rows: number; failed_rows: UploadFailedRow[] }
+
+interface UploadedDateRange {
+  from:             string   // YYYY-MM-DD
+  to:               string   // YYYY-MM-DD
+  employee_count:   number   // distinct employee_code values
+}
 
 function csvParseLine(line: string): string[] {
   const fields: string[] = []
@@ -367,9 +418,10 @@ export function Attendance() {
   const [uploadHeaders,     setUploadHeaders]   = useState<string[]>([])
   const [uploadMissingCols, setUploadMissingCols] = useState<string[]>([])
   const [uploadPreviewRows, setUploadPreviewRows] = useState<UploadPreviewRow[]>([])
-  const [uploadTotalRows,   setUploadTotalRows]  = useState(0)
-  const [uploadResult,      setUploadResult]     = useState<UploadResult | null>(null)
-  const [uploadParseError,  setUploadParseError] = useState<string | null>(null)
+  const [uploadTotalRows,    setUploadTotalRows]    = useState(0)
+  const [uploadResult,       setUploadResult]       = useState<UploadResult | null>(null)
+  const [uploadParseError,   setUploadParseError]   = useState<string | null>(null)
+  const [uploadedDateRange,  setUploadedDateRange]  = useState<UploadedDateRange | null>(null)
 
   // ── Pipeline strip highlight ref ─────────────────────────────────────────────
   const lastRunRef        = useRef<HTMLDivElement>(null)
@@ -409,6 +461,12 @@ export function Attendance() {
       setIsExporting(false)
     }
   }, [])
+
+  // ── Derived: is current teamDate outside the last uploaded range? ─────────────
+  const isTeamDateOutsideUpload = useMemo(() => {
+    if (!uploadedDateRange) return false
+    return teamDate < uploadedDateRange.from || teamDate > uploadedDateRange.to
+  }, [teamDate, uploadedDateRange])
 
   // ── Team date navigation ──────────────────────────────────────────────────────
   function teamPrevDay() {
@@ -458,6 +516,33 @@ export function Attendance() {
     const dataLines = lines.slice(1)
     setUploadTotalRows(dataLines.length)
 
+    // ── Extract date range + unique employee count from ALL rows ──────────────
+    const dateColIdx = headerCols.indexOf('date')
+    const empColIdx  = headerCols.indexOf('employee_code')
+    if (dateColIdx >= 0 && missing.length === 0) {
+      const allDates: string[] = []
+      const allEmployees = new Set<string>()
+      for (const line of dataLines) {
+        const cols = csvParseLine(line)
+        const d    = cols[dateColIdx]?.trim()
+        const emp  = cols[empColIdx]?.trim()
+        if (d && UPLOAD_DATE_RE.test(d))  allDates.push(d)
+        if (emp)                          allEmployees.add(emp)
+      }
+      if (allDates.length > 0) {
+        allDates.sort()
+        setUploadedDateRange({
+          from:           allDates[0],
+          to:             allDates[allDates.length - 1],
+          employee_count: allEmployees.size,
+        })
+      } else {
+        setUploadedDateRange(null)
+      }
+    } else {
+      setUploadedDateRange(null)
+    }
+
     const preview: UploadPreviewRow[] = []
     for (let i = 0; i < Math.min(20, dataLines.length); i++) {
       const fields = csvParseLine(dataLines[i])
@@ -472,13 +557,15 @@ export function Attendance() {
   function handleUploadClear() {
     setUploadFileName(null); setUploadCsvText(null); setUploadHeaders([])
     setUploadMissingCols([]); setUploadPreviewRows([]); setUploadTotalRows(0)
-    setUploadResult(null); setUploadParseError(null)
+    setUploadResult(null); setUploadParseError(null); setUploadedDateRange(null)
   }
 
   const uploadMutation = useMutation<UploadResult, Error, string>({
     mutationFn: (csv_content) => api.post<UploadResult>('/attendance/upload', { csv_content }),
     onSuccess:  (data) => {
       setUploadResult(data)
+      // Refresh pipeline stats so CSV metrics card reflects the new upload
+      queryClient.invalidateQueries({ queryKey: ['attendance-pipeline-stats'] })
       toast.success('Upload complete', { description: `${data.success_rows ?? 0} rows processed` })
     },
     onError: (e: Error) => toast.error('Upload failed', { description: e.message }),
@@ -553,6 +640,15 @@ export function Attendance() {
     retry: false,
   })
 
+  // Pipeline stats (both CSV + biometric pipeline metrics)
+  const { data: pipelineStats } = useQuery<PipelineStats>({
+    queryKey: ['attendance-pipeline-stats'],
+    queryFn:  () => api.get<PipelineStats>('/attendance/pipeline-stats'),
+    enabled:  isAdmin,
+    staleTime: 60_000,
+    retry: false,
+  })
+
   // Recent activity (7-day window, max 8 rows — for operational timeline)
   const { data: recentActivity } = useQuery<{ data: AuditLogRow[]; total: number }>({
     queryKey: ['attendance-recent-activity'],
@@ -599,6 +695,15 @@ export function Attendance() {
     },
   })
 
+  const forceUnlockMutation = useMutation({
+    mutationFn: () => api.post('/attendance/process/force-unlock', {}),
+    onSuccess: () => {
+      toast.success('Lock cleared', { description: 'Processing lock has been reset. You can now run attendance processing.' })
+      queryClient.invalidateQueries({ queryKey: ['attendance-process-status'] })
+    },
+    onError: (e: Error) => toast.error('Could not clear lock', { description: e.message }),
+  })
+
   const recomputeMutation = useMutation({
     mutationFn: (body: { from_date: string; to_date: string; employee_id?: string }) =>
       api.post<{ employees_processed: number; rows_upserted: number; duration_ms: number }>(
@@ -608,6 +713,9 @@ export function Attendance() {
     onSuccess: (res) => {
       setRecomputeResult(res)
       queryClient.invalidateQueries({ queryKey: ['my-attendance'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-recent-activity'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-pipeline-stats'] })
       toast.success('Recompute complete', { description: `${res.employees_processed} employees · ${res.rows_upserted} rows updated` })
     },
     onError: (e: Error) => toast.error('Recompute failed', { description: e.message }),
@@ -632,7 +740,20 @@ export function Attendance() {
     return { skipRate, incRate, level, skipPct: Math.round(skipRate * 100), incPct: Math.round(incRate * 100) }
   })()
 
-  const todaySummary = teamData?.today_summary
+  // ── Canonical attendance data source ────────────────────────────────────────
+  // For HR admins: always use active_period_summary (from attendance-read-model.ts).
+  //   This is the canonical source — it finds the most recent month with data and
+  //   returns the full canonical month aggregate.  No date=today assumptions.
+  // For managers/employees: use teamData (direct reports only, live day view).
+  const todaySummary = isAdmin
+    ? (opsStats?.active_period_summary ?? teamData?.today_summary)
+    : teamData?.today_summary
+
+  // Label for the KPI summary period — always the active month name (e.g. "May 2025")
+  // Derives from attendance-period-context — no inline new Date() formatting
+  const todaySummaryLabel = isAdmin && opsStats?.active_period_summary
+    ? formatMonthShort(opsStats.active_period_summary.active_month)
+    : formatMonthShort(new Date().toISOString().slice(0, 7))
 
   // ── Attention queue items ─────────────────────────────────────────────────────
   const attentionItems: Array<{
@@ -663,6 +784,7 @@ export function Attendance() {
     queryClient.invalidateQueries({ queryKey: ['attendance-process-status'] })
     queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
     queryClient.invalidateQueries({ queryKey: ['attendance-recent-activity'] })
+    queryClient.invalidateQueries({ queryKey: ['attendance-pipeline-stats'] })
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -672,7 +794,7 @@ export function Attendance() {
       {/* ── Page Header ──────────────────────────────────────────────────────── */}
       <PageHeader
         title="Attendance Operations"
-        subtitle={`Live command center · ${new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`}
+        subtitle={`Live command center · ${(() => { const _n = new Date(); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; const _DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; return `${_DOW[_n.getDay()]}, ${String(_n.getDate()).padStart(2,'0')}-${_M[_n.getMonth()]}-${_n.getFullYear()}` })()}`}
         actions={
           <Button size="sm" variant="ghost" onClick={handleRefreshAll}>
             <RefreshCw className="h-4 w-4" />
@@ -680,7 +802,70 @@ export function Attendance() {
         }
       />
 
-      {/* ── 1. PROCESSING PIPELINE STRIP ─────────────────────────────────────── */}
+      {/* ── 1. PIPELINE SOURCE BANNER (FIX 3 + FIX 7) ───────────────────────── */}
+      {isAdmin && pipelineStats && (
+        <div className={cn(
+          'flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 rounded-lg border text-sm',
+          pipelineStats.active_source === 'csv'       && 'bg-primary/5 border-primary/20',
+          pipelineStats.active_source === 'biometric' && 'bg-success/5 border-success/20',
+          pipelineStats.active_source === 'hybrid'    && 'bg-info/5 border-info/20',
+          pipelineStats.active_source === 'none'      && 'bg-muted/50 border-border',
+        )}>
+          {/* Source label */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {pipelineStats.active_source === 'csv'       && <UploadIcon  className="h-4 w-4 text-primary" />}
+            {pipelineStats.active_source === 'biometric' && <Fingerprint className="h-4 w-4 text-success" />}
+            {pipelineStats.active_source === 'hybrid'    && <Database    className="h-4 w-4 text-info" />}
+            {pipelineStats.active_source === 'none'      && <Info        className="h-4 w-4 text-muted-foreground" />}
+            <div>
+              <p className={cn(
+                'text-xs font-semibold leading-none',
+                pipelineStats.active_source === 'csv'       && 'text-primary',
+                pipelineStats.active_source === 'biometric' && 'text-success',
+                pipelineStats.active_source === 'hybrid'    && 'text-info',
+                pipelineStats.active_source === 'none'      && 'text-muted-foreground',
+              )}>
+                {pipelineStats.active_source === 'csv'       && 'CSV ATTENDANCE PIPELINE ACTIVE'}
+                {pipelineStats.active_source === 'biometric' && 'BIOMETRIC DEVICE PIPELINE ACTIVE'}
+                {pipelineStats.active_source === 'hybrid'    && 'HYBRID PIPELINE ACTIVE'}
+                {pipelineStats.active_source === 'none'      && 'NO ATTENDANCE DATA IN LAST 30 DAYS'}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {pipelineStats.active_source === 'csv'
+                  ? 'CSV uploads → attendance_punch_logs → recomputeRange → attendance_daily. Biometric/device processing is not currently configured.'
+                  : pipelineStats.active_source === 'biometric'
+                    ? 'Biometric devices → attendance_raw_logs → batch processor → attendance_daily. No CSV uploads in the last 30 days.'
+                    : pipelineStats.active_source === 'hybrid'
+                      ? 'Both CSV uploads and biometric devices are active. attendance_daily is populated from both sources.'
+                      : 'Upload a CSV or connect biometric devices to start generating attendance records.'}
+              </p>
+            </div>
+          </div>
+          {/* Source chips */}
+          <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
+            <span className={cn(
+              'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold',
+              pipelineStats.punch_log_count_30d > 0
+                ? 'bg-primary/15 text-primary'
+                : 'bg-muted text-muted-foreground',
+            )}>
+              <UploadIcon className="h-2.5 w-2.5" />
+              CSV: {pipelineStats.punch_log_count_30d > 0 ? `${pipelineStats.punch_log_count_30d} punches` : 'No data'}
+            </span>
+            <span className={cn(
+              'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold',
+              pipelineStats.raw_log_count_30d > 0
+                ? 'bg-success/15 text-success'
+                : 'bg-muted text-muted-foreground',
+            )}>
+              <Fingerprint className="h-2.5 w-2.5" />
+              Device: {pipelineStats.raw_log_count_30d > 0 ? `${pipelineStats.raw_log_count_30d} logs` : 'No data'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── 1A. BIOMETRIC DEVICE PROCESSING (renamed FIX 6) ─────────────────── */}
       <div
         ref={lastRunRef}
         className={cn(
@@ -688,6 +873,22 @@ export function Attendance() {
           lastRunHighlight && 'ring-2 ring-primary/50 shadow-md shadow-primary/10',
         )}
       >
+        {/* Section label */}
+        <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-border/60">
+          <Fingerprint className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Batch Device Processing
+          </span>
+          <span className="text-[10px] text-muted-foreground ml-1">
+            attendance_raw_logs → batch processor → attendance_daily
+          </span>
+          {pipelineStats && pipelineStats.raw_log_count_30d === 0 && (
+            <Badge variant="outline" className="ml-auto text-[10px] h-4 rounded-full text-muted-foreground">
+              Not configured
+            </Badge>
+          )}
+        </div>
+
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
 
           {/* Status indicator */}
@@ -706,10 +907,19 @@ export function Attendance() {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-success ring-2 ring-success/20" />
+                <div className={cn(
+                  'h-2.5 w-2.5 rounded-full ring-2',
+                  pipelineStats && pipelineStats.raw_log_count_30d > 0
+                    ? 'bg-success ring-success/20'
+                    : 'bg-muted-foreground/40 ring-muted-foreground/10',
+                )} />
                 <div>
                   <p className="text-xs font-semibold text-foreground leading-none">IDLE</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Ready to process</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {pipelineStats && pipelineStats.raw_log_count_30d === 0
+                      ? 'No device logs — CSV pipeline is active'
+                      : 'Ready to process'}
+                  </p>
                 </div>
               </div>
             )}
@@ -767,7 +977,14 @@ export function Attendance() {
                 </button>
               </div>
             ) : isAdmin ? (
-              <p className="text-xs text-muted-foreground">No processing runs yet — run attendance below</p>
+              <p className="text-xs text-muted-foreground">
+                No batch runs yet
+                {pipelineStats && pipelineStats.raw_log_count_30d === 0 && (
+                  <span className="text-primary ml-1">
+                    — this tenant uses the CSV upload pipeline
+                  </span>
+                )}
+              </p>
             ) : (
               <p className="text-xs text-muted-foreground">Attendance processing status</p>
             )}
@@ -787,10 +1004,9 @@ export function Attendance() {
                   />
                   Force
                 </label>
-                <Input
-                  type="date"
+                <DateInput
                   value={processDate}
-                  onChange={(e) => setProcessDate(e.target.value)}
+                  onChange={setProcessDate}
                   disabled={isJobRunning || processMutation.isPending}
                   className="h-8 text-xs w-36"
                 />
@@ -815,19 +1031,143 @@ export function Attendance() {
         </div>
       </div>
 
+      {/* ── 1B. CSV ATTENDANCE RECOMPUTE STRIP (FIX 1 + FIX 2 + FIX 6) ─────── */}
+      {isAdmin && (
+        <div className="rounded-lg border border-border bg-card shadow-elev-1 p-4">
+          {/* Section label */}
+          <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-border/60">
+            <UploadIcon className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              CSV Attendance Recompute
+            </span>
+            <span className="text-[10px] text-muted-foreground ml-1">
+              CSV upload → attendance_punch_logs → recomputeRange → attendance_daily
+            </span>
+            {pipelineStats && pipelineStats.punch_log_count_30d > 0 && (
+              <div className="ml-auto flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                <span className="text-[10px] font-semibold text-primary">ACTIVE</span>
+              </div>
+            )}
+          </div>
+
+          {/* FIX 2 — CSV metrics grid */}
+          {pipelineStats ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {/* Punch rows uploaded */}
+              <div className="p-3 rounded-md bg-muted/50 space-y-1">
+                <p className="text-[10px] text-muted-foreground">Punch Rows (30d)</p>
+                <p className={cn(
+                  'text-xl font-bold tabular-nums',
+                  pipelineStats.punch_log_count_30d > 0 ? 'text-foreground' : 'text-muted-foreground',
+                )}>
+                  {pipelineStats.punch_log_count_30d.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-muted-foreground">from CSV uploads</p>
+              </div>
+
+              {/* Employees recomputed */}
+              <div className="p-3 rounded-md bg-muted/50 space-y-1">
+                <p className="text-[10px] text-muted-foreground">Employees (30d)</p>
+                <p className={cn(
+                  'text-xl font-bold tabular-nums',
+                  pipelineStats.csv_employees_30d > 0 ? 'text-foreground' : 'text-muted-foreground',
+                )}>
+                  {pipelineStats.csv_employees_30d}
+                </p>
+                <p className="text-[10px] text-muted-foreground">recomputed</p>
+              </div>
+
+              {/* attendance_daily rows */}
+              <div className="p-3 rounded-md bg-muted/50 space-y-1">
+                <p className="text-[10px] text-muted-foreground">Daily Rows</p>
+                <p className={cn(
+                  'text-xl font-bold tabular-nums',
+                  pipelineStats.daily_rows_from_csv > 0 ? 'text-success' : 'text-muted-foreground',
+                )}>
+                  {pipelineStats.daily_rows_from_csv.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-muted-foreground">generated (all time)</p>
+              </div>
+
+              {/* Upload sessions */}
+              <div className="p-3 rounded-md bg-muted/50 space-y-1">
+                <p className="text-[10px] text-muted-foreground">Uploads (30d)</p>
+                <p className={cn(
+                  'text-xl font-bold tabular-nums',
+                  pipelineStats.upload_count_30d > 0 ? 'text-foreground' : 'text-muted-foreground',
+                )}>
+                  {pipelineStats.upload_count_30d}
+                </p>
+                <p className="text-[10px] text-muted-foreground">completed sessions</p>
+              </div>
+
+              {/* Uploaded period */}
+              <div className="p-3 rounded-md bg-muted/50 space-y-1 sm:col-span-2">
+                <p className="text-[10px] text-muted-foreground">Uploaded Period</p>
+                {pipelineStats.csv_date_range ? (
+                  <>
+                    <p className="text-sm font-semibold text-foreground tabular-nums">
+                      {pipelineStats.csv_date_range.from}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      → {pipelineStats.csv_date_range.to}
+                      {pipelineStats.last_upload_at && (
+                        <span className="ml-2 text-muted-foreground/70">
+                          · uploaded {(() => { const _d = new Date(pipelineStats.last_upload_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}` })()}
+                        </span>
+                      )}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No uploads yet</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-[72px] rounded-md bg-muted/60 animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {/* No-data helper */}
+          {pipelineStats && pipelineStats.punch_log_count_30d === 0 && (
+            <p className="mt-3 text-xs text-muted-foreground text-center">
+              No CSV attendance data in the last 30 days. Use the{' '}
+              <button
+                className="text-primary underline"
+                onClick={() => document.getElementById('bulk-upload-section')?.scrollIntoView({ behavior: 'smooth' })}
+              >
+                Bulk Upload
+              </button>{' '}
+              section below to upload attendance records.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── Inline processing warnings ────────────────────────────────────────── */}
 
       {isAdmin && isJobRunning && isStale && (
-        <div className="flex items-start gap-2 text-sm p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-          <span>
-            Processing appears stuck — the lock TTL has expired. The next run will
-            force-take the lock automatically, or enable{' '}
-            <button type="button" className="underline font-medium" onClick={() => setForceProcess(true)}>
-              Force
-            </button>
-            {' '}and click Process.
-          </span>
+        <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive">
+          <div className="flex items-start gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <span>
+              Processing appears stuck — the lock TTL has expired. Click{' '}
+              <strong>Force Clear Lock</strong> to reset it immediately, or the next
+              run will take over automatically.
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={forceUnlockMutation.isPending}
+            onClick={() => forceUnlockMutation.mutate()}
+            className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded border border-destructive/40 bg-background hover:bg-destructive/5 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {forceUnlockMutation.isPending ? 'Clearing…' : 'Force Clear Lock'}
+          </button>
         </div>
       )}
 
@@ -844,9 +1184,21 @@ export function Attendance() {
       )}
 
       {isAdmin && processMutation.isError && !alreadyProcessedWarn && (
-        <div className="flex items-center gap-2 text-sm text-destructive p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-          <WifiOff className="h-4 w-4 flex-shrink-0" />
-          {processMutation.error?.message ?? 'Processing failed. Please try again.'}
+        <div className="flex items-start justify-between gap-3 text-sm text-destructive p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+          <div className="flex items-start gap-2">
+            <WifiOff className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <span>{processMutation.error?.message ?? 'Processing failed. Please try again.'}</span>
+          </div>
+          {processMutation.error?.message?.includes('already running') && (
+            <button
+              type="button"
+              disabled={forceUnlockMutation.isPending}
+              onClick={() => forceUnlockMutation.mutate()}
+              className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded border border-destructive/40 bg-background hover:bg-destructive/5 disabled:opacity-50 transition-colors whitespace-nowrap"
+            >
+              {forceUnlockMutation.isPending ? 'Clearing…' : 'Force Clear Lock'}
+            </button>
+          )}
         </div>
       )}
 
@@ -888,20 +1240,51 @@ export function Attendance() {
         </div>
       )}
 
+      {/* ── Active period context banner ──────────────────────────────────────── */}
+      {/* Shown when attendance data is from a historical period (e.g., 2025 data
+          viewed in 2026) so users know the KPIs are not live-today values.    */}
+      {isAdmin && opsStats?.active_period_summary?.is_historical && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-warning/20 bg-warning/5 text-xs">
+          <CalendarDays className="h-3.5 w-3.5 text-warning flex-shrink-0" />
+          <span className="text-muted-foreground">
+            Showing active attendance period:{' '}
+            <span className="font-semibold text-foreground">{todaySummaryLabel}</span>
+            {' '}— no attendance data exists for today. All metrics reflect the most recent period with data.
+          </span>
+        </div>
+      )}
+
       {/* ── 2. KPI ROW ─────────────────────────────────────────────────────────── */}
       {(isAdmin || isManager) && (
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          {teamLoading ? (
+          {!opsStats && !teamLoading ? (
             Array.from({ length: 7 }).map((_, i) => (
               <div key={i} className="h-[62px] rounded-lg bg-muted/60 animate-pulse" />
             ))
           ) : todaySummary ? (
             <>
+              {/* Period badge — always shown for admin views (month aggregate, not today) */}
+              {isAdmin && (
+                <div className="col-span-full flex items-center gap-1.5 text-[10px] text-muted-foreground pb-0.5">
+                  <CalendarDays className="h-3 w-3 flex-shrink-0" />
+                  <span>
+                    Monthly aggregate ·{' '}
+                    <span className="font-medium text-foreground">{todaySummaryLabel}</span>
+                    {opsStats?.active_period_summary?.is_historical && (
+                      <span className="ml-1 text-warning">(historical period)</span>
+                    )}
+                  </span>
+                </div>
+              )}
               <KpiChip label="Present"    value={todaySummary.present}    colorClass="text-success" />
               <KpiChip label="Late"       value={todaySummary.late}       colorClass="text-warning" />
               <KpiChip label="Absent"     value={todaySummary.absent}     colorClass="text-destructive" />
-              <KpiChip label="On Leave"   value={todaySummary.leave}      colorClass="text-info" />
-              <KpiChip label="Not Marked" value={todaySummary.not_marked} colorClass="text-muted-foreground" />
+              <KpiChip label="On Leave"   value={(todaySummary as any).leave ?? (todaySummary as any).on_leave ?? 0} colorClass="text-info" />
+              {/* Payable days always available from active_period_summary; not_marked for manager view */}
+              {'payable_days' in todaySummary
+                ? <KpiChip label="Payable Days" value={(todaySummary as any).payable_days} colorClass="text-success" />
+                : <KpiChip label="Not Marked"   value={(todaySummary as any).not_marked ?? 0} colorClass="text-muted-foreground" />
+              }
               <KpiChip
                 label="Anomalies"
                 value={opsStats?.unresolved_anomalies ?? '—'}
@@ -969,116 +1352,190 @@ export function Attendance() {
               </SectionCard>
             )}
 
-            {/* Today's Distribution */}
+            {/* Attendance Distribution — always shows the active period month aggregate */}
             <SectionCard
-              title="Today's Distribution"
+              title={`${todaySummaryLabel} Distribution`}
               icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
-              description={`As of ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${todaySummary.total} total`}
+              description={`Month total · ${todaySummaryLabel}${'total_employees' in todaySummary ? ` · ${(todaySummary as any).total_employees} employees` : ''}`}
             >
-              <div className="space-y-2.5 mt-1">
-                {[
+              {(() => {
+                // Normalise field names: active_period_summary uses 'leave',
+                // manager teamData.today_summary also uses 'leave'
+                const leaveVal  = (todaySummary as any).leave ?? (todaySummary as any).on_leave ?? 0
+                const totalBase = Math.max(
+                  1,
+                  todaySummary.present + todaySummary.late + todaySummary.absent + leaveVal,
+                )
+                const bars: Array<{ label: string; value: number; barClass: string }> = [
                   { label: 'Present',    value: todaySummary.present,    barClass: 'bg-success' },
                   { label: 'Late',       value: todaySummary.late,       barClass: 'bg-warning' },
                   { label: 'Absent',     value: todaySummary.absent,     barClass: 'bg-destructive' },
-                  { label: 'On Leave',   value: todaySummary.leave,      barClass: 'bg-info' },
-                  { label: 'Not Marked', value: todaySummary.not_marked, barClass: 'bg-muted-foreground/50' },
-                ].map(({ label, value, barClass }) => (
-                  <div key={label} className="flex items-center gap-3 text-xs">
-                    <span className="w-[76px] text-muted-foreground flex-shrink-0">{label}</span>
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={cn('h-full rounded-full transition-all duration-500', barClass)}
-                        style={{ width: `${todaySummary.total > 0 ? (value / todaySummary.total) * 100 : 0}%` }}
-                      />
-                    </div>
-                    <span className="w-8 text-right font-semibold text-foreground tabular-nums flex-shrink-0">{value}</span>
+                  { label: 'On Leave',   value: leaveVal,                barClass: 'bg-info' },
+                  'payable_days' in todaySummary
+                    ? { label: 'Payable Days', value: (todaySummary as any).payable_days, barClass: 'bg-success/60' }
+                    : { label: 'Not Marked',   value: (todaySummary as any).not_marked ?? 0, barClass: 'bg-muted-foreground/50' },
+                ]
+                return (
+                  <div className="space-y-2.5 mt-1">
+                    {bars.map(({ label, value, barClass }) => (
+                      <div key={label} className="flex items-center gap-3 text-xs">
+                        <span className="w-[76px] text-muted-foreground flex-shrink-0">{label}</span>
+                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={cn('h-full rounded-full transition-all duration-500', barClass)}
+                            style={{ width: `${(value / totalBase) * 100}%` }}
+                          />
+                        </div>
+                        <span className="w-8 text-right font-semibold text-foreground tabular-nums flex-shrink-0">{value}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )
+              })()}
             </SectionCard>
           </div>
 
           {/* RIGHT: Processing Health + Quick Links */}
           <div className="space-y-4">
 
-            {/* Processing Health (compact) */}
-            {isAdmin && runHealth && (
+            {/* Processing Health (compact) — shows CSV pipeline when biometric not configured */}
+            {isAdmin && (runHealth || (pipelineStats && pipelineStats.active_source === 'csv')) && (
               <SectionCard
-                title="Processing Health"
+                title={pipelineStats?.active_source === 'csv' ? 'CSV Pipeline Health' : 'Processing Health'}
                 icon={<Activity className="h-4 w-4 text-muted-foreground" />}
-                description={lastRun?.date ? `Based on run · ${lastRun.date}` : undefined}
+                description={
+                  pipelineStats?.active_source === 'csv'
+                    ? pipelineStats.last_upload_at
+                      ? `Last upload · ${(() => { const _d = new Date(pipelineStats.last_upload_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}` })()}`
+                      : 'CSV upload pipeline'
+                    : lastRun?.date ? `Based on run · ${lastRun.date}` : undefined
+                }
               >
-                <div className="flex items-center gap-2 mb-3">
-                  <div className={cn(
-                    'flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold',
-                    runHealth.level === 'healthy'  && 'bg-success/15 text-success',
-                    runHealth.level === 'degraded' && 'bg-warning/15 text-warning',
-                    runHealth.level === 'critical' && 'bg-destructive/15 text-destructive',
-                  )}>
-                    <ShieldCheck className="h-3 w-3" />
-                    {runHealth.level === 'healthy'  && 'Healthy'}
-                    {runHealth.level === 'degraded' && 'Degraded'}
-                    {runHealth.level === 'critical' && 'Critical'}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 rounded-md bg-muted/50 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-muted-foreground">Skip Rate</span>
-                      {runHealth.skipPct > 0
-                        ? <TrendingDown className="h-3 w-3 text-warning" />
-                        : <TrendingUp   className="h-3 w-3 text-success" />}
+                {/* Biometric pipeline health view */}
+                {runHealth && (
+                  <>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className={cn(
+                        'flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold',
+                        runHealth.level === 'healthy'  && 'bg-success/15 text-success',
+                        runHealth.level === 'degraded' && 'bg-warning/15 text-warning',
+                        runHealth.level === 'critical' && 'bg-destructive/15 text-destructive',
+                      )}>
+                        <ShieldCheck className="h-3 w-3" />
+                        {runHealth.level === 'healthy'  && 'Healthy'}
+                        {runHealth.level === 'degraded' && 'Degraded'}
+                        {runHealth.level === 'critical' && 'Critical'}
+                      </div>
                     </div>
-                    <p className={cn(
-                      'text-lg font-bold',
-                      runHealth.skipPct === 0                           && 'text-success',
-                      runHealth.skipPct >= 5 && runHealth.skipPct < 20 && 'text-warning',
-                      runHealth.skipPct >= 20                           && 'text-destructive',
-                    )}>
-                      {runHealth.skipPct}%
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {lastRun?.skipped_count} of {(lastRun?.processed_count ?? 0) + (lastRun?.skipped_count ?? 0)} codes
-                    </p>
-                  </div>
 
-                  <div className="p-2.5 rounded-md bg-muted/50 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-muted-foreground">Incomplete</span>
-                      {runHealth.incPct > 0
-                        ? <AlertTriangle className="h-3 w-3 text-warning" />
-                        : <CheckCircle2  className="h-3 w-3 text-success" />}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2.5 rounded-md bg-muted/50 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-muted-foreground">Skip Rate</span>
+                          {runHealth.skipPct > 0
+                            ? <TrendingDown className="h-3 w-3 text-warning" />
+                            : <TrendingUp   className="h-3 w-3 text-success" />}
+                        </div>
+                        <p className={cn(
+                          'text-lg font-bold',
+                          runHealth.skipPct === 0                           && 'text-success',
+                          runHealth.skipPct >= 5 && runHealth.skipPct < 20 && 'text-warning',
+                          runHealth.skipPct >= 20                           && 'text-destructive',
+                        )}>
+                          {runHealth.skipPct}%
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {lastRun?.skipped_count} of {(lastRun?.processed_count ?? 0) + (lastRun?.skipped_count ?? 0)} codes
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 rounded-md bg-muted/50 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-muted-foreground">Incomplete</span>
+                          {runHealth.incPct > 0
+                            ? <AlertTriangle className="h-3 w-3 text-warning" />
+                            : <CheckCircle2  className="h-3 w-3 text-success" />}
+                        </div>
+                        <p className={cn(
+                          'text-lg font-bold',
+                          runHealth.incPct === 0                            && 'text-success',
+                          runHealth.incPct >= 10 && runHealth.incPct < 20  && 'text-warning',
+                          runHealth.incPct >= 20                            && 'text-destructive',
+                        )}>
+                          {runHealth.incPct}%
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {lastRun?.incomplete_count} no OUT punch
+                        </p>
+                      </div>
                     </div>
-                    <p className={cn(
-                      'text-lg font-bold',
-                      runHealth.incPct === 0                            && 'text-success',
-                      runHealth.incPct >= 10 && runHealth.incPct < 20  && 'text-warning',
-                      runHealth.incPct >= 20                            && 'text-destructive',
-                    )}>
-                      {runHealth.incPct}%
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {lastRun?.incomplete_count} no OUT punch
-                    </p>
-                  </div>
-                </div>
 
-                {runHealth.level !== 'healthy' && (
-                  <ContextualHint
-                    id="run-health-degraded"
-                    title={runHealth.level === 'critical' ? 'Action required' : 'Attention recommended'}
-                    variant={runHealth.level === 'critical' ? 'warning' : 'info'}
-                    inline
-                    className="mt-3"
-                  >
-                    {runHealth.skipPct >= 5 && (
-                      <>High skip rate means employee codes in biometric data don't match records. Check recently onboarded employees. </>
+                    {runHealth.level !== 'healthy' && (
+                      <ContextualHint
+                        id="run-health-degraded"
+                        title={runHealth.level === 'critical' ? 'Action required' : 'Attention recommended'}
+                        variant={runHealth.level === 'critical' ? 'warning' : 'info'}
+                        inline
+                        className="mt-3"
+                      >
+                        {runHealth.skipPct >= 5 && (
+                          <>High skip rate means employee codes in biometric data don't match records. Check recently onboarded employees. </>
+                        )}
+                        {runHealth.incPct >= 10 && (
+                          <>Employees with no OUT punch are marked present with estimated hours. Ask them to regularise.</>
+                        )}
+                      </ContextualHint>
                     )}
-                    {runHealth.incPct >= 10 && (
-                      <>Employees with no OUT punch are marked present with estimated hours. Ask them to regularise.</>
+                  </>
+                )}
+
+                {/* CSV pipeline health view (shown when biometric not active) */}
+                {!runHealth && pipelineStats && pipelineStats.active_source === 'csv' && (
+                  <>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className={cn(
+                        'flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold',
+                        pipelineStats.daily_rows_from_csv > 0
+                          ? 'bg-success/15 text-success'
+                          : 'bg-warning/15 text-warning',
+                      )}>
+                        <ShieldCheck className="h-3 w-3" />
+                        {pipelineStats.daily_rows_from_csv > 0 ? 'Healthy' : 'No data yet'}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2.5 rounded-md bg-muted/50 space-y-1">
+                        <p className="text-[10px] text-muted-foreground">Daily Rows</p>
+                        <p className={cn(
+                          'text-lg font-bold',
+                          pipelineStats.daily_rows_from_csv > 0 ? 'text-success' : 'text-muted-foreground',
+                        )}>
+                          {pipelineStats.daily_rows_from_csv.toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">generated</p>
+                      </div>
+                      <div className="p-2.5 rounded-md bg-muted/50 space-y-1">
+                        <p className="text-[10px] text-muted-foreground">Uploads</p>
+                        <p className={cn(
+                          'text-lg font-bold',
+                          pipelineStats.upload_count_30d > 0 ? 'text-foreground' : 'text-muted-foreground',
+                        )}>
+                          {pipelineStats.upload_count_30d}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">last 30 days</p>
+                      </div>
+                    </div>
+
+                    {pipelineStats.csv_date_range && (
+                      <div className="mt-2 p-2 rounded-md bg-primary/5 border border-primary/15 text-xs">
+                        <p className="text-[10px] text-muted-foreground mb-0.5">Uploaded period</p>
+                        <p className="font-semibold text-foreground">
+                          {pipelineStats.csv_date_range.from} → {pipelineStats.csv_date_range.to}
+                        </p>
+                      </div>
                     )}
-                  </ContextualHint>
+                  </>
                 )}
               </SectionCard>
             )}
@@ -1114,13 +1571,55 @@ export function Attendance() {
         </div>
       )}
 
-      {/* ── 4. OPERATIONAL TIMELINE ──────────────────────────────────────────── */}
+      {/* ── 4. OPERATIONAL TIMELINE (FIX 4) ─────────────────────────────────── */}
       {isAdmin && (
         <SectionCard
-          title="Recent Activity"
+          title="Recompute & Audit Activity"
           icon={<Clock className="h-4 w-4 text-muted-foreground" />}
-          description="Last 7 days · latest 8 changes"
+          description={
+            pipelineStats?.active_source === 'csv'
+              ? 'Last 7 days — CSV uploads, recompute runs, corrections, leave approvals'
+              : 'Last 7 days · latest 8 changes'
+          }
         >
+          {/* CSV pipeline activity summary (FIX 4 — shown when CSV is active) */}
+          {pipelineStats && pipelineStats.active_source !== 'none' && pipelineStats.upload_count_30d > 0 && (
+            <div className="flex items-center gap-3 flex-wrap mb-3 p-2.5 rounded-md bg-primary/5 border border-primary/15 text-xs">
+              <div className="flex items-center gap-1.5">
+                <UploadIcon className="h-3 w-3 text-primary" />
+                <span className="font-semibold text-foreground">{pipelineStats.upload_count_30d}</span>
+                <span className="text-muted-foreground">uploads (30d)</span>
+              </div>
+              <div className="text-muted-foreground/60">·</div>
+              <div className="flex items-center gap-1.5">
+                <Database className="h-3 w-3 text-success" />
+                <span className="font-semibold text-foreground">{pipelineStats.daily_rows_from_csv.toLocaleString()}</span>
+                <span className="text-muted-foreground">daily rows generated</span>
+              </div>
+              {pipelineStats.csv_employees_30d > 0 && (
+                <>
+                  <div className="text-muted-foreground/60">·</div>
+                  <div className="flex items-center gap-1.5">
+                    <Users className="h-3 w-3 text-muted-foreground" />
+                    <span className="font-semibold text-foreground">{pipelineStats.csv_employees_30d}</span>
+                    <span className="text-muted-foreground">employees</span>
+                  </div>
+                </>
+              )}
+              {pipelineStats.csv_date_range && (
+                <>
+                  <div className="text-muted-foreground/60">·</div>
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">
+                      {pipelineStats.csv_date_range.from} → {pipelineStats.csv_date_range.to}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {(() => {
             const rows = recentActivity?.data ?? []
             if (!rows.length) {
@@ -1128,7 +1627,11 @@ export function Attendance() {
                 <EmptyState
                   icon={Clock}
                   title="No recent audit events"
-                  description="Attendance changes will appear here after processing, corrections, or leave approvals."
+                  description={
+                    pipelineStats?.active_source === 'csv'
+                      ? 'Attendance changes will appear here after CSV uploads, corrections, or leave approvals.'
+                      : 'Attendance changes will appear here after processing, corrections, or leave approvals.'
+                  }
                 />
               )
             }
@@ -1156,7 +1659,13 @@ export function Attendance() {
                       )}
                     </span>
                     <span className="flex-shrink-0 text-muted-foreground">
-                      <span>{row.before_status ?? '—'}</span>
+                      {/* Presentation-layer semantics: system recompute transitions from 'absent'
+                          are not a real prior absence — they mean "no record existed yet". */}
+                      <span>
+                        {row.source === 'system' && row.before_status === 'absent'
+                          ? 'system recompute'
+                          : (row.before_status ?? '—')}
+                      </span>
                       <span className="mx-1">→</span>
                       <span className="font-medium text-foreground">{row.after_status}</span>
                     </span>
@@ -1173,22 +1682,52 @@ export function Attendance() {
 
       {/* ── 5. COLLAPSIBLE: Team Attendance ──────────────────────────────────── */}
       {(isAdmin || isManager) && (
+        <div id="team-attendance-section">
         <CollapsibleCard
           title="Team Attendance"
           defaultOpen={false}
           icon={<Users className="h-4 w-4 text-muted-foreground" />}
         >
+          {/* FIX 6 — Health banner: viewing different period than uploaded data */}
+          {isTeamDateOutsideUpload && uploadedDateRange && (
+            <div className="flex items-start gap-2 p-2.5 rounded-md bg-warning/8 border border-warning/30 mb-3 text-xs">
+              <AlertTriangle className="h-3.5 w-3.5 text-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-warning">Viewing a different period than your uploaded data.</span>
+                <span className="text-muted-foreground ml-1">
+                  Uploaded attendance covers {uploadedDateRange.from} → {uploadedDateRange.to}.
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 px-2 text-[10px] text-primary flex-shrink-0"
+                onClick={() => setTeamDate(uploadedDateRange.from)}
+              >
+                Jump to upload
+              </Button>
+            </div>
+          )}
+
           {/* Date navigation + search */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
             <div className="flex items-center gap-2">
               <Button size="icon" variant="ghost" className="h-8 w-8" onClick={teamPrevDay}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <span className="text-sm font-medium text-foreground min-w-[150px] text-center">
-                {new Date(`${teamDate}T12:00:00Z`).toLocaleDateString([], {
-                  weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-                })}
-              </span>
+              <div className="flex flex-col items-center min-w-[150px]">
+                <span className="text-sm font-medium text-foreground text-center">
+                  {(() => { const _d = new Date(`${teamDate}T12:00:00Z`); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; const _DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return isNaN(_d.getTime()) ? teamDate : `${_DOW[_d.getUTCDay()]}, ${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}` })()}
+                </span>
+                {/* FIX 3 — Context indicator */}
+                {teamDate === todayStr() ? (
+                  <span className="text-[10px] text-success font-medium">Today</span>
+                ) : teamDate > todayStr() ? (
+                  <span className="text-[10px] text-muted-foreground">Future date</span>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Historical data</span>
+                )}
+              </div>
               <Button
                 size="icon"
                 variant="ghost"
@@ -1198,6 +1737,32 @@ export function Attendance() {
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
+            </div>
+
+            {/* FIX 7 — Quick-switch buttons */}
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant={teamDate === todayStr() ? 'secondary' : 'ghost'}
+                className="h-6 px-2 text-[10px]"
+                onClick={() => setTeamDate(todayStr())}
+              >
+                Today
+              </Button>
+              {uploadedDateRange && (
+                <Button
+                  size="sm"
+                  variant={(teamDate >= uploadedDateRange.from && teamDate <= uploadedDateRange.to) ? 'secondary' : 'ghost'}
+                  className="h-6 px-2 text-[10px] max-w-[160px] truncate"
+                  onClick={() => setTeamDate(uploadedDateRange.from)}
+                  title={`Uploaded period: ${uploadedDateRange.from} → ${uploadedDateRange.to}`}
+                >
+                  <Calendar className="h-2.5 w-2.5 mr-1" />
+                  {uploadedDateRange.from === uploadedDateRange.to
+                    ? uploadedDateRange.from
+                    : `${uploadedDateRange.from.slice(5)} → ${uploadedDateRange.to.slice(5)}`}
+                </Button>
+              )}
             </div>
 
             <div className="flex-1 max-w-xs">
@@ -1214,10 +1779,17 @@ export function Attendance() {
           {teamLoading ? (
             <LoadingState label="Loading team data…" />
           ) : !teamData || filteredTeam.length === 0 ? (
+            /* FIX 4 — Smart empty state */
             <EmptyState
               icon={Users}
-              title={teamSearch ? 'No members match your search' : 'No team members found'}
-              description={teamSearch ? 'Try a different name or code.' : 'Team members will appear here once configured.'}
+              title={teamSearch ? 'No members match your search' : 'No attendance data for this date'}
+              description={
+                teamSearch
+                  ? 'Try a different name or code.'
+                  : uploadedDateRange && (teamDate < uploadedDateRange.from || teamDate > uploadedDateRange.to)
+                    ? `No records for ${teamDate}. Recent uploaded attendance exists for: ${uploadedDateRange.from} → ${uploadedDateRange.to}.`
+                    : `No attendance records found for ${teamDate}. Upload a CSV or run the attendance processor to generate data.`
+              }
             />
           ) : (
             <div className="overflow-x-auto">
@@ -1282,10 +1854,12 @@ export function Attendance() {
             </div>
           )}
         </CollapsibleCard>
+        </div>
       )}
 
       {/* ── 6. COLLAPSIBLE: Bulk Upload ───────────────────────────────────────── */}
       {isAdmin && (
+        <div id="bulk-upload-section">
         <CollapsibleCard
           title="Bulk Upload Attendance"
           defaultOpen={false}
@@ -1461,6 +2035,23 @@ export function Attendance() {
                 <CheckCircle2 className="h-4 w-4 text-success" />
                 <span className="text-sm font-semibold text-success">Upload Complete</span>
               </div>
+
+              {/* FIX 1 — Date range summary */}
+              {uploadedDateRange && uploadResult.success_rows > 0 && (
+                <div className="flex items-center gap-2 p-2.5 rounded-md bg-primary/8 border border-primary/20 mb-3">
+                  <Calendar className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-semibold text-primary">
+                      Attendance uploaded for: {uploadedDateRange.from} → {uploadedDateRange.to}
+                    </span>
+                    <span className="text-xs text-muted-foreground ml-2">
+                      · {uploadedDateRange.employee_count} employee{uploadedDateRange.employee_count !== 1 ? 's' : ''}
+                      · {uploadResult.success_rows} rows
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-3 gap-3 text-sm mb-3">
                 {[
                   { label: 'Total Rows',  value: uploadResult.total_rows,        cls: 'text-foreground' },
@@ -1498,13 +2089,32 @@ export function Attendance() {
               )}
 
               {uploadResult.success_rows > 0 && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Attendance recompute has been triggered for all successfully uploaded rows.
-                </p>
+                <div className="flex items-center justify-between mt-3">
+                  <p className="text-xs text-muted-foreground">
+                    Attendance recompute triggered for all successfully uploaded rows.
+                  </p>
+                  {/* FIX 2 — Jump-To-Date CTA */}
+                  {uploadedDateRange && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1.5 ml-3 flex-shrink-0"
+                      onClick={() => {
+                        setTeamDate(uploadedDateRange.from)
+                        // Scroll to Team Attendance section smoothly
+                        document.getElementById('team-attendance-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }}
+                    >
+                      <Eye className="h-3 w-3" />
+                      View Uploaded Attendance
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           )}
         </CollapsibleCard>
+        </div>
       )}
 
       {/* ── 7. COLLAPSIBLE: Recompute Range ──────────────────────────────────── */}
@@ -1528,20 +2138,18 @@ export function Attendance() {
           <div className="space-y-3 mt-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <FormField label="From Date" htmlFor="rc-from" required>
-                <Input
+                <DateInput
                   id="rc-from"
-                  type="date"
                   value={recomputeFrom}
-                  onChange={(e) => setRecomputeFrom(e.target.value)}
+                  onChange={setRecomputeFrom}
                   max={recomputeTo}
                 />
               </FormField>
               <FormField label="To Date" htmlFor="rc-to" required>
-                <Input
+                <DateInput
                   id="rc-to"
-                  type="date"
                   value={recomputeTo}
-                  onChange={(e) => setRecomputeTo(e.target.value)}
+                  onChange={setRecomputeTo}
                   min={recomputeFrom}
                 />
               </FormField>
@@ -1618,19 +2226,17 @@ export function Attendance() {
           {/* Filter row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <FormField label="From" htmlFor="log-from">
-              <Input
+              <DateInput
                 id="log-from"
-                type="date"
                 value={logFrom}
-                onChange={(e) => setLogFrom(e.target.value)}
+                onChange={setLogFrom}
               />
             </FormField>
             <FormField label="To" htmlFor="log-to">
-              <Input
+              <DateInput
                 id="log-to"
-                type="date"
                 value={logTo}
-                onChange={(e) => setLogTo(e.target.value)}
+                onChange={setLogTo}
               />
             </FormField>
             <FormField label="Employee ID" htmlFor="log-emp-id">
@@ -1710,7 +2316,7 @@ export function Attendance() {
                         <span className="text-foreground font-medium">{row.after_status}</span>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">
-                        <div>{new Date(row.created_at).toLocaleDateString()}</div>
+                        <div>{(() => { const _d = new Date(row.created_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}-${_d.getUTCFullYear()}` })()}</div>
                         <div className="text-[10px]">{new Date(row.created_at).toLocaleTimeString()}</div>
                         {row.changed_by_name && (
                           <div className="text-[10px] text-muted-foreground/70">{row.changed_by_name}</div>

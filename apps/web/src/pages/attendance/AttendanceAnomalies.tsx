@@ -1,952 +1,372 @@
 /**
- * AttendanceAnomalies — /attendance/anomalies
+ * AttendanceAnomalies — /admin/attendance/anomalies
  *
- * Two views in one page:
- *   - Employee view (/my)  — own anomalies for the current month, read-only
- *   - HR view (default)    — all tenant anomalies with filter/search + resolve action
+ * Repurposed as a READ-ONLY HR monitoring view.
+ * Shows department-level anomaly rates — NOT individual actionable rows.
  *
- * Access:
- *   - Any authenticated user can see their own anomalies.
- *   - Only hr_admin / super_admin can see the full HR table and resolve anomalies.
+ * Why: At scale (4000+ employees) raw anomaly lists are unactionable.
+ * Anomalies are resolved via the regularisation workflow (manager approval).
+ * This view gives HR leadership oversight into which departments need attention.
  *
- * Design rules: design-system tokens only — no raw hex / bg-gray-* / text-blue-*.
+ * Data: GET /attendance/anomalies/summary?month=YYYY-MM
  */
 
-import { useState }                  from 'react'
-import { Link }                      from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast }                     from 'sonner'
+import { useState, useMemo }     from 'react'
+import { useNavigate }           from 'react-router-dom'
+import { useQuery }              from '@tanstack/react-query'
 import {
-  AlertTriangle, Loader2,
-  CheckCircle2, GitBranch, ShieldQuestion, ClipboardEdit, Search, TrendingUp,
+  AlertTriangle, ChevronLeft, ChevronRight,
+  BarChart3, ArrowRight, Loader2,
+  ShieldAlert, CheckCircle2,
 } from 'lucide-react'
-
-import { PageContainer }     from '@/components/layout/PageContainer'
-import { PageHeader }        from '@/components/layout/PageHeader'
-import { SectionCard }       from '@/components/layout/SectionCard'
-import { StatusStrip }       from '@/components/layout/StatusStrip'
-import { PeriodLockBanner }  from '@/components/layout/PeriodLockBanner'
-import { usePeriodLock }     from '@/hooks/usePeriodLock'
-import {
-  TableToolbar,
-  BulkActionBar,
-  PaginationBar,
-  EmptyTableState,
-} from '@/components/table'
-import { Badge }             from '@/components/ui/badge'
-import { Button }            from '@/components/ui/button'
-import { Input }             from '@/components/ui/input'
-import { api }               from '@/lib/api/client'
-import { useAuthStore }      from '@/stores/authStore'
-import { cn }                from '@/lib/utils'
-import { ForensicsDrawer }   from '@/components/operational/ForensicsDrawer'
-import { PolicyExplainPanel, type PolicyResolutionInfo } from '@/components/operational/PolicyChain'
+import { PageContainer }         from '@/components/layout/PageContainer'
+import { Button }                from '@/components/ui/button'
+import { cn }                    from '@/lib/utils'
+import { api }                   from '@/lib/api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type AnomalyType     = 'missing_out' | 'no_punch' | 'late' | 'excessive_hours'
-type AnomalySeverity = 'low' | 'medium' | 'high'
-
-interface AnomalyRow {
-  id:               string
-  date:             string
-  type:             AnomalyType
-  message:          string
-  severity:         AnomalySeverity
-  resolved:         boolean
-  created_at:       string
-  resolved_at:      string | null
-  // HR-only fields
-  employee_id?:     string | null
-  employee_name?:   string | null
-  employee_code?:   string | null
-  resolved_by_name?: string | null
-}
-
-interface AnomalyResponse {
-  data:   AnomalyRow[]
-  total:  number
-  limit:  number
-  offset: number
-}
-
-interface HrFilters {
-  from:        string
-  to:          string
-  employee_id: string
-  type:        '' | AnomalyType
-  severity:    '' | AnomalySeverity
-  resolved:    '' | 'true' | 'false'
-}
-
-const EMPTY_HR_FILTERS: HrFilters = {
-  from:        '',
-  to:          '',
-  employee_id: '',
-  type:        '',
-  severity:    '',
-  resolved:    'false',   // default: show unresolved only
-}
-
-const PAGE_SIZE = 50
-
-// ── Badge helpers ──────────────────────────────────────────────────────────────
-
-type BadgeVariant = 'success' | 'warning' | 'destructive' | 'secondary' | 'outline' | 'default'
-
-const TYPE_VARIANT: Record<AnomalyType, BadgeVariant> = {
-  missing_out:     'warning',
-  no_punch:        'destructive',
-  late:            'warning',
-  excessive_hours: 'secondary',
-}
-
-const TYPE_LABEL: Record<AnomalyType, string> = {
-  missing_out:     'Missing OUT',
-  no_punch:        'No Punch',
-  late:            'Late Arrival',
-  excessive_hours: 'Excessive Hours',
-}
-
-const SEVERITY_VARIANT: Record<AnomalySeverity, BadgeVariant> = {
-  low:    'outline',
-  medium: 'warning',
-  high:   'destructive',
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
-}
-
-function fmtDatetime(iso: string) {
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
-}
-
-/** Days elapsed since an ISO timestamp */
-function ageDays(iso: string): number {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
-}
-
-function ageLabel(days: number): string {
-  if (days === 0) return 'Today'
-  if (days === 1) return '1 day'
-  return `${days}d`
-}
-
-function ageBadgeVariant(days: number): BadgeVariant {
-  if (days >= 5) return 'destructive'
-  if (days >= 2) return 'warning'
-  return 'secondary'
-}
-
-// ── Quick filter presets ────────────────────────────────────────────────────────
-
-interface QuickPreset {
-  label:     string
-  filters:   Partial<HrFilters>
-}
-
-function buildQuickPresets(): QuickPreset[] {
-  const today     = new Date().toISOString().slice(0, 10)
-  const weekStart = (() => {
-    const d = new Date()
-    d.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1))  // Monday
-    return d.toISOString().slice(0, 10)
-  })()
-
-  return [
-    { label: 'High Only',    filters: { severity: 'high',   resolved: 'false', type: '', from: '', to: '' } },
-    { label: 'No Punch',     filters: { type: 'no_punch',   resolved: 'false', severity: '', from: '', to: '' } },
-    { label: 'Missing OUT',  filters: { type: 'missing_out', resolved: 'false', severity: '', from: '', to: '' } },
-    { label: 'Today',        filters: { from: today, to: today, resolved: 'false', type: '', severity: '' } },
-    { label: 'This Week',    filters: { from: weekStart, to: today, resolved: 'false', type: '', severity: '' } },
-    { label: 'All Open',     filters: { resolved: 'false', type: '', severity: '', from: '', to: '' } },
-  ]
-}
-
-// ── Policy resolution builder ──────────────────────────────────────────────────
-
-const ANOMALY_RULE_DESCRIPTIONS: Record<AnomalyType, { name: string; desc: string }> = {
-  missing_out: {
-    name: 'Missing OUT Detection Rule',
-    desc: 'A check-in was detected without a corresponding check-out punch. Attendance hours cannot be computed until a check-out is recorded. If genuine, the employee should submit a regularisation request.',
-  },
-  no_punch: {
-    name: 'No Punch Detection Rule',
-    desc: 'No attendance punches were recorded for this scheduled working day. The employee will be marked absent unless a leave application is approved or a regularisation request is submitted and approved.',
-  },
-  late: {
-    name: 'Late Arrival Detection Rule',
-    desc: 'The first check-in for this day was recorded after the allowed grace period for the employee\'s assigned shift. Late minutes are computed from shift start time plus the configured grace window.',
-  },
-  excessive_hours: {
-    name: 'Excessive Hours Detection Rule',
-    desc: 'Total logged work hours significantly exceeded the expected shift duration. This may indicate a missing OUT punch from a prior session or genuine extended work. Review the punch timeline for clarity.',
-  },
-}
-
-/** Build a synthetic PolicyResolutionInfo from an anomaly row for the explainer panel */
-function buildAnomalyPolicyResolution(row: AnomalyRow): PolicyResolutionInfo {
-  const rule = ANOMALY_RULE_DESCRIPTIONS[row.type]
-  return {
-    policy_id:   null,
-    policy_name: rule.name,
-    source:      'default',
-    rules: [
-      {
-        leave_type_name:    TYPE_LABEL[row.type],
-        eligible:           false,
-        eligibility_reason: `${row.message} — ${rule.desc}`,
-      },
-    ],
+interface DeptRow {
+  department_id:        string | null
+  department_name:      string
+  employee_count:       number
+  affected_employees:   number
+  anomaly_count:        number
+  unresolved_count:     number
+  high_severity_count:  number
+  anomaly_rate:         number | null
+  by_type: {
+    no_punch:        number
+    missing_punch:   number
+    missing_out:     number
+    late:            number
+    excessive_hours: number
   }
 }
 
-// ── Employee self-view ─────────────────────────────────────────────────────────
+interface SummaryResp {
+  month: string
+  summary: {
+    total:         number
+    unresolved:    number
+    high_severity: number
+    by_type:       Record<string, number>
+  }
+  by_department: DeptRow[]
+  trend: Array<{ month: string; total: number; unresolved: number }>
+}
 
-function MyAnomaliesView() {
-  const now      = new Date()
-  const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-  const [typeFilter, setTypeFilter] = useState<'' | AnomalyType>('')
+function fmtMonth(ym: string) {
+  const [y, m] = ym.split('-')
+  return new Date(Number(y), Number(m) - 1, 1)
+    .toLocaleString('default', { month: 'long', year: 'numeric' })
+}
 
-  const { data, isLoading, isError, refetch } = useQuery<AnomalyResponse>({
-    queryKey: ['my-anomalies', monthStr, typeFilter],
-    queryFn:  () => {
-      const params = new URLSearchParams({ limit: '50', offset: '0' })
-      if (typeFilter) params.set('type', typeFilter)
-      return api.get<AnomalyResponse>(`/attendance/anomalies/my?${params}`)
-    },
-    staleTime: 60_000,
-  })
+function prevMonth(ym: string) {
+  const d = new Date(`${ym}-01`)
+  d.setUTCMonth(d.getUTCMonth() - 1)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
 
-  const rows  = data?.data  ?? []
-  const total = data?.total ?? 0
+function nextMonth(ym: string) {
+  const d = new Date(`${ym}-01`)
+  d.setUTCMonth(d.getUTCMonth() + 1)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
 
+function currentMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function rateColor(rate: number | null) {
+  if (rate == null) return 'text-muted-foreground'
+  if (rate >= 3)    return 'text-destructive font-bold'
+  if (rate >= 1.5)  return 'text-warning font-semibold'
+  if (rate >= 0.5)  return 'text-foreground'
+  return 'text-success'
+}
+
+function RateBar({ rate, max }: { rate: number; max: number }) {
+  const pct = max > 0 ? Math.min((rate / max) * 100, 100) : 0
+  const color = rate >= 3 ? 'bg-destructive' : rate >= 1.5 ? 'bg-warning' : rate >= 0.5 ? 'bg-primary' : 'bg-success'
   return (
-    <SectionCard
-      title={`My Anomalies — ${total} unresolved`}
-      icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-      action={
-        <div className="flex items-center gap-2">
-          <select
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value as '' | AnomalyType)}
-            className="h-7 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
-          >
-            <option value="">All types</option>
-            <option value="missing_out">Missing OUT</option>
-            <option value="no_punch">No Punch</option>
-            <option value="late">Late</option>
-            <option value="excessive_hours">Excessive Hours</option>
-          </select>
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => refetch()}>
-            Refresh
-          </Button>
-        </div>
-      }
-    >
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Loading…</span>
-        </div>
-      )}
-
-      {isError && (
-        <div className="flex flex-col items-center gap-2 py-12">
-          <p className="text-sm text-destructive">Failed to load anomalies</p>
-          <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
-        </div>
-      )}
-
-      {!isLoading && !isError && rows.length === 0 && (
-        <div className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
-          <CheckCircle2 className="h-8 w-8 text-success opacity-70" />
-          <p className="text-sm font-medium text-foreground">All clear!</p>
-          <p className="text-xs">No attendance anomalies detected for this month.</p>
-        </div>
-      )}
-
-      {!isLoading && !isError && rows.length > 0 && (
-        <div className="space-y-2">
-          {rows.map(row => (
-            <div
-              key={row.id}
-              className={cn(
-                'flex items-start gap-3 p-3 rounded-md border transition-colors',
-                row.resolved
-                  ? 'border-border/40 bg-muted/20 opacity-60'
-                  : 'border-border bg-card',
-              )}
-            >
-              {/* Severity indicator */}
-              <AlertTriangle
-                className={cn(
-                  'h-4 w-4 flex-shrink-0 mt-0.5',
-                  row.severity === 'high'   && 'text-destructive',
-                  row.severity === 'medium' && 'text-warning',
-                  row.severity === 'low'    && 'text-muted-foreground',
-                )}
-              />
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center flex-wrap gap-1.5 mb-1">
-                  <span className="text-xs font-semibold text-foreground">{fmtDate(row.date)}</span>
-                  <Badge variant={TYPE_VARIANT[row.type]} className="rounded-full text-[10px] px-2">
-                    {TYPE_LABEL[row.type]}
-                  </Badge>
-                  <Badge variant={SEVERITY_VARIANT[row.severity]} className="rounded-full text-[10px] px-2">
-                    {row.severity}
-                  </Badge>
-                  {row.resolved && (
-                    <Badge variant="success" className="rounded-full text-[10px] px-2">Resolved</Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">{row.message}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionCard>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   )
 }
 
-// ── HR table view ──────────────────────────────────────────────────────────────
-
-function HrAnomaliesView() {
-  const qc = useQueryClient()
-  const [filters, setFilters] = useState<HrFilters>(EMPTY_HR_FILTERS)
-  const [applied, setApplied] = useState<HrFilters>(EMPTY_HR_FILTERS)
-  const [page,    setPage]    = useState(1)
-  // Live employee search — client-side filter on current page rows
-  const [employeeSearch, setEmployeeSearch] = useState('')
-  const [resolving, setResolving] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [forensicsTarget, setForensicsTarget] = useState<{
-    employeeId: string; date: string; employeeName?: string
-  } | null>(null)
-  const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
-
-  // Derive offset from page
-  const offset = (page - 1) * PAGE_SIZE
-
-  const { data, isLoading, isError, refetch } = useQuery<AnomalyResponse>({
-    queryKey: ['attendance-anomalies', applied, page],
-    queryFn:  () => {
-      const params = new URLSearchParams({
-        limit:  String(PAGE_SIZE),
-        offset: String(offset),
-      })
-      if (applied.from)        params.set('from',        applied.from)
-      if (applied.to)          params.set('to',          applied.to)
-      if (applied.employee_id) params.set('employee_id', applied.employee_id)
-      if (applied.type)        params.set('type',        applied.type)
-      if (applied.severity)    params.set('severity',    applied.severity)
-      if (applied.resolved)    params.set('resolved',    applied.resolved)
-      return api.get<AnomalyResponse>(`/attendance/anomalies?${params}`)
-    },
-    staleTime: 30_000,
-  })
-
-  const resolveMutation = useMutation({
-    mutationFn: (id: string) =>
-      api.post(`/attendance/anomalies/${id}/resolve`, {}),
-    onSuccess: () => {
-      setResolving(null)
-      qc.invalidateQueries({ queryKey: ['attendance-anomalies'] })
-      toast.success('Anomaly resolved')
-    },
-    onError: (e: Error) => {
-      setResolving(null)
-      toast.error('Failed to resolve anomaly', { description: e.message })
-    },
-  })
-
-  const bulkResolveMutation = useMutation({
-    mutationFn: () =>
-      api.post('/attendance/anomalies/bulk-resolve', { ids: [...selectedIds] }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['attendance-anomalies'] })
-      setSelectedIds(new Set())
-      toast.success('Selected anomalies resolved')
-    },
-    onError: (e: Error) => toast.error('Failed to resolve anomalies', { description: e.message }),
-  })
-
-  const allRows = data?.data  ?? []
-  const total   = data?.total ?? 0
-
-  // Client-side employee search filter
-  const rows = employeeSearch.trim()
-    ? allRows.filter(r => {
-        const q = employeeSearch.toLowerCase()
-        return (
-          (r.employee_name ?? '').toLowerCase().includes(q) ||
-          (r.employee_code ?? '').toLowerCase().includes(q)
-        )
-      })
-    : allRows
-
-  // Payroll risk: unresolved no_punch rows directly affect payroll (absent → no payable day)
-  const payrollRiskCount = rows.filter(r => !r.resolved && (r.type === 'no_punch' || r.type === 'missing_out')).length
-
-  // Derive resolved/unresolved counts from current page rows (best effort without API counts)
-  const resolvedCount   = rows.filter(r => r.resolved).length
-  const unresolvedCount = rows.filter(r => !r.resolved).length
-
-  // Severity breakdown — for current page unresolved rows only
-  const highCount   = rows.filter(r => !r.resolved && r.severity === 'high').length
-  const mediumCount = rows.filter(r => !r.resolved && r.severity === 'medium').length
-  const lowCount    = rows.filter(r => !r.resolved && r.severity === 'low').length
-
-  const quickPresets = buildQuickPresets()
-
-  function applyPreset(preset: QuickPreset) {
-    const next = { ...EMPTY_HR_FILTERS, ...preset.filters } as HrFilters
-    setFilters(next)
-    setApplied(next)
-    setPage(1)
-    setSelectedIds(new Set())
-  }
-
-  // Period lock awareness
-  const lockMonth = applied.from ? applied.from.slice(0, 7) : new Date().toISOString().slice(0, 7)
-  const { state: periodState } = usePeriodLock(lockMonth)
-
-  function applyFilters() {
-    setPage(1)
-    setApplied({ ...filters })
-  }
-
-  function resetFilters() {
-    setFilters(EMPTY_HR_FILTERS)
-    setApplied(EMPTY_HR_FILTERS)
-    setPage(1)
-  }
-
-  function handleResolve(id: string) {
-    setResolving(id)
-    resolveMutation.mutate(id)
-  }
-
-  // Build filter chips from applied state
-  const filterChips = [
-    ...(applied.from     ? [{ key: 'from',     label: `From: ${applied.from}` }]              : []),
-    ...(applied.to       ? [{ key: 'to',       label: `To: ${applied.to}` }]                  : []),
-    ...(applied.type     ? [{ key: 'type',     label: `Type: ${applied.type}` }]               : []),
-    ...(applied.severity ? [{ key: 'severity', label: `Severity: ${applied.severity}` }]       : []),
-    ...(applied.resolved !== ''
-      ? [{ key: 'resolved', label: applied.resolved === 'true' ? 'Resolved' : 'Unresolved' }]
-      : []),
-  ]
-
-  function handleRemoveChip(key: string) {
-    const next = { ...applied }
-    if (key === 'from')     { next.from     = ''; setFilters(f => ({ ...f, from: '' })) }
-    if (key === 'to')       { next.to       = ''; setFilters(f => ({ ...f, to: '' })) }
-    if (key === 'type')     { next.type     = ''; setFilters(f => ({ ...f, type: '' })) }
-    if (key === 'severity') { next.severity = ''; setFilters(f => ({ ...f, severity: '' })) }
-    if (key === 'resolved') { next.resolved = ''; setFilters(f => ({ ...f, resolved: '' })) }
-    setApplied(next)
-    setPage(1)
-  }
-
-  function handleClearAllChips() {
-    resetFilters()
-  }
-
-  // Row selection helpers
-  function toggleRow(id: string) {
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function toggleAll() {
-    if (selectedIds.size === rows.length) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(rows.map(r => r.id)))
-    }
-  }
-
+// ── KPI tile ──────────────────────────────────────────────────────────────────
+function KpiTile({
+  label, value, sub, icon: Icon, iconBg, iconColor, valueColor,
+}: {
+  label: string; value: string | number; sub?: string
+  icon: React.ComponentType<{ className?: string }>
+  iconBg: string; iconColor: string; valueColor?: string
+}) {
   return (
-    <SectionCard
-      title={`Anomalies${total ? ` (${total})` : ''}`}
-      icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-      noPadding
-    >
-      {/* Quick filter presets */}
-      <div className="flex items-center gap-1.5 flex-wrap px-4 pt-3 pb-0">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">Quick:</span>
-        {quickPresets.map(preset => {
-          // Determine if this preset is currently active
-          const isActive = Object.entries(preset.filters).every(
-            ([k, v]) => applied[k as keyof HrFilters] === v
-          )
-          return (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() => applyPreset(preset)}
-              className={cn(
-                'text-[10px] px-2.5 py-1 rounded-full border transition-colors',
-                isActive
-                  ? 'border-primary/40 bg-primary/10 text-primary font-semibold'
-                  : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground',
-              )}
-            >
-              {preset.label}
-            </button>
-          )
-        })}
+    <div className="rounded-2xl bg-card shadow-card p-5 flex flex-col gap-3">
+      <span className={cn('h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0', iconBg)}>
+        <Icon className={cn('h-5 w-5', iconColor)} />
+      </span>
+      <div>
+        <p className="text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+        <p className={cn('font-display text-[2rem] font-black tabular-nums leading-none mt-1', valueColor ?? 'text-foreground')}>
+          {value ?? '—'}
+        </p>
+        {sub && <p className="text-[11px] text-muted-foreground mt-1">{sub}</p>}
       </div>
-
-      {/* Filter toolbar */}
-      <TableToolbar
-        left={
-          <>
-            {/* Live employee search */}
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <Input
-                placeholder="Search employee…"
-                value={employeeSearch}
-                onChange={e => setEmployeeSearch(e.target.value)}
-                className="h-8 text-xs pl-7 w-44"
-              />
-            </div>
-
-            {/* Date from */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">From</label>
-              <Input
-                type="date"
-                className="h-8 text-xs"
-                value={filters.from}
-                onChange={e => setFilters(f => ({ ...f, from: e.target.value }))}
-              />
-            </div>
-
-            {/* Date to */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">To</label>
-              <Input
-                type="date"
-                className="h-8 text-xs"
-                value={filters.to}
-                min={filters.from}
-                onChange={e => setFilters(f => ({ ...f, to: e.target.value }))}
-              />
-            </div>
-
-            {/* Type */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">Type</label>
-              <select
-                value={filters.type}
-                onChange={e => setFilters(f => ({ ...f, type: e.target.value as HrFilters['type'] }))}
-                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-              >
-                <option value="">All Types</option>
-                <option value="missing_out">Missing OUT</option>
-                <option value="no_punch">No Punch</option>
-                <option value="late">Late Arrival</option>
-                <option value="excessive_hours">Excessive Hours</option>
-              </select>
-            </div>
-
-            {/* Severity */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">Severity</label>
-              <select
-                value={filters.severity}
-                onChange={e => setFilters(f => ({ ...f, severity: e.target.value as HrFilters['severity'] }))}
-                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-              >
-                <option value="">All Severities</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-            </div>
-
-            {/* Status */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">Status</label>
-              <select
-                value={filters.resolved}
-                onChange={e => setFilters(f => ({ ...f, resolved: e.target.value as HrFilters['resolved'] }))}
-                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-              >
-                <option value="">All</option>
-                <option value="false">Unresolved</option>
-                <option value="true">Resolved</option>
-              </select>
-            </div>
-
-            {/* Apply / Clear */}
-            <div className="flex items-end gap-2 pt-5">
-              <Button className="h-8 text-xs" onClick={applyFilters}>Apply</Button>
-              <Button variant="ghost" className="h-8 text-xs" onClick={resetFilters}>Clear</Button>
-            </div>
-          </>
-        }
-        right={
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => refetch()}>
-            Refresh
-          </Button>
-        }
-        filterChips={filterChips}
-        onRemoveChip={handleRemoveChip}
-        onClearAllChips={filterChips.length > 0 ? handleClearAllChips : undefined}
-      />
-
-      {/* Period lock banner */}
-      {periodState !== 'OPEN' && (
-        <PeriodLockBanner state={periodState} month={lockMonth} className="mx-4 mt-3" />
-      )}
-
-      {/* Payroll risk signal */}
-      {payrollRiskCount > 0 && applied.resolved !== 'true' && (
-        <div className="mx-4 mt-1 flex items-center gap-2 text-xs text-warning bg-warning/10 border border-warning/20 rounded-md px-3 py-2">
-          <TrendingUp className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>
-            <strong>{payrollRiskCount}</strong> unresolved no-punch / missing-OUT anomal{payrollRiskCount !== 1 ? 'ies' : 'y'} — these directly affect payroll payable days.
-          </span>
-        </div>
-      )}
-
-      {/* Status strip */}
-      <StatusStrip items={[
-        { label: 'Total',      value: total,          variant: 'default'  },
-        { label: 'Unresolved', value: unresolvedCount, variant: 'warning', hideWhenZero: false },
-        { label: 'High',       value: highCount,      variant: 'destructive', hideWhenZero: true },
-        { label: 'Medium',     value: mediumCount,    variant: 'warning',     hideWhenZero: true },
-        { label: 'Low',        value: lowCount,       variant: 'default',     hideWhenZero: true },
-        { label: 'Resolved',   value: resolvedCount,  variant: 'success',     hideWhenZero: true },
-      ]} />
-
-      {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <BulkActionBar
-          selectedCount={selectedIds.size}
-          actions={[{
-            id:      'resolve',
-            label:   'Resolve Selected',
-            icon:    CheckCircle2,
-            onClick: () => bulkResolveMutation.mutate(),
-            loading: bulkResolveMutation.isPending,
-          }]}
-          onClearSelection={() => setSelectedIds(new Set())}
-        />
-      )}
-
-      {/* Content */}
-      <div className="px-4 pb-4">
-        {isLoading && (
-          <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Loading anomalies…</span>
-          </div>
-        )}
-
-        {isError && (
-          <div className="flex flex-col items-center gap-2 py-12">
-            <p className="text-sm text-destructive">Failed to load anomalies</p>
-            <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
-          </div>
-        )}
-
-        {!isLoading && !isError && rows.length === 0 && (
-          <EmptyTableState
-            preset={filterChips.length > 0 ? 'no-results' : 'no-anomalies'}
-          />
-        )}
-
-        {!isLoading && !isError && rows.length > 0 && (
-          <div className="overflow-x-auto -mx-1 mt-2">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  {/* Select all checkbox */}
-                  <th className="py-2 px-3 w-8">
-                    <input
-                      type="checkbox"
-                      checked={rows.length > 0 && selectedIds.size === rows.length}
-                      onChange={toggleAll}
-                      className="rounded border-border"
-                    />
-                  </th>
-                  {['Date', 'Employee', 'Type', 'Severity', 'Message', 'Detected', 'Age', 'Status', 'Policy', ''].map(h => (
-                    <th
-                      key={h}
-                      className="text-left text-xs font-semibold text-muted-foreground py-2 px-3 whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(row => (
-                  <>
-                  <tr
-                    key={row.id}
-                    className={cn(
-                      'border-b border-border/50 hover:bg-muted/20 transition-colors',
-                      row.resolved && 'opacity-60',
-                      selectedIds.has(row.id) && 'bg-primary/5',
-                    )}
-                  >
-                    {/* Row checkbox */}
-                    <td className="py-2.5 px-3 w-8">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(row.id)}
-                        onChange={() => toggleRow(row.id)}
-                        className="rounded border-border"
-                      />
-                    </td>
-
-                    {/* Date */}
-                    <td className="py-2.5 px-3 whitespace-nowrap text-foreground text-xs tabular-nums">
-                      {fmtDate(row.date)}
-                    </td>
-
-                    {/* Employee */}
-                    <td className="py-2.5 px-3">
-                      <p className="font-medium text-foreground text-xs leading-tight">
-                        {row.employee_name ?? '—'}
-                      </p>
-                      {row.employee_code && (
-                        <p className="text-[10px] text-muted-foreground font-mono">{row.employee_code}</p>
-                      )}
-                    </td>
-
-                    {/* Type */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <Badge variant={TYPE_VARIANT[row.type]} className="rounded-full text-[10px] px-2">
-                        {TYPE_LABEL[row.type]}
-                      </Badge>
-                    </td>
-
-                    {/* Severity */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <Badge variant={SEVERITY_VARIANT[row.severity]} className="rounded-full text-[10px] px-2 capitalize">
-                        {row.severity}
-                      </Badge>
-                    </td>
-
-                    {/* Message */}
-                    <td className="py-2.5 px-3 max-w-xs">
-                      <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
-                        {row.message}
-                      </p>
-                    </td>
-
-                    {/* Detected at */}
-                    <td className="py-2.5 px-3 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
-                      {fmtDatetime(row.created_at)}
-                    </td>
-
-                    {/* Age — only shown for unresolved rows */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      {!row.resolved ? (
-                        <Badge
-                          variant={ageBadgeVariant(ageDays(row.created_at))}
-                          className="rounded-full text-[10px] px-1.5"
-                        >
-                          {ageLabel(ageDays(row.created_at))}
-                        </Badge>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground/50">—</span>
-                      )}
-                    </td>
-
-                    {/* Status */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      {row.resolved ? (
-                        <div>
-                          <Badge variant="success" className="rounded-full text-[10px] px-2">Resolved</Badge>
-                          {row.resolved_at && (
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {fmtDatetime(row.resolved_at)}
-                            </p>
-                          )}
-                          {row.resolved_by_name && (
-                            <p className="text-[10px] text-muted-foreground">by {row.resolved_by_name}</p>
-                          )}
-                        </div>
-                      ) : (
-                        <Badge variant="warning" className="rounded-full text-[10px] px-2">Open</Badge>
-                      )}
-                    </td>
-
-                    {/* Policy context column */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className={cn(
-                          'h-7 text-xs transition-colors',
-                          expandedRowId === row.id
-                            ? 'text-primary bg-primary/10 hover:bg-primary/15'
-                            : 'text-muted-foreground hover:text-primary hover:bg-primary/5',
-                        )}
-                        title="Show policy context for this anomaly"
-                        onClick={() => setExpandedRowId(prev => prev === row.id ? null : row.id)}
-                      >
-                        <ShieldQuestion className="h-3.5 w-3.5" />
-                        <span className="ml-1 hidden sm:inline">Why?</span>
-                      </Button>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        {/* Forensics timeline deep-link */}
-                        {row.employee_id && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs text-info hover:text-info hover:bg-info/10"
-                            title="Open attendance timeline"
-                            onClick={() => setForensicsTarget({
-                              employeeId:   row.employee_id!,
-                              date:         row.date,
-                              employeeName: row.employee_name ?? undefined,
-                            })}
-                          >
-                            <GitBranch className="h-3.5 w-3.5" />
-                            <span className="ml-1 hidden sm:inline">Timeline</span>
-                          </Button>
-                        )}
-
-                        {/* Correction workflow link — for missing punch anomalies that require a correction request */}
-                        {!row.resolved && (row.type === 'missing_out' || row.type === 'no_punch') && row.employee_id && (
-                          <Link
-                            to={`/admin/attendance/corrections?employeeId=${row.employee_id}&date=${row.date}`}
-                            className="inline-flex items-center gap-1 h-7 px-2 text-xs text-warning hover:text-warning hover:bg-warning/10 rounded-md transition-colors"
-                            title="Route to Corrections workflow for this employee"
-                          >
-                            <ClipboardEdit className="h-3.5 w-3.5" />
-                            <span className="ml-0.5 hidden sm:inline">Correct</span>
-                          </Link>
-                        )}
-
-                        {!row.resolved && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs text-success hover:text-success hover:bg-success/10"
-                            disabled={resolving === row.id || resolveMutation.isPending}
-                            onClick={() => handleResolve(row.id)}
-                          >
-                            {resolving === row.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            )}
-                            <span className="ml-1">Resolve</span>
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* Policy context expansion row */}
-                  {expandedRowId === row.id && (
-                    <tr className="bg-muted/10">
-                      <td colSpan={11} className="px-6 pb-4 pt-1">
-                        <div className="border border-primary/20 rounded-md p-3 bg-card max-w-2xl">
-                          <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
-                            <ShieldQuestion className="h-3.5 w-3.5 text-primary" />
-                            Why was this anomaly flagged?
-                          </p>
-                          <PolicyExplainPanel
-                            resolution={buildAnomalyPolicyResolution(row)}
-                            compact
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                  </>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Pagination */}
-      {total > 0 && (
-        <PaginationBar
-          total={total}
-          page={page}
-          pageSize={PAGE_SIZE}
-          onPageChange={setPage}
-        />
-      )}
-
-      {/* Forensics drawer — opens when a "Timeline" button is clicked */}
-      <ForensicsDrawer
-        target={forensicsTarget}
-        onClose={() => setForensicsTarget(null)}
-      />
-    </SectionCard>
+    </div>
   )
 }
 
-// ── Page component ─────────────────────────────────────────────────────────────
+// ── AttendanceAnomalies ───────────────────────────────────────────────────────
 
-export function AttendanceAnomalies() {
-  const { profile } = useAuthStore()
-  const isAdmin     = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
+export default function AttendanceAnomalies() {
+  const nav = useNavigate()
+  const [month, setMonth] = useState(currentMonth)
+  const isCurrentMonth    = month === currentMonth()
+
+  const { data, isLoading, error } = useQuery<SummaryResp>({
+    queryKey: ['anomaly-summary', month],
+    queryFn:  () => api.get(`/attendance/anomalies/summary?month=${month}`),
+    staleTime: 5 * 60_000,
+  })
+
+  const maxRate = useMemo(() => {
+    if (!data?.by_department) return 1
+    return Math.max(...data.by_department.map(d => d.anomaly_rate ?? 0), 1)
+  }, [data])
+
+  // Trend: compare current vs prev month total
+  const trend = useMemo(() => {
+    if (!data?.trend || data.trend.length < 2) return null
+    const curr = data.trend[data.trend.length - 1]?.total ?? 0
+    const prev = data.trend[data.trend.length - 2]?.total ?? 0
+    if (prev === 0) return null
+    const pct = Math.round(((curr - prev) / prev) * 100)
+    return { pct, up: curr > prev }
+  }, [data])
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Attendance Anomalies"
-        subtitle={
-          isAdmin
-            ? 'System-detected irregularities — policy violations, suspicious patterns, and unresolved punch exceptions'
-            : 'System-detected anomalies in your attendance records'
-        }
-      />
+      {/* ── Header ──────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-foreground">Anomaly Monitor</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Department-level attendance anomaly rates — read-only oversight view
+          </p>
+        </div>
 
-      {/* Employee self-view — always visible */}
-      {!isAdmin && <MyAnomaliesView />}
+        {/* Month navigation */}
+        <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-1 py-1 shadow-card">
+          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
+            onClick={() => setMonth(prevMonth)}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm font-semibold text-foreground px-2 min-w-[130px] text-center">
+            {fmtMonth(month)}
+          </span>
+          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
+            disabled={isCurrentMonth}
+            onClick={() => setMonth(nextMonth)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
-      {/* HR view — full table with filters + resolve */}
-      {isAdmin && (
+      {/* ── Loading ──────────────────────────────────────────────── */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center justify-center py-16 gap-2 text-destructive/70">
+          <AlertTriangle className="h-4 w-4" /> Failed to load — please refresh
+        </div>
+      )}
+
+      {data && (
         <>
-          <HrAnomaliesView />
+          {/* ── KPI strip ────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <KpiTile
+              label="Total Anomalies"
+              value={data.summary.total}
+              sub={trend ? `${trend.up ? '↑' : '↓'} ${Math.abs(trend.pct)}% vs last month` : 'This month'}
+              icon={AlertTriangle}
+              iconBg={data.summary.total > 100 ? 'bg-amber-50' : 'bg-muted'}
+              iconColor={data.summary.total > 100 ? 'text-amber-600' : 'text-muted-foreground'}
+              valueColor={data.summary.total > 100 ? 'text-amber-700' : undefined}
+            />
+            <KpiTile
+              label="Unresolved"
+              value={data.summary.unresolved}
+              sub="No regularisation submitted"
+              icon={ShieldAlert}
+              iconBg={data.summary.unresolved > 50 ? 'bg-destructive/8' : 'bg-muted'}
+              iconColor={data.summary.unresolved > 50 ? 'text-destructive' : 'text-muted-foreground'}
+              valueColor={data.summary.unresolved > 50 ? 'text-destructive' : undefined}
+            />
+            <KpiTile
+              label="High Severity"
+              value={data.summary.high_severity}
+              sub="Needs priority attention"
+              icon={AlertTriangle}
+              iconBg="bg-rose-50"
+              iconColor="text-rose-600"
+              valueColor={data.summary.high_severity > 0 ? 'text-rose-700' : undefined}
+            />
+            <KpiTile
+              label="Departments Affected"
+              value={data.by_department.filter(d => d.anomaly_count > 0).length}
+              sub={`of ${data.by_department.length} total`}
+              icon={BarChart3}
+              iconBg="bg-blue-50"
+              iconColor="text-blue-600"
+            />
+          </div>
 
-          {/* Divider + personal view for admins who also want to see their own */}
-          <SectionCard
-            title="My Anomalies"
-            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-          >
-            <p className="text-xs text-muted-foreground mb-3">
-              Your personal attendance anomalies — these also appear in the HR table above.
-            </p>
-            <MyAnomaliesView />
-          </SectionCard>
+          {/* ── 3-month trend strip ───────────────────────────────── */}
+          {data.trend.length > 0 && (
+            <div className="rounded-2xl bg-card shadow-card px-5 py-4 mb-5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">
+                3-Month Trend
+              </p>
+              <div className="flex items-end gap-6">
+                {data.trend.map((t, i) => {
+                  const isLatest = i === data.trend.length - 1
+                  const maxVal   = Math.max(...data.trend.map(x => x.total), 1)
+                  const barH     = Math.max(Math.round((t.total / maxVal) * 64), 4)
+                  return (
+                    <div key={t.month} className="flex flex-col items-center gap-1.5">
+                      <span className={cn('text-[11px] font-bold tabular-nums', isLatest ? 'text-primary' : 'text-muted-foreground')}>
+                        {t.total}
+                      </span>
+                      <div
+                        className={cn('w-10 rounded-t-md transition-all', isLatest ? 'bg-primary' : 'bg-muted')}
+                        style={{ height: `${barH}px` }}
+                      />
+                      <span className="text-[10px] text-muted-foreground">{fmtMonth(t.month).split(' ')[0]}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Department table ──────────────────────────────────── */}
+          <div className="rounded-2xl bg-card shadow-card overflow-hidden">
+            {/* Notice banner */}
+            <div className="flex items-center gap-2.5 px-4 py-3 bg-primary/[0.04] border-b border-primary/10">
+              <CheckCircle2 className="h-4 w-4 text-primary flex-shrink-0" />
+              <p className="text-[12px] text-primary/80 font-medium">
+                Anomalies are resolved via the <strong>Regularisation workflow</strong> — employees submit requests, managers approve.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-auto h-7 text-xs border-primary/20 text-primary hover:bg-primary/5 flex-shrink-0"
+                onClick={() => nav('/admin/attendance/regularisation')}
+              >
+                Manager Queue <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </div>
+
+            {/* Table header */}
+            <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_2fr] gap-4 px-4 py-2.5 border-b border-border bg-muted/20 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <span>Department</span>
+              <span className="text-right">Employees</span>
+              <span className="text-right">Anomalies</span>
+              <span className="text-right">Unresolved</span>
+              <span className="text-right">Rate / emp</span>
+              <span>Breakdown</span>
+            </div>
+
+            {data.by_department.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <CheckCircle2 className="h-10 w-10 text-success/40" />
+                <p className="text-sm font-medium text-muted-foreground">No anomalies recorded this month</p>
+              </div>
+            )}
+
+            {data.by_department.map((dept, i) => (
+              <div
+                key={dept.department_id ?? i}
+                className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_2fr] gap-4 items-center px-4 py-3 border-b border-border/40 hover:bg-muted/20 transition-colors last:border-0"
+              >
+                {/* Department name */}
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{dept.department_name}</p>
+                  <p className="text-[10.5px] text-muted-foreground">
+                    {dept.affected_employees} of {dept.employee_count} employees affected
+                  </p>
+                </div>
+
+                {/* Employee count */}
+                <p className="text-sm tabular-nums text-right text-muted-foreground">{dept.employee_count}</p>
+
+                {/* Anomaly count */}
+                <p className={cn('text-sm tabular-nums text-right font-semibold',
+                  dept.anomaly_count > 50 ? 'text-destructive' : dept.anomaly_count > 20 ? 'text-warning' : 'text-foreground'
+                )}>
+                  {dept.anomaly_count}
+                </p>
+
+                {/* Unresolved */}
+                <p className={cn('text-sm tabular-nums text-right',
+                  dept.unresolved_count > 20 ? 'text-destructive font-semibold' : 'text-muted-foreground'
+                )}>
+                  {dept.unresolved_count}
+                </p>
+
+                {/* Rate */}
+                <div className="text-right">
+                  <p className={cn('text-sm tabular-nums', rateColor(dept.anomaly_rate))}>
+                    {dept.anomaly_rate != null ? dept.anomaly_rate.toFixed(1) : '—'}
+                  </p>
+                  {dept.anomaly_rate != null && (
+                    <RateBar rate={dept.anomaly_rate} max={maxRate} />
+                  )}
+                </div>
+
+                {/* Type breakdown pills */}
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(dept.by_type)
+                    .filter(([, v]) => v > 0)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([type, count]) => (
+                      <span
+                        key={type}
+                        className="inline-flex items-center text-[9.5px] font-semibold bg-muted text-muted-foreground rounded-full px-2 py-0.5 capitalize"
+                      >
+                        {type.replace(/_/g, ' ')} · {count}
+                      </span>
+                    ))
+                  }
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Footer note ───────────────────────────────────────── */}
+          <p className="text-[11px] text-muted-foreground text-center mt-4">
+            Anomaly rate = anomalies ÷ active employee count · Data refreshed every 5 minutes
+          </p>
         </>
       )}
     </PageContainer>
   )
 }
+
+// Named export alias for router compatibility
+// (App.tsx and AttendanceWorkspace.tsx lazy-import this as a named export)
+export { AttendanceAnomalies }

@@ -39,10 +39,12 @@ interface AutomationJob {
 
 function fmtDatetime(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString([], {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function StatusIcon({ status }: { status: AutomationJob['last_status'] }) {
@@ -63,7 +65,7 @@ export function AutomationsConsole() {
 
   const { data, isLoading, isError, refetch } = useQuery<{ data: AutomationJob[] }>({
     queryKey:  ['automations-jobs'],
-    queryFn:   () => api.get('/system/jobs'),
+    queryFn:   () => api.get('/system/jobs/automations'),
     staleTime: 30_000,
     retry:     false,
   })
@@ -79,7 +81,7 @@ export function AutomationsConsole() {
     },
   })
 
-  const jobs: AutomationJob[] = data?.data ?? []
+  const jobs: AutomationJob[] = Array.isArray(data?.data) ? (data.data as AutomationJob[]) : []
 
   // Group by owner module
   const byOwner = jobs.reduce<Record<string, AutomationJob[]>>((acc, job) => {

@@ -756,6 +756,7 @@ export async function processAttendanceForDate(
       site_id: null, roster_id: null, work_location_id: null,
       site_timezone: 'Asia/Kolkata',
       emp_roster_weekly_off: [], site_default_roster_weekly_off: [],
+      site_default_rotation_policy_id: null,
       site_default_shift_id: null,
     } satisfies EmployeeOrgContext
     const dayOfWeek = getLocalDayOfWeek(date, empCtx.site_timezone)

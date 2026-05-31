@@ -15,7 +15,10 @@ import { z } from 'zod'
 // ── Zod schema ────────────────────────────────────────────────────────────────
 
 const simulateSchema = z.object({
-  target_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'target_date must be YYYY-MM-DD'),
+  // Accept target_date directly, or date_from/date_to (UI sends a range; we simulate on date_from)
+  target_date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'target_date must be YYYY-MM-DD').optional(),
+  date_from:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date_from must be YYYY-MM-DD').optional(),
+  date_to:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // accepted for FE compat, not used
   employee_ids: z.array(z.string().uuid()).min(1).max(100).optional(),
   scenarios: z
     .array(
@@ -243,7 +246,14 @@ export default async function simulatePolicyRoute(fastify: FastifyInstance) {
       })
     }
 
-    const { target_date, employee_ids, scenarios } = parsed.data
+    const { target_date: rawTargetDate, date_from, employee_ids, scenarios } = parsed.data
+    const target_date = rawTargetDate ?? date_from
+    if (!target_date) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: 'target_date or date_from is required',
+      })
+    }
 
     // Load attendance_daily records for target_date
     let q = fastify.supabase

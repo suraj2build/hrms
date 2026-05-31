@@ -57,9 +57,11 @@ interface HolidaysResponse {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDate(dateStr: string) {
-  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString([], {
-    weekday: 'short', day: '2-digit', month: 'long',
-  })
+  const d = new Date(dateStr + 'T12:00:00Z')
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  if (isNaN(d.getTime())) return '—'
+  return `${WD[d.getUTCDay()]}, ${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
@@ -268,7 +270,7 @@ export function OptionalHolidayPool() {
                   {/* Date */}
                   <div className="flex-shrink-0 text-center w-12">
                     <div className="text-[10px] font-semibold text-muted-foreground">
-                      {new Date(`${h.date}T12:00:00Z`).toLocaleString('default', { month: 'short' }).toUpperCase()}
+                      {(() => { const _d = new Date(`${h.date}T12:00:00Z`); const _M = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']; return isNaN(_d.getTime()) ? '—' : _M[_d.getUTCMonth()] })()}
                     </div>
                     <div className="text-lg font-bold text-foreground leading-none">
                       {new Date(`${h.date}T12:00:00Z`).getUTCDate()}

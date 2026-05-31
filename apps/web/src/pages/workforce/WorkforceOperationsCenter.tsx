@@ -260,7 +260,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   { label: 'Intelligence',        description: 'Risk scores, anomalies, at-risk employees',  href: '/admin/intelligence',           icon: Brain,        accent: 'warning'  },
   { label: 'Executive Intel',     description: 'C-suite workforce intelligence reports',      href: '/admin/analytics/executive',    icon: PieChart,     accent: 'neutral'  },
   { label: 'Master Import',       description: 'Bulk data import via CSV',                   href: '/admin/import',                 icon: FolderUp,     accent: 'neutral'  },
-  { label: 'Manager Dashboard',   description: 'Team-level view for managers',               href: '/admin/manager-dashboard',      icon: UserCog,      accent: 'neutral'  },
+  { label: 'Manager Dashboard',   description: 'Team-level view for managers',               href: '/manager/dashboard',            icon: UserCog,      accent: 'neutral'  },
 ]
 
 const ACCENT_CLASSES: Record<string, string> = {

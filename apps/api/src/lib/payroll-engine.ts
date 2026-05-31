@@ -8,11 +8,20 @@
  *   2. Count total working days in month (calendar days − weekends − holidays)
  *   3. Count payable_days + lop_days + overtime_hours from attendance_daily
  *   4. Gross pay  = sum of earning components (full-month amounts)
- *   5. LOP amount = (lop_days / total_working_days) × ctc_monthly
+ *   5. LOP amount = (lop_days / total_working_days) × gross_pay
  *   6. Net pay    = gross_pay − lop_amount − sum(deduction components)
  *   7. Employer contributions are tracked separately (not deducted from net)
  *
  * No I/O — pure computation given the inputs fetched by the route layer.
+ *
+ * Error handling contract:
+ *   fetchActiveCompensation() — throws Error on DB failure (never returns null silently
+ *     on query error; returns null only when the employee genuinely has no active record).
+ *   fetchAttendanceSummary()  — throws Error on DB failure (never returns zeroes on
+ *     query error; zeroes only mean the employee has no attendance rows for that period).
+ *
+ *   Callers must catch throws from both fetch functions per-employee so that one
+ *   failed DB fetch does not abort the entire payroll run.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -45,11 +54,15 @@ export interface PayrollSlipInput {
   } | null
   /** From attendance_daily for the month */
   attendance: {
-    payable_days:   number
-    lop_days:       number
-    present_days:   number
-    late_days:      number
-    overtime_hours: number
+    payable_days:       number
+    lop_days:           number
+    present_days:       number
+    late_days:          number
+    overtime_hours:     number
+    /** True if at least one attendance_daily row exists for this employee+month.
+     *  False means no punch/attendance data was found — employee gets full pay
+     *  by default (lop_days = 0) which is likely wrong.  Operators must verify. */
+    has_attendance_data: boolean
   }
   /** Total scheduled working days in the month for this employee */
   total_working_days: number
@@ -80,6 +93,16 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     employeeId, month, compensation, attendance, total_working_days,
   } = input
 
+  // ── Warning: no attendance data (employee will receive full pay — may be wrong) ─
+  // This is distinct from "employee was present all month": presence produces actual
+  // attendance_daily rows.  Zero rows means the punch system had no data — data gap,
+  // not confirmed attendance.  Operator must verify before finalization.
+  const noAttendanceWarning = !attendance.has_attendance_data
+    ? `No attendance data found for this employee in ${month}. ` +
+      'Employee will receive full pay (0 LOP days assumed). ' +
+      'Verify punch records before finalizing.'
+    : undefined
+
   // Guard: no compensation set up
   if (!compensation) {
     return {
@@ -96,7 +119,10 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       net_pay:               0,
       employer_contributions:0,
       component_breakdown:   [],
-      warning: 'No active compensation configured for this employee.',
+      warning: [
+        'No active compensation configured for this employee.',
+        noAttendanceWarning,
+      ].filter(Boolean).join(' '),
     }
   }
 
@@ -111,11 +137,13 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
   const deduction_total_base  = round2(deductions.reduce((s, c) => s + c.monthly_amount, 0))
   const employer_contributions= round2(empContrib.reduce((s, c) => s + c.monthly_amount, 0))
 
-  // LOP deduction: proportional to days missed
+  // LOP deduction: proportional to days missed.
+  // Basis is gross_pay (sum of earning components), NOT ctc_monthly.
+  // ctc_monthly includes employer contributions (PF, gratuity, etc.) which are
+  // NOT paid to the employee and must not inflate the LOP deduction.
   const safe_working_days = total_working_days > 0 ? total_working_days : 1
-  const lop_amount = round2(
-    Math.max(0, (attendance.lop_days / safe_working_days) * ctc_monthly)
-  )
+  const lop_daily_rate    = gross_pay / safe_working_days
+  const lop_amount        = round2(Math.max(0, attendance.lop_days * lop_daily_rate))
 
   const total_deductions = round2(deduction_total_base + lop_amount)
   const net_pay          = round2(Math.max(0, gross_pay - total_deductions))
@@ -134,11 +162,123 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     net_pay,
     employer_contributions,
     component_breakdown: components,
+    // Propagate no-attendance warning so the run creation response surfaces it
+    warning: noAttendanceWarning,
   }
 }
 
-function round2(n: number): number {
+/** Round to 2 decimal places. Exported so callers can use the same rounding. */
+export function round2(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+// ── buildPayrollSlipPreview ─────────────────────────────────────────────────────
+
+export interface PayrollSlipPreviewLine {
+  code:           string
+  name:           string
+  component_type: 'earning' | 'deduction' | 'employer_contribution'
+  monthly_amount: number
+  annual_amount:  number
+}
+
+export interface PayrollSlipPreview {
+  employee_id:            string
+  month:                  string
+  earnings:               PayrollSlipPreviewLine[]
+  deductions:             PayrollSlipPreviewLine[]
+  employer_contributions: PayrollSlipPreviewLine[]
+  gross_pay:              number
+  lop_impact:             number
+  net_pay:                number
+  employer_contributions_total: number
+  payable_days:           number
+  lop_days:               number
+  total_working_days:     number
+  overtime_hours:         number
+  /** Operator warnings — non-blocking but should be reviewed */
+  warning_flags: string[]
+}
+
+/**
+ * Build a rich payroll slip preview from a `computePayrollSlip` result.
+ *
+ * This is a pure formatting function — no I/O, no computation.
+ * Use after `computePayrollSlip` to get a structured breakdown for:
+ *   - dry-run UI rendering
+ *   - preview modals in the payroll runs page
+ *   - payslip template data
+ *
+ * @param result  Output of computePayrollSlip
+ * @param month   The payroll period (YYYY-MM) — for display context
+ */
+export function buildPayrollSlipPreview(
+  result: PayrollSlipResult,
+): PayrollSlipPreview {
+  const earnings: PayrollSlipPreviewLine[]               = []
+  const deductions: PayrollSlipPreviewLine[]             = []
+  const employer_contributions: PayrollSlipPreviewLine[] = []
+  const warning_flags: string[]                          = []
+
+  for (const c of result.component_breakdown) {
+    const line: PayrollSlipPreviewLine = {
+      code:           c.code,
+      name:           c.name,
+      component_type: c.component_type,
+      monthly_amount: c.monthly_amount,
+      annual_amount:  c.annual_amount,
+    }
+    if (c.component_type === 'earning')               earnings.push(line)
+    else if (c.component_type === 'deduction')        deductions.push(line)
+    else if (c.component_type === 'employer_contribution') employer_contributions.push(line)
+  }
+
+  // Add LOP deduction line when applicable
+  if (result.lop_amount > 0) {
+    deductions.push({
+      code:           'LOP',
+      name:           'Loss of Pay',
+      component_type: 'deduction',
+      monthly_amount: result.lop_amount,
+      annual_amount:  result.lop_amount * 12,
+    })
+  }
+
+  // Surface warnings
+  if (result.warning) {
+    warning_flags.push(result.warning)
+  }
+  if (earnings.length === 0) {
+    warning_flags.push('No earning components — gross pay is ₹0')
+  }
+  if (result.gross_pay === 0 && result.ctc_monthly > 0) {
+    warning_flags.push(
+      `CTC is ₹${result.ctc_monthly}/month but gross pay computed as ₹0 — ` +
+      'check component formulas',
+    )
+  }
+  if (result.lop_days > result.total_working_days) {
+    warning_flags.push(
+      `LOP days (${result.lop_days}) exceed total working days (${result.total_working_days}) — verify attendance data`,
+    )
+  }
+
+  return {
+    employee_id:                  result.employeeId,
+    month:                        result.month,
+    earnings,
+    deductions,
+    employer_contributions,
+    gross_pay:                    result.gross_pay,
+    lop_impact:                   result.lop_amount,
+    net_pay:                      result.net_pay,
+    employer_contributions_total: result.employer_contributions,
+    payable_days:                 result.payable_days,
+    lop_days:                     result.lop_days,
+    total_working_days:           result.total_working_days,
+    overtime_hours:               result.overtime_hours,
+    warning_flags,
+  }
 }
 
 // ── Data-fetching helpers (used by the route layer) ───────────────────────────
@@ -161,14 +301,25 @@ export async function countWorkingDaysInMonth(
   const lastDay     = new Date(year, mon, 0).toISOString().slice(0, 10)
   const allDates    = expandDateRange(firstDay, lastDay)
 
-  // Fetch public holidays for the month (tenant-wide, non-optional)
-  const { data: holidays } = await supabase
+  // Fetch public holidays for the month (tenant-wide, non-optional).
+  // This query is run-level (not per-employee) — failure throws so the entire run
+  // fails immediately rather than silently producing wrong working-day counts for
+  // every employee (which would corrupt all LOP calculations).
+  const { data: holidays, error: holidayErr } = await supabase
     .from('holiday_calendar')
     .select('date')
     .eq('tenant_id', tenantId)
     .eq('is_optional', false)
     .gte('date', firstDay)
     .lte('date', lastDay)
+
+  if (holidayErr) {
+    throw new Error(
+      `DB error fetching holiday calendar for ${month}: ` +
+      `${holidayErr.message} [code=${holidayErr.code}] — ` +
+      'payroll run aborted to prevent incorrect working-day counts',
+    )
+  }
 
   const holidaySet = new Set<string>((holidays ?? []).map((h: { date: string }) => h.date))
 
@@ -188,68 +339,112 @@ export async function fetchAttendanceSummary(
   employeeId: string,
   month:      string,
 ): Promise<{
-  payable_days:   number
-  lop_days:       number
-  present_days:   number
-  late_days:      number
-  overtime_hours: number
+  payable_days:        number
+  lop_days:            number
+  present_days:        number
+  late_days:           number
+  overtime_hours:      number
+  /** True if at least one attendance_daily row exists for this employee+month.
+   *  When false, payable_days and lop_days are both 0 by default — the employee
+   *  will receive full pay.  Callers should surface this as an operator warning. */
+  has_attendance_data: boolean
 }> {
   const [year, mon] = month.split('-').map(Number)
   const from = `${month}-01`
   const to   = new Date(year, mon, 0).toISOString().slice(0, 10)
 
-  const { data: rows } = await supabase
+  const { data: rows, error: attErr } = await supabase
     .from('attendance_daily')
-    .select('status, is_payable, overtime_minutes')
+    .select('status, is_payable, day_fraction, overtime_minutes')
     .eq('tenant_id',   tenantId)
     .eq('employee_id', employeeId)
     .gte('date', from)
     .lte('date', to)
 
+  if (attErr) {
+    // Throw so the per-employee catch in the route layer can isolate this failure.
+    // Never return silent zeroes on a DB error — zeroes would produce full pay (0 LOP)
+    // which is an incorrect financial outcome indistinguishable from genuine full attendance.
+    throw new Error(
+      `DB error fetching attendance for employee ${employeeId} (${month}): ` +
+      `${attErr.message} [code=${attErr.code}]`,
+    )
+  }
+
   const daily = (rows ?? []) as Array<{
-    status: string
-    is_payable: boolean
+    status:           string
+    is_payable:       boolean
+    day_fraction:     number
     overtime_minutes: number
   }>
 
   return {
-    payable_days:   daily.filter(r => r.is_payable).length,
-    lop_days:       daily.filter(r => r.status === 'absent').length,
+    // Sum fractions so a half-day counts as 0.5, not 1.0.
+    // null day_fraction = legacy/unprocessed row (attendance engine never ran for that date).
+    // Treat null as 1.0 (full present day) to avoid phantom LOP on unprocessed records.
+    payable_days:   round2(daily.reduce((s, r) => s + (r.day_fraction ?? 1.0), 0)),
+    // LOP = working days not covered by payable time.
+    // Absent = 1.0 LOP, half_day = 0.5 LOP, unpaid leave = 1.0 LOP.
+    // null day_fraction → treated as 1.0 present → 0.0 LOP (safe default).
+    lop_days:       round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - (r.day_fraction ?? 1.0)), 0)),
     present_days:   daily.filter(r => r.status === 'present' || r.status === 'late').length,
     late_days:      daily.filter(r => r.status === 'late').length,
     overtime_hours: round2(daily.reduce((s, r) => s + (r.overtime_minutes ?? 0), 0) / 60),
+    has_attendance_data: daily.length > 0,
   }
 }
 
 /**
  * Fetch the active compensation for an employee with all components.
  * Returns null when no active compensation exists.
+ *
+ * Pass `asOf` (YYYY-MM-DD) to prevent future-dated compensations from being
+ * applied to payroll periods before their effective date.
  */
 export async function fetchActiveCompensation(
   supabase:   SupabaseClient,
   tenantId:   string,
   employeeId: string,
+  // asOf defaults to today so future-dated compensations are never accidentally
+  // applied to the current period when the caller omits the argument.
+  asOf:       string = new Date().toISOString().slice(0, 10),
 ): Promise<{
-  id:          string
-  ctc_monthly: number
-  ctc_annual:  number
-  components:  PayrollComponentSnapshot[]
+  id:             string
+  ctc_monthly:    number
+  ctc_annual:     number
+  effective_from: string
+  components:     PayrollComponentSnapshot[]
 } | null> {
-  // Get the active compensation record
-  const { data: comp } = await supabase
+  // Get the active compensation record capped to asOf date so
+  // future-dated revisions never affect payroll runs for earlier periods.
+  let q = supabase
     .from('employee_compensations')
-    .select('id, ctc_annual, ctc_monthly')
+    .select('id, ctc_annual, ctc_monthly, effective_from')
     .eq('tenant_id',   tenantId)
     .eq('employee_id', employeeId)
     .eq('is_active',   true)
+  if (asOf) q = q.lte('effective_from', asOf)
+  const { data: comp, error: compErr } = await q
     .order('effective_from', { ascending: false })
     .limit(1)
     .maybeSingle()
 
+  if (compErr) {
+    // Throw so the per-employee catch in the route layer can isolate this failure.
+    // Never return null silently on a DB error — null would cause computePayrollSlip
+    // to produce a zero-pay slip with a "no compensation" warning, which is wrong
+    // (the compensation may well exist; the query just failed).
+    throw new Error(
+      `DB error fetching active compensation for employee ${employeeId}: ` +
+      `${compErr.message} [code=${compErr.code}]`,
+    )
+  }
+
+  // Genuinely no active compensation — caller decides how to handle (warning vs skip)
   if (!comp) return null
 
   // Get its components
-  const { data: compComponents } = await supabase
+  const { data: compComponents, error: compCompErr } = await supabase
     .from('employee_compensation_components')
     .select(`
       salary_component_id, sequence,
@@ -259,6 +454,13 @@ export async function fetchActiveCompensation(
     `)
     .eq('compensation_id', comp.id)
     .order('sequence', { ascending: true })
+
+  if (compCompErr) {
+    throw new Error(
+      `DB error fetching compensation components for employee ${employeeId} ` +
+      `(compensation_id=${comp.id}): ${compCompErr.message} [code=${compCompErr.code}]`,
+    )
+  }
 
   const components: PayrollComponentSnapshot[] = (compComponents ?? []).map((cc: any) => ({
     salary_component_id: cc.salary_component_id,
@@ -273,9 +475,10 @@ export async function fetchActiveCompensation(
   }))
 
   return {
-    id:          comp.id,
-    ctc_monthly: Number(comp.ctc_monthly),
-    ctc_annual:  Number(comp.ctc_annual),
+    id:             comp.id,
+    ctc_monthly:    Number(comp.ctc_monthly),
+    ctc_annual:     Number(comp.ctc_annual),
+    effective_from: comp.effective_from as string,
     components,
   }
 }

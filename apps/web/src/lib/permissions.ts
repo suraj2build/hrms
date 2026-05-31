@@ -51,10 +51,24 @@ export type Permission =
   // Payroll
   | 'payroll:view'
   | 'payroll:run'
+  | 'payroll:export'
+  | 'payroll:override'
   // Workflows
   | 'workflows:view'
   | 'workflows:configure'
   | 'workflows:approve'
+  // Extended employee actions
+  | 'employees:export'
+  // Extended attendance actions
+  | 'attendance:audit'
+  | 'attendance:override'
+  // Extended corrections actions
+  | 'corrections:reject'
+  // Extended leave actions
+  | 'leave:reject'
+  | 'leave:override'
+  // Extended roster actions
+  | 'roster:override'
 
 // ── Role → Permission matrix ───────────────────────────────────────────────────
 
@@ -68,8 +82,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'roster:view', 'roster:edit', 'shifts:configure',
     'reports:view', 'reports:export',
     'settings:view', 'settings:edit', 'masters:view', 'masters:edit',
-    'payroll:view', 'payroll:run',
+    'payroll:view', 'payroll:run', 'payroll:export', 'payroll:override',
     'workflows:view', 'workflows:configure', 'workflows:approve',
+    'employees:export',
+    'attendance:audit', 'attendance:override',
+    'corrections:reject',
+    'leave:reject', 'leave:override',
+    'roster:override',
   ],
 
   hr_admin: [
@@ -81,8 +100,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'roster:view', 'roster:edit', 'shifts:configure',
     'reports:view', 'reports:export',
     'settings:view', 'masters:view', 'masters:edit',
-    'payroll:view',
+    'payroll:view', 'payroll:export', 'payroll:override',
     'workflows:view', 'workflows:configure', 'workflows:approve',
+    'employees:export',
+    'attendance:audit', 'attendance:override',
+    'corrections:reject',
+    'leave:reject', 'leave:override',
+    'roster:override',
   ],
 
   manager: [
@@ -126,28 +150,17 @@ export function getPermissionsForRole(role: string): Permission[] {
   return [...(ROLE_PERMISSIONS[role] ?? [])]
 }
 
-// ── Dev-only effective permission hook ────────────────────────────────────────
+// ── Permission hooks ──────────────────────────────────────────────────────────
 //
-// ⚠️  DEVELOPMENT / STAGING ONLY — NOT real authorization.
-// This hook respects the activeRole preview override set in uiStore so that
-// sidebar items, page guards, and action buttons reflect the simulated role.
-//
-// Backend API calls are NEVER affected — the real JWT role governs all server
-// requests. Use `authStore.hasPermission()` (or the raw `hasPermission()`
-// function above) for any check that touches the server.
-//
-// In production builds (import.meta.env.PROD) the activeRole override is
-// ignored and the real profile.role is always used.
+// These hooks always use the user's REAL profile role.
+// `activeRole` in uiStore is a workspace context signal (Admin Portal /
+// Manager Workspace / Employee Self Service) — it does not affect RBAC.
+// Backend API calls always use the real JWT and real server-side role.
 
 import { useAuthStore } from '@/stores/authStore'
-import { useUIStore }   from '@/stores/uiStore'
 
 /**
- * Hook — returns true when the *effective* role has the given permission.
- *
- * Effective role:
- *   - DEV/staging: `uiStore.activeRole ?? profile.role`
- *   - Production:  always `profile.role`
+ * Hook — returns true when the real profile role has the given permission.
  *
  * Use this for: sidebar item visibility, page-level access guards, button
  * enable/disable states, conditional tabs.
@@ -156,27 +169,15 @@ import { useUIStore }   from '@/stores/uiStore'
  * the real role from `authStore.hasPermission()`.
  */
 export function useEffectivePermission(permission: Permission): boolean {
-  const profile    = useAuthStore(s => s.profile)
-  const activeRole = useUIStore(s => s.activeRole)
-
+  const profile = useAuthStore(s => s.profile)
   if (!profile) return false
-
-  // In production the override is silently ignored.
-  const effectiveRole = (!import.meta.env.PROD && activeRole) ? activeRole : profile.role
-
-  return hasPermission(effectiveRole, permission)
+  return hasPermission(profile.role, permission)
 }
 
 /**
- * Hook — returns the effective role string (for display / conditional logic).
- *
- * Same dev-vs-production rules as `useEffectivePermission`.
+ * Hook — returns the real profile role string (for display / conditional logic).
  */
 export function useEffectiveRole(): string | null {
-  const profile    = useAuthStore(s => s.profile)
-  const activeRole = useUIStore(s => s.activeRole)
-
-  if (!profile) return null
-  if (!import.meta.env.PROD && activeRole) return activeRole
-  return profile.role
+  const profile = useAuthStore(s => s.profile)
+  return profile?.role ?? null
 }

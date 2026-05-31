@@ -22,6 +22,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
+import { DateInput }     from '@/components/ui/date-input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
@@ -73,9 +74,11 @@ const REASON_LABEL: Record<WorkedReason, string> = {
 }
 
 function fmt(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const s = dateStr
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -362,11 +365,11 @@ export function CompOff() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-foreground">From Date</label>
-                  <Input type="date" value={genFrom} onChange={e => setGenFrom(e.target.value)} className="h-8 text-xs" />
+                  <DateInput value={genFrom} onChange={setGenFrom} className="h-8 text-xs" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-foreground">To Date</label>
-                  <Input type="date" value={genTo} min={genFrom} onChange={e => setGenTo(e.target.value)} className="h-8 text-xs" />
+                  <DateInput value={genTo} min={genFrom} onChange={setGenTo} className="h-8 text-xs" />
                 </div>
               </div>
 

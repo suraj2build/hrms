@@ -63,10 +63,24 @@ export type Permission =
   // Payroll
   | 'payroll:view'
   | 'payroll:run'
+  | 'payroll:export'
+  | 'payroll:override'
   // Workflows
   | 'workflows:view'
   | 'workflows:configure'
   | 'workflows:approve'
+  // Extended employee actions
+  | 'employees:export'
+  // Extended attendance actions
+  | 'attendance:audit'
+  | 'attendance:override'
+  // Extended corrections actions
+  | 'corrections:reject'
+  // Extended leave actions
+  | 'leave:reject'
+  | 'leave:override'
+  // Extended roster actions
+  | 'roster:override'
 
 // ── Role → Permission matrix ───────────────────────────────────────────────────
 
@@ -80,8 +94,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'roster:view', 'roster:edit', 'shifts:configure',
     'reports:view', 'reports:export',
     'settings:view', 'settings:edit', 'masters:view', 'masters:edit',
-    'payroll:view', 'payroll:run',
+    'payroll:view', 'payroll:run', 'payroll:export', 'payroll:override',
     'workflows:view', 'workflows:configure', 'workflows:approve',
+    'employees:export',
+    'attendance:audit', 'attendance:override',
+    'corrections:reject',
+    'leave:reject', 'leave:override',
+    'roster:override',
   ],
 
   hr_admin: [
@@ -93,8 +112,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'roster:view', 'roster:edit', 'shifts:configure',
     'reports:view', 'reports:export',
     'settings:view', 'masters:view', 'masters:edit',
-    'payroll:view',
+    'payroll:view', 'payroll:export', 'payroll:override',
     'workflows:view', 'workflows:configure', 'workflows:approve',
+    'employees:export',
+    'attendance:audit', 'attendance:override',
+    'corrections:reject',
+    'leave:reject', 'leave:override',
+    'roster:override',
   ],
 
   manager: [
@@ -207,8 +231,13 @@ export function buildPermissionsSummary(role: string): Record<Permission, boolea
     'roster:view', 'roster:edit', 'shifts:configure',
     'reports:view', 'reports:export',
     'settings:view', 'settings:edit', 'masters:view', 'masters:edit',
-    'payroll:view', 'payroll:run',
+    'payroll:view', 'payroll:run', 'payroll:export', 'payroll:override',
     'workflows:view', 'workflows:configure', 'workflows:approve',
+    'employees:export',
+    'attendance:audit', 'attendance:override',
+    'corrections:reject',
+    'leave:reject', 'leave:override',
+    'roster:override',
   ]
   const summary = {} as Record<Permission, boolean>
   for (const p of allPerms) {

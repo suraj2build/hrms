@@ -129,9 +129,9 @@ export function AttendanceOperationsCenter() {
     if ((stats?.unresolved_anomalies ?? 0) > 0) {
       anomalyItems.push({
         id: 'anomalies', title: 'Unresolved attendance anomalies',
-        description: 'System-flagged records requiring HR review',
-        severity: 'critical' as const, count: stats!.unresolved_anomalies,
-        action: 'Review anomalies', onAction: () => navigate('/admin/attendance/anomalies'),
+        description: 'Will auto-mark as LOP at period lock · Employees resolve via regularisation → manager approval',
+        severity: 'warning' as const, count: stats!.unresolved_anomalies,
+        action: 'View dept breakdown', onAction: () => navigate('/admin/attendance/anomalies'),
       })
     }
     if ((stats?.overnight_issues ?? 0) > 0) {
@@ -225,7 +225,7 @@ export function AttendanceOperationsCenter() {
             <OperationalMetricChip
               value={isLoading ? '—' : (stats?.unresolved_anomalies ?? 0)}
               label="Unresolved Anomalies"
-              severity={(stats?.unresolved_anomalies ?? 0) > 0 ? 'critical' : 'success'}
+              severity={(stats?.unresolved_anomalies ?? 0) > 0 ? 'warning' : 'success'}
               icon={AlertTriangle}
               onClick={() => navigate('/admin/attendance/anomalies')}
             />

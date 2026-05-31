@@ -27,6 +27,7 @@ import {
   ClipboardCheck, Zap, Info, ChevronDown, ChevronUp,
   AlarmClock, User, Terminal, Filter, Eye, EyeOff,
   ArrowRight, Activity, Layers, ChevronsUpDown,
+  Upload, RefreshCw,
 } from 'lucide-react'
 import { PageContainer }   from '@/components/layout/PageContainer'
 import { PageHeader }      from '@/components/layout/PageHeader'
@@ -34,6 +35,7 @@ import { SectionCard }     from '@/components/layout/SectionCard'
 import { Badge }           from '@/components/ui/badge'
 import { Button }          from '@/components/ui/button'
 import { Input }           from '@/components/ui/input'
+import { DateInput }       from '@/components/ui/date-input'
 import { StatusChangePill } from '@/components/operational/AttendanceDiff'
 import { api }             from '@/lib/api/client'
 import { useAuthStore }    from '@/stores/authStore'
@@ -42,13 +44,14 @@ import { cn }              from '@/lib/utils'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface TimelineEvent {
-  time:     string | null
-  type:     string
-  label:    string
-  detail:   string | null
-  actor:    string | null
-  severity: 'info' | 'success' | 'warning' | 'error' | 'neutral'
-  meta:     Record<string, unknown>
+  time:         string | null
+  type:         string
+  label:        string
+  detail:       string | null
+  actor:        string | null
+  severity:     'info' | 'success' | 'warning' | 'error' | 'neutral'
+  source_badge?: string   // 'CSV Upload' | 'Biometric Device' | 'Manual Override' | etc.
+  meta:         Record<string, unknown>
 }
 
 interface DailyRecord {
@@ -61,6 +64,7 @@ interface DailyRecord {
   day_fraction:         number
   worked_on_holiday:    boolean
   worked_on_weekly_off: boolean
+  computed_source?:     string   // 'engine' | 'manual' | 'leave_approval' | 'regularization'
 }
 
 interface EffectiveShift {
@@ -76,12 +80,18 @@ interface EffectiveShift {
 interface ForensicsData {
   employee:            { id: string; name: string; code: string }
   date:                string
+  // Provenance — which pipeline produced this data
+  source_type:         'biometric' | 'csv_upload' | 'mixed' | 'none'
+  computed_source:     string | null  // 'engine' | 'manual' | 'leave_approval' | 'regularization'
   daily_record:        DailyRecord | null
   effective_shift:     EffectiveShift | null
   holiday:             { id: string; name: string; holiday_type: string } | null
   is_weekly_off:       boolean
+  // Pipeline A (biometric)
   raw_punches:         RawPunch[]
   processed_sessions:  ProcessedSession[]
+  // Pipeline B (CSV upload)
+  csv_punches:         CsvPunch[]
   leave_applications:  LeaveApp[]
   corrections:         Correction[]
   policy_evaluations:  PolicyEval[]
@@ -91,6 +101,9 @@ interface ForensicsData {
 
 interface RawPunch {
   id: string; device_id: string | null; punch_time: string; direction: string | null
+}
+interface CsvPunch {
+  id: string; punched_at: string; direction: string | null; source: string
 }
 interface ProcessedSession {
   id: string; check_in: string; check_out: string | null; is_complete: boolean; work_minutes: number | null
@@ -120,7 +133,8 @@ type EventCategory = 'all' | 'punches' | 'shift' | 'leave' | 'corrections' | 'po
 
 const CATEGORY_DEFS: { id: EventCategory; label: string; icon: React.ComponentType<{ className?: string }>; types: string[] }[] = [
   { id: 'all',         label: 'All',        icon: Activity,      types: [] },
-  { id: 'punches',     label: 'Punches',    icon: Wifi,          types: ['raw_punch', 'session_paired'] },
+  // 'punches' covers BOTH biometric raw_punches AND csv_punches + sessions + recompute jobs
+  { id: 'punches',     label: 'Punches',    icon: Wifi,          types: ['raw_punch', 'csv_punch', 'session_paired', 'recompute_job'] },
   { id: 'shift',       label: 'Shift',      icon: AlarmClock,    types: ['shift_resolved', 'computation_result'] },
   { id: 'leave',       label: 'Leave',      icon: CalendarDays,  types: ['holiday', 'weekly_off', 'leave_applied', 'leave_approved', 'leave_rejected'] },
   { id: 'corrections', label: 'Corrections',icon: ClipboardEdit, types: ['correction_requested', 'correction_approved', 'correction_rejected'] },
@@ -157,7 +171,9 @@ const SEVERITY_COLORS: Record<TimelineEvent['severity'], SeverityColor> = {
 function eventIcon(type: string) {
   const map: Record<string, React.ComponentType<{ className?: string }>> = {
     raw_punch:            Wifi,
+    csv_punch:            Upload,       // CSV upload pipeline punch
     session_paired:       Clock,
+    recompute_job:        RefreshCw,    // CSV recompute job
     shift_resolved:       AlarmClock,
     holiday:              CalendarDays,
     weekly_off:           CalendarDays,
@@ -186,7 +202,11 @@ function fmtDateTime(iso: string | null): string {
   if (!iso) return '—'
   try {
     const d = new Date(iso)
-    return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    if (isNaN(d.getTime())) return '—'
+    const hr = String(d.getHours()).padStart(2,'0')
+    const mn = String(d.getMinutes()).padStart(2,'0')
+    return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
   } catch { return iso }
 }
 
@@ -267,19 +287,73 @@ function MetricPill({ label, value, highlight }: { label: string; value: string 
 
 // ── ComputationFlow ───────────────────────────────────────────────────────────
 
+// ── Source badge pill ─────────────────────────────────────────────────────────
+
+const SOURCE_BADGE_COLORS: Record<string, string> = {
+  'CSV Upload':        'bg-info/10 text-info border-info/30',
+  'Biometric Device':  'bg-success/10 text-success border-success/30',
+  'Manual Override':   'bg-warning/10 text-warning border-warning/30',
+  'Leave Override':    'bg-accent/20 text-accent-foreground border-accent/30',
+  'Correction':        'bg-primary/10 text-primary border-primary/30',
+}
+
+function SourceBadge({ badge }: { badge?: string }) {
+  if (!badge) return null
+  const cls = SOURCE_BADGE_COLORS[badge] ?? 'bg-muted text-muted-foreground border-border/40'
+  return (
+    <span className={cn('inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0 rounded-full border flex-shrink-0', cls)}>
+      {badge === 'CSV Upload'        && <Upload className="h-2 w-2" />}
+      {badge === 'Biometric Device'  && <Wifi className="h-2 w-2" />}
+      {badge === 'Manual Override'   && <User className="h-2 w-2" />}
+      {badge === 'Correction'        && <ClipboardCheck className="h-2 w-2" />}
+      {badge}
+    </span>
+  )
+}
+
 function ComputationFlow({ data }: { data: ForensicsData }) {
+  // Unified punch count across both pipelines
+  const totalPunches   = data.raw_punches.length + (data.csv_punches?.length ?? 0)
+  const isCsvPipeline  = data.source_type === 'csv_upload' || data.source_type === 'mixed'
+  const isBiometric    = data.source_type === 'biometric'  || data.source_type === 'mixed'
+
+  // Punch display — source-aware label
+  let punchValue: string
+  if (data.source_type === 'mixed') {
+    punchValue = `${data.raw_punches.length} device + ${data.csv_punches.length} CSV`
+  } else if (isCsvPipeline) {
+    punchValue = `${data.csv_punches.length} CSV punches`
+  } else {
+    punchValue = `${data.raw_punches.length} device punches`
+  }
+
+  // Sessions are only from the biometric pipeline. CSV pipeline goes
+  // punch → recomputeRange → attendance_daily without a sessions table.
+  const sessionsLabel  = isCsvPipeline && !isBiometric ? 'via engine' : (
+    data.processed_sessions.length > 0
+      ? `${data.processed_sessions.length} (${data.processed_sessions.filter(s => !s.is_complete).length} incomplete)`
+      : '0'
+  )
+  const sessionsOk     = isCsvPipeline && !isBiometric
+    ? true
+    : data.processed_sessions.length > 0 && data.processed_sessions.every(s => s.is_complete)
+
+  // "Final Status" always shows correctly when daily_record exists —
+  // NEVER shows "Not computed" when the row exists regardless of pipeline.
+  const finalStatusValue = data.daily_record
+    ? data.daily_record.status.replace(/_/g, ' ')
+    : 'Not computed'
+
   const stages: { label: string; value: string; ok: boolean; dim?: boolean }[] = [
     {
-      label: 'Raw Punches',
-      value: `${data.raw_punches.length}`,
-      ok: data.raw_punches.length > 0,
+      label: isCsvPipeline && !isBiometric ? 'Punch Source' : 'Raw Punches',
+      value: punchValue,
+      ok:    totalPunches > 0,
     },
     {
-      label: 'Sessions',
-      value: data.processed_sessions.length > 0
-        ? `${data.processed_sessions.length} (${data.processed_sessions.filter(s => !s.is_complete).length} incomplete)`
-        : '0',
-      ok: data.processed_sessions.length > 0 && data.processed_sessions.every(s => s.is_complete),
+      label: isCsvPipeline && !isBiometric ? 'Engine Input' : 'Sessions',
+      value: sessionsLabel,
+      ok:    sessionsOk,
     },
     {
       label: 'Shift',
@@ -295,7 +369,7 @@ function ComputationFlow({ data }: { data: ForensicsData }) {
         : data.is_weekly_off
           ? 'Weekly Off'
           : data.leave_applications.some(la => la.status === 'approved')
-            ? `On Leave`
+            ? 'On Leave'
             : 'None',
       ok: true,
       dim: !data.holiday && !data.is_weekly_off && !data.leave_applications.some(la => la.status === 'approved'),
@@ -305,13 +379,16 @@ function ComputationFlow({ data }: { data: ForensicsData }) {
       value: data.corrections.length > 0
         ? `${data.corrections.filter(c => c.status === 'approved').length}/${data.corrections.length} approved`
         : 'None',
-      ok: true,
+      ok:  true,
       dim: data.corrections.length === 0,
     },
     {
+      // Final Status is always "computable" if the daily_record exists.
+      // The previous logic showed "Not computed" even when daily_record
+      // existed for CSV-pipeline rows (because raw_punches was 0).
       label: 'Final Status',
-      value: data.daily_record ? data.daily_record.status.replace('_', ' ') : 'Not computed',
-      ok: !!data.daily_record,
+      value: finalStatusValue,
+      ok:    !!data.daily_record,
     },
   ]
 
@@ -367,7 +444,10 @@ function TimelineRow({ event, isLast }: { event: TimelineEvent; isLast: boolean 
           <Icon className={cn('h-3.5 w-3.5 mt-0.5 flex-shrink-0', colors.icon)} />
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
-              <p className="text-xs font-medium text-foreground leading-snug">{event.label}</p>
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <p className="text-xs font-medium text-foreground leading-snug">{event.label}</p>
+                {event.source_badge && <SourceBadge badge={event.source_badge} />}
+              </div>
               {event.time && (
                 <span className="text-[10px] text-muted-foreground tabular-nums flex-shrink-0 font-mono">{fmtTime(event.time)}</span>
               )}
@@ -631,7 +711,11 @@ export function AttendanceTimeline() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [empInput,  setEmpInput]  = useState(searchParams.get('employeeId') ?? '')
-  const [dateInput, setDateInput] = useState(searchParams.get('date') ?? new Date().toISOString().slice(0, 10))
+  // Default to the date from the URL param if present; otherwise empty string.
+  // Do NOT default to today — if data is historical (e.g. 2025 uploads while
+  // current date is 2026), defaulting to today produces "No events found" with
+  // no indication of what went wrong.
+  const [dateInput, setDateInput] = useState(searchParams.get('date') ?? '')
   const [applied, setApplied]     = useState({
     employeeId: searchParams.get('employeeId') ?? '',
     date:       searchParams.get('date') ?? '',
@@ -725,10 +809,9 @@ export function AttendanceTimeline() {
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Date</label>
-            <Input
-              type="date"
+            <DateInput
               value={dateInput}
-              onChange={e => setDateInput(e.target.value)}
+              onChange={setDateInput}
               className="h-8 text-xs w-40"
             />
           </div>
@@ -791,6 +874,24 @@ export function AttendanceTimeline() {
                     </Badge>
                   </div>
                 )}
+                {/* Source pipeline badge */}
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Attendance Source</p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {(data.source_type === 'biometric' || data.source_type === 'mixed') && (
+                      <SourceBadge badge="Biometric Device" />
+                    )}
+                    {(data.source_type === 'csv_upload' || data.source_type === 'mixed') && (
+                      <SourceBadge badge="CSV Upload" />
+                    )}
+                    {data.source_type === 'none' && (
+                      <span className="text-[10px] text-muted-foreground italic">No punch data found</span>
+                    )}
+                    {data.computed_source === 'manual' && <SourceBadge badge="Manual Override" />}
+                    {data.computed_source === 'leave_approval' && <SourceBadge badge="Leave Override" />}
+                    {data.computed_source === 'regularization' && <SourceBadge badge="Correction" />}
+                  </div>
+                </div>
                 {!data.daily_record && (
                   <p className="text-xs text-muted-foreground italic">No daily record computed yet</p>
                 )}
@@ -822,7 +923,11 @@ export function AttendanceTimeline() {
                   <MetricPill label="Overtime"     value={fmtMinutes(data.daily_record.overtime_minutes)}                />
                   <MetricPill label="Day Fraction" value={data.daily_record.day_fraction}                                />
                   <MetricPill label="Payable"      value={data.daily_record.is_payable ? 'Yes' : 'No'}                  />
-                  <MetricPill label="Sessions"     value={data.processed_sessions.length}                                />
+                  {/* Show total punches across both pipelines */}
+                  <MetricPill
+                    label={data.source_type === 'csv_upload' ? 'CSV Punches' : data.source_type === 'biometric' ? 'Device Punches' : 'Punches'}
+                    value={data.raw_punches.length + (data.csv_punches?.length ?? 0)}
+                  />
                 </div>
                 <div className="flex flex-wrap gap-2 mt-3">
                   {data.daily_record.worked_on_holiday && (
@@ -953,10 +1058,16 @@ export function AttendanceTimeline() {
             {/* Data panels (right) */}
             <div className="lg:col-span-2 space-y-4">
 
-              {/* Raw punches */}
-              <SectionCard title={`Raw Punches (${data.raw_punches.length})`} icon={<Wifi className="h-4 w-4 text-muted-foreground" />}>
+              {/* Raw punches — biometric device (Pipeline A) */}
+              <SectionCard
+                title={`Device Punches (${data.raw_punches.length})`}
+                icon={<Wifi className="h-4 w-4 text-muted-foreground" />}
+              >
                 {data.raw_punches.length === 0 ? (
-                  <p className="text-xs text-muted-foreground py-2">No raw device punches recorded.</p>
+                  <p className="text-xs text-muted-foreground py-2">
+                    No biometric device punches recorded.
+                    {data.source_type === 'csv_upload' && ' Attendance sourced from CSV upload — see CSV Punches below.'}
+                  </p>
                 ) : (
                   <div className="space-y-1">
                     {data.raw_punches.map((p, i) => (
@@ -976,6 +1087,42 @@ export function AttendanceTimeline() {
                         {p.device_id && (
                           <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[80px]" title={p.device_id}>{p.device_id}</span>
                         )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+
+              {/* CSV punches — Pipeline B (always shown; non-empty = CSV upload source) */}
+              <SectionCard
+                title={`CSV Punches (${data.csv_punches?.length ?? 0})`}
+                icon={<Upload className="h-4 w-4 text-muted-foreground" />}
+              >
+                {(data.csv_punches?.length ?? 0) === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2">
+                    No CSV-uploaded punches for this date.
+                    {data.source_type === 'biometric' && ' Attendance sourced from biometric device — see Device Punches above.'}
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {data.csv_punches.map((p, i) => (
+                      <div key={p.id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/40 last:border-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground/60 text-[10px] w-4">#{i + 1}</span>
+                          <span className="font-mono text-foreground">{fmtTime(p.punched_at)}</span>
+                          {p.direction && (
+                            <Badge
+                              variant={p.direction === 'IN' ? 'success' : 'secondary'}
+                              className="text-[9px] rounded-full px-1.5 py-0"
+                            >
+                              {p.direction}
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-info font-medium flex items-center gap-0.5">
+                          <Upload className="h-2.5 w-2.5" />
+                          {p.source ?? 'csv_upload'}
+                        </span>
                       </div>
                     ))}
                   </div>

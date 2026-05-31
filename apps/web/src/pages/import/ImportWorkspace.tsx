@@ -9,8 +9,8 @@
  */
 
 import * as React from 'react'
-import { useState, useRef } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useRef, useEffect } from 'react'
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
@@ -23,10 +23,15 @@ import {
   DollarSign,
   Umbrella,
   Sun,
+  Wallet,
+  BookOpen,
+  UserCheck,
+  Globe,
   Download,
   Upload,
   CheckCircle2,
   XCircle,
+  AlertTriangle,
   FileSpreadsheet,
   ChevronRight,
   Loader2,
@@ -34,6 +39,15 @@ import {
   History,
   RefreshCw,
   Filter,
+  ArrowRight,
+  Layers,
+  Scale,
+  Package,
+  FileText,
+  CreditCard,
+  Heart,
+  TrendingUp,
+  BarChart3,
 } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -55,6 +69,7 @@ import { cn } from '@/lib/utils'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type MasterType =
+  | 'sites'
   | 'employees'
   | 'shifts'
   | 'departments'
@@ -64,11 +79,30 @@ type MasterType =
   | 'salary_components'
   | 'leave_types'
   | 'holiday_calendar'
+  // Enterprise operational masters
+  | 'grades'
+  | 'payroll_groups'
+  | 'employment_categories'
+  | 'statutory_groups'
+  | 'asset_categories'
+  // Payroll masters
+  | 'salary_structures'
+  // Enterprise onboarding imports
+  | 'employee_compensation'
+  | 'leave_opening_balances'
+  | 'shift_assignments'
+  | 'compensation_revisions'
+  // Reference data
+  | 'document_types'
+  | 'identity_types'
+  | 'relationship_types'
 
 type Step = 'download' | 'upload' | 'validate' | 'import' | 'complete'
-type Mode = 'upsert' | 'create' | 'update' | 'validate_only'
+// NOTE: must match backend ImportMode — 'create_only' / 'update_only', NOT 'create' / 'update'
+type Mode = 'upsert' | 'create_only' | 'update_only' | 'validate_only'
 type ActiveTab = 'import' | 'history'
 
+// Flattened per-error row (derived from ValidatedRow.errors + .warnings on response)
 interface ValidationRow {
   rowNumber: number
   field: string
@@ -76,12 +110,56 @@ interface ValidationRow {
   severity: 'error' | 'warning'
 }
 
+// Matches backend ValidatedRow shape
+interface BackendRowError {
+  field:    string
+  message:  string
+  severity: 'error' | 'warning'
+}
+interface BackendValidatedRow {
+  rowNumber:    number
+  errors:       BackendRowError[]
+  warnings:     BackendRowError[]
+  isValid:      boolean
+  isDuplicate?: boolean
+}
+
+// Backend ValidationResult (as returned by POST /import/validate)
+interface BackendValidationResult {
+  totalRows:     number
+  validRows:     number
+  invalidRows:   number
+  duplicateRows: number
+  rows:          BackendValidatedRow[]
+}
+
+// Frontend-normalised result (errors flattened for display)
 interface ValidationResult {
-  totalRows: number
-  validRows: number
-  invalidRows: number
-  duplicateRows?: number
-  rows: ValidationRow[]
+  totalRows:     number
+  validRows:     number
+  invalidRows:   number
+  duplicateRows: number
+  rows:          ValidationRow[]
+}
+
+/** Flatten backend validation rows (one row per error/warning) for the error table. */
+function flattenValidationRows(backend: BackendValidationResult): ValidationResult {
+  const flatRows: ValidationRow[] = []
+  for (const vr of backend.rows) {
+    for (const e of vr.errors) {
+      flatRows.push({ rowNumber: vr.rowNumber, field: e.field, error: e.message, severity: e.severity })
+    }
+    for (const w of vr.warnings) {
+      flatRows.push({ rowNumber: vr.rowNumber, field: w.field, error: w.message, severity: w.severity })
+    }
+  }
+  return {
+    totalRows:     backend.totalRows,
+    validRows:     backend.validRows,
+    invalidRows:   backend.invalidRows,
+    duplicateRows: backend.duplicateRows,
+    rows:          flatRows,
+  }
 }
 
 interface ImportResult {
@@ -109,11 +187,111 @@ interface ImportJob {
 }
 
 interface ImportJobRow {
+  id: string
+  row_number: number
+  status: 'created' | 'updated' | 'failed' | 'skipped'
+  errors: Array<{ field: string; message: string; severity: 'error' | 'warning' }> | null
+  warnings: Array<{ field: string; message: string; severity: 'error' | 'warning' }> | null
+  row_data:         Record<string, unknown> | null
+  normalized_data:  Record<string, unknown> | null
+  record_id:        string | null
+}
+
+interface FlatJobRow {
   rowNumber: number
-  status: 'valid' | 'invalid' | 'skipped'
-  field?: string
-  error?: string
-  severity?: 'error' | 'warning'
+  field: string
+  error: string
+  severity: 'error' | 'warning'
+}
+
+// ─── Session Persistence ──────────────────────────────────────────────────────
+
+// Sensitive master types whose row data must not be written to localStorage
+const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions']
+// Max rows to persist — very large files are re-uploaded after refresh
+const SESSION_ROW_LIMIT = 5_000
+const SESSION_TTL_MS    = 24 * 60 * 60 * 1000  // 24 h
+
+interface ImportSessionSnapshot {
+  masterType: MasterType
+  step: Exclude<Step, 'download' | 'complete'>
+  fileName: string
+  mode: Mode
+  parsedRows: Record<string, string>[]
+  validationResult: ValidationResult | null
+  savedAt: number
+}
+
+function sessionKey(t: MasterType)       { return `hrms_import_${t}` }
+
+function saveSession(snap: ImportSessionSnapshot) {
+  if (SENSITIVE_IMPORT_TYPES.includes(snap.masterType)) return
+  if (snap.parsedRows.length > SESSION_ROW_LIMIT) return
+  try {
+    localStorage.setItem(sessionKey(snap.masterType), JSON.stringify(snap))
+    if (process.env.NODE_ENV === 'development') {
+      console.debug(`[Import] session saved  ${snap.masterType} @ ${snap.step}  rows=${snap.parsedRows.length}`)
+    }
+  } catch { /* quota exceeded */ }
+}
+
+function validateSessionIntegrity(data: unknown): data is ImportSessionSnapshot {
+  if (!data || typeof data !== 'object') return false
+  const s = data as Record<string, unknown>
+  return (
+    typeof s.masterType === 'string' &&
+    MASTER_CONFIGS.some(c => c.type === s.masterType) &&
+    typeof s.step === 'string' &&
+    ['upload', 'validate', 'import'].includes(s.step) &&
+    typeof s.fileName === 'string' &&
+    typeof s.mode === 'string' &&
+    ['upsert', 'create_only', 'update_only', 'validate_only'].includes(s.mode) &&
+    Array.isArray(s.parsedRows) &&
+    typeof s.savedAt === 'number'
+  )
+}
+
+function loadSession(t: MasterType): ImportSessionSnapshot | null {
+  try {
+    const raw = localStorage.getItem(sessionKey(t))
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!validateSessionIntegrity(parsed)) {
+      if (process.env.NODE_ENV === 'development') console.warn(`[Import] corrupt session evicted  key=${sessionKey(t)}`)
+      localStorage.removeItem(sessionKey(t)); return null
+    }
+    if (Date.now() - parsed.savedAt > SESSION_TTL_MS) {
+      if (process.env.NODE_ENV === 'development') console.debug(`[Import] stale session evicted  key=${sessionKey(t)}`)
+      localStorage.removeItem(sessionKey(t)); return null
+    }
+    if (process.env.NODE_ENV === 'development') {
+      console.debug(`[Import] session loaded  ${parsed.masterType} @ ${parsed.step}  rows=${parsed.parsedRows.length}`)
+    }
+    return parsed
+  } catch { return null }
+}
+
+function clearSession(t: MasterType) {
+  try {
+    localStorage.removeItem(sessionKey(t))
+    if (process.env.NODE_ENV === 'development') console.debug(`[Import] session cleared  key=${sessionKey(t)}`)
+  } catch { /* ignore */ }
+}
+
+function validateSessionStep(snap: ImportSessionSnapshot): Exclude<Step, 'download' | 'complete'> {
+  const { step, parsedRows, validationResult } = snap
+  if ((step === 'validate' || step === 'import') && parsedRows.length === 0) return 'upload'
+  if (step === 'import' && !validationResult) return 'validate'
+  return step
+}
+
+function findLatestSession(): ImportSessionSnapshot | null {
+  let best: ImportSessionSnapshot | null = null
+  for (const cfg of MASTER_CONFIGS) {
+    const snap = loadSession(cfg.type)
+    if (snap && (!best || snap.savedAt > best.savedAt)) best = snap
+  }
+  return best
 }
 
 // ─── Master Config ─────────────────────────────────────────────────────────────
@@ -125,95 +303,272 @@ interface MasterConfig {
   icon: React.ComponentType<{ className?: string }>
   requiredFields: string[]
   optionalFields: string[]
+  /** Visual group key — used to render section headers in the selector */
+  group?: string
+  /** Optional dependency step number within a group (e.g. 1 = upload first) */
+  groupStep?: number
 }
 
+// ─── Import Groups ─────────────────────────────────────────────────────────────
+// Org imports must follow this order: Sites → Work Locations → Cost Centers
+// (work_locations reference sites via site_code)
+
+interface ImportGroupDef {
+  key: string
+  label: string
+  note?: string
+}
+
+const IMPORT_GROUPS: ImportGroupDef[] = [
+  {
+    key: 'organization',
+    label: 'Organization',
+    note: 'Import in order — Work Locations reference Sites via site_code',
+  },
+  { key: 'people',     label: 'People & Structure' },
+  { key: 'payroll',    label: 'Payroll & Leave' },
+  { key: 'enterprise', label: 'Enterprise Masters', note: 'Grades, payroll groups, statutory groups, categories' },
+  { key: 'onboarding', label: 'Enterprise Onboarding', note: 'Compensations, revisions, balances, assignments' },
+  { key: 'reference',  label: 'Reference Data', note: 'Document types, identity types, relationship types' },
+]
+
+// IMPORTANT: requiredFields / optionalFields MUST match the actual CSV column keys
+// defined in apps/api/src/lib/import-engine/templates.ts — these are what the
+// backend validator expects and what appears in the downloaded template.
 const MASTER_CONFIGS: MasterConfig[] = [
+  // ── Organization ────────────────────────────────────────────────────────────
   {
-    type: 'employees',
-    label: 'Employees',
-    description: 'Bulk import employee records with personal and job details',
-    icon: Users,
-    requiredFields: ['employee_code', 'first_name', 'last_name', 'email', 'department', 'designation'],
-    optionalFields: ['phone', 'date_of_birth', 'date_of_joining', 'work_location', 'manager_code'],
-  },
-  {
-    type: 'shifts',
-    label: 'Shifts',
-    description: 'Define work shift schedules and timing configurations',
-    icon: Clock,
-    requiredFields: ['shift_code', 'shift_name', 'start_time', 'end_time'],
-    optionalFields: ['grace_in', 'grace_out', 'break_duration', 'is_night_shift'],
-  },
-  {
-    type: 'departments',
-    label: 'Departments',
-    description: 'Organisational units and department hierarchy',
-    icon: Building2,
-    requiredFields: ['department_code', 'department_name'],
-    optionalFields: ['parent_department', 'cost_center', 'head_employee_code'],
-  },
-  {
-    type: 'designations',
-    label: 'Designations',
-    description: 'Job titles and designation grade mappings',
-    icon: Briefcase,
-    requiredFields: ['designation_code', 'designation_name'],
-    optionalFields: ['grade', 'department', 'is_manager_role'],
+    type: 'sites',
+    label: 'Sites',
+    description: 'Campus and branch locations — import first',
+    icon: Globe,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['location', 'timezone'],
+    group: 'organization',
+    groupStep: 1,
   },
   {
     type: 'work_locations',
     label: 'Work Locations',
-    description: 'Office sites, branches and remote work setups',
+    description: 'Office addresses — link to Sites via site_code',
     icon: MapPin,
-    requiredFields: ['location_code', 'location_name', 'city', 'country'],
-    optionalFields: ['address', 'state', 'pin_code', 'timezone'],
+    requiredFields: ['code', 'name'],
+    optionalFields: ['site_code', 'city', 'state', 'country', 'pincode'],
+    group: 'organization',
+    groupStep: 2,
   },
   {
     type: 'cost_centers',
     label: 'Cost Centers',
     description: 'Financial cost centers for payroll allocation',
     icon: DollarSign,
-    requiredFields: ['cost_center_code', 'cost_center_name'],
-    optionalFields: ['parent_cost_center', 'gl_code', 'description'],
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description'],
+    group: 'organization',
+    groupStep: 3,
   },
+  // ── People & Structure ───────────────────────────────────────────────────────
+  {
+    type: 'employees',
+    label: 'Employees',
+    description: 'Bulk import employee records with personal and job details',
+    icon: Users,
+    requiredFields: ['employee_code', 'first_name', 'last_name', 'email', 'joining_date', 'employment_type'],
+    optionalFields: ['phone', 'status', 'department_code', 'designation_code', 'grade_code', 'manager_employee_code', 'work_location_code', 'pan_number', 'uan_number'],
+    group: 'people',
+  },
+  {
+    type: 'departments',
+    label: 'Departments',
+    description: 'Organisational units and department hierarchy',
+    icon: Building2,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['parent_code'],
+    group: 'people',
+  },
+  {
+    type: 'designations',
+    label: 'Designations',
+    description: 'Job titles and designation grade mappings',
+    icon: Briefcase,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['department_code', 'level'],
+    group: 'people',
+  },
+  {
+    type: 'shifts',
+    label: 'Shifts',
+    description: 'Define work shift schedules and timing configurations',
+    icon: Clock,
+    requiredFields: ['code', 'name', 'start_time', 'end_time'],
+    optionalFields: ['grace_minutes', 'is_night_shift'],
+    group: 'people',
+  },
+  // ── Payroll & Leave ──────────────────────────────────────────────────────────
   {
     type: 'salary_components',
     label: 'Salary Components',
     description: 'Earnings, deductions and reimbursement components',
     icon: DollarSign,
-    requiredFields: ['component_code', 'component_name', 'type'],
-    optionalFields: ['calculation_type', 'is_taxable', 'is_pf_applicable', 'sequence'],
+    requiredFields: ['code', 'name', 'component_type'],
+    optionalFields: ['is_taxable', 'is_pf_applicable', 'is_esi_applicable'],
+    group: 'payroll',
   },
   {
     type: 'leave_types',
     label: 'Leave Types',
-    description: 'Leave policies, accrual rules and approval flows',
+    description: 'Leave policies and payability configuration',
     icon: Umbrella,
-    requiredFields: ['leave_code', 'leave_name', 'annual_quota'],
-    optionalFields: ['carry_forward_limit', 'encashable', 'half_day_allowed', 'approval_levels'],
+    requiredFields: ['name'],
+    optionalFields: ['is_paid', 'allow_sandwich'],
+    group: 'payroll',
   },
   {
     type: 'holiday_calendar',
     label: 'Holiday Calendar',
     description: 'Public and restricted holidays by location or policy',
     icon: Sun,
-    requiredFields: ['holiday_date', 'holiday_name', 'holiday_type'],
-    optionalFields: ['applicable_locations', 'description', 'is_optional'],
+    requiredFields: ['date', 'name'],
+    optionalFields: ['holiday_type'],
+    group: 'payroll',
+  },
+  // ── Enterprise masters ────────────────────────────────────────────────────────
+  {
+    type: 'grades',
+    label: 'Grades / Bands',
+    description: 'Pay grades and bands with CTC min/max ranges',
+    icon: BarChart3,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'level_order', 'ctc_min_annual', 'ctc_max_annual'],
+    group: 'enterprise',
+  },
+  {
+    type: 'payroll_groups',
+    label: 'Payroll Groups',
+    description: 'Payroll processing cycles and payout schedules',
+    icon: Layers,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['cycle_type', 'cutoff_day', 'payout_day', 'currency_code'],
+    group: 'enterprise',
+  },
+  {
+    type: 'employment_categories',
+    label: 'Employment Categories',
+    description: 'Engagement classification with statutory eligibility flags',
+    icon: Briefcase,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'benefits_eligible', 'pf_applicable', 'esi_applicable', 'notice_period_days', 'probation_days'],
+    group: 'enterprise',
+  },
+  {
+    type: 'statutory_groups',
+    label: 'Statutory Groups',
+    description: 'State-wise PF / ESI / PT / LWF compliance configuration',
+    icon: Scale,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['state', 'pf_enabled', 'esi_enabled', 'pt_enabled', 'lwf_enabled', 'pf_wage_ceiling', 'esi_wage_ceiling'],
+    group: 'enterprise',
+  },
+  {
+    type: 'asset_categories',
+    label: 'Asset Categories',
+    description: 'Asset classification and depreciation rules',
+    icon: Package,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'depreciation_method', 'useful_life_years', 'requires_return'],
+    group: 'enterprise',
+  },
+  {
+    type: 'salary_structures',
+    label: 'Salary Structures',
+    description: 'Named CTC packages that group salary components',
+    icon: DollarSign,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'is_default'],
+    group: 'enterprise',
+  },
+  // ── Enterprise onboarding ──────────────────────────────────────────────────
+  {
+    type: 'employee_compensation',
+    label: 'Employee Compensation',
+    description: 'Bulk-set CTC and salary structures for employees',
+    icon: Wallet,
+    requiredFields: ['employee_code', 'effective_from', 'ctc_annual'],
+    optionalFields: ['salary_structure_code', 'notes'],
+    group: 'onboarding',
+  },
+  {
+    type: 'compensation_revisions',
+    label: 'Compensation Revisions',
+    description: 'Bulk-initiate pending CTC revisions (increment, promotion, correction)',
+    icon: TrendingUp,
+    requiredFields: ['employee_code', 'revision_type', 'effective_date', 'new_ctc_annual', 'reason'],
+    optionalFields: ['notes'],
+    group: 'onboarding',
+  },
+  {
+    type: 'leave_opening_balances',
+    label: 'Leave Opening Balances',
+    description: 'Set opening leave balances (with carry-forward) for the year',
+    icon: BookOpen,
+    requiredFields: ['employee_code', 'leave_type_name', 'balance'],
+    optionalFields: ['year', 'carry_forward_balance'],
+    group: 'onboarding',
+  },
+  {
+    type: 'shift_assignments',
+    label: 'Shift Assignments',
+    description: 'Assign employees to shifts with effective dates',
+    icon: UserCheck,
+    requiredFields: ['employee_code', 'shift_code', 'effective_from'],
+    optionalFields: [],
+    group: 'onboarding',
+  },
+  // ── Reference data ────────────────────────────────────────────────────────────
+  {
+    type: 'document_types',
+    label: 'Document Types',
+    description: 'Document classification for employee records (Aadhaar, PAN, etc.)',
+    icon: FileText,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'is_mandatory'],
+    group: 'reference',
+  },
+  {
+    type: 'identity_types',
+    label: 'Identity Types',
+    description: 'Identity document types (Passport, Driving Licence, etc.)',
+    icon: CreditCard,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description'],
+    group: 'reference',
+  },
+  {
+    type: 'relationship_types',
+    label: 'Relationship Types',
+    description: 'Nominee / dependent relationship types (Spouse, Father, etc.)',
+    icon: Heart,
+    requiredFields: ['code', 'name'],
+    optionalFields: [],
+    group: 'reference',
   },
 ]
 
 const MODE_LABELS: Record<Mode, string> = {
-  upsert: 'Create + Update (Upsert)',
-  create: 'Create Only',
-  update: 'Update Only',
+  upsert:        'Create + Update (Upsert)',
+  create_only:   'Create Only',
+  update_only:   'Update Only',
   validate_only: 'Validate Only',
 }
 
-const STATUS_BADGE_VARIANT: Record<ImportJob['status'], 'outline' | 'success' | 'destructive' | 'warning'> = {
-  pending: 'outline',
-  completed: 'success',
-  failed: 'destructive',
+// Backend statuses: pending → validating → validated → importing → completed | failed
+const STATUS_BADGE_VARIANT: Record<string, 'outline' | 'success' | 'destructive' | 'warning'> = {
+  pending:    'outline',
   validating: 'warning',
+  validated:  'warning',
+  importing:  'warning',
+  completed:  'success',
+  failed:     'destructive',
 }
 
 // ─── Step Indicator ────────────────────────────────────────────────────────────
@@ -304,20 +659,49 @@ function StatCard({ label, value, variant }: StatCardProps) {
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function ImportWorkspace() {
-  const { profile } = useAuthStore()
+  const { profile, isLoading: authLoading } = useAuthStore()
   const queryClient = useQueryClient()
 
   const isAdmin = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
+  // ── Auth loading deadlock guard ───────────────────────────────────────────
+  // authLoading stays true until external auth-init code calls setLoading(false).
+  // If that call never arrives (network timeout, init error), the page spins forever.
+  // After 5 s we release the gate and fall through to the role check.
+  const [authTimedOut, setAuthTimedOut] = useState(false)
+  useEffect(() => {
+    if (!authLoading) return
+    const t = setTimeout(() => {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[ImportWorkspace] authLoading gate timed out after 5 s — proceeding with role check')
+      }
+      setAuthTimedOut(true)
+    }, 5_000)
+    return () => clearTimeout(t)
+  }, [authLoading])
+
+  // ── Initial Session — computed once per mount ─────────────────────────────
+  // useRef keeps the value stable across re-renders without lazy-fn overhead.
+  // The conditional write runs only on the first render (when current === undefined).
+  const _initSnap = useRef<ImportSessionSnapshot | null | undefined>(undefined)
+  if (_initSnap.current === undefined) _initSnap.current = findLatestSession()
+  const initialSession = _initSnap.current
+
   // ── Global State ──────────────────────────────────────────────────────────
-  const [selectedMaster, setSelectedMaster] = useState<MasterType | null>(null)
-  const [currentStep, setCurrentStep] = useState<Step>('download')
-  const [parsedRows, setParsedRows] = useState<Record<string, string>[]>([])
-  const [fileName, setFileName] = useState('')
-  const [mode, setMode] = useState<Mode>('upsert')
-  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null)
+  // Initial values derived from the single initialSession read — no async race.
+  const [selectedMaster, setSelectedMaster] = useState<MasterType | null>(initialSession?.masterType ?? null)
+  const [currentStep, setCurrentStep] = useState<Step>(initialSession ? validateSessionStep(initialSession) : 'download')
+  const [parsedRows, setParsedRows] = useState<Record<string, string>[]>(initialSession?.parsedRows ?? [])
+  const [fileName, setFileName] = useState<string>(initialSession?.fileName ?? '')
+  const [mode, setMode] = useState<Mode>(initialSession?.mode ?? 'upsert')
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(initialSession?.validationResult ?? null)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>('import')
+  // True when a previous session was auto-applied on mount or master switch
+  const [sessionRestoredNotice, setSessionRestoredNotice] = useState<boolean>(initialSession !== null)
+  // Mutation timeout flags — set after deadline to expose cancel UI (set to false on mutation settle)
+  const [validateTimedOut, setValidateTimedOut] = useState(false)
+  const [importTimedOut, setImportTimedOut] = useState(false)
 
   // ── History Filters ───────────────────────────────────────────────────────
   const [historyMasterFilter, setHistoryMasterFilter] = useState<string>('all')
@@ -330,6 +714,58 @@ export function ImportWorkspace() {
   const [isDragging, setIsDragging] = useState(false)
 
   const masterConfig = selectedMaster ? MASTER_CONFIGS.find(m => m.type === selectedMaster) ?? null : null
+
+  // ── Session Persistence ───────────────────────────────────────────────────
+  // Ref mirror of current session-relevant state — read by the unmount cleanup
+  // to save the latest snapshot without stale closure capture.
+  const sessionStateRef = useRef({ selectedMaster, currentStep, fileName, mode, parsedRows, validationResult })
+  useEffect(() => {
+    sessionStateRef.current = { selectedMaster, currentStep, fileName, mode, parsedRows, validationResult }
+  })
+
+  // Auto-save on state changes. Guards: skip empty state, skip terminal steps.
+  useEffect(() => {
+    if (!selectedMaster) return
+    if (currentStep === 'download' || currentStep === 'complete') return
+    if (parsedRows.length === 0) return   // never persist blank state
+    saveSession({
+      masterType:      selectedMaster,
+      step:            currentStep as Exclude<Step, 'download' | 'complete'>,
+      fileName,
+      mode,
+      parsedRows,
+      validationResult,
+      savedAt:         Date.now(),
+    })
+  }, [selectedMaster, currentStep, fileName, mode, parsedRows, validationResult])
+
+  // Save on route navigation / unmount — catches in-flight mutation state that
+  // the auto-save effect may not have captured (mutation onSuccess fires async).
+  useEffect(() => {
+    return () => {
+      const s = sessionStateRef.current
+      if (!s.selectedMaster) return
+      if (s.currentStep === 'download' || s.currentStep === 'complete') return
+      if (s.parsedRows.length === 0) return
+      saveSession({
+        masterType:       s.selectedMaster,
+        step:             s.currentStep as Exclude<Step, 'download' | 'complete'>,
+        fileName:         s.fileName,
+        mode:             s.mode,
+        parsedRows:       s.parsedRows,
+        validationResult: s.validationResult,
+        savedAt:          Date.now(),
+      })
+    }
+  }, [])
+
+  // Navigation guard — warn before leaving when a file has been uploaded
+  useEffect(() => {
+    if (!(['upload', 'validate', 'import'] as Step[]).includes(currentStep) || !selectedMaster) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [currentStep, selectedMaster])
 
   // ── Step 1: Download Template ──────────────────────────────────────────────
   const [isDownloading, setIsDownloading] = useState(false)
@@ -348,12 +784,22 @@ export function ImportWorkspace() {
       XLSX.utils.book_append_sheet(wb, ws, 'Template')
       XLSX.writeFile(wb, `${selectedMaster}_import_template.xlsx`)
     } catch (err) {
-      // fallback: generate from known fields
+      // Fallback: generate from MASTER_CONFIGS when API is unreachable.
+      // Column names match templates.ts exactly (no * suffixes in header row).
       const cfg = MASTER_CONFIGS.find(m => m.type === selectedMaster)
       if (cfg) {
-        const headers = [...cfg.requiredFields, ...cfg.optionalFields]
+        const required = cfg.requiredFields
+        const optional = cfg.optionalFields
+        const headerRow = [
+          ...required.map((f) => `${f} *`),   // * suffix = visual hint only
+          ...optional,
+        ]
         const wb = XLSX.utils.book_new()
-        const ws = XLSX.utils.aoa_to_sheet([headers])
+        const ws = XLSX.utils.aoa_to_sheet([
+          // Instruction row (informational — delete before upload)
+          ['# Required fields marked with *. Delete this row before uploading. Date format: YYYY-MM-DD.'],
+          headerRow,
+        ])
         XLSX.utils.book_append_sheet(wb, ws, 'Template')
         XLSX.writeFile(wb, `${selectedMaster}_import_template.xlsx`)
       }
@@ -363,30 +809,70 @@ export function ImportWorkspace() {
   }
 
   // ── Step 2: Parse File ─────────────────────────────────────────────────────
+
+  /**
+   * Normalise column names produced by the template download:
+   *   - Strip trailing " *" (required-field marker added by generateCSV)
+   *   - Trim whitespace
+   * This ensures re-uploads of downloaded templates work without manual editing.
+   */
+  function normaliseKey(k: string): string {
+    return k.replace(/\s*\*\s*$/, '').trim()
+  }
+
   function parseFile(file: File) {
     const ext = file.name.split('.').pop()?.toLowerCase()
     setFileName(file.name)
 
     if (ext === 'csv') {
-      Papa.parse<Record<string, string>>(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (result) => {
-          setParsedRows(result.data)
-        },
+      // Pre-process: strip instruction comment rows (lines starting with #)
+      file.text().then((text) => {
+        const cleanedLines = text
+          .split(/\r?\n/)
+          .filter((line) => !line.trimStart().startsWith('#'))
+          .join('\n')
+
+        Papa.parse<Record<string, string>>(cleanedLines, {
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: normaliseKey,
+          complete: (result) => {
+            setParsedRows(result.data)
+          },
+        })
       })
     } else if (ext === 'xlsx' || ext === 'xls') {
       const reader = new FileReader()
       reader.onload = (e) => {
         const data = e.target?.result
-        if (!data) return
-        const wb = XLSX.read(data, { type: 'binary' })
+        if (!data || !(data instanceof ArrayBuffer)) return
+        const wb = XLSX.read(new Uint8Array(data), { type: 'array' })
         const sheetName = wb.SheetNames[0]
         const ws = wb.Sheets[sheetName]
-        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' })
+
+        // Get raw array-of-arrays to skip # comment rows before building objects
+        const raw = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][]
+
+        // Find the first non-comment row — that's the header
+        const headerIdx = raw.findIndex(
+          (row) => row.length > 0 && !String(row[0] ?? '').trimStart().startsWith('#'),
+        )
+        if (headerIdx === -1) { setParsedRows([]); return }
+
+        const headers = raw[headerIdx].map((h) => normaliseKey(String(h)))
+        const dataRows = raw.slice(headerIdx + 1).filter(
+          (row) => row.some((cell) => String(cell ?? '').trim() !== '') &&
+                   !String(row[0] ?? '').trimStart().startsWith('#'),
+        )
+
+        const rows: Record<string, string>[] = dataRows.map((row) => {
+          const obj: Record<string, string> = {}
+          headers.forEach((h, i) => { obj[h] = String(row[i] ?? '') })
+          return obj
+        })
         setParsedRows(rows)
       }
-      reader.readAsBinaryString(file)
+      reader.readAsArrayBuffer(file)
     }
   }
 
@@ -414,17 +900,20 @@ export function ImportWorkspace() {
   // ── Step 3: Validate ───────────────────────────────────────────────────────
   const validateMutation = useMutation({
     mutationFn: () =>
-      api.post<ValidationResult>('/import/validate', {
+      api.post<{ data: BackendValidationResult }>('/import/validate', {
         masterType: selectedMaster,
         rows: parsedRows,
         mode,
       }),
-    onSuccess: (data) => {
+    onSuccess: (response) => {
+      const raw = response.data
+      // Flatten per-row error arrays into individual display rows
+      const data = flattenValidationRows(raw)
       setValidationResult(data)
-      if (data.invalidRows === 0) {
-        toast.success('Validation passed', { description: `All ${data.totalRows} rows are valid.` })
+      if (raw.invalidRows === 0) {
+        toast.success('Validation passed', { description: `All ${raw.totalRows} rows are valid.` })
       } else {
-        toast.success('Validation complete', { description: `${data.invalidRows} row${data.invalidRows !== 1 ? 's' : ''} have errors. Review before importing.` })
+        toast.success('Validation complete', { description: `${raw.invalidRows} row${raw.invalidRows !== 1 ? 's' : ''} have errors. Review before importing.` })
       }
     },
     onError: (e: Error) => toast.error('Validation failed', { description: e.message }),
@@ -451,19 +940,61 @@ export function ImportWorkspace() {
     URL.revokeObjectURL(url)
   }
 
+  function handleDownloadFailureReport() {
+    if (failedFlatRows.length === 0) return
+    const csvRows = [
+      ['Row #', 'Field', 'Error', 'Severity'],
+      ...failedFlatRows.map(r => [String(r.rowNumber), r.field, r.error, r.severity]),
+    ]
+    const csvContent = Papa.unparse(csvRows)
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${selectedMaster}_import_failures_${new Date().toISOString().split('T')[0]}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   // ── Step 4: Import ─────────────────────────────────────────────────────────
   const importMutation = useMutation({
     mutationFn: () =>
-      api.post<ImportResult>('/import/run', {
+      api.post<{ data: ImportResult }>('/import/run', {
         masterType: selectedMaster,
         rows: parsedRows,
         fileName,
         mode,
       }),
-    onSuccess: (data) => {
+    onSuccess: (response) => {
+      if (selectedMaster) clearSession(selectedMaster)
+      const data = response.data
       setImportResult(data)
       setCurrentStep('complete')
       queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
+
+      // Bust the master-page cache so changes are visible immediately
+      const MASTER_QUERY_KEYS: Record<string, string[]> = {
+        grades:                ['grades'],
+        departments:           ['departments'],
+        designations:          ['designations'],
+        cost_centers:          ['cost-centers'],
+        work_locations:        ['work-locations'],
+        sites:                 ['sites'],
+        shifts:                ['shifts'],
+        leave_types:           ['leave-types'],
+        rosters:               ['rosters'],
+        payroll_groups:        ['payroll-groups'],
+        employment_categories: ['employment-categories'],
+        statutory_groups:      ['statutory-groups'],
+        asset_categories:      ['asset-categories'],
+        salary_structures:     ['salary-structures'],
+        holiday_calendar:      ['holiday-calendar'],
+      }
+      const keysToInvalidate = selectedMaster ? (MASTER_QUERY_KEYS[selectedMaster] ?? []) : []
+      for (const k of keysToInvalidate) {
+        queryClient.invalidateQueries({ queryKey: [k] })
+      }
+
       toast.success('Import complete', {
         description: `${data.created} created, ${data.updated} updated, ${data.failed} failed.`,
       })
@@ -471,11 +1002,47 @@ export function ImportWorkspace() {
     onError: (e: Error) => toast.error('Import failed', { description: e.message }),
   })
 
+  // ── Mutation Timeout Guards ───────────────────────────────────────────────
+  // If a mutation hangs indefinitely the spinner never clears. After the deadline
+  // we expose a cancel UI so the user always has an escape hatch.
+  useEffect(() => {
+    if (!validateMutation.isPending) { setValidateTimedOut(false); return }
+    const t = setTimeout(() => setValidateTimedOut(true), 60_000)
+    return () => clearTimeout(t)
+  }, [validateMutation.isPending])
+
+  useEffect(() => {
+    if (!importMutation.isPending) { setImportTimedOut(false); return }
+    const t = setTimeout(() => setImportTimedOut(true), 120_000)
+    return () => clearTimeout(t)
+  }, [importMutation.isPending])
+
+  // ── Dev-mode render gate trace ────────────────────────────────────────────
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return
+    console.debug('[ImportWorkspace] render gate', {
+      authLoading, authTimedOut, isAdmin, selectedMaster, currentStep,
+      parsedRows: parsedRows.length, hasValidation: !!validationResult,
+      sessionRestored: sessionRestoredNotice,
+      validatePending: validateMutation.isPending, validateTimedOut,
+      importPending: importMutation.isPending, importTimedOut,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, selectedMaster, parsedRows.length, authLoading, authTimedOut,
+      validateMutation.isPending, importMutation.isPending, validateTimedOut, importTimedOut])
+
   // ── Import History ─────────────────────────────────────────────────────────
-  const { data: jobsData, isLoading: jobsLoading, refetch: refetchJobs } = useQuery({
+  // staleTime: 60 s so switching tabs (import → history → import → history) within
+  // the window does not trigger a redundant refetch on every re-enable.
+  // placeholderData: keepPreviousData keeps the jobs table visible (no blank flash)
+  // while a background refresh runs after the stale window elapses.
+  const { data: jobsData, isLoading: jobsLoading, isFetching: jobsFetching, isError: jobsError } = useQuery({
     queryKey: ['import-jobs'],
     queryFn: () => api.get<{ data: ImportJob[] }>('/import/jobs'),
     enabled: activeTab === 'history',
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    retry: 2,
   })
 
   const allJobs = jobsData?.data ?? []
@@ -486,17 +1053,44 @@ export function ImportWorkspace() {
   })
 
   // ── Expanded Job Rows ──────────────────────────────────────────────────────
-  const { data: expandedRowsData } = useQuery({
+  // staleTime: 60 s — row errors for a completed job never change; caching prevents
+  // a re-fetch every time the user collapses and re-expands the same job row.
+  const { data: expandedRowsData, isLoading: expandedRowsLoading, isError: expandedRowsError } = useQuery({
     queryKey: ['import-job-rows', expandedJobId],
     queryFn: () =>
       api.get<{ data: ImportJobRow[] }>(`/import/jobs/${expandedJobId}/rows?status=invalid`),
     enabled: !!expandedJobId,
+    staleTime: 60_000,
+    retry: 1,
   })
 
   const expandedRows = expandedRowsData?.data ?? []
+  const expandedFlatRows: FlatJobRow[] = expandedRows.flatMap(row => [
+    ...(row.errors ?? []).map(e => ({ rowNumber: row.row_number, field: e.field, error: e.message, severity: e.severity })),
+    ...(row.warnings ?? []).map(w => ({ rowNumber: row.row_number, field: w.field, error: w.message, severity: 'warning' as const })),
+  ])
+
+  // ── Complete Step — Failed Row Details ────────────────────────────────────
+  // staleTime: 5 min — failed rows for a finished job are immutable; no need to
+  // ever refetch unless the user explicitly resets and comes back via history.
+  const { data: failedRowsData, isLoading: failedRowsLoading, isError: failedRowsError } = useQuery({
+    queryKey: ['import-failed-rows', importResult?.importJobId],
+    queryFn: () =>
+      api.get<{ data: ImportJobRow[] }>(`/import/jobs/${importResult!.importJobId}/rows?status=failed&limit=100`),
+    enabled: currentStep === 'complete' && !!importResult?.importJobId && (importResult?.failed ?? 0) > 0,
+    staleTime: 5 * 60_000,
+    retry: 2,
+  })
+  const failedFlatRows: FlatJobRow[] = (failedRowsData?.data ?? []).flatMap(row => [
+    ...(row.errors ?? []).map(e => ({ rowNumber: row.row_number, field: e.field, error: e.message, severity: e.severity })),
+    ...(row.warnings ?? []).map(w => ({ rowNumber: row.row_number, field: w.field, error: w.message, severity: 'warning' as const })),
+  ])
 
   // ── Reset Workflow ─────────────────────────────────────────────────────────
   function resetWorkflow() {
+    if (selectedMaster) clearSession(selectedMaster)
+    validateMutation.reset()
+    importMutation.reset()
     setCurrentStep('download')
     setParsedRows([])
     setFileName('')
@@ -504,16 +1098,50 @@ export function ImportWorkspace() {
     setValidationResult(null)
     setImportResult(null)
     setErrorPage(1)
+    setSessionRestoredNotice(false)
   }
 
   function selectMaster(type: MasterType) {
-    if (selectedMaster !== type) {
-      setSelectedMaster(type)
-      resetWorkflow()
+    if (selectedMaster === type) return
+    // Reset mutation state so prior validation/import errors don't bleed into the new master
+    validateMutation.reset()
+    importMutation.reset()
+    setSelectedMaster(type)
+    const snap = loadSession(type)
+    if (snap) {
+      const safeStep = validateSessionStep(snap)
+      setCurrentStep(safeStep)
+      setFileName(snap.fileName)
+      setMode(snap.mode)
+      setParsedRows(snap.parsedRows)
+      setValidationResult(snap.validationResult)
+      setSessionRestoredNotice(true)
+    } else {
+      setCurrentStep('download')
+      setParsedRows([])
+      setFileName('')
+      setMode('upsert')
+      setValidationResult(null)
+      setSessionRestoredNotice(false)
     }
+    setImportResult(null)
+    setErrorPage(1)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // isLoading is true while Zustand persist middleware rehydrates the auth store.
+  // Render a spinner rather than the access-restriction wall to avoid a false-negative flash.
+  if (authLoading && !authTimedOut) {
+    return (
+      <PageContainer>
+        <PageHeader title="Import" subtitle="Universal Master Import Framework" />
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </PageContainer>
+    )
+  }
+
   if (!isAdmin) {
     return (
       <PageContainer>
@@ -550,7 +1178,13 @@ export function ImportWorkspace() {
         </TabsList>
 
         {/* ── Import Tab ─────────────────────────────────────────────────── */}
-        <TabsContent value="import" className="space-y-6">
+        {/* forceMount keeps the import workflow DOM (drag-drop, step indicator,
+            master grid) mounted when the user switches to the History tab.
+            Without forceMount, Radix unmounts the inactive TabsContent by default
+            → switching back causes a full remount and visual flash even though
+            parent-level state (parsedRows, currentStep, etc.) is preserved.
+            The `hidden` class drives visibility via CSS — no remount. */}
+        <TabsContent value="import" forceMount className={cn('space-y-6', activeTab !== 'import' && 'hidden')}>
 
           {/* Section 1: Master Type Selector */}
           <SectionCard
@@ -558,38 +1192,95 @@ export function ImportWorkspace() {
             description="Choose the data category you want to import"
             icon={<FileSpreadsheet className="h-4 w-4 text-muted-foreground" />}
           >
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 gap-3">
-              {MASTER_CONFIGS.map((cfg) => {
-                const Icon = cfg.icon
-                const isSelected = selectedMaster === cfg.type
+            <div className="space-y-6">
+              {IMPORT_GROUPS.map((group) => {
+                const groupConfigs = MASTER_CONFIGS.filter(c => c.group === group.key)
+                if (groupConfigs.length === 0) return null
+                const isOrgGroup = group.key === 'organization'
                 return (
-                  <button
-                    key={cfg.type}
-                    type="button"
-                    onClick={() => selectMaster(cfg.type)}
-                    className={cn(
-                      'flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-all duration-150',
-                      'hover:border-primary/60 hover:bg-muted/40',
-                      isSelected
-                        ? 'border-primary ring-2 ring-primary/30 bg-primary/5'
-                        : 'border-border bg-card',
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'rounded-md p-2',
-                        isSelected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
-                      )}
-                    >
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className={cn('text-sm font-semibold', isSelected ? 'text-primary' : 'text-foreground')}>
-                        {cfg.label}
+                  <div key={group.key}>
+                    {/* Group header */}
+                    <div className="flex items-center gap-3 mb-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                        {group.label}
                       </p>
-                      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{cfg.description}</p>
+                      <div className="flex-1 h-px bg-border" />
+                      {group.note && (
+                        <span className="text-[10px] text-muted-foreground/60 italic shrink-0">
+                          {group.note}
+                        </span>
+                      )}
                     </div>
-                  </button>
+
+                    {/* Org group: show horizontal dependency chain indicator */}
+                    {isOrgGroup && (
+                      <div className="flex items-center gap-1.5 mb-3 px-1">
+                        {groupConfigs.map((cfg, i) => (
+                          <React.Fragment key={cfg.type}>
+                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                              <span className="h-4 w-4 rounded-full bg-muted border border-border flex items-center justify-center text-[9px] font-bold text-muted-foreground shrink-0">
+                                {cfg.groupStep}
+                              </span>
+                              <span>{cfg.label}</span>
+                            </div>
+                            {i < groupConfigs.length - 1 && (
+                              <ArrowRight className="h-3 w-3 text-muted-foreground/30 shrink-0" />
+                            )}
+                          </React.Fragment>
+                        ))}
+                        <span className="ml-1 text-[10px] text-muted-foreground/50">— upload in this order</span>
+                      </div>
+                    )}
+
+                    {/* Card grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 gap-3">
+                      {groupConfigs.map((cfg) => {
+                        const Icon = cfg.icon
+                        const isSelected = selectedMaster === cfg.type
+                        return (
+                          <button
+                            key={cfg.type}
+                            type="button"
+                            onClick={() => selectMaster(cfg.type)}
+                            className={cn(
+                              'flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-all duration-150',
+                              'hover:border-primary/60 hover:bg-muted/40',
+                              isSelected
+                                ? 'border-primary ring-2 ring-primary/30 bg-primary/5'
+                                : 'border-border bg-card',
+                            )}
+                          >
+                            <div className="flex items-start justify-between w-full gap-2">
+                              <div
+                                className={cn(
+                                  'rounded-md p-2 shrink-0',
+                                  isSelected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                <Icon className="h-5 w-5" />
+                              </div>
+                              {cfg.groupStep && (
+                                <span className={cn(
+                                  'text-[10px] font-semibold rounded-full px-1.5 py-0.5 border shrink-0',
+                                  isSelected
+                                    ? 'border-primary/40 text-primary bg-primary/10'
+                                    : 'border-border text-muted-foreground/60 bg-muted/50',
+                                )}>
+                                  Step {cfg.groupStep}
+                                </span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className={cn('text-sm font-semibold', isSelected ? 'text-primary' : 'text-foreground')}>
+                                {cfg.label}
+                              </p>
+                              <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{cfg.description}</p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                 )
               })}
             </div>
@@ -610,6 +1301,22 @@ export function ImportWorkspace() {
                 )
               }
             >
+              {/* Session restored notice — auto-applied, no manual resume needed */}
+              {sessionRestoredNotice && fileName && (
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3 flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <RotateCcw className="h-4 w-4 text-primary flex-shrink-0" />
+                    <span className="text-sm text-foreground truncate">
+                      Session restored:&nbsp;<span className="font-mono text-xs">{fileName}</span>
+                      &nbsp;—&nbsp;resuming from&nbsp;<span className="font-medium capitalize">{currentStep}</span> step
+                    </span>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setSessionRestoredNotice(false)}>
+                    Dismiss
+                  </Button>
+                </div>
+              )}
+
               {/* Step Indicator */}
               <div className="flex justify-center mb-8">
                 <StepIndicator current={currentStep} />
@@ -723,9 +1430,9 @@ export function ImportWorkspace() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      {mode === 'upsert' && 'Creates new records and updates existing ones based on unique identifiers.'}
-                      {mode === 'create' && 'Only creates new records. Existing records are skipped.'}
-                      {mode === 'update' && 'Only updates existing records. New records are skipped.'}
+                      {mode === 'upsert'        && 'Creates new records and updates existing ones based on unique identifiers.'}
+                      {mode === 'create_only'   && 'Only creates new records. Existing records are skipped.'}
+                      {mode === 'update_only'   && 'Only updates existing records. New records are skipped.'}
                       {mode === 'validate_only' && 'Validates data without making any changes to the database.'}
                     </p>
                   </div>
@@ -750,27 +1457,54 @@ export function ImportWorkspace() {
                 <div className="space-y-6">
                   {/* Run Validation CTA */}
                   {!validationResult && !validateMutation.isPending && (
-                    <div className="flex flex-col items-center gap-4 py-6">
-                      <div className="rounded-full bg-warning/10 p-4">
-                        <CheckCircle2 className="h-8 w-8 text-warning" />
+                    parsedRows.length === 0 ? (
+                      // Impossible state guard: arrived at validate with no rows
+                      // (session demote should prevent this, but defend explicitly)
+                      <div className="flex flex-col items-center gap-4 py-6">
+                        <div className="rounded-full bg-warning/10 p-4">
+                          <AlertTriangle className="h-8 w-8 text-warning" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-foreground font-medium">No Data to Validate</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Go back and upload a file before running validation.
+                          </p>
+                        </div>
+                        <Button variant="outline" onClick={() => setCurrentStep('upload')}>
+                          Back to Upload
+                        </Button>
                       </div>
-                      <div className="text-center">
-                        <p className="text-foreground font-medium">Ready to Validate</p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {parsedRows.length} rows from <span className="font-mono">{fileName}</span> will be checked
-                        </p>
+                    ) : (
+                      <div className="flex flex-col items-center gap-4 py-6">
+                        <div className="rounded-full bg-warning/10 p-4">
+                          <CheckCircle2 className="h-8 w-8 text-warning" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-foreground font-medium">Ready to Validate</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {parsedRows.length} rows from <span className="font-mono">{fileName}</span> will be checked
+                          </p>
+                        </div>
+                        <Button onClick={() => validateMutation.mutate()}>
+                          <CheckCircle2 className="h-4 w-4" />
+                          Run Validation
+                        </Button>
                       </div>
-                      <Button onClick={() => validateMutation.mutate()}>
-                        <CheckCircle2 className="h-4 w-4" />
-                        Run Validation
-                      </Button>
-                    </div>
+                    )
                   )}
 
                   {validateMutation.isPending && (
                     <div className="flex flex-col items-center gap-3 py-10">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                       <p className="text-sm text-muted-foreground">Validating rows…</p>
+                      {validateTimedOut && (
+                        <div className="flex flex-col items-center gap-2 mt-2">
+                          <p className="text-xs text-warning">Taking longer than expected. The server may be slow.</p>
+                          <Button variant="outline" size="sm" onClick={() => validateMutation.reset()}>
+                            Cancel and Retry
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -828,7 +1562,7 @@ export function ImportWorkspace() {
                               <tbody>
                                 {pagedErrorRows.map((row, i) => (
                                   <tr
-                                    key={i}
+                                    key={`${row.rowNumber}-${row.field}-${i}`}
                                     className={cn(
                                       'border-b border-border last:border-0',
                                       row.severity === 'error' ? 'bg-destructive/5' : 'bg-warning/5',
@@ -907,7 +1641,10 @@ export function ImportWorkspace() {
               {/* Step 4: Import */}
               {currentStep === 'import' && (
                 <div className="space-y-6">
-                  {!importMutation.isPending && !importMutation.isSuccess && (
+                  {/* Show summary+action whenever not running — isSuccess is excluded because
+                      currentStep transitions to 'complete' atomically with isSuccess=true in
+                      React 18 batching, so checking it here only creates a blank-panel race. */}
+                  {!importMutation.isPending && (
                     <>
                       {/* Summary */}
                       <div className="rounded-lg border border-border bg-muted/30 p-5 space-y-3">
@@ -965,25 +1702,65 @@ export function ImportWorkspace() {
                     <div className="flex flex-col items-center gap-3 py-10">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                       <p className="text-sm text-muted-foreground">Importing data, please wait…</p>
+                      {importTimedOut && (
+                        <div className="flex flex-col items-center gap-2 mt-2">
+                          <p className="text-xs text-warning">This is taking longer than expected.</p>
+                          <p className="text-xs text-muted-foreground">The import may still be running server-side. Check Import History before retrying.</p>
+                          <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import') }}>
+                            Dismiss and Check History
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Step 5: Complete */}
+              {/* Step 5: Complete — importResult is ephemeral (not persisted).
+                  On refresh the session clears and step resets to download, so this
+                  fallback only fires in the edge case where importResult is lost
+                  while currentStep somehow remains 'complete'. */}
+              {currentStep === 'complete' && !importResult && (
+                <div className="flex flex-col items-center gap-4 py-10">
+                  <CheckCircle2 className="h-10 w-10 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">Import finished. Check Import History for results.</p>
+                  <Button variant="outline" onClick={resetWorkflow}>
+                    <RotateCcw className="h-4 w-4" />
+                    Start New Import
+                  </Button>
+                </div>
+              )}
+
               {currentStep === 'complete' && importResult && (
                 <div className="space-y-6">
-                  <div className="flex flex-col items-center gap-4 py-4">
-                    <div className="rounded-full bg-success/10 p-5">
-                      <CheckCircle2 className="h-10 w-10 text-success" />
+                  {importResult.failed === 0 ? (
+                    <div className="flex flex-col items-center gap-4 py-4">
+                      <div className="rounded-full bg-success/10 p-5">
+                        <CheckCircle2 className="h-10 w-10 text-success" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-foreground">Import Complete!</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          All <span className="font-semibold">{masterConfig.label}</span> rows imported successfully.
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-center">
-                      <p className="text-xl font-bold text-foreground">Import Complete!</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Your <span className="font-semibold">{masterConfig.label}</span> data has been imported successfully.
-                      </p>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 py-4">
+                      <div className="rounded-full bg-warning/10 p-5">
+                        <AlertTriangle className="h-10 w-10 text-warning" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-foreground">Import Completed with Errors</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          <span className="font-semibold text-destructive">{importResult.failed} rows failed</span>
+                          {importResult.created > 0 && `, ${importResult.created} created`}
+                          {importResult.updated > 0 && `, ${importResult.updated} updated`}
+                          {importResult.skipped > 0 && `, ${importResult.skipped} skipped`}.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Result cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -992,6 +1769,61 @@ export function ImportWorkspace() {
                     <StatCard label="Failed" value={importResult.failed} variant="destructive" />
                     <StatCard label="Skipped" value={importResult.skipped} variant="warning" />
                   </div>
+
+                  {/* Failed row loading indicator */}
+                  {importResult.failed > 0 && failedRowsLoading && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading failure details…
+                    </div>
+                  )}
+                  {importResult.failed > 0 && failedRowsError && (
+                    <div className="rounded-md border border-destructive/20 bg-destructive/5 p-3 flex items-center gap-2 text-sm text-muted-foreground">
+                      <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
+                      Could not load failure details. Check Import History for row-level errors.
+                    </div>
+                  )}
+
+                  {/* Failed row details */}
+                  {importResult.failed > 0 && failedFlatRows.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-foreground">
+                          Failed Rows ({failedFlatRows.length})
+                        </p>
+                        <Button variant="outline" size="sm" onClick={handleDownloadFailureReport}>
+                          <Download className="h-4 w-4" />
+                          Download Failure Report
+                        </Button>
+                      </div>
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-border bg-muted/50">
+                              <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-16">Row #</th>
+                              <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">Field</th>
+                              <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">Error</th>
+                              <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-24">Severity</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {failedFlatRows.map((row, i) => (
+                              <tr key={`${row.rowNumber}-${row.field}-${i}`} className="border-b border-border last:border-0 bg-destructive/5">
+                                <td className="px-3 py-2 text-muted-foreground font-mono">{row.rowNumber}</td>
+                                <td className="px-3 py-2 font-mono text-xs text-foreground">{row.field}</td>
+                                <td className="px-3 py-2 text-foreground">{row.error}</td>
+                                <td className="px-3 py-2">
+                                  <Badge variant={row.severity === 'error' ? 'destructive' : 'warning'}>
+                                    {row.severity}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap gap-3 justify-center">
                     <Button variant="outline" onClick={resetWorkflow}>
@@ -1010,14 +1842,24 @@ export function ImportWorkspace() {
         </TabsContent>
 
         {/* ── History Tab ────────────────────────────────────────────────── */}
-        <TabsContent value="history" className="space-y-4">
+        {/* Same forceMount strategy — keeps history table mounted so the jobs
+            query result is never discarded when switching back to the import tab. */}
+        <TabsContent value="history" forceMount className={cn('space-y-4', activeTab !== 'history' && 'hidden')}>
           <SectionCard
             title="Import History"
             description="All import jobs across master types"
             icon={<History className="h-4 w-4 text-muted-foreground" />}
             action={
-              <Button variant="outline" size="sm" onClick={() => refetchJobs()}>
-                <RefreshCw className="h-4 w-4" />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={jobsFetching}
+                onClick={() => queryClient.invalidateQueries({ queryKey: ['import-jobs'], exact: true })}
+              >
+                {jobsFetching
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <RefreshCw className="h-4 w-4" />
+                }
                 Refresh
               </Button>
             }
@@ -1059,6 +1901,15 @@ export function ImportWorkspace() {
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Loading import history…</span>
               </div>
+            ) : jobsError ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                <XCircle className="h-8 w-8 text-destructive/50" />
+                <p className="text-sm text-muted-foreground">Failed to load import history.</p>
+                <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['import-jobs'], exact: true })}>
+                  <RefreshCw className="h-4 w-4" />
+                  Retry
+                </Button>
+              </div>
             ) : filteredJobs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
                 <History className="h-8 w-8 text-muted-foreground/50" />
@@ -1097,7 +1948,7 @@ export function ImportWorkspace() {
                               onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
                             >
                               <td className="px-3 py-2.5 text-muted-foreground text-xs whitespace-nowrap">
-                                {new Date(job.createdAt).toLocaleDateString()}{' '}
+                                {(() => { const _d = new Date(job.createdAt); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}-${_d.getUTCFullYear()}` })()}{' '}
                                 <span className="text-muted-foreground/60">
                                   {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
@@ -1128,9 +1979,19 @@ export function ImportWorkspace() {
                             {isExpanded && (
                               <tr className="border-b border-border bg-muted/20">
                                 <td colSpan={11} className="px-4 py-3">
-                                  {expandedRows.length === 0 ? (
+                                  {expandedRowsLoading ? (
+                                    <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      Loading error details…
+                                    </div>
+                                  ) : expandedRowsError ? (
+                                    <div className="flex items-center gap-2 py-2 text-xs text-destructive">
+                                      <XCircle className="h-3 w-3" />
+                                      Could not load row errors.
+                                    </div>
+                                  ) : expandedFlatRows.length === 0 ? (
                                     <p className="text-xs text-muted-foreground py-2">
-                                      {job.failed === 0 ? 'No errors for this import job.' : 'Loading error details…'}
+                                      No errors recorded for this import job.
                                     </p>
                                   ) : (
                                     <div className="rounded-md border border-border overflow-hidden">
@@ -1144,23 +2005,21 @@ export function ImportWorkspace() {
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {expandedRows.map((row, i) => (
+                                          {expandedFlatRows.map((row, i) => (
                                             <tr
-                                              key={i}
+                                              key={`${row.rowNumber}-${row.field}-${i}`}
                                               className={cn(
                                                 'border-b border-border last:border-0',
                                                 row.severity === 'error' ? 'bg-destructive/5' : 'bg-warning/5',
                                               )}
                                             >
                                               <td className="px-3 py-1.5 font-mono text-muted-foreground">{row.rowNumber}</td>
-                                              <td className="px-3 py-1.5 font-mono text-foreground">{row.field ?? '—'}</td>
-                                              <td className="px-3 py-1.5 text-foreground">{row.error ?? '—'}</td>
+                                              <td className="px-3 py-1.5 font-mono text-foreground">{row.field}</td>
+                                              <td className="px-3 py-1.5 text-foreground">{row.error}</td>
                                               <td className="px-3 py-1.5">
-                                                {row.severity && (
-                                                  <Badge variant={row.severity === 'error' ? 'destructive' : 'warning'}>
-                                                    {row.severity}
-                                                  </Badge>
-                                                )}
+                                                <Badge variant={row.severity === 'error' ? 'destructive' : 'warning'}>
+                                                  {row.severity}
+                                                </Badge>
                                               </td>
                                             </tr>
                                           ))}

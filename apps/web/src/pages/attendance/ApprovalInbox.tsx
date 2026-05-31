@@ -13,12 +13,13 @@
  * Design: design-system tokens only — no raw hex / bg-gray-* colors.
  */
 
-import { useState, Fragment }                               from 'react'
-import { useQuery, useMutation, useQueryClient }           from '@tanstack/react-query'
+import { useState, Fragment }                                        from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
-  Inbox, CheckCircle2, XCircle, Loader2, SearchX,
+  Inbox, CheckCircle2, XCircle, Loader2,
   CalendarDays, Clock, Filter, ChevronDown, ChevronUp,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, TrendingUp, ArrowUpDown, ArrowUp, ArrowDown,
+  GitBranch,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -29,6 +30,11 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
+import { ForensicsDrawer } from '@/components/operational/ForensicsDrawer'
+import {
+  IntelligenceLoadingSkeleton,
+  IntelligenceEmptyState,
+} from '@/components/ui/intelligence/index.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,6 +59,7 @@ interface RegularisationItem {
   reason:              string
   status:              string
   created_at:          string
+  rejection_reason?:   string | null
   employees:           { id: string; first_name: string; last_name: string; employee_code: string } | null
 }
 
@@ -77,9 +84,11 @@ const PAGE_LIMIT = 20
 
 function fmtDate(iso: string | null) {
   if (!iso) return '—'
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtTime(iso: string | null) {
@@ -89,9 +98,12 @@ function fmtTime(iso: string | null) {
 
 function fmtDatetime(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function employeeName(emp: { first_name: string; last_name: string } | null) {
@@ -101,6 +113,23 @@ function employeeName(emp: { first_name: string; last_name: string } | null) {
 
 function ageDays(iso: string) {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+}
+
+function slaStatus(createdAt: string): { label: string; color: string } {
+  const hours = (Date.now() - new Date(createdAt).getTime()) / 3_600_000
+  if (hours > 48) return { label: 'SLA breach', color: 'text-destructive' }
+  if (hours > 24) return { label: 'Near SLA',   color: 'text-amber-600 dark:text-amber-400' }
+  return                 { label: 'On time',     color: 'text-emerald-600 dark:text-emerald-400' }
+}
+
+type SortOrder = 'none' | 'asc' | 'desc'
+
+/** Sort items by submitted date. 'asc' = oldest first (most urgent), 'desc' = newest first. */
+function sortByCreatedAt<T extends { created_at: string }>(items: T[], order: Exclude<SortOrder, 'none'>): T[] {
+  return [...items].sort((a, b) => {
+    const diff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    return order === 'asc' ? diff : -diff
+  })
 }
 
 function AgeBadge({ createdAt }: { createdAt: string }) {
@@ -114,29 +143,31 @@ function AgeBadge({ createdAt }: { createdAt: string }) {
   )
 }
 
+// ── Shared types ──────────────────────────────────────────────────────────────
+
+interface ForensicsTarget {
+  employeeId:   string
+  date:         string
+  employeeName?: string
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
 function LoadingState() {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
-      <Loader2 className="h-7 w-7 animate-spin text-primary" />
-      <p className="text-sm">Loading pending approvals…</p>
-    </div>
-  )
+  return <IntelligenceLoadingSkeleton rows={6} />
 }
 
 function EmptyState({ filter }: { filter: FilterTab }) {
-  const labels: Record<FilterTab, string> = {
+  const titles: Record<FilterTab, string> = {
     all:            'No pending approvals',
     leave:          'No pending leave requests',
     regularisation: 'No pending regularisation requests',
   }
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-16 text-muted-foreground">
-      <SearchX className="h-8 w-8 opacity-40" />
-      <p className="text-sm font-medium text-foreground">{labels[filter]}</p>
-      <p className="text-xs">All items have been reviewed.</p>
-    </div>
+    <IntelligenceEmptyState
+      title={titles[filter]}
+      description="All items have been reviewed."
+    />
   )
 }
 
@@ -188,7 +219,15 @@ function RejectionForm({
 
 // ── Leave Requests Table ──────────────────────────────────────────────────────
 
-function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; onRefresh: () => void }) {
+function LeaveRequestsTable({
+  items,
+  onRefresh,
+  onForensics,
+}: {
+  items:       LeaveRequestItem[]
+  onRefresh:   () => void
+  onForensics: (t: ForensicsTarget) => void
+}) {
   const queryClient = useQueryClient()
   const [actionRowId,   setActionRowId]   = useState<string | null>(null)
   const [rejectRowId,   setRejectRowId]   = useState<string | null>(null)
@@ -203,6 +242,10 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
       })
       setActionRowId(null)
       queryClient.invalidateQueries({ queryKey: ['approvals-pending'] })
+      // Invalidate notification inbox — leave approval may generate an employee notification
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
+      // Invalidate leave balance — approved leave reduces available balance
+      queryClient.invalidateQueries({ queryKey: ['leave-balance'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -222,6 +265,8 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
       setActionRowId(null)
       setRejectRowId(null)
       queryClient.invalidateQueries({ queryKey: ['approvals-pending'] })
+      // Invalidate notification inbox — rejection generates an employee notification
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -252,12 +297,12 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
               <Fragment key={row.id}>
                 <tr
                   className={cn(
-                    'border-b border-border/50 transition-colors',
-                    isActioning ? 'opacity-60 pointer-events-none' : 'hover:bg-muted/30',
+                    'border-b border-border/50 transition-colors hover:bg-muted/30',
+                    isActioning ? 'opacity-60 pointer-events-none' : '',
                   )}
                 >
                   {/* Employee */}
-                  <td className="py-3 px-3">
+                  <td className="py-2 px-3">
                     <p className="font-medium text-foreground leading-tight">
                       {employeeName(row.employees)}
                     </p>
@@ -267,7 +312,7 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
                   </td>
 
                   {/* Leave Type */}
-                  <td className="py-3 px-3">
+                  <td className="py-2 px-3">
                     <div className="space-y-0.5">
                       <span className="text-xs font-medium text-foreground">
                         {row.leave_types?.name ?? '—'}
@@ -286,7 +331,7 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
                   </td>
 
                   {/* Period */}
-                  <td className="py-3 px-3 whitespace-nowrap text-xs text-foreground">
+                  <td className="py-2 px-3 whitespace-nowrap text-xs text-foreground">
                     <div className="flex items-center gap-1">
                       <CalendarDays className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                       <span>
@@ -302,12 +347,12 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
                   </td>
 
                   {/* Days */}
-                  <td className="py-3 px-3 text-center text-foreground font-medium text-sm">
+                  <td className="py-2 px-3 text-center text-foreground font-medium text-sm">
                     {row.computed_days}
                   </td>
 
                   {/* Reason */}
-                  <td className="py-3 px-3 max-w-[180px]">
+                  <td className="py-2 px-3 max-w-[180px]">
                     {row.reason ? (
                       <button
                         className="text-left text-xs text-foreground line-clamp-2 hover:line-clamp-none"
@@ -327,13 +372,21 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
                   </td>
 
                   {/* Submitted */}
-                  <td className="py-3 px-3 whitespace-nowrap text-muted-foreground text-xs">
+                  <td className="py-2 px-3 whitespace-nowrap text-muted-foreground text-xs">
                     <div>{fmtDatetime(row.created_at)}</div>
                     <AgeBadge createdAt={row.created_at} />
+                    {(() => {
+                      const sla = slaStatus(row.created_at)
+                      return (
+                        <span className={cn('text-[10px] font-medium', sla.color)}>
+                          {sla.label}
+                        </span>
+                      )
+                    })()}
                   </td>
 
                   {/* Actions */}
-                  <td className="py-3 px-3">
+                  <td className="py-2 px-3">
                     {isActioning ? (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -360,6 +413,22 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
                           <XCircle className="h-3.5 w-3.5" />
                           Reject
                         </Button>
+                        {/* Q2 — forensics trigger in actions column */}
+                        {row.employees?.id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-info"
+                            title="View attendance timeline"
+                            onClick={() => onForensics({
+                              employeeId:   row.employees!.id,
+                              date:         row.from_date,
+                              employeeName: employeeName(row.employees),
+                            })}
+                          >
+                            <GitBranch className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -391,10 +460,19 @@ function LeaveRequestsTable({ items, onRefresh }: { items: LeaveRequestItem[]; o
 
 // ── Regularisation Table ──────────────────────────────────────────────────────
 
-function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]; onRefresh: () => void }) {
+function RegularisationTable({
+  items,
+  onRefresh,
+  onForensics,
+}: {
+  items:       RegularisationItem[]
+  onRefresh:   () => void
+  onForensics: (t: ForensicsTarget) => void
+}) {
   const queryClient = useQueryClient()
-  const [actionRowId, setActionRowId] = useState<string | null>(null)
-  const [rejectRowId, setRejectRowId] = useState<string | null>(null)
+  const [actionRowId,   setActionRowId]   = useState<string | null>(null)
+  const [rejectRowId,   setRejectRowId]   = useState<string | null>(null)
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
@@ -405,6 +483,9 @@ function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]
       })
       setActionRowId(null)
       queryClient.invalidateQueries({ queryKey: ['approvals-pending'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+      // Invalidate notification inbox — attendance correction approval generates employee notification
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -424,6 +505,9 @@ function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]
       setActionRowId(null)
       setRejectRowId(null)
       queryClient.invalidateQueries({ queryKey: ['approvals-pending'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+      // Invalidate notification inbox — rejection generates employee notification
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -448,27 +532,43 @@ function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]
           {items.map(row => {
             const isActioning = actionRowId === row.id
             const isRejecting = rejectRowId === row.id
+            const isExpanded  = expandedRowId === row.id
 
             return (
               <Fragment key={row.id}>
                 <tr
                   className={cn(
-                    'border-b border-border/50 transition-colors',
-                    isActioning ? 'opacity-60 pointer-events-none' : 'hover:bg-muted/30',
+                    'border-b border-border/50 transition-colors hover:bg-muted/30',
+                    isActioning ? 'opacity-60 pointer-events-none' : '',
                   )}
                 >
-                  {/* Employee */}
-                  <td className="py-3 px-3">
+                  {/* Employee — Q4: payroll badge · Q7: rejection reason */}
+                  <td className="py-2 px-3">
                     <p className="font-medium text-foreground leading-tight">
                       {employeeName(row.employees)}
                     </p>
                     {row.employees?.employee_code && (
                       <p className="text-[10px] text-muted-foreground">{row.employees.employee_code}</p>
                     )}
+                    {/* Q4 — payroll impact signal: adding a check-in flips absent→present */}
+                    {row.requested_check_in && (
+                      <div className="mt-0.5">
+                        <Badge variant="warning" className="rounded-full text-[9px] px-1.5 py-0 gap-0.5">
+                          <TrendingUp className="h-2.5 w-2.5" />
+                          Payroll
+                        </Badge>
+                      </div>
+                    )}
+                    {/* Q7 — rejection reason (defensive: pending items normally have none) */}
+                    {row.rejection_reason && (
+                      <p className="text-[10px] text-muted-foreground/70 italic mt-0.5 leading-tight">
+                        Rejected: {row.rejection_reason}
+                      </p>
+                    )}
                   </td>
 
                   {/* Date */}
-                  <td className="py-3 px-3 whitespace-nowrap">
+                  <td className="py-2 px-3 whitespace-nowrap">
                     <div className="flex items-center gap-1.5 text-xs text-foreground">
                       <CalendarDays className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                       {fmtDate(row.date)}
@@ -476,7 +576,7 @@ function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]
                   </td>
 
                   {/* Requested In */}
-                  <td className="py-3 px-3 whitespace-nowrap text-xs text-foreground">
+                  <td className="py-2 px-3 whitespace-nowrap text-xs text-foreground">
                     <div className="flex items-center gap-1">
                       <Clock className="h-3 w-3 text-muted-foreground" />
                       {fmtTime(row.requested_check_in)}
@@ -484,28 +584,51 @@ function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]
                   </td>
 
                   {/* Requested Out */}
-                  <td className="py-3 px-3 whitespace-nowrap text-xs text-foreground">
+                  <td className="py-2 px-3 whitespace-nowrap text-xs text-foreground">
                     <div className="flex items-center gap-1">
                       <Clock className="h-3 w-3 text-muted-foreground" />
                       {fmtTime(row.requested_check_out)}
                     </div>
                   </td>
 
-                  {/* Reason */}
-                  <td className="py-3 px-3 max-w-[180px]">
-                    <p className="text-xs text-foreground line-clamp-2" title={row.reason}>
-                      {row.reason}
-                    </p>
+                  {/* Reason — Q7: expandable on hover/click (mirrors LeaveRequestsTable) */}
+                  <td className="py-2 px-3 max-w-[180px]">
+                    {row.reason ? (
+                      <button
+                        className="text-left text-xs text-foreground line-clamp-2 hover:line-clamp-none"
+                        title={row.reason}
+                        onClick={() => setExpandedRowId(isExpanded ? null : row.id)}
+                      >
+                        {row.reason}
+                        {row.reason.length > 60 && (
+                          <span className="ml-1 text-muted-foreground">
+                            {isExpanded
+                              ? <ChevronUp   className="inline h-3 w-3" />
+                              : <ChevronDown className="inline h-3 w-3" />}
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
 
                   {/* Submitted */}
-                  <td className="py-3 px-3 whitespace-nowrap text-muted-foreground text-xs">
+                  <td className="py-2 px-3 whitespace-nowrap text-muted-foreground text-xs">
                     <div>{fmtDatetime(row.created_at)}</div>
                     <AgeBadge createdAt={row.created_at} />
+                    {(() => {
+                      const sla = slaStatus(row.created_at)
+                      return (
+                        <span className={cn('text-[10px] font-medium', sla.color)}>
+                          {sla.label}
+                        </span>
+                      )
+                    })()}
                   </td>
 
                   {/* Actions */}
-                  <td className="py-3 px-3">
+                  <td className="py-2 px-3">
                     {isActioning ? (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -532,6 +655,22 @@ function RegularisationTable({ items, onRefresh }: { items: RegularisationItem[]
                           <XCircle className="h-3.5 w-3.5" />
                           Reject
                         </Button>
+                        {/* Q2 — forensics trigger in actions column */}
+                        {row.employees?.id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-info"
+                            title="View attendance timeline"
+                            onClick={() => onForensics({
+                              employeeId:   row.employees!.id,
+                              date:         row.date,
+                              employeeName: employeeName(row.employees),
+                            })}
+                          >
+                            <GitBranch className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -615,6 +754,10 @@ export function ApprovalInbox() {
   const [activeTab,  setActiveTab]  = useState<FilterTab>('all')
   const [leavePage,  setLeavePage]  = useState(1)
   const [regPage,    setRegPage]    = useState(1)
+  // Q3 — sort-by-age: cycles none → asc (oldest first) → desc (newest first)
+  const [sortOrder,       setSortOrder]       = useState<SortOrder>('none')
+  // Q2 — forensics drawer target; null = closed
+  const [forensicsTarget, setForensicsTarget] = useState<ForensicsTarget | null>(null)
 
   // Reset pages when switching tabs
   function switchTab(tab: FilterTab) {
@@ -623,15 +766,21 @@ export function ApprovalInbox() {
     setRegPage(1)
   }
 
+  function cycleSortOrder() {
+    setSortOrder(prev =>
+      prev === 'none' ? 'asc' : prev === 'asc' ? 'desc' : 'none'
+    )
+  }
+
   // Use whichever page is appropriate for the active tab
   const page = activeTab === 'regularisation' ? regPage : leavePage
 
   const { data, isLoading, isError, refetch } = useQuery<PendingResponse>({
     queryKey: ['approvals-pending', page],
     queryFn:  () => api.get<PendingResponse>(`/approvals/pending?page=${page}&limit=${PAGE_LIMIT}`),
-    staleTime: 30_000,
-    keepPreviousData: true,
-  } as any)
+    staleTime:       30_000,
+    placeholderData: keepPreviousData,   // H3: v5 API — holds previous page data during page transitions
+  })
 
   const leaveItems   = data?.leave_requests  ?? []
   const regItems     = data?.regularisations ?? []
@@ -648,6 +797,10 @@ export function ApprovalInbox() {
   const filteredReg   = showReg   ? regItems   : []
   const filteredTotal = filteredLeave.length + filteredReg.length
 
+  // Q3 — apply age sort for display; counts remain based on unsorted originals
+  const displayLeave = sortOrder !== 'none' ? sortByCreatedAt(filteredLeave, sortOrder) : filteredLeave
+  const displayReg   = sortOrder !== 'none' ? sortByCreatedAt(filteredReg,   sortOrder) : filteredReg
+
   const TABS: { key: FilterTab; label: string; count: number }[] = [
     { key: 'all',            label: 'All',            count: totalPending },
     { key: 'leave',          label: 'Leave',          count: leaveTotal },
@@ -656,38 +809,66 @@ export function ApprovalInbox() {
 
   return (
     <PageContainer>
+      {/* Q1 — breadcrumb back to Operations Center */}
       <PageHeader
+        breadcrumb={[
+          { label: 'Attendance Operations', href: '/admin/attendance/center' },
+          { label: 'Approval Inbox' },
+        ]}
         title="Approval Inbox"
         subtitle="Review and action pending leave and regularisation requests from your team"
       />
 
-      {/* Filter tabs */}
-      <div className="flex items-center gap-1 p-1 bg-muted/40 rounded-lg w-fit mb-1">
-        <Filter className="h-3.5 w-3.5 text-muted-foreground ml-1.5 mr-0.5 flex-shrink-0" />
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => switchTab(tab.key)}
-            className={cn(
-              'px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5',
-              activeTab === tab.key
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {tab.label}
-            {tab.count > 0 && (
-              <span className={cn(
-                'rounded-full px-1.5 py-0 text-[10px] font-semibold',
+      {/* Filter tabs + Q3 sort-by-age toggle */}
+      <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-1 p-1 bg-muted/40 rounded-lg">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground ml-1.5 mr-0.5 flex-shrink-0" />
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => switchTab(tab.key)}
+              className={cn(
+                'px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5',
                 activeTab === tab.key
-                  ? 'bg-primary/15 text-primary'
-                  : 'bg-muted text-muted-foreground',
-              )}>
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+              {tab.count > 0 && (
+                <span className={cn(
+                  'rounded-full px-1.5 py-0 text-[10px] font-semibold',
+                  activeTab === tab.key
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-muted text-muted-foreground',
+                )}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Q3 — sort-by-age button; active state lights up in primary */}
+        <button
+          onClick={cycleSortOrder}
+          title={
+            sortOrder === 'none' ? 'Sort by submission age'
+            : sortOrder === 'asc' ? 'Oldest first — click for newest first'
+            : 'Newest first — click to clear sort'
+          }
+          className={cn(
+            'flex items-center gap-1 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors',
+            sortOrder === 'none'
+              ? 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/40'
+              : 'border-primary/30 text-primary bg-primary/[0.06] hover:bg-primary/[0.10]',
+          )}
+        >
+          {sortOrder === 'asc'  ? <ArrowUp   className="h-3.5 w-3.5" /> :
+           sortOrder === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> :
+                                  <ArrowUpDown className="h-3.5 w-3.5" />}
+          {sortOrder === 'asc' ? 'Oldest first' : sortOrder === 'desc' ? 'Newest first' : 'Age'}
+        </button>
       </div>
 
       {/* Loading */}
@@ -730,7 +911,7 @@ export function ApprovalInbox() {
             </div>
           }
         >
-          <LeaveRequestsTable items={filteredLeave} onRefresh={refetch} />
+          <LeaveRequestsTable items={displayLeave} onRefresh={refetch} onForensics={t => setForensicsTarget(t)} />
 
           <PaginationBar
             page={leavePage}
@@ -758,7 +939,7 @@ export function ApprovalInbox() {
             </div>
           }
         >
-          <RegularisationTable items={filteredReg} onRefresh={refetch} />
+          <RegularisationTable items={displayReg} onRefresh={refetch} onForensics={t => setForensicsTarget(t)} />
 
           <PaginationBar
             page={regPage}
@@ -781,6 +962,12 @@ export function ApprovalInbox() {
           </span>
         </div>
       )}
+
+      {/* Q2 — forensics drawer (shared across leave + regularisation tables) */}
+      <ForensicsDrawer
+        target={forensicsTarget}
+        onClose={() => setForensicsTarget(null)}
+      />
     </PageContainer>
   )
 }

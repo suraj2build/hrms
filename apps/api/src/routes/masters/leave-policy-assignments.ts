@@ -6,7 +6,8 @@
  * Scope types and their priority (highest → lowest):
  *   'employee'      — applies to one specific employee (scope_id = employee UUID)
  *   'department'    — applies to all employees in a department (scope_id = department UUID)
- *   'work_location' — applies to all employees at a site (scope_id = work_location UUID)
+ *   'work_location' — applies to all employees at a work location (scope_id = work_location UUID)
+ *   'site'          — applies to all employees at a site (scope_id = sites.id UUID) [migration 156]
  *   'default'       — catch-all fallback (scope_id must be NULL)
  *
  * Endpoints:
@@ -40,6 +41,12 @@ const assignmentSchema = z.discriminatedUnion('scope_type', [
     policy_id:  z.string().uuid(),
   }),
   z.object({
+    // migration 156 — site-level scope
+    scope_type: z.literal('site'),
+    scope_id:   z.string().uuid(),
+    policy_id:  z.string().uuid(),
+  }),
+  z.object({
     scope_type: z.literal('default'),
     scope_id:   z.null().optional(),
     policy_id:  z.string().uuid(),
@@ -51,7 +58,8 @@ const SCOPE_PRIORITY: Record<string, number> = {
   employee:      1,
   department:    2,
   work_location: 3,
-  default:       4,
+  site:          4,   // migration 156
+  default:       5,
 }
 
 export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInstance) {
@@ -191,7 +199,8 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
       const table =
         scope_type === 'employee'      ? 'employees'       :
         scope_type === 'department'    ? 'departments'     :
-        scope_type === 'work_location' ? 'work_locations'  : null
+        scope_type === 'work_location' ? 'work_locations'  :
+        scope_type === 'site'          ? 'sites'           : null
 
       if (table) {
         const { data: entity } = await fastify.supabase

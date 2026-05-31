@@ -21,6 +21,16 @@ import leavePolicyRulesRoutes, {
 import leavePolicyAssignmentsRoutes from './leave-policy-assignments.js'
 // ── Attendance Policy Engine ──────────────────────────────────────────────────
 import attendancePoliciesRoutes     from './attendance-policies.js'
+// ── Enterprise Operational Masters ───────────────────────────────────────────
+import gradesRoutes                 from './grades.js'
+import payrollGroupsRoutes          from './payroll-groups.js'
+import employmentCategoriesRoutes   from './employment-categories.js'
+import statutoryGroupsRoutes        from './statutory-groups.js'
+import assetCategoriesRoutes        from './asset-categories.js'
+// ── Rotation Policy Engine ────────────────────────────────────────────────────
+import rotationPoliciesRoutes       from './rotation-policies.js'
+// ── Leave Governance — Important Date Types ───────────────────────────────────
+import importantDateTypesRoutes     from './important-date-types.js'
 
 export default async function mastersRoutes(fastify: FastifyInstance) {
   fastify.register(sitesRoutes,             { prefix: '/sites' })
@@ -62,4 +72,30 @@ export default async function mastersRoutes(fastify: FastifyInstance) {
   // GET/POST /masters/attendance-policies/assignments
   // DELETE   /masters/attendance-policies/assignments/:assignId
   fastify.register(attendancePoliciesRoutes, { prefix: '/attendance-policies' })
+
+  // ── Enterprise Operational Masters ───────────────────────────────────────
+  // Grades / Bands:       GET/POST/PUT/DELETE /masters/grades
+  // Payroll Groups:       GET/POST/PUT/DELETE /masters/payroll-groups
+  // Employment Categories:GET/POST/PUT/DELETE /masters/employment-categories
+  // Statutory Groups:     GET/POST/PUT/DELETE /masters/statutory-groups
+  // Asset Categories:     GET/POST/PUT/DELETE /masters/asset-categories
+  fastify.register(gradesRoutes,               { prefix: '/grades' })
+  fastify.register(payrollGroupsRoutes,        { prefix: '/payroll-groups' })
+  fastify.register(employmentCategoriesRoutes, { prefix: '/employment-categories' })
+  fastify.register(statutoryGroupsRoutes,      { prefix: '/statutory-groups' })
+  fastify.register(assetCategoriesRoutes,      { prefix: '/asset-categories' })
+
+  // ── Rotation Policy Engine ───────────────────────────────────────────────
+  // GET/POST  /masters/rotation-policies
+  // GET/PUT/DELETE /masters/rotation-policies/:id
+  // GET       /masters/rotation-policies/:id/impact
+  // POST      /masters/rotation-policies/:id/duplicate
+  fastify.register(rotationPoliciesRoutes,    { prefix: '/rotation-policies' })
+
+  // ── Leave Governance — Important Date Types ──────────────────────────────
+  // GET      /masters/important-date-types
+  // POST     /masters/important-date-types
+  // PUT      /masters/important-date-types/:id
+  // DELETE   /masters/important-date-types/:id
+  fastify.register(importantDateTypesRoutes,  { prefix: '/important-date-types' })
 }

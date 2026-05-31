@@ -1,4 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
 
 export interface ExtractedField {
   field_name: string
@@ -13,10 +15,12 @@ export interface ExtractionResult {
   document_summary: string
   overall_confidence: number      // 0.0 - 1.0
   extraction_version: string
+  provider?: string               // which AI provider was used
   error?: string
 }
 
-// Field lists per document type
+// ── Field lists per document type ─────────────────────────────────────────────
+
 const DOCUMENT_FIELDS: Record<string, string[]> = {
   aadhaar: [
     'full_name', 'dob', 'gender', 'address_line1', 'address_city',
@@ -72,7 +76,7 @@ const DOCUMENT_FIELDS: Record<string, string[]> = {
   ],
 }
 
-const EXTRACTION_VERSION = '1.0.0'
+const EXTRACTION_VERSION = '1.1.0'
 
 const SYSTEM_PROMPT = `You are an enterprise HR document analysis assistant for an Indian HR management system.
 Extract structured employee data from the provided document text.
@@ -84,25 +88,16 @@ Return ONLY valid JSON. Be precise with Indian formats:
 - Phone: 10 digits
 - Pincode: 6 digits`
 
-export async function extractFromDocument(
-  documentType: string,
-  documentText: string,
-  mimeType: string,
-  imageBase64?: string,
-): Promise<ExtractionResult> {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+// ── Shared JSON parser ─────────────────────────────────────────────────────────
 
-  const normalizedType = documentType.toLowerCase().replace(/[\s-]/g, '_')
-  const fields = DOCUMENT_FIELDS[normalizedType] ?? DOCUMENT_FIELDS['other']
-  const fieldListJson = JSON.stringify(fields, null, 2)
-
-  const userPrompt = `Document Type: ${documentType}
+function buildUserPrompt(documentType: string, documentText: string, fields: string[]): string {
+  return `Document Type: ${documentType}
 
 Document Text:
 ${documentText}
 
 Extract the following fields and return JSON:
-${fieldListJson}
+${JSON.stringify(fields, null, 2)}
 
 Return this exact JSON structure:
 {
@@ -119,110 +114,222 @@ Return this exact JSON structure:
 }
 
 If a field is not found, include it with value: null and confidence_score: 0.`
+}
 
-  try {
-    // Build message content — support vision for image types
-    type ContentBlock =
-      | { type: 'text'; text: string }
-      | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'; data: string } }
+function parseExtractionResponse(
+  rawText: string,
+  documentType: string,
+  fields: string[],
+): Omit<ExtractionResult, 'extraction_version' | 'provider' | 'error'> {
+  // Strip markdown code fences if present
+  const jsonText = rawText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim()
 
-    const contentBlocks: ContentBlock[] = []
+  const parsed = JSON.parse(jsonText) as {
+    fields: Array<{ field_name: string; value: string | null; confidence_score: number; reasoning: string }>
+    document_summary: string
+    overall_confidence: number
+  }
 
-    if (
-      imageBase64 &&
-      (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp')
-    ) {
-      const validMime =
-        mimeType === 'image/jpeg' ? 'image/jpeg'
-        : mimeType === 'image/png' ? 'image/png'
-        : 'image/webp'
-      contentBlocks.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: validMime as 'image/jpeg' | 'image/png' | 'image/webp',
-          data: imageBase64,
-        },
+  if (!Array.isArray(parsed.fields)) {
+    throw new Error('Parsed response missing fields array')
+  }
+
+  const enrichedFields: ExtractedField[] = parsed.fields.map((f) => ({
+    field_name: f.field_name,
+    value: f.value ?? null,
+    confidence_score: typeof f.confidence_score === 'number' ? f.confidence_score : 0,
+    reasoning: f.reasoning ?? '',
+    source_document_type: documentType,
+  }))
+
+  // Ensure all expected fields are present (fill missing ones with null)
+  const presentNames = new Set(enrichedFields.map((f) => f.field_name))
+  for (const fieldName of fields) {
+    if (!presentNames.has(fieldName)) {
+      enrichedFields.push({
+        field_name: fieldName,
+        value: null,
+        confidence_score: 0,
+        reasoning: 'Field not found in document',
+        source_document_type: documentType,
       })
     }
+  }
 
-    contentBlocks.push({ type: 'text', text: userPrompt })
+  return {
+    fields: enrichedFields,
+    document_summary: parsed.document_summary ?? '',
+    overall_confidence: typeof parsed.overall_confidence === 'number' ? parsed.overall_confidence : 0,
+  }
+}
 
-    const response = await client.messages.create({
-      model: 'claude-3-5-haiku-20241022',
-      max_tokens: 1500,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: contentBlocks,
-        },
-      ],
+function humaniseError(raw: string): string {
+  if (raw.includes('credit balance is too low') || raw.includes('insufficient_quota')) {
+    return 'Anthropic API credits exhausted — top up at console.anthropic.com/settings/billing'
+  }
+  if (raw.includes('invalid_api_key') || raw.includes('authentication_error')) {
+    return 'API key is invalid — check the API key in apps/api/.env'
+  }
+  if (raw.includes('overloaded_error') || raw.includes('529')) {
+    return 'AI API is overloaded — retry in a few seconds'
+  }
+  return raw
+}
+
+// ── Provider: Anthropic Claude ────────────────────────────────────────────────
+
+async function extractWithAnthropic(
+  documentType: string,
+  documentText: string,
+  mimeType: string,
+  imageBase64: string | undefined,
+  fields: string[],
+): Promise<ExtractionResult> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+  type ContentBlock =
+    | { type: 'text'; text: string }
+    | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg' | 'image/png' | 'image/webp'; data: string } }
+    | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string }; title?: string }
+
+  const contentBlocks: ContentBlock[] = []
+
+  if (imageBase64 && mimeType === 'application/pdf') {
+    contentBlocks.push({
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: imageBase64 },
+      title: `${documentType} document`,
     })
+  } else if (imageBase64 && (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp')) {
+    const validMime = mimeType as 'image/jpeg' | 'image/png' | 'image/webp'
+    contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: validMime, data: imageBase64 } })
+  }
 
-    // Extract raw text from response
-    const rawText = response.content
-      .filter((block) => block.type === 'text')
-      .map((block) => (block as { type: 'text'; text: string }).text)
-      .join('')
+  contentBlocks.push({ type: 'text', text: buildUserPrompt(documentType, documentText, fields) })
 
-    // Strip markdown code fences if present
-    const jsonText = rawText
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/, '')
-      .trim()
+  const response = await client.messages.create({
+    model: 'claude-3-5-haiku-20241022',
+    max_tokens: 1500,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: contentBlocks }],
+  })
 
-    // Parse JSON
-    const parsed = JSON.parse(jsonText) as {
-      fields: Array<{
-        field_name: string
-        value: string | null
-        confidence_score: number
-        reasoning: string
-      }>
-      document_summary: string
-      overall_confidence: number
+  const rawText = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('')
+
+  const result = parseExtractionResponse(rawText, documentType, fields)
+  return { ...result, extraction_version: EXTRACTION_VERSION, provider: 'anthropic' }
+}
+
+// ── Provider: Google Gemini ───────────────────────────────────────────────────
+
+async function extractWithGemini(
+  documentType: string,
+  documentText: string,
+  mimeType: string,
+  imageBase64: string | undefined,
+  fields: string[],
+): Promise<ExtractionResult> {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '')
+  // gemini-2.0-flash is free in Google AI Studio dev quota
+  const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash' })
+
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = []
+
+  // Gemini supports PDF and images natively via inlineData
+  if (imageBase64 && (mimeType === 'application/pdf' || mimeType.startsWith('image/'))) {
+    parts.push({ inlineData: { mimeType, data: imageBase64 } })
+  }
+
+  parts.push({ text: `${SYSTEM_PROMPT}\n\n${buildUserPrompt(documentType, documentText, fields)}` })
+
+  const response = await model.generateContent(parts)
+  const rawText = response.response.text()
+
+  const result = parseExtractionResponse(rawText, documentType, fields)
+  return { ...result, extraction_version: EXTRACTION_VERSION, provider: 'gemini' }
+}
+
+// ── Provider: OpenAI ──────────────────────────────────────────────────────────
+
+async function extractWithOpenAI(
+  documentType: string,
+  documentText: string,
+  mimeType: string,
+  imageBase64: string | undefined,
+  fields: string[],
+): Promise<ExtractionResult> {
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+  type MessageContent = Array<
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } }
+  >
+
+  const userContent: MessageContent = []
+
+  // OpenAI doesn't support native PDF blocks — send images only
+  if (imageBase64 && mimeType.startsWith('image/')) {
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+    })
+  }
+
+  userContent.push({ type: 'text', text: buildUserPrompt(documentType, documentText, fields) })
+
+  const response = await client.chat.completions.create({
+    model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+    max_tokens: 1500,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: userContent },
+    ],
+  })
+
+  const rawText = response.choices[0]?.message?.content ?? ''
+  const result = parseExtractionResponse(rawText, documentType, fields)
+  return { ...result, extraction_version: EXTRACTION_VERSION, provider: 'openai' }
+}
+
+// ── Main entry point ──────────────────────────────────────────────────────────
+
+export async function extractFromDocument(
+  documentType: string,
+  documentText: string,
+  mimeType: string,
+  imageBase64?: string,
+): Promise<ExtractionResult> {
+  const normalizedType = documentType.toLowerCase().replace(/[\s-]/g, '_')
+  const fields = DOCUMENT_FIELDS[normalizedType] ?? DOCUMENT_FIELDS['other']
+
+  // AI_PROVIDER env var controls which backend is used.
+  // Fallback chain: if primary fails and AUTO_FALLBACK=true, try next.
+  const provider = (process.env.AI_PROVIDER ?? 'anthropic').toLowerCase()
+
+  try {
+    if (provider === 'gemini') {
+      return await extractWithGemini(documentType, documentText, mimeType, imageBase64, fields)
     }
-
-    if (!Array.isArray(parsed.fields)) {
-      throw new Error('Parsed response missing fields array')
+    if (provider === 'openai') {
+      return await extractWithOpenAI(documentType, documentText, mimeType, imageBase64, fields)
     }
-
-    const enrichedFields: ExtractedField[] = parsed.fields.map((f) => ({
-      field_name: f.field_name,
-      value: f.value ?? null,
-      confidence_score: typeof f.confidence_score === 'number' ? f.confidence_score : 0,
-      reasoning: f.reasoning ?? '',
-      source_document_type: documentType,
-    }))
-
-    // Ensure all expected fields are present (fill missing ones)
-    const presentNames = new Set(enrichedFields.map((f) => f.field_name))
-    for (const fieldName of fields) {
-      if (!presentNames.has(fieldName)) {
-        enrichedFields.push({
-          field_name: fieldName,
-          value: null,
-          confidence_score: 0,
-          reasoning: 'Field not found in document',
-          source_document_type: documentType,
-        })
-      }
-    }
-
-    return {
-      fields: enrichedFields,
-      document_summary: parsed.document_summary ?? '',
-      overall_confidence: typeof parsed.overall_confidence === 'number' ? parsed.overall_confidence : 0,
-      extraction_version: EXTRACTION_VERSION,
-    }
+    // default: anthropic
+    return await extractWithAnthropic(documentType, documentText, mimeType, imageBase64, fields)
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
+    const raw = err instanceof Error ? err.message : String(err)
+    const message = humaniseError(raw)
     return {
       fields: [],
       document_summary: '',
       overall_confidence: 0,
       extraction_version: EXTRACTION_VERSION,
+      provider,
       error: message,
     }
   }

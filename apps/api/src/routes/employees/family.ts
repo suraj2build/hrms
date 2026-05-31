@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   relationship_type_id: z.string().uuid('Invalid relationship type'),
@@ -18,7 +19,8 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function familyRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/family', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -47,7 +49,7 @@ export default async function familyRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/employees/:id/family/:memberId', auth, async (req: any, reply) => {
+  fastify.put('/employees/:id/family/:memberId', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -63,7 +65,7 @@ export default async function familyRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/employees/:id/family/:memberId', auth, async (req: any, reply) => {
+  fastify.delete('/employees/:id/family/:memberId', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('employee_family')
       .delete()

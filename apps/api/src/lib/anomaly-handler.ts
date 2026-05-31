@@ -28,6 +28,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventService }        from './event-service.js'
 import type { AttendanceUpdatedPayload } from './event-service.js'
+import { notify }              from './notify.js'
 
 // ── Notification types ─────────────────────────────────────────────────────────
 
@@ -56,49 +57,39 @@ const ANOMALY_LABEL: Record<AnomalyNotificationType, string> = {
   excessive_hours:  'Excessive hours logged',
 }
 
-// ── Core dispatch stub ────────────────────────────────────────────────────────
+// ── Core dispatch ─────────────────────────────────────────────────────────────
 
 /**
- * Dispatch one anomaly notification to one recipient.
- * Replace this stub with a real notification provider when ready.
- * Must never throw.
+ * Dispatch one anomaly notification to one recipient via the inbox.
+ * Inserts an inbox_items row so the recipient sees it in their notification bell.
+ * Must never throw — errors are swallowed to keep the handler fire-and-forget.
  */
 async function dispatchAnomalyNotification(
-  payload: AnomalyNotificationPayload,
+  supabase: SupabaseClient,
+  payload:  AnomalyNotificationPayload,
 ): Promise<void> {
-  // ── TODO: integrate real notification provider ──────────────────────────────
-  //
-  // Example with Resend (email):
-  //   const email = await fetchRecipientEmail(supabase, payload.recipientId)
-  //   await resend.emails.send({
-  //     from:    'noreply@yourhrms.com',
-  //     to:      email,
-  //     subject: `Attendance Alert: ${ANOMALY_LABEL[payload.type]}`,
-  //     html:    renderAnomalyEmail(payload),
-  //   })
-  //
-  // Example with Supabase Realtime (in-app bell):
-  //   await supabase.channel(`user:${payload.recipientId}`).send({
-  //     type: 'broadcast', event: 'anomaly', payload,
-  //   })
-  //
-  // ─────────────────────────────────────────────────────────────────────────────
+  const severityMap: Record<string, 'info' | 'warning' | 'error'> = {
+    high:   'error',
+    medium: 'warning',
+    low:    'info',
+  }
 
-  // Structured log — events observable without a real provider
-  console.log(JSON.stringify({
-    level:          'info',
-    service:        'anomaly-handler',
-    action:         'notify',
-    event:          payload.type,
-    label:          ANOMALY_LABEL[payload.type],
-    recipient_role: payload.recipientRole,
-    recipient_id:   payload.recipientId,
-    employee_id:    payload.employeeId,
-    tenant_id:      payload.tenantId,
-    date:           payload.date,
-    severity:       payload.severity,
-    message:        payload.message,
-  }))
+  await notify(supabase, {
+    tenantId:     payload.tenantId,
+    recipientId:  payload.recipientId,
+    item_type:    'incident_alert',
+    title:        `Attendance Alert: ${ANOMALY_LABEL[payload.type] ?? payload.type}`,
+    summary:      payload.message,
+    severity:     severityMap[payload.severity] ?? 'info',
+    entity_type:  'attendance_anomalies',
+    action_route: '/attendance',
+    metadata: {
+      anomaly_type:   payload.type,
+      employee_id:    payload.employeeId,
+      date:           payload.date,
+      recipient_role: payload.recipientRole,
+    },
+  })
 }
 
 // ── DB helpers ─────────────────────────────────────────────────────────────────
@@ -195,7 +186,7 @@ async function handleAttendanceUpdated(
 
     // Notify the employee themselves
     notifyPs.push(
-      dispatchAnomalyNotification({
+      dispatchAnomalyNotification(supabase, {
         recipientRole: 'employee',
         recipientId:   employee_id,
         employeeId:    employee_id,
@@ -210,7 +201,7 @@ async function handleAttendanceUpdated(
     // Notify the manager (if one is configured)
     if (managerEmployeeId) {
       notifyPs.push(
-        dispatchAnomalyNotification({
+        dispatchAnomalyNotification(supabase, {
           recipientRole: 'manager',
           recipientId:   managerEmployeeId,
           employeeId:    employee_id,
@@ -228,17 +219,6 @@ async function handleAttendanceUpdated(
   // dispatchAnomalyNotification so allSettled is not strictly needed,
   // but we use it to guarantee all attempts complete before logging.
   await Promise.allSettled(notifyPs)
-
-  console.log(JSON.stringify({
-    level:        'debug',
-    service:      'anomaly-handler',
-    action:       'notifications_dispatched',
-    tenant_id,
-    employee_id,
-    date,
-    anomaly_count:    anomalies.length,
-    has_manager:      !!managerEmployeeId,
-  }))
 }
 
 // ── Registration ───────────────────────────────────────────────────────────────

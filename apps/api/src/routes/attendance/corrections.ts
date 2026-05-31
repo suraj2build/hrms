@@ -32,6 +32,7 @@ import {
 }                                       from '../../services/attendance/correction-processor.js'
 import { logAction }                    from '../../lib/audit-service.js'
 import { eventBus }                     from '../../lib/event-bus.js'
+import { orchestrateWorkforceEvent }    from '../../lib/workforce-orchestrator.js'
 
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
 const HR_ROLES    = ['super_admin', 'hr_admin']
@@ -454,7 +455,31 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
 
     const { data, error, count } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch corrections' })
-    return reply.send({ data: data ?? [], total: count ?? 0 })
+
+    // Flatten nested employee join so consumers get flat employee_name / employee_code
+    const rows = (data ?? []).map((r: any) => {
+      const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
+      return {
+        id:                     r.id,
+        date:                   r.date,
+        corrected_in:           r.corrected_in,
+        corrected_out:          r.corrected_out,
+        reason:                 r.reason,
+        status:                 r.status,
+        rejection_reason:       r.rejection_reason,
+        failure_reason:         r.failure_reason,
+        retry_count:            r.retry_count,
+        created_at:             r.created_at,
+        approved_at:            r.approved_at,
+        applied_at:             r.applied_at,
+        processing_started_at:  r.processing_started_at,
+        employee_id:            emp?.id           ?? null,
+        employee_name:          emp ? `${emp.first_name} ${emp.last_name}` : null,
+        employee_code:          emp?.employee_code ?? null,
+      }
+    })
+
+    return reply.send({ data: rows, total: count ?? 0 })
   })
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -549,6 +574,20 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
         approverId:   req.userId,
         date:         c.date,
       },
+    })
+
+    // Workforce orchestrator — fire-and-forget cascade sequencing (attendance → leave → payroll)
+    orchestrateWorkforceEvent(fastify.supabase, {
+      tenantId:         req.tenantId,
+      eventType:        'attendance_corrected',
+      sourceEventId:    id,
+      employeeId:       c.employee_id,
+      affectedFromDate: c.date,
+      affectedToDate:   c.date,
+      triggeredBy:      req.userId,
+      metadata: { correction_id: id, approver_id: req.userId },
+    }).catch((err) => {
+      req.log.warn({ err, correctionId: id }, 'workforce orchestration failed for correction approval')
     })
 
     return reply.send({ data: { id, status: 'processing', approved_at: now } })

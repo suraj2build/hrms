@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { logAction } from '../../lib/audit-service.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
@@ -18,6 +19,269 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
     done()
   }
+
+  // ── ESS SELF-SERVICE ROUTES (/my) ────────────────────────────────────────────
+  // These are registered first to avoid being shadowed by /:id wildcard routes.
+
+  /**
+   * GET /payroll/reimbursements/my
+   * Employee views their own claims, sorted newest first.
+   * Supports optional ?status= and ?month= filters.
+   */
+  fastify.get('/my', auth, async (req: any, reply) => {
+    const querySchema = z.object({
+      status: z.string().optional(),
+      month:  z.string().optional(),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // Resolve employee_id from the authenticated user's profile
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!profile?.employee_id) {
+      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+    }
+
+    let q = fastify.supabase
+      .from('reimbursement_claims')
+      .select('*, reimbursement_categories(id, name, code, category_type)', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', profile.employee_id)
+      .order('created_at', { ascending: false })
+
+    if (parsed.data.status) q = q.eq('status', parsed.data.status)
+    if (parsed.data.month) {
+      const [year, mon] = parsed.data.month.split('-').map(Number)
+      const firstDay = `${parsed.data.month}-01`
+      const lastDay  = new Date(year, mon, 0).toISOString().slice(0, 10)
+      q = q.gte('expense_date', firstDay).lte('expense_date', lastDay)
+    }
+
+    const { data, count, error } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0 })
+  })
+
+  /**
+   * POST /payroll/reimbursements/my
+   * Employee creates a new draft claim. employee_id is resolved from the
+   * authenticated session — never taken from the request body.
+   */
+  fastify.post('/my', auth, async (req: any, reply) => {
+    const schema = z.object({
+      category_id:     z.string().uuid(),
+      expense_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expense_date must be YYYY-MM-DD'),
+      claimed_amount:  z.number().positive(),
+      description:     z.string().min(1).max(500),
+    })
+
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!profile?.employee_id) {
+      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+    }
+
+    // Verify the category exists and is active for this tenant
+    const { data: category } = await fastify.supabase
+      .from('reimbursement_categories')
+      .select('id, is_active, monthly_limit')
+      .eq('id', parsed.data.category_id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!category) {
+      return reply.code(404).send({ error: 'CATEGORY_NOT_FOUND', message: 'Reimbursement category not found' })
+    }
+    if (!(category as any).is_active) {
+      return reply.code(422).send({ error: 'CATEGORY_INACTIVE', message: 'This reimbursement category is no longer active' })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .insert({
+        tenant_id:      req.tenantId,
+        employee_id:    profile.employee_id,
+        category_id:    parsed.data.category_id,
+        expense_date:   parsed.data.expense_date,
+        claimed_amount: parsed.data.claimed_amount,
+        description:    parsed.data.description,
+        status:         'draft',
+        claim_date:     new Date().toISOString().slice(0, 10),
+        created_by:     req.userId,
+      })
+      .select('*, reimbursement_categories(id, name, code, category_type)')
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  /**
+   * PUT /payroll/reimbursements/my/:id
+   * Employee updates their own draft claim (only while status = 'draft').
+   */
+  fastify.put('/my/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!profile?.employee_id) {
+      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+    }
+
+    // Fetch claim and verify ownership + status
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if ((existing as any).employee_id !== profile.employee_id) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only edit your own claims' })
+    }
+    if ((existing as any).status !== 'draft') {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only draft claims can be updated' })
+    }
+
+    const schema = z.object({
+      expense_date:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      claimed_amount: z.number().positive().optional(),
+      description:    z.string().min(1).max(500).optional(),
+      category_id:    z.string().uuid().optional(),
+    })
+
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select('*, reimbursement_categories(id, name, code, category_type)')
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ data })
+  })
+
+  /**
+   * POST /payroll/reimbursements/my/:id/submit
+   * Employee submits their own draft claim for approval.
+   * Only allowed while status = 'draft'.
+   */
+  fastify.post('/my/:id/submit', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!profile?.employee_id) {
+      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+    }
+
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if ((existing as any).employee_id !== profile.employee_id) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only submit your own claims' })
+    }
+    if ((existing as any).status !== 'draft') {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: `Cannot submit a claim with status '${(existing as any).status}'` })
+    }
+
+    const now = new Date().toISOString()
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .update({ status: 'submitted', submitted_at: now, updated_at: now })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select('id, status, submitted_at')
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'Claim submitted for approval', data })
+  })
+
+  /**
+   * DELETE /payroll/reimbursements/my/:id
+   * Employee deletes their own draft claim (only while status = 'draft').
+   * Submitted / approved claims cannot be deleted.
+   */
+  fastify.delete('/my/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!profile?.employee_id) {
+      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+    }
+
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if ((existing as any).employee_id !== profile.employee_id) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only delete your own claims' })
+    }
+    if ((existing as any).status !== 'draft') {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only draft claims can be deleted' })
+    }
+
+    const { error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    return reply.code(204).send()
+  })
 
   // ── GET /payroll/reimbursements/categories ────────────────────────────────────
   fastify.get('/categories', auth, async (req: any, reply) => {
@@ -114,6 +378,9 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/reimbursements/claims ────────────────────────────────────────
+  // HR admin: sees all tenant claims, optionally filtered by employee_id.
+  // Manager: may only view direct reports' claims (employee_id validated server-side).
+  // Employee: blocked — must use GET /my instead.
   fastify.get('/claims', auth, async (req: any, reply) => {
     const querySchema = z.object({
       employee_id: z.string().uuid().optional(),
@@ -126,12 +393,64 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+
+    // Employees have no business calling the admin claims list
+    if (!isHrAdmin && req.userRole !== 'manager') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Use /my to view your own claims' })
+    }
+
+    // Managers: resolve their own employee_id to scope the query to direct reports
+    let managerEmployeeId: string | null = null
+    if (!isHrAdmin) {
+      const { data: mgProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      managerEmployeeId = mgProfile?.employee_id ?? null
+      if (!managerEmployeeId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager profile not linked to an employee record' })
+      }
+    }
+
     let q = fastify.supabase
       .from('reimbursement_claims')
       .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)')
       .eq('tenant_id', req.tenantId)
 
-    if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+    if (isHrAdmin) {
+      // HR admin can filter by any supplied employee_id
+      if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+    } else {
+      // Manager: scope to direct reports only
+      if (parsed.data.employee_id) {
+        // Validate the requested employee_id is a direct report
+        const { data: reportCheck } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('id', parsed.data.employee_id)
+          .eq('manager_id', managerEmployeeId!)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (!reportCheck) {
+          return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view claims for your direct reports' })
+        }
+        q = q.eq('employee_id', parsed.data.employee_id)
+      } else {
+        // No specific employee requested — scope to all direct reports
+        const { data: reports } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('manager_id', managerEmployeeId!)
+          .eq('tenant_id', req.tenantId)
+        const reportIds = (reports ?? []).map((r: any) => r.id)
+        if (reportIds.length === 0) return reply.send({ data: [] })
+        q = q.in('employee_id', reportIds)
+      }
+    }
+
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
     if (parsed.data.month) {
       const [year, mon] = parsed.data.month.split('-').map(Number)
@@ -146,7 +465,9 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/reimbursements/claims ───────────────────────────────────────
-  fastify.post('/claims', auth, async (req: any, reply) => {
+  // HR admin only — creates a claim on behalf of any employee.
+  // Employees must use POST /my instead.
+  fastify.post('/claims', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const schema = z.object({
       employee_id: z.string().uuid(),
       category_id: z.string().uuid(),
@@ -177,7 +498,8 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── PUT /payroll/reimbursements/claims/:id ────────────────────────────────────
-  fastify.put('/claims/:id', auth, async (req: any, reply) => {
+  // HR admin only — edits any tenant claim. Employees use PUT /my/:id.
+  fastify.put('/claims/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     // Verify draft status
@@ -218,7 +540,8 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/reimbursements/claims/:id/submit ────────────────────────────
-  fastify.post('/claims/:id/submit', auth, async (req: any, reply) => {
+  // HR admin only — submits any tenant claim. Employees use POST /my/:id/submit.
+  fastify.post('/claims/:id/submit', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
@@ -245,6 +568,24 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Fetch current claim to enforce status guard — prevents double-approve overwriting reviewer metadata
+    const { data: existing, error: fetchErr } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (fetchErr || !existing) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    }
+    if ((existing as any).status !== 'submitted') {
+      return reply.code(409).send({
+        error:   'INVALID_STATUS',
+        message: `Only submitted claims can be approved (current status: '${(existing as any).status}')`,
+      })
+    }
+
     const now = new Date().toISOString()
 
     const { data, error } = await fastify.supabase
@@ -264,6 +605,16 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'reimbursement_claims',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (existing as any).employee_id ?? null,
+      newData:     { status: 'approved', approved_amount: parsed.data.approved_amount },
+    })
+
     return reply.send({ data })
   })
 
@@ -278,6 +629,24 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // Fetch current claim to enforce status guard — prevents double-reject / rejecting already-approved claims
+    const { data: existing, error: fetchErr } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (fetchErr || !existing) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    }
+    if ((existing as any).status !== 'submitted') {
+      return reply.code(409).send({
+        error:   'INVALID_STATUS',
+        message: `Only submitted claims can be rejected (current status: '${(existing as any).status}')`,
+      })
     }
 
     const now = new Date().toISOString()
@@ -298,6 +667,16 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'reimbursement_claims',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (existing as any).employee_id ?? null,
+      newData:     { status: 'rejected', rejection_reason: parsed.data.rejection_reason },
+    })
 
     return reply.send({ data })
   })
@@ -349,6 +728,160 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/reimbursements/pending-payments/:month ──────────────────────
+  // ── Root-level aliases (frontend uses /:id/action directly, not /claims/:id/action) ──
+
+  /**
+   * GET /payroll/reimbursements
+   * Admin list of all claims — alias for GET /claims.
+   */
+  fastify.get('/', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const querySchema = z.object({
+      employee_id: z.string().uuid().optional(),
+      status: z.string().optional(),
+      month:  z.string().optional(),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    let q = fastify.supabase
+      .from('reimbursement_claims')
+      .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+
+    if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+    if (parsed.data.status)      q = q.eq('status', parsed.data.status)
+    if (parsed.data.month) {
+      const [year, mon] = parsed.data.month.split('-').map(Number)
+      q = q.gte('expense_date', `${parsed.data.month}-01`).lte('expense_date', new Date(year, mon, 0).toISOString().slice(0, 10))
+    }
+
+    const { data, count, error } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0 })
+  })
+
+  /**
+   * POST /payroll/reimbursements/:id/review
+   * HR reviews and approves a claim with an approved_amount (may differ from claimed).
+   */
+  fastify.post('/:id/review', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      approved_amount: z.number().positive(),
+      review_notes:    z.string().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id, claimed_amount')
+      .eq('id', id).eq('tenant_id', req.tenantId).single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if (!['submitted', 'under_review'].includes((existing as any).status)) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
+    }
+
+    const now = new Date().toISOString()
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .update({ status: 'approved', approved_amount: parsed.data.approved_amount, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
+      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'approved', approved_amount: parsed.data.approved_amount } })
+    return reply.send({ data })
+  })
+
+  /**
+   * POST /payroll/reimbursements/:id/approve
+   * Quick-approve at full claimed amount.
+   */
+  fastify.post('/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id, claimed_amount')
+      .eq('id', id).eq('tenant_id', req.tenantId).single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if (!['submitted', 'under_review'].includes((existing as any).status)) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
+    }
+
+    const now = new Date().toISOString()
+    const approvedAmt = (req.body as any)?.approved_amount ?? (existing as any).claimed_amount
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .update({ status: 'approved', approved_amount: approvedAmt, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
+      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'approved', approved_amount: approvedAmt } })
+    return reply.send({ data })
+  })
+
+  /**
+   * POST /payroll/reimbursements/:id/reject
+   * Alias for /claims/:id/reject.
+   */
+  fastify.post('/:id/reject', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({ rejection_reason: z.string().min(1) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id')
+      .eq('id', id).eq('tenant_id', req.tenantId).single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if (!['submitted', 'under_review', 'approved'].includes((existing as any).status)) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: `Cannot reject claim with status: ${(existing as any).status}` })
+    }
+
+    const now = new Date().toISOString()
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .update({ status: 'rejected', rejection_reason: parsed.data.rejection_reason, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
+      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'rejected', rejection_reason: parsed.data.rejection_reason } })
+    return reply.send({ data })
+  })
+
+  /**
+   * POST /payroll/reimbursements/:id/pay
+   * Marks an approved claim as paid.
+   */
+  fastify.post('/:id/pay', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data: existing } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, status, employee_id, approved_amount')
+      .eq('id', id).eq('tenant_id', req.tenantId).single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if ((existing as any).status !== 'approved') {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only approved claims can be marked as paid' })
+    }
+
+    const now = new Date().toISOString()
+    const { data, error } = await fastify.supabase
+      .from('reimbursement_claims')
+      .update({ status: 'paid', paid_at: now, updated_at: now })
+      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'paid' } })
+    return reply.send({ data })
+  })
+
+  // ── Pending payments by month ─────────────────────────────────────────────────
   fastify.get('/pending-payments/:month', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month } = req.params as { month: string }
     const [year, mon] = month.split('-').map(Number)

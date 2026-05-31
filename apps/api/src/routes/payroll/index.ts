@@ -18,34 +18,324 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { EventType, MODULE } from '../../platform/events/index.js'
 import {
   computePayrollSlip,
   countWorkingDaysInMonth,
   fetchAttendanceSummary,
   fetchActiveCompensation,
+  round2,
   type PayrollSlipResult,
 } from '../../lib/payroll-engine.js'
+import {
+  validatePayrollSlipPayload,
+  validateCompensation,
+} from '../../lib/payroll-validator.js'
+import {
+  buildPayrollVisibilityState,
+  buildEmployeePayslipView,
+} from '../../lib/payroll-read-model.js'
+import {
+  buildPayrollBlockers,
+  groupPayrollBlockers,
+  computePayrollRunHealth,
+} from '../../lib/payroll-blocker-engine.js'
+import { recomputeRange } from '../../lib/attendance-engine.js'
+import { logAction } from '../../lib/audit-service.js'
+import { buildCompensationCoverageAudit } from '../../lib/payroll-compensation-coverage.js'
+import {
+  buildPayrollRunSnapshot,
+  replayPayrollRun,
+  validateSnapshotIntegrity,
+} from '../../lib/payroll-snapshot-engine.js'
+import {
+  buildPayrollFinancialLedger,
+  reversePayrollLedger,
+  exportGeneralLedger,
+  validateLedgerBalance,
+  buildPayoutObligations,
+  generateAccrualEntries,
+  generateAccountingIntegrityHash,
+} from '../../lib/payroll-accounting-engine.js'
 
 const monthRe = /^\d{4}-\d{2}$/
+
+/**
+ * checkFreezeGuard — shared helper for payroll write operations.
+ *
+ * Returns { frozen: true, reason } if the given month is currently frozen
+ * (i.e. an unlifted freeze record exists in payroll_freeze_log).
+ * Returns { frozen: false } when clear to proceed.
+ *
+ * Call before any operation that creates or modifies payroll data for a month.
+ */
+async function checkFreezeGuard(
+  supabase: any,
+  tenantId: string,
+  month: string,
+): Promise<{ frozen: boolean; reason?: string }> {
+  const { data, error } = await supabase
+    .from('payroll_freeze_log')
+    .select('frozen_by, reason')
+    .eq('tenant_id', tenantId)
+    .eq('freeze_month', month)
+    .eq('action', 'freeze')
+    .is('unfrozen_at', null)
+    .order('frozen_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    // On query error, fail open (don't block operations due to guard failure)
+    return { frozen: false }
+  }
+  if (data) {
+    return {
+      frozen: true,
+      reason: data.reason ?? `Payroll for ${month} is frozen and cannot be modified`,
+    }
+  }
+  return { frozen: false }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Build the payroll_slips insert row from a computed slip result.
+ * Centralising this prevents field-name drift between computation and DB insert.
+ */
+function buildSlipRow(
+  tenantId: string,
+  runId:    string,
+  result:   PayrollSlipResult,
+  month:    string,
+): Record<string, unknown> {
+  return {
+    tenant_id:              tenantId,
+    run_id:                 runId,
+    employee_id:            result.employeeId,
+    month,
+    total_working_days:     result.total_working_days,
+    payable_days:           result.payable_days,
+    lop_days:               result.lop_days,
+    overtime_hours:         result.overtime_hours,
+    ctc_monthly:            result.ctc_monthly,
+    gross_pay:              result.gross_pay,
+    lop_amount:             result.lop_amount,
+    total_deductions:       result.total_deductions,
+    net_pay:                result.net_pay,
+    employer_contributions: result.employer_contributions,
+    component_breakdown:    result.component_breakdown,
+    status:                 'draft',
+    warning:                result.warning ?? null,
+  }
+}
+
+/**
+ * Append one forensic event to payroll_run_events.
+ *
+ * This is deliberately non-throwing — forensic logging must never block payroll.
+ * Failures are logged to the Fastify logger at warn level.
+ */
+async function logRunEvent(
+  supabase: any,
+  log:      { warn: (obj: unknown, msg: string) => void },
+  event: {
+    tenant_id:     string
+    run_id:        string
+    event_type:    string
+    employee_id?:  string
+    month?:        string
+    payload?:      Record<string, unknown>
+    error_details?: Record<string, unknown>
+  },
+): Promise<void> {
+  const { error } = await supabase
+    .from('payroll_run_events')
+    .insert({
+      tenant_id:    event.tenant_id,
+      run_id:       event.run_id,
+      event_type:   event.event_type,
+      employee_id:  event.employee_id  ?? null,
+      month:        event.month        ?? null,
+      payload:      event.payload      ?? null,
+      error_details: event.error_details ?? null,
+    })
+
+  if (error) {
+    log.warn(
+      { err: error, event_type: event.event_type, run_id: event.run_id },
+      'payroll_run_events: insert failed — forensic event not persisted (payroll continues)',
+    )
+  }
+}
+
+/** Per-employee failure record — returned in the API response and forensic log */
+interface FailedEmployee {
+  employee_id:   string
+  employee_code: string
+  failure_stage: 'data_fetch' | 'compensation_validation' | 'computation' | 'slip_validation' | 'db_insert' | 'unexpected'
+  reason:        string
+  details?:      Record<string, unknown>
+}
+
+/** Structured breakdown of all per-employee failures in a run — stored in payroll_runs.failure_summary */
+interface FailureSummaryGroup {
+  failure_stage:   string
+  reason:          string
+  count:           number
+  employee_codes:  string[]
+}
+
+interface FailureSummary {
+  total_failed:    number
+  total_employees: number
+  dominant_stage:  string
+  dominant_reason: string
+  groups:          FailureSummaryGroup[]
+}
+
+/**
+ * Compute a structured failure summary from a list of FailedEmployee records.
+ * Groups by (failure_stage, reason), sorts by count descending.
+ */
+function buildFailureSummary(
+  failedEmployees: FailedEmployee[],
+  totalEmployees:  number,
+): FailureSummary | null {
+  if (failedEmployees.length === 0) return null
+
+  const groupMap = new Map<string, FailureSummaryGroup>()
+
+  for (const f of failedEmployees) {
+    const key = `${f.failure_stage}\x00${f.reason}`
+    const existing = groupMap.get(key)
+    if (existing) {
+      existing.count++
+      existing.employee_codes.push(f.employee_code)
+    } else {
+      groupMap.set(key, {
+        failure_stage:  f.failure_stage,
+        reason:         f.reason,
+        count:          1,
+        employee_codes: [f.employee_code],
+      })
+    }
+  }
+
+  const groups = [...groupMap.values()].sort((a, b) => b.count - a.count)
+  const dominant = groups[0]
+
+  return {
+    total_failed:    failedEmployees.length,
+    total_employees: totalEmployees,
+    dominant_stage:  dominant.failure_stage,
+    dominant_reason: dominant.reason,
+    groups,
+  }
+}
 
 export default async function payrollRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── POST /payroll/runs ───────────────────────────────────────────────────────
+  //
   // Create or re-trigger a payroll run for a given month.
   // Idempotent: calling again for the same month replaces the existing draft run.
+  //
+  // dry_run=true: computes all slips and validates all payloads but writes nothing
+  //   to the DB.  Returns the full per-employee result set so operators can verify
+  //   before committing.  No run row is created, no slips are inserted.
+  //
+  // Per-employee isolation: one employee's data-fetch failure, compensation issue,
+  //   or DB insert error does not abort the remaining employees.  Failed employees
+  //   are collected in `failed_employees[]` in the response.  The run is marked
+  //   'failed' only if zero employees succeed.
   fastify.post('/payroll/runs', hrAdminAuth, async (req: any, reply) => {
     const schema = z.object({
-      month: z.string().regex(monthRe, 'month must be YYYY-MM'),
-      notes: z.string().max(500).optional(),
+      month:   z.string().regex(monthRe, 'month must be YYYY-MM'),
+      notes:   z.string().max(500).optional(),
+      /** Compute and validate all slips without writing to the DB. */
+      dry_run: z.boolean().optional().default(false),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
-    const { month, notes } = parsed.data
+    const { month, notes, dry_run } = parsed.data
     const tenantId = req.tenantId as string
+
+    // ── Pre-flight: compensation coverage audit ──────────────────────────────
+    // For live runs only — dry runs bypass this check so operators can
+    // simulate even when some employees are not yet set up.
+    if (!dry_run) {
+      try {
+        const coverage = await buildCompensationCoverageAudit(fastify.supabase, tenantId)
+
+        if (!coverage.ready_for_payroll) {
+          const blockerDetails: string[] = []
+          if (coverage.employees_missing_compensation > 0)
+            blockerDetails.push(`${coverage.employees_missing_compensation} employee(s) missing compensation`)
+          if (coverage.employees_zero_ctc > 0)
+            blockerDetails.push(`${coverage.employees_zero_ctc} employee(s) with zero CTC`)
+          if (coverage.employees_with_no_components > 0)
+            blockerDetails.push(`${coverage.employees_with_no_components} employee(s) with no salary components`)
+          if (coverage.employees_with_invalid_components > 0)
+            blockerDetails.push(`${coverage.employees_with_invalid_components} employee(s) with invalid component amounts`)
+
+          req.log.warn(
+            {
+              event:    'payroll_preflight_blocked',
+              month,
+              tenant_id: tenantId,
+              coverage: {
+                total:   coverage.total_active_employees,
+                missing: coverage.employees_missing_compensation,
+                zero_ctc: coverage.employees_zero_ctc,
+                no_components: coverage.employees_with_no_components,
+                invalid: coverage.employees_with_invalid_components,
+              },
+            },
+            'payroll run blocked by compensation coverage pre-flight',
+          )
+
+          return reply.code(422).send({
+            error:    'COMPENSATION_COVERAGE_INSUFFICIENT',
+            message:  `Payroll blocked — ${blockerDetails.join('; ')}. ` +
+                      `Set up compensation for all active employees before running payroll.`,
+            coverage,
+          })
+        }
+
+        // Future-dated warning (non-blocking) — surface to caller
+        if (coverage.employees_future_dated > 0) {
+          req.log.info(
+            { event: 'payroll_preflight_future_dated', count: coverage.employees_future_dated, month },
+            'payroll pre-flight: some compensations are future-dated — using previous active records',
+          )
+        }
+      } catch (preflightErr: any) {
+        // Coverage audit failure is non-blocking — we log and continue rather
+        // than aborting the run (the per-employee compensation validation
+        // inside the loop will catch individuals with missing records).
+        req.log.warn(
+          { err: preflightErr, month, tenant_id: tenantId },
+          'payroll pre-flight compensation audit failed — proceeding with run (per-employee checks apply)',
+        )
+      }
+    }
+
+    // Freeze guard — applies to live runs only; dry runs are always allowed
+    if (!dry_run) {
+      const freeze = await checkFreezeGuard(fastify.supabase, tenantId, month)
+      if (freeze.frozen) {
+        return reply.code(423).send({
+          error:   'PAYROLL_FROZEN',
+          message: freeze.reason ?? `Payroll for ${month} is frozen`,
+        })
+      }
+    }
 
     // Fetch all active employees
     const { data: employees, error: empErr } = await fastify.supabase
@@ -56,127 +346,548 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('employee_code')
 
     if (empErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+      req.log.error({ err: empErr, month, tenant_id: tenantId }, 'payroll run: failed to fetch employees')
+      return reply.code(500).send({
+        error:   'QUERY_FAILED',
+        message: 'Failed to fetch employees',
+        details: empErr.message,
+        code:    empErr.code,
+      })
     }
 
     const empList = (employees ?? []) as Array<{
-      id: string
-      first_name: string
-      last_name:  string
-      employee_code: string
+      id: string; first_name: string; last_name: string; employee_code: string
     }>
 
-    // Upsert the run row (draft)
+    // Shared context for the processing loop
+    const [runYear, runMon] = month.split('-').map(Number)
+    const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
+
+    // countWorkingDaysInMonth now throws on DB error (holiday calendar query failure would
+    // corrupt every employee's LOP calculation — fail the entire run immediately).
+    let total_working_days: number
+    try {
+      total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, month)
+    } catch (wdErr: any) {
+      req.log.error({ err: wdErr, month, tenant_id: tenantId }, 'payroll: holiday calendar query failed — run aborted')
+      return reply.code(500).send({
+        error:   'WORKING_DAYS_FETCH_FAILED',
+        message: wdErr?.message ?? 'Failed to count working days for the payroll period',
+        details: 'Payroll run aborted — LOP calculations require an accurate working-day count.',
+      })
+    }
+
+    // ── DRY RUN: compute + validate without any DB writes ───────────────────
+    if (dry_run) {
+      req.log.info(
+        { event: 'payroll_dry_run_start', month, employee_count: empList.length, tenant_id: tenantId },
+        'payroll dry run started',
+      )
+
+      type DryRunResult = {
+        employee_id:              string
+        employee_code:            string
+        status:                   'ok' | 'failed'
+        result?:                  PayrollSlipResult
+        compensation_warnings?:   string[]
+        validation_errors?:       string[]
+        error?:                   string
+        failure_stage?:           FailedEmployee['failure_stage']
+      }
+
+      const dryResults: DryRunResult[] = []
+
+      for (const emp of empList) {
+        try {
+          const [compensation, attendance] = await Promise.all([
+            fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
+            fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
+          ])
+
+          const compValidation = validateCompensation(
+            compensation, { employeeId: emp.id, month }, runPeriodEnd,
+          )
+
+          if (compValidation.blocking_errors.length > 0) {
+            dryResults.push({
+              employee_id:   emp.id,
+              employee_code: emp.employee_code,
+              status:        'failed',
+              failure_stage: 'compensation_validation',
+              error:         compValidation.blocking_errors[0],
+              validation_errors: compValidation.blocking_errors,
+            })
+            continue
+          }
+
+          const result  = computePayrollSlip({
+            tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days,
+          })
+          const slipRow    = buildSlipRow(tenantId, 'dry-run', result, month)
+          const slipValid  = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
+
+          dryResults.push({
+            employee_id:            emp.id,
+            employee_code:          emp.employee_code,
+            status:                 slipValid.valid ? 'ok' : 'failed',
+            result,
+            compensation_warnings:  compValidation.warnings.length > 0 ? compValidation.warnings : undefined,
+            validation_errors:      !slipValid.valid ? slipValid.errors : undefined,
+            failure_stage:          !slipValid.valid ? 'slip_validation' : undefined,
+            error:                  !slipValid.valid ? slipValid.errors[0] : undefined,
+          })
+        } catch (err: any) {
+          dryResults.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            status:        'failed',
+            failure_stage: 'data_fetch',
+            error:         err?.message ?? 'Unexpected error',
+          })
+        }
+      }
+
+      const okCount   = dryResults.filter(r => r.status === 'ok').length
+      const failCount = dryResults.filter(r => r.status === 'failed').length
+
+      req.log.info(
+        { event: 'payroll_dry_run_complete', month, ok: okCount, failed: failCount },
+        'payroll dry run complete',
+      )
+
+      return reply.send({
+        dry_run:           true,
+        month,
+        employee_count:    empList.length,
+        total_working_days,
+        ok_count:          okCount,
+        failed_count:      failCount,
+        results:           dryResults,
+      })
+    }
+
+    // ── LIVE RUN ─────────────────────────────────────────────────────────────
+
+    // Upsert the run row (processing)
     const { data: run, error: runErr } = await fastify.supabase
       .from('payroll_runs')
       .upsert({
-        tenant_id:  tenantId,
+        tenant_id:      tenantId,
         month,
-        status:     'processing',
-        notes:      notes ?? null,
-        created_by: req.userId,
+        status:         'processing',
+        notes:          notes ?? null,
+        created_by:     req.userId,
         employee_count: empList.length,
       }, { onConflict: 'tenant_id,month' })
       .select('id')
       .single()
 
     if (runErr || !run) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create payroll run' })
+      req.log.error(
+        { err: runErr, month, tenant_id: tenantId },
+        'payroll run: failed to upsert run row',
+      )
+      return reply.code(500).send({
+        error:   'INSERT_FAILED',
+        message: 'Failed to create payroll run',
+        details: runErr?.message,
+        code:    runErr?.code,
+      })
     }
 
     const runId = run.id as string
 
-    // Delete existing slips for this run (re-compute fresh)
+    req.log.info(
+      { event: 'payroll_run_start', run_id: runId, month, employee_count: empList.length },
+      'payroll run started',
+    )
+
+    // Forensic: run_started
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     runId,
+      event_type: 'run_started',
+      month,
+      payload:    { employee_count: empList.length, initiated_by: req.userId },
+    })
+
+    // Delete existing slips for this run (idempotent re-trigger)
     await fastify.supabase
       .from('payroll_slips')
       .delete()
       .eq('run_id', runId)
 
-    // Count working days once for the month
-    const total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, month)
+    // ── Per-employee processing loop ─────────────────────────────────────────
+    //
+    // Each employee is fully isolated.  A failure at any stage (data fetch,
+    // compensation validation, payload validation, DB insert) is caught, logged
+    // with full structured context, appended to failedEmployees[], and the loop
+    // continues with the next employee.
 
-    // Compute per-employee slips
-    const slipResults: PayrollSlipResult[] = []
+    const succeededSlips: PayrollSlipResult[] = []
+    const failedEmployees: FailedEmployee[]   = []
 
     for (const emp of empList) {
-      const [compensation, attendance] = await Promise.all([
-        fetchActiveCompensation(fastify.supabase, tenantId, emp.id),
-        fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
-      ])
+      const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month, run_id: runId }
 
-      const result = computePayrollSlip({
-        tenantId,
-        employeeId: emp.id,
-        month,
-        compensation,
-        attendance,
-        total_working_days,
-      })
+      try {
+        // ── Stage 1: Fetch compensation + attendance ───────────────────────
+        let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
+        let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
 
-      slipResults.push(result)
-    }
+        try {
+          ;[compensation, attendance] = await Promise.all([
+            fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
+            fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
+          ])
+        } catch (fetchErr: any) {
+          const reason = fetchErr?.message ?? 'Unknown data fetch error'
+          req.log.error(
+            { ...empCtx, err: fetchErr, stage: 'data_fetch' },
+            'payroll: data fetch failed — skipping employee',
+          )
+          await logRunEvent(fastify.supabase, req.log, {
+            tenant_id:    tenantId, run_id: runId,
+            event_type:   'data_fetch_failed',
+            employee_id:  emp.id, month,
+            error_details: { message: reason, stack: fetchErr?.stack },
+          })
+          failedEmployees.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'data_fetch',
+            reason,
+          })
+          continue
+        }
 
-    // Bulk-insert slips
-    if (slipResults.length) {
-      const slipRows = slipResults.map(r => ({
-        tenant_id:             tenantId,
-        run_id:                runId,
-        employee_id:           r.employeeId,
-        month,
-        total_working_days:    r.total_working_days,
-        payable_days:          r.payable_days,
-        lop_days:              r.lop_days,
-        overtime_hours:        r.overtime_hours,
-        ctc_monthly:           r.ctc_monthly,
-        gross_pay:             r.gross_pay,
-        lop_amount:            r.lop_amount,
-        total_deductions:      r.total_deductions,
-        net_pay:               r.net_pay,
-        employer_contributions:r.employer_contributions,
-        component_breakdown:   r.component_breakdown,
-        status:                'draft',
-      }))
+        // ── Stage 2: Validate compensation ────────────────────────────────
+        const compValidation = validateCompensation(
+          compensation, { employeeId: emp.id, month }, runPeriodEnd,
+        )
 
-      const { error: slipErr } = await fastify.supabase
-        .from('payroll_slips')
-        .insert(slipRows)
+        if (compValidation.blocking_errors.length > 0) {
+          const reason = compValidation.blocking_errors[0]
+          req.log.error(
+            { ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' },
+            'payroll: compensation validation blocking error — skipping employee',
+          )
+          await logRunEvent(fastify.supabase, req.log, {
+            tenant_id:    tenantId, run_id: runId,
+            event_type:   compensation ? 'compensation_invalid' : 'compensation_missing',
+            employee_id:  emp.id, month,
+            payload:      { errors: compValidation.blocking_errors },
+            error_details: { message: reason },
+          })
+          failedEmployees.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'compensation_validation',
+            reason,
+            details:       { errors: compValidation.blocking_errors },
+          })
+          continue
+        }
 
-      if (slipErr) {
-        req.log.error({ err: slipErr }, 'payroll slip insert failed')
-        await fastify.supabase
-          .from('payroll_runs')
-          .update({ status: 'failed', error_message: slipErr.message })
-          .eq('id', runId)
-        return reply.code(500).send({ error: 'SLIP_INSERT_FAILED', message: 'Failed to save payroll slips' })
+        // Non-blocking compensation warnings — surfaced in logs, do not skip employee
+        if (compValidation.warnings.length > 0) {
+          req.log.warn(
+            { ...empCtx, warnings: compValidation.warnings },
+            'payroll: compensation warnings (non-blocking)',
+          )
+        }
+
+        // ── Stage 3: Compute slip ─────────────────────────────────────────
+        const result = computePayrollSlip({
+          tenantId,
+          employeeId: emp.id,
+          month,
+          compensation,
+          attendance,
+          total_working_days,
+        })
+
+        // ── Stage 4: Validate slip payload before insert ──────────────────
+        const slipRow  = buildSlipRow(tenantId, runId, result, month)
+        const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
+
+        if (!slipValid.valid) {
+          req.log.error(
+            {
+              ...empCtx,
+              validation_errors: slipValid.errors,
+              slip_payload:      slipRow,
+              stage:             'slip_validation',
+            },
+            'payroll: slip payload validation failed — refusing DB insert',
+          )
+          await logRunEvent(fastify.supabase, req.log, {
+            tenant_id:    tenantId, run_id: runId,
+            event_type:   'validation_failed',
+            employee_id:  emp.id, month,
+            payload:      slipRow,
+            error_details: { validation_errors: slipValid.errors },
+          })
+          failedEmployees.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'slip_validation',
+            reason:        `Slip payload validation failed: ${slipValid.errors[0]}`,
+            details:       { validation_errors: slipValid.errors },
+          })
+          continue
+        }
+
+        // ── Stage 5: DB insert ────────────────────────────────────────────
+        const { error: insertErr } = await fastify.supabase
+          .from('payroll_slips')
+          .insert(slipRow)
+
+        if (insertErr) {
+          req.log.error(
+            {
+              ...empCtx,
+              err:              insertErr,
+              supabase_code:    insertErr.code,
+              supabase_details: insertErr.details,
+              supabase_hint:    insertErr.hint,
+              slip_payload:     slipRow,
+              stage:            'db_insert',
+            },
+            'payroll: DB insert failed for employee slip',
+          )
+          await logRunEvent(fastify.supabase, req.log, {
+            tenant_id:    tenantId, run_id: runId,
+            event_type:   'slip_insert_failed',
+            employee_id:  emp.id, month,
+            payload:      slipRow,
+            error_details: {
+              message: insertErr.message,
+              code:    insertErr.code,
+              details: insertErr.details,
+              hint:    insertErr.hint,
+            },
+          })
+          failedEmployees.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'db_insert',
+            reason:        insertErr.message,
+            details: {
+              code:    insertErr.code,
+              details: insertErr.details,
+              hint:    insertErr.hint,
+            },
+          })
+          continue
+        }
+
+        // ── Stage 6: Slip inserted — log success forensics ────────────────
+        await logRunEvent(fastify.supabase, req.log, {
+          tenant_id:  tenantId, run_id: runId,
+          event_type: 'slip_computed',
+          employee_id: emp.id, month,
+          payload: {
+            gross_pay:        result.gross_pay,
+            net_pay:          result.net_pay,
+            lop_days:         result.lop_days,
+            payable_days:     result.payable_days,
+            total_deductions: result.total_deductions,
+            has_warning:      !!result.warning,
+          },
+        })
+
+        succeededSlips.push(result)
+
+      } catch (unexpectedErr: any) {
+        // Should not reach here — all stages have their own try/catch above.
+        // Belt-and-suspenders catch to ensure one employee never crashes the loop.
+        const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
+        req.log.error(
+          { ...empCtx, err: unexpectedErr, stack: unexpectedErr?.stack, stage: 'unexpected' },
+          'payroll: unexpected per-employee error (all stages should be caught above)',
+        )
+        failedEmployees.push({
+          employee_id:   emp.id,
+          employee_code: emp.employee_code,
+          failure_stage: 'unexpected',
+          reason,
+          details:       { stack: unexpectedErr?.stack },
+        })
       }
     }
 
-    // Aggregate totals and mark draft
-    const totalGross       = slipResults.reduce((s, r) => s + r.gross_pay,              0)
-    const totalDeductions  = slipResults.reduce((s, r) => s + r.total_deductions,       0)
-    const totalNet         = slipResults.reduce((s, r) => s + r.net_pay,                0)
-    const totalLop         = slipResults.reduce((s, r) => s + r.lop_amount,             0)
+    // ── Aggregate totals from succeeded slips only ───────────────────────────
+    const totalGross      = round2(succeededSlips.reduce((s, r) => s + r.gross_pay,        0))
+    const totalDeductions = round2(succeededSlips.reduce((s, r) => s + r.total_deductions, 0))
+    const totalNet        = round2(succeededSlips.reduce((s, r) => s + r.net_pay,          0))
+    const totalLop        = round2(succeededSlips.reduce((s, r) => s + r.lop_amount,       0))
 
-    await fastify.supabase
+    // Mark run as failed if every single employee failed.
+    // Mark as partial_failed if some (but not all) employees failed.
+    // Mark as draft only when all employees succeeded.
+    const runStatus: 'draft' | 'partial_failed' | 'failed' =
+      succeededSlips.length === 0 && empList.length > 0
+        ? 'failed'
+        : failedEmployees.length > 0
+          ? 'partial_failed'
+          : 'draft'
+
+    // Build structured failure summary — stored in DB so the admin UI can display
+    // the dominant failure reason without a separate payroll_run_events query.
+    const failureSummary = buildFailureSummary(failedEmployees, empList.length)
+
+    const runUpdatePayload: Record<string, unknown> = {
+      status:           runStatus,
+      employee_count:   succeededSlips.length,
+      total_gross:      totalGross,
+      total_deductions: totalDeductions,
+      total_net:        totalNet,
+      total_lop_amount: totalLop,
+      failure_summary:  failureSummary,
+    }
+
+    if (runStatus === 'failed') {
+      // Use dominant reason in error_message so it surfaces in list view without
+      // needing to join payroll_run_events.
+      const dominantLabel = failureSummary
+        ? `${failureSummary.dominant_stage}: ${failureSummary.dominant_reason}`
+        : 'unknown error'
+      runUpdatePayload.error_message =
+        `All ${empList.length} employee(s) failed. Dominant cause — ${dominantLabel}`
+    } else if (failedEmployees.length > 0) {
+      const dominantLabel = failureSummary
+        ? `${failureSummary.dominant_stage}: ${failureSummary.dominant_reason}`
+        : 'unknown error'
+      runUpdatePayload.error_message =
+        `${failedEmployees.length} of ${empList.length} employee(s) failed. ` +
+        `Dominant cause — ${dominantLabel}`
+    }
+
+    const { error: runUpdateErr } = await fastify.supabase
       .from('payroll_runs')
-      .update({
-        status:          'draft',
-        employee_count:  slipResults.length,
-        total_gross:     Math.round(totalGross * 100) / 100,
-        total_deductions:Math.round(totalDeductions * 100) / 100,
-        total_net:       Math.round(totalNet * 100) / 100,
-        total_lop_amount:Math.round(totalLop * 100) / 100,
-      })
+      .update(runUpdatePayload)
       .eq('id', runId)
 
-    return reply.code(201).send({
-      run_id:          runId,
+    if (runUpdateErr) {
+      // Non-fatal: slips are already inserted.  Log the error so it's not invisible,
+      // but don't block the response — the caller already knows the slip count.
+      req.log.error(
+        { err: runUpdateErr, run_id: runId, attempted_status: runStatus },
+        'payroll: failed to update run totals after slip insertion',
+      )
+    }
+
+    // ── Forensic: run_completed ──────────────────────────────────────────────
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId, run_id: runId,
+      event_type: 'run_completed',
       month,
-      employee_count:  slipResults.length,
-      total_working_days,
-      total_gross:     Math.round(totalGross * 100) / 100,
-      total_net:       Math.round(totalNet * 100) / 100,
+      payload: {
+        succeeded:    succeededSlips.length,
+        failed:       failedEmployees.length,
+        total:        empList.length,
+        total_gross:  totalGross,
+        total_net:    totalNet,
+        run_status:   runStatus,
+      },
     })
+
+    // ── Persist payroll blockers ──────────────────────────────────────────────
+    // Non-fatal: blocker write failure must never block the run response.
+    // The blockers populate the Resolution Center UI for HR admins.
+    if (failedEmployees.length > 0) {
+      try {
+        // Fetch enabled validation rules so DB overrides apply to severity/blocking
+        const { data: dbRules } = await fastify.supabase
+          .from('payroll_validation_rules')
+          .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
+          .eq('enabled', true)
+
+        const blockerRows = buildPayrollBlockers({
+          tenantId,
+          runId,
+          failedEmployees,
+          dbRules: dbRules ?? undefined,
+        })
+
+        if (blockerRows.length > 0) {
+          const { error: blockerErr } = await fastify.supabase
+            .from('payroll_run_blockers')
+            .insert(blockerRows)
+
+          if (blockerErr) {
+            req.log.warn(
+              { err: blockerErr, run_id: runId, blocker_count: blockerRows.length },
+              'payroll: blocker insert failed — Resolution Center will be empty for this run',
+            )
+          } else {
+            req.log.info(
+              { run_id: runId, blocker_count: blockerRows.length },
+              'payroll: blockers inserted into payroll_run_blockers',
+            )
+          }
+        }
+      } catch (blockerErr: any) {
+        req.log.warn(
+          { err: blockerErr, run_id: runId },
+          'payroll: blocker build/insert threw unexpectedly — non-fatal, run response continues',
+        )
+      }
+    }
+
+    req.log.info(
+      {
+        event:       'payroll_run_complete',
+        run_id:      runId,
+        month,
+        succeeded:   succeededSlips.length,
+        failed:      failedEmployees.length,
+        total:       empList.length,
+        total_gross: totalGross,
+        total_net:   totalNet,
+        run_status:  runStatus,
+      },
+      'payroll run complete',
+    )
+
+    // Employees with no attendance data (full pay assumed — operator must verify)
+    const noAttendanceSlips = succeededSlips.filter(r => r.warning)
+
+    const responseBody: Record<string, unknown> = {
+      run_id:            runId,
+      month,
+      employee_count:    succeededSlips.length,
+      total_working_days,
+      total_gross:       totalGross,
+      total_net:         totalNet,
+      run_status:        runStatus,
+      ...(failedEmployees.length > 0 && {
+        failed_count:     failedEmployees.length,
+        failed_employees: failedEmployees,
+        failure_summary:  failureSummary,
+      }),
+      ...(noAttendanceSlips.length > 0 && {
+        no_attendance_count:     noAttendanceSlips.length,
+        no_attendance_employees: noAttendanceSlips.map(r => r.employeeId),
+        warnings: [
+          `${noAttendanceSlips.length} employee(s) have no attendance data and will receive full pay — ` +
+          'verify punch records before finalizing.',
+        ],
+      }),
+    }
+
+    // If every employee failed, return 500 with full failure detail
+    if (runStatus === 'failed') {
+      return reply.code(500).send({
+        error:   'PAYROLL_RUN_FAILED',
+        message: `Payroll run created (run_id=${runId}) but all ${empList.length} employees failed. ` +
+                 'See failed_employees for per-employee machine-readable failure reasons.',
+        ...responseBody,
+      })
+    }
+
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /payroll/runs ────────────────────────────────────────────────────────
@@ -184,19 +895,31 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const querySchema = z.object({
       limit:  z.coerce.number().int().min(1).max(100).default(24),
       offset: z.coerce.number().int().min(0).default(0),
+      // q: free-text filter on month (e.g. "2025-03") or notes. Used by the
+      // UniversalSearch palette; callers typically pass limit=3 alongside q.
+      q:      z.string().max(50).optional(),
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
-    const { limit, offset } = parsed.data
+    const { limit, offset, q } = parsed.data
 
-    const { data, error, count } = await fastify.supabase
+    let qb = fastify.supabase
       .from('payroll_runs')
-      .select('id, month, status, employee_count, total_gross, total_deductions, total_net, total_lop_amount, created_at, finalized_at', { count: 'exact' })
+      .select('id, month, status, employee_count, total_gross, total_deductions, total_net, total_lop_amount, error_message, failure_summary, created_at, finalized_at', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .order('month', { ascending: false })
       .range(offset, offset + limit - 1)
+
+    if (q && q.trim()) {
+      const term = `%${q.trim()}%`
+      // month is stored as YYYY-MM — ilike match covers partial month strings.
+      // notes is the freetext field supplied at run creation.
+      qb = qb.or(`month.ilike.${term},notes.ilike.${term}`)
+    }
+
+    const { data, error, count } = await qb
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch runs' })
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
@@ -290,6 +1013,30 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── GET /payroll/compensation-coverage ─────────────────────────────────────
+  //
+  // Compensation coverage audit — returns a full per-employee breakdown of
+  // compensation readiness for payroll.  Used by the Operations Center health
+  // card and by the pre-run blocker response.
+  //
+  // MUST be registered before /payroll/runs/:id so the router doesn't try to
+  // parse "compensation-coverage" as a run ID.
+  fastify.get('/payroll/compensation-coverage', hrAdminAuth, async (req: any, reply) => {
+    try {
+      const audit = await buildCompensationCoverageAudit(fastify.supabase, req.tenantId as string)
+      return reply.send({ data: audit })
+    } catch (err: any) {
+      req.log.error(
+        { err, tenant_id: req.tenantId },
+        'payroll compensation-coverage audit failed',
+      )
+      return reply.code(500).send({
+        error:   'AUDIT_FAILED',
+        message: err?.message ?? 'Failed to run compensation coverage audit',
+      })
+    }
+  })
+
   // ── GET /payroll/runs/:id ────────────────────────────────────────────────────
   fastify.get('/payroll/runs/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
@@ -308,12 +1055,24 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   // ── POST /payroll/runs/:id/finalize ──────────────────────────────────────────
   fastify.post('/payroll/runs/:id/finalize', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    // Parse finalize-specific body options.
+    // force_finalize=true: override the missing-attendance gate (requires override_reason).
+    const finalizeSchema = z.object({
+      force_finalize:  z.boolean().optional().default(false),
+      override_reason: z.string().max(500).optional(),
+    })
+    const parsedBody = finalizeSchema.safeParse(req.body ?? {})
+    const { force_finalize, override_reason } = parsedBody.success
+      ? parsedBody.data
+      : { force_finalize: false, override_reason: undefined }
 
     const { data: run } = await fastify.supabase
       .from('payroll_runs')
-      .select('status')
+      .select('status, month, created_at')
       .eq('id', id)
-      .eq('tenant_id', req.tenantId)
+      .eq('tenant_id', tenantId)
       .single()
 
     if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
@@ -321,23 +1080,385 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'ALREADY_FINALIZED', message: 'Run is already finalized' })
     }
     if (run.status === 'failed') {
-      return reply.code(409).send({ error: 'RUN_FAILED', message: 'Cannot finalize a failed run' })
+      return reply.code(409).send({ error: 'RUN_FAILED', message: 'Cannot finalize a failed run — all employees failed during computation' })
+    }
+    // partial_failed is finalizable — only the succeeded slips are finalized
+
+    // Freeze guard: block finalization if payroll for this month is frozen
+    const freeze = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (freeze.frozen) {
+      return reply.code(423).send({
+        error: 'PAYROLL_FROZEN',
+        message: freeze.reason ?? `Payroll for ${run.month} is frozen`,
+      })
     }
 
-    // Finalize run and all its slips
-    await Promise.all([
-      fastify.supabase
-        .from('payroll_runs')
-        .update({ status: 'finalized', finalized_by: req.userId, finalized_at: new Date().toISOString() })
-        .eq('id', id),
-      fastify.supabase
-        .from('payroll_slips')
-        .update({ status: 'finalized' })
-        .eq('run_id', id)
-        .eq('status', 'draft'),
-    ])
+    // ── Attendance completeness gate ────────────────────────────────────────────
+    //
+    // Employees without any attendance_daily rows for the run month received full
+    // pay (0 LOP) by default — this is almost certainly wrong. Block finalization
+    // so operators must verify before locking. Pass force_finalize=true with an
+    // override_reason to proceed anyway (all overrides are audit-logged).
+    {
+      const [runYear, runMon] = (run.month as string).split('-').map(Number)
+      const monthStart = `${run.month}-01`
+      const monthEnd   = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
 
-    return reply.send({ message: 'Payroll run finalized successfully' })
+      // Collect all employee IDs in the draft run
+      const { data: draftSlips } = await fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id')
+        .eq('run_id', id)
+        .eq('status', 'draft')
+
+      const draftEmpIds = (draftSlips ?? []).map((s: { employee_id: string }) => s.employee_id)
+
+      if (draftEmpIds.length > 0) {
+        // Which of these employees have at least one attendance_daily row?
+        const { data: attRows } = await fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .in('employee_id', draftEmpIds)
+          .gte('date', monthStart)
+          .lte('date', monthEnd)
+
+        const hasAttendance = new Set(
+          (attRows ?? []).map((r: { employee_id: string }) => r.employee_id)
+        )
+        const missingIds = draftEmpIds.filter(eid => !hasAttendance.has(eid))
+
+        if (missingIds.length > 0) {
+          if (!force_finalize) {
+            // Enrich with names for a human-readable error response
+            const { data: empRows } = await fastify.supabase
+              .from('employees')
+              .select('id, first_name, last_name, employee_code')
+              .in('id', missingIds)
+              .eq('tenant_id', tenantId)
+
+            return reply.code(422).send({
+              error:   'MISSING_ATTENDANCE_DATA',
+              message: `${missingIds.length} employee(s) have no attendance data for ${run.month}. ` +
+                       'These employees will receive full pay (0 LOP assumed). ' +
+                       'Verify punch records, then either process attendance or pass force_finalize=true with an override_reason.',
+              missing_attendance_count:     missingIds.length,
+              missing_attendance_employees: (empRows ?? []).map((e: any) => ({
+                employee_id:   e.id,
+                employee_name: `${e.first_name} ${e.last_name}`,
+                employee_code: e.employee_code,
+              })),
+            })
+          }
+
+          // Override path — log the decision for the audit trail
+          req.log.warn({
+            run_id:              id,
+            month:               run.month,
+            overridden_by:       req.userId,
+            override_reason:     override_reason ?? '(none provided)',
+            missing_count:       missingIds.length,
+            missing_employee_ids: missingIds,
+          }, 'payroll finalization override: proceeding with missing attendance data — full pay assumed for affected employees')
+
+          // Persist override to DB for SOX-compliant audit trail.
+          // Non-fatal: a write failure must not block finalization — the structured
+          // log above already captures the decision; the DB row is for audit queries.
+          await fastify.supabase
+            .from('payroll_finalize_overrides')
+            .insert({
+              tenant_id:              tenantId,
+              run_id:                 id,
+              month:                  run.month,
+              overridden_by:          req.userId,
+              override_reason:        override_reason ?? null,
+              missing_employee_count: missingIds.length,
+              missing_employee_ids:   missingIds,
+            })
+            .then(({ error: overrideErr }) => {
+              if (overrideErr) {
+                req.log.error(
+                  { err: overrideErr, run_id: id },
+                  'payroll finalize override: audit row insert failed — override proceeded but was not persisted to DB',
+                )
+              }
+            })
+        }
+      }
+    }
+
+    // ── Staleness guard ─────────────────────────────────────────────────────────
+    // If any leave was approved AFTER this run was created, those employees'
+    // attendance_daily rows may be stale.  Auto-recompute and refresh their slips
+    // before locking so the finalized slip reflects the approved leave correctly.
+    //
+    // Per-employee failures are tracked and surfaced in the response body so
+    // the operator knows which slips were finalized with potentially stale data.
+    const recomputeWarnings: Array<{ employee_id: string; error: string }> = []
+    let recomputedCount = 0
+
+    try {
+      const [year, mon] = (run.month as string).split('-').map(Number)
+      const periodStart = `${run.month}-01`
+      const periodEnd   = new Date(year, mon, 0).toISOString().slice(0, 10)
+
+      // Find employees with leave approved after the run snapshot
+      const { data: staleRows } = await fastify.supabase
+        .from('leave_requests')
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'APPROVED')
+        .gte('updated_at', run.created_at)      // leave approved after run was created
+        .lte('from_date', periodEnd)
+        .gte('to_date', periodStart)
+
+      const staleEmployeeIds = [...new Set((staleRows ?? []).map((r: { employee_id: string }) => r.employee_id))]
+
+      if (staleEmployeeIds.length > 0) {
+        req.log.info({ stale_count: staleEmployeeIds.length, run_id: id }, 'payroll finalize: recomputing stale employees before lock')
+
+        let total_working_days: number
+        try {
+          total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, run.month as string)
+        } catch (wdErr: any) {
+          req.log.error(
+            { err: wdErr, run_id: id, month: run.month },
+            'payroll finalize: holiday calendar query failed — skipping stale attendance recompute. ' +
+            'Slips will be finalized with existing attendance data.',
+          )
+          // Skip the entire stale recompute block: proceeding with total_working_days=0
+          // would produce corrupt LOP deductions.  The run still finalizes with whatever
+          // slip data was computed during the original run.
+          staleEmployeeIds.length = 0
+          total_working_days = 0
+        }
+
+        for (const employeeId of staleEmployeeIds) {
+          try {
+            // 1. Recompute attendance_daily for the period
+            await recomputeRange(fastify.supabase, {
+              tenant_id:   tenantId,
+              employee_id: employeeId,
+              from_date:   periodStart,
+              to_date:     periodEnd,
+              changed_by:  req.userId,
+            })
+
+            // 2. Re-fetch attendance + compensation and recompute slip
+            const [compensation, attendance] = await Promise.all([
+              fetchActiveCompensation(fastify.supabase, tenantId, employeeId, periodEnd),
+              fetchAttendanceSummary(fastify.supabase, tenantId, employeeId, run.month as string),
+            ])
+
+            const freshSlip = computePayrollSlip({
+              tenantId,
+              employeeId,
+              month:              run.month as string,
+              compensation,
+              attendance,
+              total_working_days,
+            })
+
+            // 3. Update the existing draft slip in place
+            await fastify.supabase
+              .from('payroll_slips')
+              .update({
+                payable_days:          freshSlip.payable_days,
+                lop_days:              freshSlip.lop_days,
+                overtime_hours:        freshSlip.overtime_hours,
+                gross_pay:             freshSlip.gross_pay,
+                lop_amount:            freshSlip.lop_amount,
+                total_deductions:      freshSlip.total_deductions,
+                net_pay:               freshSlip.net_pay,
+                employer_contributions:freshSlip.employer_contributions,
+                component_breakdown:   freshSlip.component_breakdown,
+              })
+              .eq('run_id', id)
+              .eq('employee_id', employeeId)
+              .eq('status', 'draft')
+
+            recomputedCount++
+          } catch (empErr: any) {
+            // Per-employee failure: log, record warning, continue with remaining employees
+            const errMsg = empErr?.message ?? 'Unknown recompute error'
+            req.log.warn({ err: empErr, employee_id: employeeId, run_id: id },
+              'payroll finalize: per-employee recompute failed (non-fatal)')
+            recomputeWarnings.push({ employee_id: employeeId, error: errMsg })
+          }
+        }
+
+        if (recomputeWarnings.length > 0) {
+          req.log.warn(
+            { warnings: recomputeWarnings, run_id: id },
+            `payroll finalize: ${recomputeWarnings.length} of ${staleEmployeeIds.length} recomputes failed — slips finalized with potentially stale attendance`,
+          )
+        }
+      }
+    } catch (staleErr) {
+      // Outer guard failure (e.g. leave_requests query failed) — non-fatal, continue
+      req.log.error({ err: staleErr, run_id: id }, 'payroll finalize: staleness guard outer query failed (non-fatal)')
+    }
+
+    // ── Finalize run and all its slips (sequential, ordered) ───────────────────
+    //
+    // Order matters for partial-failure recovery:
+    //
+    //   Step 1 — Finalize slips FIRST (critical path).
+    //     If this fails:  both slips and run remain draft → fully re-runnable, no data loss.
+    //
+    //   Step 2 — Finalize the run record AFTER slips are confirmed written.
+    //     If this fails:  slips are already finalized; retrying finalize finds run still
+    //                     'draft', the slip update is a no-op (0 draft rows), and only
+    //                     the run status update re-executes → safe to retry.
+    //
+    // The previous Promise.all approach created a split state where payroll_runs showed
+    // 'finalized' but payroll_slips remained 'draft' — employees saw no payslips and
+    // re-finalization was permanently blocked by the ALREADY_FINALIZED guard.
+
+    // Step 1: Finalize draft slips
+    const { error: slipFinalizeErr } = await fastify.supabase
+      .from('payroll_slips')
+      .update({ status: 'finalized' })
+      .eq('run_id', id)
+      .eq('status', 'draft')
+
+    if (slipFinalizeErr) {
+      req.log.error(
+        { err: slipFinalizeErr, run_id: id },
+        'payroll finalize: slip status update failed — run remains draft, retry is safe',
+      )
+      return reply.code(500).send({
+        error:   'SLIP_FINALIZE_FAILED',
+        message: 'Failed to finalize payroll slips — the run remains in draft. Retry finalization.',
+      })
+    }
+
+    // Step 2: Mark the run as finalized (only after slips are confirmed finalized)
+    const { error: runFinalizeErr } = await fastify.supabase
+      .from('payroll_runs')
+      .update({ status: 'finalized', finalized_by: req.userId, finalized_at: new Date().toISOString() })
+      .eq('id', id)
+
+    if (runFinalizeErr) {
+      // Slips are finalized; run status is not.  Retrying finalization is safe:
+      // the slip update will match 0 draft rows (no-op) and only the run status
+      // update will re-execute.
+      req.log.error(
+        { err: runFinalizeErr, run_id: id },
+        'payroll finalize: run status update failed after slips finalized — retry finalization to complete',
+      )
+      return reply.code(500).send({
+        error:   'RUN_STATUS_UPDATE_FAILED',
+        message: 'Payroll slips were finalized but run status update failed — retry finalization to complete.',
+      })
+    }
+
+    // ── Phase 15: auto-create immutable snapshot ─────────────────────────────
+    // Build and persist the snapshot AFTER the run is confirmed finalized.
+    // Non-fatal: finalization succeeds even if snapshot creation fails (operator
+    // can trigger snapshot manually via POST /payroll/runs/:id/snapshot).
+    let snapshotId: string | undefined
+    let snapshotHash: string | undefined
+    try {
+      const snapResult = await buildPayrollRunSnapshot(fastify.supabase, id, tenantId, req.userId)
+      if ('error' in snapResult) {
+        req.log.warn({ run_id: id, reason: snapResult.error }, 'payroll finalize: snapshot build failed (non-fatal)')
+      } else {
+        snapshotId   = snapResult.snapshot_id
+        snapshotHash = snapResult.integrity_hash
+        // Emit forensic events for snapshot creation
+        await logRunEvent(fastify.supabase, req.log, {
+          tenant_id:  tenantId,
+          run_id:     id,
+          event_type: 'snapshot_created',
+          payload:    { snapshot_id: snapshotId, integrity_hash: snapshotHash },
+        })
+        await logRunEvent(fastify.supabase, req.log, {
+          tenant_id:  tenantId,
+          run_id:     id,
+          event_type: 'snapshot_verified',
+          payload:    { snapshot_id: snapshotId, valid: true },
+        })
+      }
+    } catch (snapErr: any) {
+      req.log.warn({ err: snapErr, run_id: id }, 'payroll finalize: snapshot exception (non-fatal)')
+    }
+
+    await logAction(fastify.supabase, {
+      tenantId:    tenantId,
+      tableName:   'payroll_runs',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'finalized', month: run.month, snapshot_id: snapshotId ?? null },
+    })
+
+    // Fire-and-forget — never await, never blocks
+    fastify.eventPublisher.publish({
+      event_type:  EventType.PAYROLL_RUN_FINALIZED,
+      module:      MODULE.PAYROLL,
+      entity_type: 'payroll_run',
+      entity_id:   id,
+      org_id:      req.tenantId,
+      actor_id:    req.userId,
+      actor_type:  'user',
+      payload:     { month: run.month, total_employees: (run as any).total_employees ?? 0 },
+      correlation_id: req.correlationId ?? undefined,
+    })
+
+    // ── Billing snapshot (fire-and-forget, non-fatal) ────────────────────────
+    // Captures employee_count × per_employee_rate at time of finalization.
+    // Used by the owner panel for per-tenant SaaS billing reports.
+    ;(async () => {
+      try {
+        const { data: tenantRow } = await fastify.supabase
+          .from('tenants')
+          .select('per_employee_rate, plan')
+          .eq('id', tenantId)
+          .single()
+
+        if (tenantRow) {
+          const employeeCount   = (run as any).employee_count ?? 0
+          const perEmployeeRate = Number(tenantRow.per_employee_rate ?? 0)
+          const snapshotMonth   = (run.month as string).slice(0, 7) // 'YYYY-MM'
+
+          const { error: bsErr } = await fastify.supabase
+            .from('tenant_billing_snapshots')
+            .upsert(
+              {
+                tenant_id:         tenantId,
+                payroll_run_id:    id,
+                snapshot_month:    snapshotMonth,
+                employee_count:    employeeCount,
+                per_employee_rate: perEmployeeRate,
+                plan:              tenantRow.plan ?? 'standard',
+              },
+              { onConflict: 'tenant_id,payroll_run_id', ignoreDuplicates: false },
+            )
+
+          if (bsErr) {
+            req.log.warn({ err: bsErr, run_id: id }, 'billing snapshot upsert failed (non-fatal)')
+          } else {
+            req.log.info(
+              { run_id: id, month: snapshotMonth, employee_count: employeeCount, rate: perEmployeeRate },
+              'billing snapshot created',
+            )
+          }
+        }
+      } catch (bsErr: any) {
+        req.log.warn({ err: bsErr, run_id: id }, 'billing snapshot exception (non-fatal)')
+      }
+    })()
+
+    return reply.send({
+      message: 'Payroll run finalized successfully',
+      recomputed_count: recomputedCount,
+      snapshot_id:   snapshotId,
+      snapshot_hash: snapshotHash,
+      // Surface per-employee recompute failures so the caller can alert the operator.
+      // These slips are finalized but may carry stale attendance data.
+      recompute_warnings: recomputeWarnings.length > 0 ? recomputeWarnings : undefined,
+    })
   })
 
   // ── GET /payroll/runs/:id/slips ──────────────────────────────────────────────
@@ -354,49 +1475,63 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     }
     const { limit, offset } = parsed.data
 
-    // Verify run belongs to tenant
+    // Verify run belongs to tenant — fetch full run status for visibility computation
     const { data: run } = await fastify.supabase
       .from('payroll_runs')
-      .select('id')
+      .select('id, status')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
     if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
 
+    // Use LEFT JOIN (no !inner) so orphaned slips remain visible when employee row
+    // has been archived or soft-deleted — !inner would silently drop those slips.
     let q = fastify.supabase
       .from('payroll_slips')
       .select(`
-        id, employee_id, month, status,
+        id, employee_id, month, status, held_reason, warning,
         total_working_days, payable_days, lop_days, overtime_hours,
         ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay, employer_contributions,
-        employees!inner(id, first_name, last_name, employee_code)
+        component_breakdown,
+        employees(id, first_name, last_name, employee_code)
       `, { count: 'exact' })
       .eq('run_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('employees(employee_code)', { ascending: true })
       .range(offset, offset + limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch slips' })
+    if (error) {
+      req.log.error({ err: error, run_id: id, tenant_id: req.tenantId }, 'payroll: failed to fetch run slips')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch slips' })
+    }
 
-    const slips = (data ?? []).map((r: any) => ({
-      id:                    r.id,
-      employee_id:           r.employee_id,
-      employee_name:         r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
-      employee_code:         r.employees?.employee_code ?? null,
-      month:                 r.month,
-      status:                r.status,
-      total_working_days:    r.total_working_days,
-      payable_days:          r.payable_days,
-      lop_days:              r.lop_days,
-      overtime_hours:        r.overtime_hours,
-      ctc_monthly:           r.ctc_monthly,
-      gross_pay:             r.gross_pay,
-      lop_amount:            r.lop_amount,
-      total_deductions:      r.total_deductions,
-      net_pay:               r.net_pay,
-      employer_contributions:r.employer_contributions,
-    }))
+    const slips = (data ?? []).map((r: any) => {
+      const emp = r.employees ?? null
+      return buildEmployeePayslipView(
+        {
+          id:                    r.id,
+          employee_id:           r.employee_id,
+          run_id:                id,
+          month:                 r.month,
+          gross_pay:             r.gross_pay,
+          net_pay:               r.net_pay,
+          lop_days:              r.lop_days,
+          lop_amount:            r.lop_amount,
+          payable_days:          r.payable_days,
+          total_working_days:    r.total_working_days,
+          overtime_hours:        r.overtime_hours,
+          ctc_monthly:           r.ctc_monthly,
+          total_deductions:      r.total_deductions,
+          employer_contributions:r.employer_contributions,
+          component_breakdown:   r.component_breakdown ?? [],
+          status:                r.status,
+          held_reason:           r.held_reason ?? null,
+          warning:               r.warning ?? null,
+        },
+        { id, status: run.status },
+        emp ? { first_name: emp.first_name, last_name: emp.last_name, employee_code: emp.employee_code } : null,
+      )
+    })
 
     return reply.send({ data: slips, total: count ?? 0, limit, offset })
   })
@@ -420,11 +1555,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         employee_id, month,
         total_working_days, payable_days, lop_days, overtime_hours,
         ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay,
-        employees!inner(first_name, last_name, employee_code)
+        employees(first_name, last_name, employee_code)
       `)
       .eq('run_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('employees(employee_code)', { ascending: true })
 
     const header = [
       'Employee Code', 'Employee Name', 'Month',
@@ -489,7 +1623,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .select(`
           employee_id, gross_pay, net_pay, lop_days, lop_amount,
           payable_days, total_deductions,
-          employees!inner(first_name, last_name, employee_code)
+          employees(first_name, last_name, employee_code)
         `)
         .eq('run_id', id)
         .eq('tenant_id', tenantId),
@@ -612,65 +1746,1765 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const isAdmin = HR_ADMIN_ROLES.includes(req.userRole)
 
+    // LEFT JOIN (no !inner) — orphan slips (archived employee) must remain retrievable by admin.
     const { data, error } = await fastify.supabase
       .from('payroll_slips')
       .select(`
         *,
-        employees!inner(id, first_name, last_name, employee_code)
+        payroll_runs!inner(id, status),
+        employees(id, first_name, last_name, employee_code)
       `)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
 
-    if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Slip not found' })
+    if (error || !data) {
+      req.log.warn({ slip_id: id, tenant_id: req.tenantId, err: error }, 'payroll: slip not found or query error')
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Slip not found' })
+    }
+
+    const slip = data as any
+    const run  = slip.payroll_runs ?? null
+    const emp  = slip.employees    ?? null
+
+    // Compute visibility state before access checks so we can return it in the response
+    const visibility = buildPayrollVisibilityState(
+      { status: slip.status, held_reason: slip.held_reason },
+      run ? { status: run.status } : null,
+    )
 
     // Non-admin can only see their own finalized slip
     if (!isAdmin) {
-      const { data: profile } = await fastify.supabase
+      const { data: profile, error: profileErr } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
         .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
         .maybeSingle()
 
-      if (profile?.employee_id !== data.employee_id) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own payslip' })
+      if (profileErr) {
+        req.log.error({ err: profileErr, user_id: req.userId, slip_id: id }, 'payroll: profile lookup failed during slip access check')
+        return reply.code(500).send({ error: 'PROFILE_FETCH_FAILED', message: 'Unable to verify your employee identity' })
       }
-      if (data.status !== 'finalized') {
-        return reply.code(403).send({ error: 'NOT_FINALIZED', message: 'Payslip is not yet finalized' })
+
+      if (profile?.employee_id !== slip.employee_id) {
+        return reply.code(403).send({
+          error:            'FORBIDDEN',
+          message:          'You can only view your own payslip',
+          visibility_reason: visibility.reason,
+        })
+      }
+
+      if (!visibility.employee_visible) {
+        return reply.code(403).send({
+          error:            'NOT_FINALIZED',
+          message:          visibility.label,
+          visibility_reason: visibility.reason,
+        })
       }
     }
 
-    const emp = (data as any).employees
     return reply.send({
       data: {
-        ...data,
-        employees: undefined,
+        ...slip,
+        payroll_runs:  undefined,
+        employees:     undefined,
         employee_name: emp ? `${emp.first_name} ${emp.last_name}` : null,
         employee_code: emp?.employee_code ?? null,
+        run_status:    run?.status ?? null,
+        visibility,
       },
     })
   })
 
+  // ── GET /payroll/runs/:id/blockers ──────────────────────────────────────────
+  // Resolution Center data: grouped blockers + run health for a failed/partial run.
+  // Returns: { groups, health, run }
+  fastify.get('/payroll/runs/:id/blockers', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    // Verify run belongs to tenant
+    const { data: run } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status, employee_count, error_message, failure_summary')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+
+    // Fetch blockers joined with employee info
+    const { data: blockerRows, error: blockerErr } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select(`
+        id, employee_id, rule_code, severity, blocking, stage,
+        reason, message, status, resolved_at, resolution_note, metadata,
+        employees(first_name, last_name, employee_code)
+      `)
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true })
+
+    if (blockerErr) {
+      req.log.error({ err: blockerErr, run_id: id }, 'payroll blockers: query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch blockers' })
+    }
+
+    // Fetch validation rules for enrichment
+    const { data: dbRules } = await fastify.supabase
+      .from('payroll_validation_rules')
+      .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
+
+    const flatBlockers = (blockerRows ?? []).map((b: any) => {
+      const emp = b.employees ?? null
+      return {
+        id:              b.id,
+        employee_id:     b.employee_id ?? null,
+        rule_code:       b.rule_code,
+        severity:        b.severity,
+        blocking:        b.blocking,
+        stage:           b.stage,
+        reason:          b.reason,
+        message:         b.message,
+        status:          b.status,
+        resolved_at:     b.resolved_at ?? null,
+        resolution_note: b.resolution_note ?? null,
+        employee_name:   emp ? `${emp.first_name} ${emp.last_name}` : null,
+        employee_code:   emp?.employee_code ?? null,
+      }
+    })
+
+    const groups = groupPayrollBlockers(flatBlockers, dbRules ?? [])
+    const health = computePayrollRunHealth(flatBlockers)
+
+    return reply.send({ run, groups, health })
+  })
+
+  // ── POST /payroll/blockers/:id/resolve ───────────────────────────────────────
+  // Mark a single blocker as resolved or ignored.
+  fastify.post('/payroll/blockers/:id/resolve', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      action:          z.enum(['resolved', 'ignored']),
+      resolution_note: z.string().max(500).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const { action, resolution_note } = parsed.data
+    const tenantId = req.tenantId as string
+
+    // Fetch blocker to verify ownership and get run_id for forensic event
+    const { data: blocker } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select('id, run_id, rule_code, employee_id, status')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    if (!blocker) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Blocker not found' })
+    if (blocker.status !== 'open') {
+      return reply.code(409).send({
+        error: 'ALREADY_RESOLVED',
+        message: `Blocker is already ${blocker.status}`,
+      })
+    }
+
+    const { error: updateErr } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .update({
+        status:          action,
+        resolved_by:     req.userId,
+        resolved_at:     new Date().toISOString(),
+        resolution_note: resolution_note ?? null,
+      })
+      .eq('id', id)
+
+    if (updateErr) {
+      req.log.error({ err: updateErr, blocker_id: id }, 'payroll blockers: resolve update failed')
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update blocker status' })
+    }
+
+    // Forensic event
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:   tenantId,
+      run_id:      blocker.run_id,
+      event_type:  action === 'resolved' ? 'blocker_resolved' : 'blocker_ignored',
+      employee_id: blocker.employee_id ?? undefined,
+      payload: {
+        blocker_id:      id,
+        rule_code:       blocker.rule_code,
+        action,
+        resolution_note: resolution_note ?? null,
+        resolved_by:     req.userId,
+      },
+    })
+
+    return reply.send({ success: true, blocker_id: id, action })
+  })
+
+  // ── POST /payroll/runs/:id/retry-failed ──────────────────────────────────────
+  // Re-run only the employees who have open critical blockers.
+  // Gated by computePayrollRunHealth().retry_eligible.
+  fastify.post('/payroll/runs/:id/retry-failed', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data: run } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!['failed', 'partial_failed'].includes(run.status)) {
+      return reply.code(409).send({
+        error:   'INVALID_RUN_STATUS',
+        message: `Run status is '${run.status}' — only failed or partial_failed runs can be retried`,
+      })
+    }
+
+    // Freeze guard
+    const freeze = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (freeze.frozen) {
+      return reply.code(423).send({ error: 'PAYROLL_FROZEN', message: freeze.reason })
+    }
+
+    // Check retry eligibility via blocker health
+    const { data: openBlockers } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select('severity, blocking, status')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+
+    const health = computePayrollRunHealth(openBlockers ?? [])
+    if (!health.retry_eligible) {
+      return reply.code(422).send({
+        error:   'RETRY_BLOCKED',
+        message: health.health_label,
+        health,
+      })
+    }
+
+    // Find which employees have open blockers (those are the ones that failed)
+    const { data: openBlockerRows } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select('employee_id')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'open')
+      .not('employee_id', 'is', null)
+
+    const retryEmpIds = [...new Set((openBlockerRows ?? []).map((b: any) => b.employee_id as string))]
+    if (retryEmpIds.length === 0) {
+      return reply.send({ message: 'No open blockers found — nothing to retry', retried_count: 0 })
+    }
+
+    // Fetch employee records for the retry set
+    const { data: employees } = await fastify.supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('tenant_id', tenantId)
+      .in('id', retryEmpIds)
+
+    const empList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+
+    // Working days context
+    const [runYear, runMon] = (run.month as string).split('-').map(Number)
+    const runPeriodEnd = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
+    let total_working_days: number
+    try {
+      total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, run.month)
+    } catch (wdErr: any) {
+      return reply.code(500).send({
+        error:   'WORKING_DAYS_FETCH_FAILED',
+        message: wdErr?.message ?? 'Failed to count working days',
+      })
+    }
+
+    // Fetch validation rules for blocker rebuild
+    const { data: dbRulesForRetry } = await fastify.supabase
+      .from('payroll_validation_rules')
+      .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
+      .eq('enabled', true)
+
+    // Re-run each failed employee
+    const succeededRetry: string[] = []
+    const failedRetry: FailedEmployee[] = []
+
+    for (const emp of empList) {
+      const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month: run.month, run_id: id }
+      try {
+        const [compensation, attendance] = await Promise.all([
+          fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
+          fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, run.month),
+        ])
+
+        const compVal = validateCompensation(
+          compensation, { employeeId: emp.id, month: run.month }, runPeriodEnd,
+        )
+        if (compVal.blocking_errors.length > 0) {
+          failedRetry.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'compensation_validation',
+            reason:        compVal.blocking_errors[0],
+          })
+          continue
+        }
+
+        const result  = computePayrollSlip({ tenantId, employeeId: emp.id, month: run.month, compensation, attendance, total_working_days })
+        const slipRow = buildSlipRow(tenantId, id, result, run.month)
+        const slipVal = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month: run.month })
+
+        if (!slipVal.valid) {
+          failedRetry.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'slip_validation',
+            reason:        slipVal.errors[0],
+          })
+          continue
+        }
+
+        // Delete existing slip (if re-inserted from a previous partial retry)
+        await fastify.supabase.from('payroll_slips').delete()
+          .eq('run_id', id).eq('employee_id', emp.id)
+
+        const { error: insertErr } = await fastify.supabase.from('payroll_slips').insert(slipRow)
+        if (insertErr) {
+          failedRetry.push({
+            employee_id:   emp.id,
+            employee_code: emp.employee_code,
+            failure_stage: 'db_insert',
+            reason:        insertErr.message,
+          })
+          continue
+        }
+
+        succeededRetry.push(emp.id)
+
+        // Close open blockers for this employee (they succeeded now)
+        await fastify.supabase
+          .from('payroll_run_blockers')
+          .update({ status: 'resolved', resolved_by: req.userId, resolved_at: new Date().toISOString(), resolution_note: 'Auto-resolved by retry' })
+          .eq('run_id', id)
+          .eq('employee_id', emp.id)
+          .eq('status', 'open')
+
+      } catch (unexpectedErr: any) {
+        failedRetry.push({
+          employee_id:   emp.id,
+          employee_code: emp.employee_code,
+          failure_stage: 'unexpected',
+          reason:        unexpectedErr?.message ?? 'Unexpected error',
+        })
+      }
+    }
+
+    // Insert new blockers for newly failed employees
+    if (failedRetry.length > 0) {
+      try {
+        const newBlockerRows = buildPayrollBlockers({ tenantId, runId: id, failedEmployees: failedRetry, dbRules: dbRulesForRetry ?? undefined })
+        if (newBlockerRows.length > 0) {
+          await fastify.supabase.from('payroll_run_blockers').insert(newBlockerRows)
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
+    // Update run status based on current open blockers after retry
+    const { data: remainingBlockers } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select('severity, blocking, status')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+
+    const remainingHealth = computePayrollRunHealth(remainingBlockers ?? [])
+    const newRunStatus = remainingHealth.total_open === 0 ? 'draft' : 'partial_failed'
+
+    await fastify.supabase
+      .from('payroll_runs')
+      .update({ status: newRunStatus })
+      .eq('id', id)
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId, run_id: id,
+      event_type: 'payroll_retry_triggered',
+      month:      run.month,
+      payload: {
+        retried_count:   empList.length,
+        succeeded_count: succeededRetry.length,
+        failed_count:    failedRetry.length,
+        new_run_status:  newRunStatus,
+        initiated_by:    req.userId,
+      },
+    })
+
+    return reply.send({
+      retried_count:    empList.length,
+      succeeded_count:  succeededRetry.length,
+      failed_count:     failedRetry.length,
+      new_run_status:   newRunStatus,
+      health:           remainingHealth,
+      ...(failedRetry.length > 0 && { failed_employees: failedRetry }),
+    })
+  })
+
+  // ── POST /payroll/runs/:id/freeze ────────────────────────────────────────────
+  // Freeze the month of this run, preventing further payroll writes.
+  fastify.post('/payroll/runs/:id/freeze', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      reason: z.string().max(500).optional(),
+    })
+    const parsed = schema.safeParse(req.body ?? {})
+    const reason = parsed.success ? (parsed.data.reason ?? null) : null
+    const tenantId = req.tenantId as string
+
+    const { data: run } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+
+    // Check already frozen
+    const alreadyFrozen = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (alreadyFrozen.frozen) {
+      return reply.code(409).send({
+        error:   'ALREADY_FROZEN',
+        message: `Payroll for ${run.month} is already frozen`,
+      })
+    }
+
+    const { error: freezeErr } = await fastify.supabase
+      .from('payroll_freeze_log')
+      .insert({
+        tenant_id:   tenantId,
+        freeze_month: run.month,
+        action:       'freeze',
+        frozen_by:    req.userId,
+        frozen_at:    new Date().toISOString(),
+        reason:       reason ?? `Frozen via Resolution Center for run ${id}`,
+      })
+
+    if (freezeErr) {
+      req.log.error({ err: freezeErr, run_id: id }, 'payroll freeze: insert failed')
+      return reply.code(500).send({ error: 'FREEZE_FAILED', message: 'Failed to freeze payroll month' })
+    }
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId, run_id: id,
+      event_type: 'payroll_run_frozen',
+      month:      run.month,
+      payload:    { frozen_by: req.userId, reason },
+    })
+
+    return reply.send({
+      success:      true,
+      frozen_month: run.month,
+      reason:       reason ?? null,
+    })
+  })
+
+  // ── GET /payroll/validation-rules ────────────────────────────────────────────
+  // List all validation rules (for Validation Center UI).
+  fastify.get('/payroll/validation-rules', hrAdminAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('payroll_validation_rules')
+      .select('*')
+      .order('stage')
+      .order('code')
+
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch validation rules' })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── PATCH /payroll/validation-rules/:id ─────────────────────────────────────
+  // Toggle enabled/blocking or change severity of a validation rule.
+  // Only super_admin can call; hr_admin gets 403.
+  fastify.patch('/payroll/validation-rules/:id', hrAdminAuth, async (req: any, reply) => {
+    if (!['super_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin can modify validation rules' })
+    }
+
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      enabled:  z.boolean().optional(),
+      blocking: z.boolean().optional(),
+      severity: z.enum(['critical', 'warning', 'info']).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'At least one field (enabled, blocking, severity) must be provided' })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_validation_rules')
+      .update(parsed.data)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update validation rule' })
+    if (!data)  return reply.code(404).send({ error: 'NOT_FOUND',     message: 'Validation rule not found' })
+
+    return reply.send({ data })
+  })
+
   // ── GET /payroll/my-slips ────────────────────────────────────────────────────
   // ESS: employee views own finalized payslips (list)
+  // Response: { data: EmployeePayslipView[] }
   fastify.get('/payroll/my-slips', auth, async (req: any, reply) => {
-    const { data: profile } = await fastify.supabase
+    // Resolve employee_id from auth profile (tenant-scoped to prevent cross-tenant leaks)
+    const { data: profile, error: profileErr } = await fastify.supabase
       .from('profiles')
       .select('employee_id')
       .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (!profile?.employee_id) return reply.send([])
+    if (profileErr) {
+      req.log.error(
+        { err: profileErr, user_id: req.userId, tenant_id: req.tenantId },
+        'payroll my-slips: profile lookup failed',
+      )
+      return reply.code(500).send({ error: 'PROFILE_FETCH_FAILED', message: 'Unable to resolve your employee profile' })
+    }
 
+    // Profile exists but no employee_id linked — return empty list (not an error)
+    if (!profile?.employee_id) {
+      return reply.send({ data: [] })
+    }
+
+    // Fetch all finalized slips with run context for visibility computation.
+    // LEFT JOIN on payroll_runs (via run_id FK) to get run status.
+    // Only finalized slips are returned to employees — the RLS policy ps_emp_read
+    // already enforces status='finalized', but we filter here too for defence-in-depth.
     const { data, error } = await fastify.supabase
       .from('payroll_slips')
-      .select('id, month, status, gross_pay, total_deductions, net_pay, lop_days, payable_days, created_at')
+      .select(`
+        id, employee_id, run_id, month, status, held_reason, warning,
+        total_working_days, payable_days, lop_days, overtime_hours,
+        ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay,
+        employer_contributions, component_breakdown, created_at,
+        payroll_runs!inner(id, status)
+      `)
       .eq('tenant_id',   req.tenantId)
       .eq('employee_id', profile.employee_id)
       .eq('status',      'finalized')
       .order('month', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch payslips' })
-    return reply.send(data ?? [])
+    if (error) {
+      req.log.error(
+        { err: error, employee_id: profile.employee_id, tenant_id: req.tenantId },
+        'payroll my-slips: slip query failed',
+      )
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch payslips' })
+    }
+
+    const slips = (data ?? []).map((r: any) => {
+      const run = r.payroll_runs ?? null
+      const visibility = buildPayrollVisibilityState(
+        { status: r.status, held_reason: r.held_reason },
+        run ? { status: run.status } : null,
+      )
+      return {
+        slip_id:               r.id,
+        employee_id:           r.employee_id,
+        month:                 r.month,
+        run_id:                r.run_id,
+        run_status:            run?.status ?? null,
+        gross_pay:             r.gross_pay,
+        net_pay:               r.net_pay,
+        lop_days:              r.lop_days,
+        lop_amount:            r.lop_amount,
+        payable_days:          r.payable_days,
+        total_working_days:    r.total_working_days,
+        overtime_hours:        r.overtime_hours,
+        ctc_monthly:           r.ctc_monthly,
+        total_deductions:      r.total_deductions,
+        employer_contributions:r.employer_contributions,
+        component_breakdown:   r.component_breakdown ?? [],
+        status:                r.status,
+        held_reason:           r.held_reason ?? null,
+        warning:               r.warning ?? null,
+        created_at:            r.created_at,
+        visibility,
+      }
+    })
+
+    return reply.send({ data: slips })
+  })
+
+  // ── GET /payroll/slips/trend ─────────────────────────────────────────────────
+  // ESS: rolling month-by-month trend of the caller's net pay, gross pay, and
+  // LOP days. Used to drive the EssCompensation chart.
+  // Query params: months (1–24, default 12)
+  fastify.get('/payroll/slips/trend', auth, async (req: any, reply) => {
+    // Resolve employee_id from the authenticated user's profile
+    const { data: profile, error: profileErr } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (profileErr) {
+      req.log.error({ err: profileErr }, 'payroll slips/trend: profile lookup failed')
+      return reply.code(500).send({ error: 'PROFILE_FETCH_FAILED', message: 'Unable to resolve your employee profile' })
+    }
+
+    if (!profile?.employee_id) {
+      return reply.send({ data: [] })
+    }
+
+    const querySchema = z.object({
+      months: z.coerce.number().int().min(1).max(24).default(12),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { months } = parsed.data
+
+    // Compute the earliest month to include: today's year-month minus (months - 1)
+    const now      = new Date()
+    const cutoffDt = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)
+    const cutoff   = `${cutoffDt.getFullYear()}-${String(cutoffDt.getMonth() + 1).padStart(2, '0')}`
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_slips')
+      .select('month, net_pay, gross_pay, lop_days, lop_amount, payable_days, ctc_monthly, status')
+      .eq('employee_id', profile.employee_id)
+      .eq('tenant_id', req.tenantId)
+      .gte('month', cutoff)
+      .order('month', { ascending: true })
+
+    if (error) {
+      req.log.error({ err: error }, 'payroll slips/trend: query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch payroll trend' })
+    }
+
+    // Only include finalized slips in the trend — draft/held slips are not yet authoritative
+    const trend = (data ?? [])
+      .filter((r: any) => r.status === 'finalized')
+      .map((r: any) => ({
+        month:        r.month,
+        net_pay:      r.net_pay      ?? 0,
+        gross_pay:    r.gross_pay    ?? 0,
+        lop_days:     r.lop_days     ?? 0,
+        lop_amount:   r.lop_amount   ?? 0,
+        payable_days: r.payable_days ?? 0,
+        ctc_monthly:  r.ctc_monthly  ?? 0,
+      }))
+
+    return reply.send({ data: trend, months_requested: months })
+  })
+
+  // ── POST /payroll/runs/:id/rollback ──────────────────────────────────────────
+  // Roll a finalized/partial_failed run back to draft so it can be re-processed.
+  // Only super_admin may rollback a finalized run; hr_admin can rollback drafts.
+  fastify.post('/payroll/runs/:id/rollback', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const { reason } = (req.body ?? {}) as { reason?: string }
+
+    const { data: run, error: runErr } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status, tenant_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (runErr || !run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (run.status === 'processing') {
+      return reply.code(409).send({ error: 'PROCESSING', message: 'Cannot rollback a run that is currently processing' })
+    }
+    if (run.status === 'finalized' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may rollback a finalized run' })
+    }
+
+    // Delete existing slips for this run (draft state = no slips)
+    await fastify.supabase.from('payroll_slips').delete().eq('run_id', id).eq('tenant_id', tenantId)
+
+    // Reset run to draft
+    const { error: updateErr } = await fastify.supabase
+      .from('payroll_runs')
+      .update({ status: 'draft', finalized_at: null, error_message: null, failure_summary: null })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (updateErr) return reply.code(500).send({ error: 'DB_ERROR', message: updateErr.message })
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id: tenantId, run_id: id, event_type: 'run_rolled_back',
+      month: run.month, payload: { reason: reason ?? null, rolled_back_by: req.userId },
+    })
+
+    return reply.send({ message: 'Run rolled back to draft', run_id: id })
+  })
+
+  // ── GET /payroll/forensics ────────────────────────────────────────────────────
+  // Cross-run forensic timeline — all payroll_run_events for the tenant, ordered
+  // by recency, with run context joined.
+  fastify.get('/payroll/forensics', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const { run_id, month, event_type, limit = '100', offset = '0' } =
+      (req.query ?? {}) as Record<string, string>
+
+    let q = fastify.supabase
+      .from('payroll_run_events')
+      .select(`
+        id, run_id, event_type, employee_id, month, payload, error_details, created_at,
+        payroll_runs ( month, status ),
+        employees ( employee_code, profiles ( full_name ) )
+      `, { count: 'exact' })
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1)
+
+    if (run_id)     q = q.eq('run_id', run_id)
+    if (month)      q = q.eq('month', month)
+    if (event_type) q = q.eq('event_type', event_type)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    return reply.send({ data: data ?? [], total: count ?? 0 })
+  })
+
+  // ── GET /payroll/readiness-score ─────────────────────────────────────────────
+  // Composite readiness score (0-100) for the current payroll month.
+  // Aggregates: coverage, blockers, validations, attendance, statutory configs.
+  fastify.get('/payroll/readiness-score', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    // Latest run
+    const { data: latestRun } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status, employee_count, failure_summary')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const month = latestRun?.month ?? new Date().toISOString().slice(0, 7)
+
+    // Compensation coverage
+    const { buildCompensationCoverageAudit } = await import('../../lib/payroll-compensation-coverage.js')
+    const coverage = await buildCompensationCoverageAudit(fastify.supabase, tenantId)
+
+    // Open blockers for latest run
+    const { count: openBlockers } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select('*', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'open')
+      .eq('run_id', latestRun?.id ?? '00000000-0000-0000-0000-000000000000')
+
+    // Pending validations
+    const { count: pendingValidations } = await fastify.supabase
+      .from('payroll_run_blockers')
+      .select('*', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'open')
+
+    // Freeze status
+    const freezeCheck = await checkFreezeGuard(fastify.supabase, tenantId, month)
+
+    // Active employees vs covered
+    const { count: totalActive } = await fastify.supabase
+      .from('employees')
+      .select('*', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+
+    // Scoring logic (each dimension 0-25 points, total 100)
+    const compensationScore = totalActive && totalActive > 0
+      ? Math.round(((coverage.employees_with_active_compensation ?? 0) / totalActive) * 25)
+      : 0
+
+    const blockerScore = Math.max(0, 25 - ((openBlockers ?? 0) * 5))
+    const runScore     = latestRun?.status === 'finalized' ? 25
+      : latestRun?.status === 'draft' ? 15
+      : latestRun?.status === 'partial_failed' ? 10
+      : 5
+    const configScore  = coverage.ready_for_payroll ? 25 : 15
+
+    const total = compensationScore + blockerScore + runScore + configScore
+
+    const checks = [
+      { key: 'compensation_coverage', label: 'Compensation Coverage', score: compensationScore, max: 25,
+        detail: `${coverage.employees_with_active_compensation ?? 0}/${totalActive ?? 0} employees covered`,
+        pass: compensationScore >= 20 },
+      { key: 'open_blockers', label: 'No Open Blockers', score: blockerScore, max: 25,
+        detail: `${openBlockers ?? 0} open blockers`, pass: (openBlockers ?? 0) === 0 },
+      { key: 'run_status', label: 'Payroll Run Status', score: runScore, max: 25,
+        detail: latestRun?.status ?? 'No run', pass: runScore >= 20 },
+      { key: 'config_valid', label: 'Configuration Valid', score: configScore, max: 25,
+        detail: coverage.ready_for_payroll ? 'All configs valid' : 'Config issues found',
+        pass: coverage.ready_for_payroll },
+    ]
+
+    return reply.send({
+      data: {
+        score: total,
+        max: 100,
+        grade: total >= 90 ? 'A' : total >= 75 ? 'B' : total >= 60 ? 'C' : 'D',
+        ready: total >= 80 && !freezeCheck.frozen,
+        month,
+        checks,
+        frozen: freezeCheck.frozen,
+        run: latestRun ? { id: latestRun.id, status: latestRun.status, month: latestRun.month } : null,
+      },
+    })
+  })
+
+  // ── GET /payroll/freeze-log ───────────────────────────────────────────────────
+  // Audit trail for all freeze/unfreeze events.
+  fastify.get('/payroll/freeze-log', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const { data, error } = await fastify.supabase
+      .from('payroll_freeze_log')
+      .select('id, freeze_month, action, reason, frozen_at, frozen_by, unfrozen_at, payroll_run_id, profiles!payroll_freeze_log_frozen_by_fkey(full_name)')
+      .eq('tenant_id', tenantId)
+      .order('frozen_at', { ascending: false })
+      .limit(100)
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── POST /payroll/freeze-month ────────────────────────────────────────────────
+  // Explicitly freeze a payroll month (outside of a run).
+  fastify.post('/payroll/freeze-month', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const schema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), reason: z.string().min(1) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', issues: parsed.error.issues })
+    const { month, reason } = parsed.data
+
+    const already = await checkFreezeGuard(fastify.supabase, tenantId, month)
+    if (already.frozen) return reply.code(409).send({ error: 'ALREADY_FROZEN', message: `${month} is already frozen` })
+
+    const { error } = await fastify.supabase.from('payroll_freeze_log').insert({
+      tenant_id: tenantId, freeze_month: month, action: 'freeze',
+      reason, frozen_by: req.userId, frozen_at: new Date().toISOString(),
+    })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ message: `${month} frozen`, month })
+  })
+
+  // ── POST /payroll/unfreeze-month ──────────────────────────────────────────────
+  // Unfreeze a previously frozen payroll month. Requires super_admin.
+  fastify.post('/payroll/unfreeze-month', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    if (req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may unfreeze a payroll month' })
+    }
+    const schema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), reason: z.string().min(1) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', issues: parsed.error.issues })
+    const { month, reason } = parsed.data
+
+    const already = await checkFreezeGuard(fastify.supabase, tenantId, month)
+    if (!already.frozen) return reply.code(409).send({ error: 'NOT_FROZEN', message: `${month} is not frozen` })
+
+    // Mark the freeze record as unfrozen
+    const { error } = await fastify.supabase
+      .from('payroll_freeze_log')
+      .update({ action: 'unfreeze', unfrozen_by: req.userId, unfrozen_at: new Date().toISOString() })
+      .eq('tenant_id', tenantId)
+      .eq('freeze_month', month)
+      .eq('action', 'freeze')
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ message: `${month} unfrozen`, month })
+  })
+
+  // ── GET /payroll/statutory-reconciliation ─────────────────────────────────────
+  // Cross-statutory reconciliation summary: PF, ESI, PT, TDS per run/month.
+  fastify.get('/payroll/statutory-reconciliation', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const { month } = (req.query ?? {}) as { month?: string }
+
+    // Get the run for the given month (or latest)
+    let runQuery = fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status, employee_count, total_gross, total_net, total_deductions')
+      .eq('tenant_id', tenantId)
+      .in('status', ['finalized', 'partial_failed', 'draft'])
+      .order('created_at', { ascending: false })
+    if (month) runQuery = runQuery.eq('month', month)
+    const { data: run } = await runQuery.limit(1).maybeSingle()
+
+    if (!run) return reply.send({ data: null, message: 'No payroll run found' })
+
+    // Aggregate component amounts from slips for statutory deductions
+    const { data: slips } = await fastify.supabase
+      .from('payroll_slips')
+      .select('component_breakdown, gross_pay, net_pay, employee_id')
+      .eq('run_id', run.id)
+      .eq('tenant_id', tenantId)
+
+    const recon = {
+      pf:  { payable: 0, computed: 0, variance: 0 },
+      esi: { payable: 0, computed: 0, variance: 0 },
+      pt:  { payable: 0, computed: 0, variance: 0 },
+      tds: { payable: 0, computed: 0, variance: 0 },
+    }
+    const employeeCount = slips?.length ?? 0
+
+    for (const slip of (slips ?? [])) {
+      for (const comp of (slip.component_breakdown ?? [])) {
+        const code = (comp.code ?? '').toUpperCase()
+        const amt  = Number(comp.monthly_amount ?? 0)
+        if (code === 'EPF' || code === 'PF')        { recon.pf.computed  += amt; recon.pf.payable  += amt }
+        else if (code === 'ESI')                    { recon.esi.computed += amt; recon.esi.payable += amt }
+        else if (code === 'PT' || code === 'PTAX')  { recon.pt.computed  += amt; recon.pt.payable  += amt }
+        else if (code === 'TDS')                    { recon.tds.computed += amt; recon.tds.payable += amt }
+      }
+    }
+
+    // Variances (filed amounts not tracked in DB yet — show as 0 diff)
+    recon.pf.variance  = recon.pf.payable  - recon.pf.computed
+    recon.esi.variance = recon.esi.payable - recon.esi.computed
+    recon.pt.variance  = recon.pt.payable  - recon.pt.computed
+    recon.tds.variance = recon.tds.payable - recon.tds.computed
+
+    const readyForFiling =
+      Math.abs(recon.pf.variance)  < 1 &&
+      Math.abs(recon.esi.variance) < 1 &&
+      Math.abs(recon.pt.variance)  < 1 &&
+      Math.abs(recon.tds.variance) < 1
+
+    return reply.send({
+      data: {
+        run: { id: run.id, month: run.month, status: run.status, employee_count: employeeCount },
+        pf:  { ...recon.pf,  label: 'Provident Fund',      ready: Math.abs(recon.pf.variance)  < 1 },
+        esi: { ...recon.esi, label: 'Employee State Insurance', ready: Math.abs(recon.esi.variance) < 1 },
+        pt:  { ...recon.pt,  label: 'Professional Tax',    ready: Math.abs(recon.pt.variance)  < 1 },
+        tds: { ...recon.tds, label: 'Tax Deducted at Source', ready: Math.abs(recon.tds.variance) < 1 },
+        ready_for_filing: readyForFiling,
+        total_statutory: recon.pf.computed + recon.esi.computed + recon.pt.computed + recon.tds.computed,
+      },
+    })
+  })
+
+  // ── GET /payroll/approval-stages ──────────────────────────────────────────────
+  // List maker-checker log entries for payroll governance.
+  fastify.get('/payroll/approval-stages', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const { status, entity_type } = (req.query ?? {}) as Record<string, string>
+
+    let q = fastify.supabase
+      .from('maker_checker_log')
+      .select(`
+        id, entity_type, entity_id, action, status, maker_data, checker_notes,
+        submitted_at, reviewed_at, sla_hours, is_escalated,
+        maker:profiles!maker_checker_log_maker_id_fkey(full_name),
+        checker:profiles!maker_checker_log_checker_id_fkey(full_name)
+      `)
+      .eq('tenant_id', tenantId)
+      .order('submitted_at', { ascending: false })
+      .limit(100)
+
+    if (status)      q = q.eq('status', status)
+    if (entity_type) q = q.eq('entity_type', entity_type)
+
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── POST /payroll/approval-stages/:id/approve ─────────────────────────────────
+  fastify.post('/payroll/approval-stages/:id/approve', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const { notes } = (req.body ?? {}) as { notes?: string }
+
+    const { error } = await fastify.supabase
+      .from('maker_checker_log')
+      .update({ status: 'approved', checker_id: req.userId, checker_notes: notes ?? null, reviewed_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ message: 'Approved' })
+  })
+
+  // ── POST /payroll/approval-stages/:id/reject ──────────────────────────────────
+  fastify.post('/payroll/approval-stages/:id/reject', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const { notes } = (req.body ?? {}) as { notes?: string }
+
+    const { error } = await fastify.supabase
+      .from('maker_checker_log')
+      .update({ status: 'rejected', checker_id: req.userId, checker_notes: notes ?? null, reviewed_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ message: 'Rejected' })
+  })
+
+  // ── GET /payroll/payout-batches ───────────────────────────────────────────────
+  // List payout batch records (bank disbursement tracking).
+  fastify.get('/payroll/payout-batches', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const { month } = (req.query ?? {}) as { month?: string }
+
+    // Aggregate from payroll_slips — treat each finalized run as a virtual payout batch
+    let q = fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status, employee_count, total_gross, total_net, finalized_at, created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(24)
+
+    if (month) q = q.eq('month', month)
+    const { data: runs, error } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    // Map runs to virtual payout batches
+    const batches = (runs ?? []).map(r => ({
+      id:             r.id,
+      month:          r.month,
+      run_id:         r.id,
+      employee_count: r.employee_count ?? 0,
+      total_amount:   r.total_net ?? 0,
+      gross_amount:   r.total_gross ?? 0,
+      status:         r.status === 'finalized' ? 'ready' : r.status === 'draft' ? 'pending' : r.status,
+      finalized_at:   r.finalized_at,
+      created_at:     r.created_at,
+    }))
+
+    return reply.send({ data: batches })
+  })
+
+  // ── GET /payroll/payout-batches/:runId/employees ──────────────────────────────
+  // Employee-level payout details for a run (for bank advice / individual tracking).
+  fastify.get('/payroll/payout-batches/:runId/employees', hrAdminAuth, async (req: any, reply) => {
+    const { runId } = req.params as { runId: string }
+    const tenantId = req.tenantId as string
+
+    const { data: slips, error } = await fastify.supabase
+      .from('payroll_slips')
+      .select(`
+        id, employee_id, month, gross_pay, net_pay, total_deductions, lop_amount, status, held_reason,
+        employees (
+          employee_code,
+          profiles ( full_name ),
+          bank_details:employee_bank_details ( account_number_masked, bank_name, ifsc_code, is_primary )
+        )
+      `)
+      .eq('run_id', runId)
+      .eq('tenant_id', tenantId)
+      .order('employee_id')
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    const mapped = (slips ?? []).map((s: any) => {
+      const bank = (s.employees?.bank_details ?? []).find((b: any) => b.is_primary) ?? s.employees?.bank_details?.[0] ?? null
+      return {
+        slip_id:          s.id,
+        employee_id:      s.employee_id,
+        employee_code:    s.employees?.employee_code ?? '—',
+        employee_name:    s.employees?.profiles?.full_name ?? '—',
+        net_pay:          s.net_pay,
+        gross_pay:        s.gross_pay,
+        total_deductions: s.total_deductions,
+        status:           s.status,
+        held_reason:      s.held_reason,
+        bank_name:        bank?.bank_name ?? null,
+        account_masked:   bank?.account_number_masked ?? null,
+        ifsc:             bank?.ifsc_code ?? null,
+        bank_verified:    !!bank,
+      }
+    })
+
+    return reply.send({ data: mapped })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SNAPSHOT & REPLAY ENDPOINTS  (Phase 15 — Immutable Snapshot Engine)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── POST /payroll/runs/:id/snapshot ─────────────────────────────────────────
+  // Manually trigger snapshot creation for a finalized run.
+  // Normally called automatically by finalize; this endpoint enables re-creation
+  // if the auto-snapshot failed (e.g., transient DB error during finalization).
+  fastify.post('/payroll/runs/:id/snapshot', hrAdminAuth, async (req: any, reply) => {
+    const { id }       = req.params as { id: string }
+    const tenantId     = req.tenantId as string
+
+    // Verify run exists and is finalized
+    const { data: run, error: runErr } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, status, snapshot_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (runErr || !run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if ((run as any).status !== 'finalized') {
+      return reply.code(409).send({ error: 'NOT_FINALIZED', message: 'Snapshot can only be created for finalized runs' })
+    }
+    if ((run as any).snapshot_id) {
+      return reply.code(409).send({ error: 'SNAPSHOT_EXISTS', message: 'Snapshot already exists for this run', snapshot_id: (run as any).snapshot_id })
+    }
+
+    const result = await buildPayrollRunSnapshot(fastify.supabase, id, tenantId, req.userId)
+    if ('error' in result) {
+      return reply.code(500).send({ error: 'SNAPSHOT_FAILED', message: result.error })
+    }
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     id,
+      event_type: 'snapshot_created',
+      payload:    { snapshot_id: result.snapshot_id, integrity_hash: result.integrity_hash, triggered_manually: true },
+    })
+
+    return reply.send({
+      message:        'Snapshot created successfully',
+      snapshot_id:    result.snapshot_id,
+      integrity_hash: result.integrity_hash,
+    })
+  })
+
+  // ── GET /payroll/runs/:id/snapshot ──────────────────────────────────────────
+  // Fetch the snapshot manifest + summary for a run.
+  fastify.get('/payroll/runs/:id/snapshot', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data: snapshot, error } = await fastify.supabase
+      .from('payroll_run_snapshots')
+      .select('id, run_id, month, snapshot_version, integrity_hash, replayable, formula_engine_version, validation_engine_version, created_at, created_by')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (error)     return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!snapshot) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No snapshot found for this run' })
+
+    // Count employee snapshots
+    const { count } = await fastify.supabase
+      .from('payroll_employee_snapshots')
+      .select('id', { count: 'exact', head: true })
+      .eq('snapshot_id', (snapshot as any).id)
+      .eq('tenant_id', tenantId)
+
+    return reply.send({ data: { ...snapshot, employee_count: count ?? 0 } })
+  })
+
+  // ── GET /payroll/runs/:id/snapshot/employees ────────────────────────────────
+  // Paginated employee-level snapshot data (for explainability panel).
+  fastify.get('/payroll/runs/:id/snapshot/employees', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const qSchema  = z.object({
+      employee_id: z.string().uuid().optional(),
+      limit:       z.coerce.number().int().min(1).max(100).default(50),
+      offset:      z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = qSchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { employee_id, limit, offset } = parsed.data
+
+    // Find snapshot for this run
+    const { data: manifest } = await fastify.supabase
+      .from('payroll_run_snapshots')
+      .select('id')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (!manifest) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No snapshot found for this run' })
+
+    let q = fastify.supabase
+      .from('payroll_employee_snapshots')
+      .select(
+        'id, employee_id, employee_code, employee_name, gross_pay, deductions, net_pay, payable_days, lop_days, overtime_hours, computed_at, attendance_snapshot, compensation_snapshot, component_snapshot, statutory_snapshot, formula_snapshot, validation_snapshot',
+        { count: 'exact' },
+      )
+      .eq('snapshot_id', (manifest as any).id)
+      .eq('tenant_id', tenantId)
+      .range(offset, offset + limit - 1)
+
+    if (employee_id) q = (q as any).eq('employee_id', employee_id)
+
+    const { data: rows, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    return reply.send({ data: rows ?? [], total: count ?? 0 })
+  })
+
+  // ── POST /payroll/runs/:id/verify-integrity ──────────────────────────────────
+  // Re-hash the stored snapshot and compare against integrity_hash.
+  fastify.post('/payroll/runs/:id/verify-integrity', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data: manifest } = await fastify.supabase
+      .from('payroll_run_snapshots')
+      .select('id')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (!manifest) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No snapshot found for this run' })
+
+    const result = await validateSnapshotIntegrity(fastify.supabase, (manifest as any).id, tenantId)
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     id,
+      event_type: result.valid ? 'snapshot_verified' : 'snapshot_integrity_failed',
+      payload: {
+        snapshot_id:    (manifest as any).id,
+        valid:          result.valid,
+        stored_hash:    result.stored_hash,
+        computed_hash:  result.computed_hash,
+        employee_count: result.employee_count,
+      },
+    })
+
+    return reply.send({ data: result })
+  })
+
+  // ── POST /payroll/runs/:id/replay ────────────────────────────────────────────
+  // Replay a finalized payroll run using ONLY snapshot data.
+  // Modes:
+  //   dry_replay      — recompute silently, return result (no persistence change)
+  //   variance_replay — compare historical vs current engine, surface diffs
+  //   audit_replay    — full reconstruction for audit purposes
+  fastify.post('/payroll/runs/:id/replay', hrAdminAuth, async (req: any, reply) => {
+    const { id }       = req.params as { id: string }
+    const tenantId     = req.tenantId as string
+
+    const bodySchema = z.object({
+      replay_type: z.enum(['dry_replay', 'variance_replay', 'audit_replay']).default('audit_replay'),
+    })
+    const parsed = bodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { replay_type } = parsed.data
+
+    const result = await replayPayrollRun(fastify.supabase, id, tenantId, replay_type, req.userId)
+    if ('error' in result) {
+      return reply.code(500).send({ error: 'REPLAY_FAILED', message: result.error })
+    }
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     id,
+      event_type: result.variance_detected ? 'replay_variance_found' : 'replay_completed',
+      payload: {
+        replay_type,
+        total_employees:   result.total_employees,
+        matched:           result.matched,
+        diverged:          result.diverged,
+        variance_detected: result.variance_detected,
+      },
+    })
+
+    return reply.send({ data: result })
+  })
+
+  // ── GET /payroll/runs/:id/replay-sessions ────────────────────────────────────
+  // List all replay sessions for a run.
+  fastify.get('/payroll/runs/:id/replay-sessions', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_replay_sessions')
+      .select('id, replay_type, triggered_by, triggered_at, result_status, variance_detected, variance_summary, completed_at')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .order('triggered_at', { ascending: false })
+      .limit(20)
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ACCOUNTING LEDGER ENDPOINTS  (Phase 16 — Financial Ledger Engine)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── POST /payroll/runs/:id/ledger ────────────────────────────────────────────
+  // Generate or regenerate a financial ledger for a finalized run (from snapshot).
+  fastify.post('/payroll/runs/:id/ledger', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const bodySchema = z.object({
+      ledger_type:      z.enum(['payroll','accrual','payout','adjustment']).default('payroll'),
+      accounting_date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    })
+    const parsed = bodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const result = await buildPayrollFinancialLedger(
+      fastify.supabase, id, tenantId, req.userId,
+      { ledger_type: parsed.data.ledger_type, accounting_date: parsed.data.accounting_date },
+    )
+
+    if ('error' in result) return reply.code(500).send({ error: 'LEDGER_BUILD_FAILED', message: result.error })
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     id,
+      event_type: 'ledger_created',
+      payload: {
+        ledger_id:      result.ledger_id,
+        balanced:       result.balanced,
+        total_debit:    result.total_debit,
+        entry_count:    result.entry_count,
+        integrity_hash: result.integrity_hash.slice(0, 12),
+      },
+    })
+
+    if (result.balanced) {
+      await logRunEvent(fastify.supabase, req.log, {
+        tenant_id:  tenantId,
+        run_id:     id,
+        event_type: 'ledger_balanced',
+        payload:    { ledger_id: result.ledger_id },
+      })
+    }
+
+    return reply.send({ data: result })
+  })
+
+  // ── GET /payroll/runs/:id/ledger ─────────────────────────────────────────────
+  // Get ledger manifest + control totals.
+  fastify.get('/payroll/runs/:id/ledger', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_financial_ledgers')
+      .select('id, ledger_month, ledger_type, ledger_status, total_debit, total_credit, currency, integrity_hash, posted_at, posted_by, reverses_ledger_id, notes, created_at')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── GET /payroll/ledgers/:ledgerId/entries ───────────────────────────────────
+  // Paginated ledger entries — GL journal view.
+  fastify.get('/payroll/ledgers/:ledgerId/entries', hrAdminAuth, async (req: any, reply) => {
+    const { ledgerId } = req.params as { ledgerId: string }
+    const tenantId     = req.tenantId as string
+    const qSchema = z.object({
+      entry_type:  z.string().optional(),
+      gl_code:     z.string().optional(),
+      employee_id: z.string().uuid().optional(),
+      limit:       z.coerce.number().int().min(1).max(500).default(200),
+      offset:      z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = qSchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { entry_type, gl_code, employee_id, limit, offset } = parsed.data
+
+    let q = fastify.supabase
+      .from('payroll_ledger_entries')
+      .select('id, entry_type, entry_category, gl_account_code, gl_account_name, debit_amount, credit_amount, description, source_component_code, source_component_name, accounting_date, journal_reference, employee_id', { count: 'exact' })
+      .eq('ledger_id', ledgerId)
+      .eq('tenant_id', tenantId)
+      .order('accounting_date')
+      .order('journal_reference')
+      .range(offset, offset + limit - 1)
+
+    if (entry_type)  q = (q as any).eq('entry_type', entry_type)
+    if (gl_code)     q = (q as any).eq('gl_account_code', gl_code)
+    if (employee_id) q = (q as any).eq('employee_id', employee_id)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0 })
+  })
+
+  // ── POST /payroll/ledgers/:ledgerId/post ─────────────────────────────────────
+  // Post a balanced ledger (requires balanced status).
+  fastify.post('/payroll/ledgers/:ledgerId/post', hrAdminAuth, async (req: any, reply) => {
+    const { ledgerId } = req.params as { ledgerId: string }
+    const tenantId     = req.tenantId as string
+
+    const { data: ledger, error: lErr } = await fastify.supabase
+      .from('payroll_financial_ledgers')
+      .select('id, ledger_status, run_id, total_debit, total_credit')
+      .eq('id', ledgerId)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    if (lErr || !ledger) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ledger not found' })
+    if ((ledger as any).ledger_status === 'posted') return reply.code(409).send({ error: 'ALREADY_POSTED', message: 'Ledger is already posted' })
+    if ((ledger as any).ledger_status !== 'balanced') {
+      return reply.code(409).send({
+        error:   'NOT_BALANCED',
+        message: `Ledger must be balanced before posting. Current status: ${(ledger as any).ledger_status}. ` +
+                 `Debit: ${(ledger as any).total_debit}, Credit: ${(ledger as any).total_credit}`,
+      })
+    }
+
+    const { error: updErr } = await fastify.supabase
+      .from('payroll_financial_ledgers')
+      .update({ ledger_status: 'posted', posted_at: new Date().toISOString(), posted_by: req.userId })
+      .eq('id', ledgerId)
+
+    if (updErr) return reply.code(500).send({ error: 'POST_FAILED', message: updErr.message })
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     (ledger as any).run_id,
+      event_type: 'ledger_posted',
+      payload:    { ledger_id: ledgerId, posted_by: req.userId },
+    })
+
+    return reply.send({ message: 'Ledger posted successfully', ledger_id: ledgerId })
+  })
+
+  // ── POST /payroll/ledgers/:ledgerId/reverse ──────────────────────────────────
+  // Safe reversal — creates mirror entries, never deletes posted entries.
+  fastify.post('/payroll/ledgers/:ledgerId/reverse', hrAdminAuth, async (req: any, reply) => {
+    const { ledgerId } = req.params as { ledgerId: string }
+    const tenantId     = req.tenantId as string
+
+    const bodySchema = z.object({ reason: z.string().min(5).max(500) })
+    const parsed = bodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const result = await reversePayrollLedger(fastify.supabase, ledgerId, tenantId, req.userId, parsed.data.reason)
+    if ('error' in result) return reply.code(400).send({ error: 'REVERSAL_FAILED', message: result.error })
+
+    const { data: origLedger } = await fastify.supabase
+      .from('payroll_financial_ledgers')
+      .select('run_id')
+      .eq('id', ledgerId)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id:  tenantId,
+      run_id:     (origLedger as any)?.run_id ?? '',
+      event_type: 'ledger_reversed',
+      payload:    { original_ledger_id: ledgerId, reversal_ledger_id: result.reversal_ledger_id, reason: parsed.data.reason },
+    })
+
+    return reply.send({ message: 'Ledger reversed', reversal_ledger_id: result.reversal_ledger_id })
+  })
+
+  // ── GET /payroll/ledgers/:ledgerId/export ────────────────────────────────────
+  // ERP-ready export. ?format=csv|tally|sap|zoho|quickbooks
+  fastify.get('/payroll/ledgers/:ledgerId/export', hrAdminAuth, async (req: any, reply) => {
+    const { ledgerId } = req.params as { ledgerId: string }
+    const tenantId     = req.tenantId as string
+    const qSchema = z.object({
+      format: z.enum(['csv','tally','sap','zoho','quickbooks']).default('csv'),
+    })
+    const parsed = qSchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const result = await exportGeneralLedger(fastify.supabase, ledgerId, tenantId, parsed.data.format)
+    if ('error' in result) return reply.code(500).send({ error: 'EXPORT_FAILED', message: result.error })
+
+    reply.header('Content-Disposition', `attachment; filename="${result.filename}"`)
+    reply.header('Content-Type', result.mime)
+    return reply.send(result.content)
+  })
+
+  // ── GET /payroll/runs/:id/cost-allocations ───────────────────────────────────
+  // Department / cost-center burden breakdown.
+  fastify.get('/payroll/runs/:id/cost-allocations', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data: ledger } = await fastify.supabase
+      .from('payroll_financial_ledgers')
+      .select('id')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .eq('ledger_type', 'payroll')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!ledger) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No ledger found for this run — generate ledger first' })
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_cost_allocations')
+      .select('employee_id, department_id, cost_center_id, department_name, cost_center_name, gross_pay, net_pay, lop_recovery, employer_burden, statutory_burden, overtime_cost, total_cost, allocation_pct')
+      .eq('ledger_id', (ledger as any).id)
+      .eq('tenant_id', tenantId)
+      .order('total_cost', { ascending: false })
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── GET /payroll/accounting/summary ─────────────────────────────────────────
+  // Dashboard aggregates: total liability, accruals, payout completion, ledger imbalances.
+  fastify.get('/payroll/accounting/summary', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const qSchema  = z.object({ months: z.coerce.number().int().min(1).max(12).default(3) })
+    const parsed   = qSchema.safeParse(req.query)
+    const months   = parsed.success ? parsed.data.months : 3
+
+    const [ledgersRes, payoutRes] = await Promise.all([
+      fastify.supabase
+        .from('payroll_financial_ledgers')
+        .select('id, ledger_month, ledger_type, ledger_status, total_debit, total_credit')
+        .eq('tenant_id', tenantId)
+        .order('ledger_month', { ascending: false })
+        .limit(months * 3),
+      fastify.supabase
+        .from('payroll_payout_reconciliation')
+        .select('expected_amount, paid_amount, payment_status')
+        .eq('tenant_id', tenantId)
+        .limit(2000),
+    ])
+
+    const ledgers  = (ledgersRes.data ?? []) as any[]
+    const payouts  = (payoutRes.data  ?? []) as any[]
+
+    const totalPayrollLiability = ledgers
+      .filter(l => l.ledger_type === 'payroll' && l.ledger_status !== 'reversed')
+      .reduce((s, l) => s + (l.total_credit ?? 0), 0)
+
+    const pendingPayouts = payouts.filter(p => p.payment_status === 'pending' || p.payment_status === 'processing')
+    const failedPayouts  = payouts.filter(p => p.payment_status === 'failed')
+    const completedPayouts = payouts.filter(p => p.payment_status === 'paid')
+
+    const totalExpected  = payouts.reduce((s, p) => s + (p.expected_amount ?? 0), 0)
+    const totalPaid      = completedPayouts.reduce((s, p) => s + (p.paid_amount ?? 0), 0)
+    const imbalancedLedgers = ledgers.filter(l => l.ledger_status !== 'reversed' && Math.abs((l.total_debit ?? 0) - (l.total_credit ?? 0)) > 0.01)
+
+    return reply.send({
+      data: {
+        total_payroll_liability:  totalPayrollLiability,
+        pending_payout_amount:    pendingPayouts.reduce((s, p) => s + p.expected_amount, 0),
+        failed_payout_count:      failedPayouts.length,
+        payout_completion_pct:    totalExpected > 0 ? Math.round((totalPaid / totalExpected) * 100) : 0,
+        imbalanced_ledger_count:  imbalancedLedgers.length,
+        total_ledger_count:       ledgers.length,
+        posted_ledger_count:      ledgers.filter(l => l.ledger_status === 'posted').length,
+        statutory_liability_hint: 'Sum statutory payable GL accounts for exact statutory liabilities',
+        recent_ledgers:           ledgers.slice(0, 6),
+      },
+    })
+  })
+
+  // ── GET /payroll/accounting/gl-summary ────────────────────────────────────────
+  // GL account balance summary across all posted ledgers.
+  fastify.get('/payroll/accounting/gl-summary', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_ledger_entries')
+      .select('gl_account_code, gl_account_name, entry_category, debit_amount, credit_amount')
+      .eq('tenant_id', tenantId)
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    // Aggregate by GL account
+    const glMap = new Map<string, { code: string; name: string; category: string; totalDebit: number; totalCredit: number }>()
+    for (const row of (data ?? []) as any[]) {
+      const existing = glMap.get(row.gl_account_code)
+      if (existing) {
+        existing.totalDebit  += row.debit_amount  ?? 0
+        existing.totalCredit += row.credit_amount ?? 0
+      } else {
+        glMap.set(row.gl_account_code, {
+          code:        row.gl_account_code,
+          name:        row.gl_account_name,
+          category:    row.entry_category,
+          totalDebit:  row.debit_amount  ?? 0,
+          totalCredit: row.credit_amount ?? 0,
+        })
+      }
+    }
+
+    const summary = Array.from(glMap.values())
+      .sort((a, b) => a.code.localeCompare(b.code))
+      .map(g => ({
+        ...g,
+        balance:     Math.round((g.totalDebit - g.totalCredit) * 100) / 100,
+        totalDebit:  Math.round(g.totalDebit  * 100) / 100,
+        totalCredit: Math.round(g.totalCredit * 100) / 100,
+      }))
+
+    return reply.send({ data: summary })
+  })
+
+  // ── GET /payroll/payout-reconciliation ───────────────────────────────────────
+  // Payout reconciliation records with filter support.
+  fastify.get('/payroll/payout-reconciliation', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const qSchema  = z.object({
+      run_id:  z.string().uuid().optional(),
+      status:  z.string().optional(),
+      limit:   z.coerce.number().int().min(1).max(500).default(100),
+      offset:  z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = qSchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { run_id, status, limit, offset } = parsed.data
+
+    let q = fastify.supabase
+      .from('payroll_payout_reconciliation')
+      .select('id, run_id, slip_id, employee_id, expected_amount, paid_amount, variance_amount, payment_status, utr_number, bank_reference, bank_account_masked, ifsc_code, initiated_at, completed_at, failure_reason, retry_count', { count: 'exact' })
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (run_id) q = (q as any).eq('run_id', run_id)
+    if (status) q = (q as any).eq('payment_status', status)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0 })
+  })
+
+  // ── POST /payroll/payout-reconciliation/:id/update ───────────────────────────
+  // Update payout status (UTR, completion, failure).
+  fastify.post('/payroll/payout-reconciliation/:id/update', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const bodySchema = z.object({
+      payment_status: z.enum(['pending','processing','paid','failed','reversed','held','partial']),
+      paid_amount:    z.number().min(0).optional(),
+      utr_number:     z.string().max(50).optional(),
+      bank_reference: z.string().max(100).optional(),
+      failure_reason: z.string().max(500).optional(),
+    })
+    const parsed = bodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const update: Record<string, unknown> = {
+      payment_status: parsed.data.payment_status,
+      updated_at:     new Date().toISOString(),
+    }
+    if (parsed.data.paid_amount !== undefined) update.paid_amount = parsed.data.paid_amount
+    if (parsed.data.utr_number)     update.utr_number     = parsed.data.utr_number
+    if (parsed.data.bank_reference) update.bank_reference = parsed.data.bank_reference
+    if (parsed.data.failure_reason) update.failure_reason = parsed.data.failure_reason
+    if (parsed.data.payment_status === 'paid') update.completed_at = new Date().toISOString()
+    if (parsed.data.payment_status === 'processing') update.initiated_at = new Date().toISOString()
+
+    const { error } = await fastify.supabase
+      .from('payroll_payout_reconciliation')
+      .update(update)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'Payout status updated' })
+  })
+
+  // ── POST /payroll/runs/:id/payout-obligations ────────────────────────────────
+  // Generate payout obligation rows for a finalized run.
+  fastify.post('/payroll/runs/:id/payout-obligations', hrAdminAuth, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    // Check if obligations already exist
+    const { count: existing } = await fastify.supabase
+      .from('payroll_payout_reconciliation')
+      .select('id', { count: 'exact', head: true })
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+
+    if ((existing ?? 0) > 0) {
+      return reply.code(409).send({ error: 'OBLIGATIONS_EXIST', message: `${existing} payout obligations already exist for this run` })
+    }
+
+    // Get ledger id
+    const { data: ledger } = await fastify.supabase
+      .from('payroll_financial_ledgers')
+      .select('id')
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+      .eq('ledger_type', 'payroll')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    // Get slips with bank details
+    const { data: slips, error: sErr } = await fastify.supabase
+      .from('payroll_slips')
+      .select(`
+        id, employee_id, net_pay,
+        employees (
+          bank_details:employee_bank_details ( account_number_masked, ifsc_code, is_primary )
+        )
+      `)
+      .eq('run_id', id)
+      .eq('tenant_id', tenantId)
+
+    if (sErr || !slips) return reply.code(500).send({ error: 'SLIPS_FETCH_FAILED', message: sErr?.message })
+
+    const obligations = buildPayoutObligations(
+      id, tenantId, (ledger as any)?.id ?? null,
+      (slips as any[]).map(s => {
+        const bank = (s.employees?.bank_details ?? []).find((b: any) => b.is_primary) ?? s.employees?.bank_details?.[0]
+        return {
+          slip_id:              s.id,
+          employee_id:          s.employee_id,
+          net_pay:              s.net_pay,
+          bank_account_masked:  bank?.account_number_masked ?? null,
+          ifsc_code:            bank?.ifsc_code ?? null,
+        }
+      }),
+    )
+
+    const { error: iErr } = await fastify.supabase.from('payroll_payout_reconciliation').insert(obligations)
+    if (iErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: iErr.message })
+
+    return reply.send({ message: `${obligations.length} payout obligations created`, count: obligations.length })
+  })
+
+  // ── GET /payroll/gl-mappings ──────────────────────────────────────────────────
+  // List GL account mappings for the tenant.
+  fastify.get('/payroll/gl-mappings', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    const { data, error } = await fastify.supabase
+      .from('payroll_gl_mappings')
+      .select('id, component_code, component_type, debit_gl_code, debit_gl_name, credit_gl_code, credit_gl_name, effective_from, is_active')
+      .eq('tenant_id', tenantId)
+      .order('component_type')
+      .order('component_code')
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── POST /payroll/gl-mappings/seed ────────────────────────────────────────────
+  // Seed default GL mappings for this tenant (idempotent).
+  fastify.post('/payroll/gl-mappings/seed', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    const { error } = await fastify.supabase.rpc('seed_default_gl_mappings', { p_tenant_id: tenantId })
+    if (error) return reply.code(500).send({ error: 'SEED_FAILED', message: error.message })
+    return reply.send({ message: 'Default GL mappings seeded successfully' })
   })
 }

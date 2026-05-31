@@ -1,320 +1,932 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { useBasePath } from '@/lib/routing'
-import { useQuery } from '@tanstack/react-query'
+/**
+ * EmployeeList — People Operations Surface
+ *
+ * Clean enterprise table matching design spec exactly:
+ *   Header + WORKFORCE SURFACE badge
+ *   5-card stats strip (Workforce · Operational · Onboarding · No-Login · Sites)
+ *   Search + filter toolbar (Status · Access · Dept · Location) + Table/Grid toggle
+ *   Sortable table: Employee · Status · Department · Location · Tenure · Access · Actions
+ *
+ * Data wired to GET /employees (enriched with job_history joins)
+ */
+
+import { useState, useMemo, memo } from 'react'
+import { useNavigate, Navigate } from 'react-router-dom'
+import { useQuery }          from '@tanstack/react-query'
 import {
-  useReactTable, getCoreRowModel, getFilteredRowModel,
-  getPaginationRowModel, getSortedRowModel, flexRender,
-  type ColumnDef, type SortingState,
-} from '@tanstack/react-table'
-import { UserPlus, Search, Filter, Download, ChevronUp, ChevronDown, ChevronsUpDown, MoreHorizontal } from 'lucide-react'
-import { api } from '@/lib/api/client'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Card, CardContent } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { getInitials, formatDate, getStatusColor, getEmploymentTypeColor } from '@/lib/utils'
+  Search, Download, UserPlus, Building2, MapPin,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
+  Check, Mail, X, Lock, Filter, LayoutGrid, Table2,
+  Bookmark, TrendingUp,
+} from 'lucide-react'
+import { api }            from '@/lib/api/client'
+import { useBasePath }    from '@/lib/routing'
+import { useAuthStore }   from '@/stores/authStore'
+// import { cn }          from '@/lib/utils'
 import type { EmployeeListItem } from '@/types'
 
-// Deterministic avatar background — picks a color from the employee code's last character
-const AVATAR_COLORS = [
-  'bg-accent-violet/20 text-accent-violet',
-  'bg-info/20 text-info',
-  'bg-success/20 text-success',
-  'bg-warning/20 text-warning',
-  'bg-destructive/20 text-destructive',
-  'bg-accent-teal/20 text-accent-teal',
-  'bg-primary/20 text-primary',
-  'bg-accent-magenta/20 text-accent-magenta',
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface Site { id: string; name: string; city?: string | null }
+
+// ── Avatar palette ─────────────────────────────────────────────────────────────
+
+const AVATAR_PALETTE = [
+  { bg: '#fde68a', color: '#92400e' },   // amber
+  { bg: '#bbf7d0', color: '#14532d' },   // green
+  { bg: '#bfdbfe', color: '#1e3a8a' },   // blue
+  { bg: '#fecaca', color: '#7f1d1d' },   // red
+  { bg: '#e9d5ff', color: '#581c87' },   // purple
+  { bg: '#a7f3d0', color: '#064e3b' },   // teal
+  { bg: '#fed7aa', color: '#7c2d12' },   // orange
+  { bg: '#ddd6fe', color: '#3730a3' },   // indigo
+  { bg: '#fce7f3', color: '#831843' },   // pink
+  { bg: '#d1fae5', color: '#065f46' },   // emerald
 ]
-function avatarColor(code: string): string {
-  const idx = code.charCodeAt(code.length - 1) % AVATAR_COLORS.length
-  return AVATAR_COLORS[idx]
+function avatarPalette(code: string) {
+  const idx = code.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+  return AVATAR_PALETTE[idx % AVATAR_PALETTE.length]
 }
 
-export function EmployeeList() {
-  const navigate     = useNavigate()
-  const basePath     = useBasePath()
-  const [globalFilter, setGlobalFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [sorting, setSorting] = useState<SortingState>([])
+// ── Department color dots ──────────────────────────────────────────────────────
 
-  const { data, isLoading } = useQuery<{ data: EmployeeListItem[]; total: number }>({
-    queryKey: ['employees', statusFilter],
-    queryFn: () => api.get(`/employees${statusFilter !== 'all' ? `?status=${statusFilter}` : ''}`),
-    staleTime: 30_000,
-  })
+const DEPT_COLORS = [
+  '#8b5cf6', '#3b82f6', '#14b8a6', '#f59e0b',
+  '#ec4899', '#ef4444', '#10b981', '#0ea5e9',
+  '#f97316', '#6366f1', '#84cc16', '#06b6d4',
+]
+function deptColor(name: string): string {
+  const idx = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+  return DEPT_COLORS[idx % DEPT_COLORS.length]
+}
 
-  const employees = data?.data ?? []
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-  const columns: ColumnDef<EmployeeListItem>[] = [
+function getInitials(first: string, last: string): string {
+  return `${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase()
+}
+
+function tenureDisplay(joining: string): { short: string; full: string; months: number } {
+  const ms = Date.now() - new Date(joining).getTime()
+  const totalMonths = Math.floor(ms / (1000 * 60 * 60 * 24 * 30.44))
+  const yrs = Math.floor(totalMonths / 12)
+  const mos = totalMonths % 12
+
+  let short = ''
+  if (yrs === 0 && mos === 0) short = '< 1m'
+  else if (yrs === 0) short = `${mos}m`
+  else if (mos === 0) short = `${yrs}y`
+  else short = `${yrs}y ${mos}m`
+
+  const d = new Date(joining)
+  const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const full = isNaN(d.getTime()) ? '—' : `${String(d.getDate()).padStart(2,'0')}-${_M[d.getMonth()]}-${d.getFullYear()}`
+  return { short, full, months: totalMonths }
+}
+
+function deriveOpState(emp: EmployeeListItem): { label: string; bg: string; color: string; dot: string } {
+  const totalMs   = Date.now() - new Date(emp.joining_date).getTime()
+  const totalDays = totalMs / 86_400_000
+  const totalMo   = totalDays / 30.44
+
+  if (emp.status === 'separated')  return { label: 'Separated',   bg: '#f3f4f6', color: '#4b5563', dot: '#9ca3af' }
+  if (emp.status === 'inactive')   return { label: 'Inactive',    bg: '#fef2f2', color: '#dc2626', dot: '#ef4444' }
+  if (emp.status === 'on_notice')  return { label: 'On Notice',   bg: '#fff7ed', color: '#c2410c', dot: '#f97316' }
+  if (totalDays <= 30)             return { label: 'Onboarding',  bg: '#fff7ed', color: '#c2410c', dot: '#fb923c' }
+  if (totalMo < 6)                 return { label: 'Probation',   bg: '#fefce8', color: '#a16207', dot: '#facc15' }
+  if (emp.current_job?.employment_type === 'contract')
+                                   return { label: 'Contract',    bg: '#f5f3ff', color: '#7c3aed', dot: '#a78bfa' }
+  if (emp.current_job?.employment_type === 'intern')
+                                   return { label: 'Intern',      bg: '#f0fdf4', color: '#15803d', dot: '#4ade80' }
+  return                                  { label: 'Operational', bg: '#f0fdf4', color: '#16a34a', dot: '#4ade80' }
+}
+
+function deriveAccessDisplay(emp: EmployeeListItem): {
+  label:    string
+  sub:      string
+  iconBg:   string
+  iconColor: string
+  Icon:     React.ComponentType<{ className?: string }>
+} {
+  const s = emp.user_account?.status
+  if (!s || s === 'no_account')
+    return { label: 'No Account',  sub: 'Setup required',       iconBg: '#f3f4f6', iconColor: '#9ca3af', Icon: Lock   }
+  if (s === 'suspended')
+    return { label: 'Locked',      sub: 'Access suspended',     iconBg: '#fef2f2', iconColor: '#ef4444', Icon: X      }
+  if (s === 'pending_verification')
+    return { label: 'Invited',     sub: 'Awaiting first login',  iconBg: '#fffbeb', iconColor: '#f59e0b', Icon: Mail   }
+  return   { label: 'Active',      sub: 'Account active',       iconBg: '#f0fdf4', iconColor: '#16a34a', Icon: Check  }
+}
+
+// ── Stats strip ───────────────────────────────────────────────────────────────
+
+function StatsStrip({
+  employees,
+  sitesCount,
+  cities,
+}: {
+  employees:  EmployeeListItem[]
+  sitesCount: number
+  cities:     number
+}) {
+  const stats = useMemo(() => {
+    const now = Date.now()
+    let operational = 0, onboarding = 0, noLogin = 0, newThisMonth = 0
+
+    for (const e of employees) {
+      const days = (now - new Date(e.joining_date).getTime()) / 86_400_000
+      const mo   = days / 30.44
+
+      if (e.status === 'active') {
+        if (days <= 30)          onboarding++
+        else if (mo >= 6)        operational++
+      }
+      if (days <= 30 && e.status === 'active') newThisMonth++
+      if (!e.user_account || e.user_account.status === 'no_account') noLogin++
+    }
+
+    return { total: employees.length, operational, onboarding, noLogin, newThisMonth }
+  }, [employees])
+
+  const opPct = stats.total > 0 ? Math.round((stats.operational / stats.total) * 100) : 0
+
+  const cards = [
     {
-      id: 'employee',
-      header: 'Employee',
-      accessorFn: (row) => `${row.first_name} ${row.last_name}`,
-      cell: ({ row }) => {
-        const emp = row.original
-        return (
-          <div className="flex items-center gap-3">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={emp.personal_info?.profile_photo ?? undefined} />
-              <AvatarFallback className={`text-xs font-semibold ${avatarColor(emp.employee_code)}`}>
-                {getInitials(`${emp.first_name} ${emp.last_name}`)}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="text-sm font-medium">{emp.first_name} {emp.last_name}</p>
-              <p className="text-xs text-muted-foreground">{emp.employee_code}</p>
-            </div>
-          </div>
-        )
-      },
+      label: 'WORKFORCE',
+      value: stats.total.toString(),
+      sub:   stats.newThisMonth > 0 ? `↑ ${stats.newThisMonth} joined this month` : 'Active roster',
+      subColor: stats.newThisMonth > 0 ? '#16a34a' : '#9ca3af',
+      accent: '#10b981',
     },
     {
-      accessorKey: 'email',
-      header: 'Email',
-      cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{getValue() as string}</span>,
+      label: 'OPERATIONAL',
+      value: `${stats.operational} / ${stats.total}`,
+      sub:   `${opPct}% active workforce`,
+      subColor: opPct >= 80 ? '#16a34a' : opPct >= 60 ? '#f59e0b' : '#ef4444',
+      accent: '#6366f1',
     },
     {
-      id: 'department',
-      header: 'Department',
-      accessorFn: (row) => row.department?.name ?? '—',
-      cell: ({ getValue }) => {
-        const val = getValue() as string
-        if (val === '—') return <span className="text-sm text-muted-foreground">—</span>
-        return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-info">
-            <span className="h-1.5 w-1.5 rounded-full bg-info shrink-0" />
-            {val}
-          </span>
-        )
-      },
+      label: 'ONBOARDING',
+      value: stats.onboarding.toString(),
+      sub:   stats.onboarding > 0 ? 'Settling in' : 'None this month',
+      subColor: stats.onboarding > 0 ? '#f59e0b' : '#9ca3af',
+      accent: '#f97316',
     },
     {
-      id: 'designation',
-      header: 'Designation',
-      accessorFn: (row) => row.designation?.name ?? '—',
-      cell: ({ getValue }) => <span className="text-sm">{getValue() as string}</span>,
+      label: 'NO-LOGIN ACCOUNTS',
+      value: stats.noLogin.toString(),
+      sub:   stats.noLogin > 0 ? 'Need attention' : 'All accounts set up',
+      subColor: stats.noLogin > 0 ? '#ef4444' : '#16a34a',
+      accent: '#ef4444',
     },
     {
-      id: 'employment_type',
-      header: 'Employment',
-      accessorFn: (row) => row.current_job?.employment_type ?? '—',
-      cell: ({ getValue }) => {
-        const type = getValue() as string
-        if (type === '—') return <span className="text-sm text-muted-foreground">—</span>
-        return (
-          <Badge className={`text-[10px] border rounded-full ${getEmploymentTypeColor(type)}`}>
-            {type.charAt(0).toUpperCase() + type.slice(1)}
-          </Badge>
-        )
-      },
-    },
-    {
-      accessorKey: 'status',
-      header: 'Status',
-      cell: ({ getValue }) => {
-        const status = getValue() as string
-        return (
-          <Badge className={`text-[10px] border rounded-full ${getStatusColor(status)}`}>
-            {status.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-          </Badge>
-        )
-      },
-    },
-    {
-      accessorKey: 'joining_date',
-      header: 'Joining Date',
-      cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{formatDate(getValue() as string)}</span>,
-    },
-    {
-      id: 'actions',
-      cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => navigate(`${basePath}/employees/${row.original.id}`)}>
-              View Profile
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
+      label: 'SITES',
+      value: sitesCount.toString(),
+      sub:   cities > 0 ? `${cities} cit${cities === 1 ? 'y' : 'ies'} covered` : 'Work locations',
+      subColor: '#6b7280',
+      accent: '#0ea5e9',
     },
   ]
 
-  const table = useReactTable({
-    data: employees,
-    columns,
-    state: { globalFilter, sorting },
-    onGlobalFilterChange: setGlobalFilter,
-    onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    initialState: { pagination: { pageSize: 20 } },
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+      {cards.map((c, i) => (
+        <div key={i} style={{
+          background: '#fff',
+          borderRadius: 10,
+          border: '1px solid #e5e7eb',
+          borderLeft: `3px solid ${c.accent}`,
+          padding: '10px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          boxShadow: '0 1px 3px rgba(0,0,0,.04)',
+        }}>
+          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: '#b0b7c3' }}>
+            {c.label}
+          </span>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#111827', letterSpacing: '-.025em', fontFamily: '"Geist Mono",ui-monospace,monospace', lineHeight: 1.15 }}>
+            {c.value}
+          </div>
+          <div style={{ fontSize: 10.5, color: c.subColor, fontWeight: 500, marginTop: 1 }}>
+            {c.sub}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── EmployeeList ──────────────────────────────────────────────────────────────
+
+type SortKey = 'name' | 'code' | 'department' | 'status' | 'joining_date'
+type SortDir = 'asc' | 'desc'
+
+export function EmployeeList() {
+  const navigate    = useNavigate()
+  const basePath    = useBasePath()
+  const { profile } = useAuthStore()
+  const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
+
+  const [search,       setSearch]       = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [accessFilter, setAccessFilter] = useState('all')
+  const [deptFilter,   setDeptFilter]   = useState('all')
+  const [locFilter,    setLocFilter]    = useState('all')
+  const [sortKey,      setSortKey]      = useState<SortKey>('name')
+  const [sortDir,      setSortDir]      = useState<SortDir>('asc')
+  const [page,         setPage]         = useState(1)
+  const [selected,     setSelected]     = useState<Set<string>>(new Set())
+
+  const PAGE_SIZE = 20
+
+  // ── Queries ────────────────────────────────────────────────────────────────
+
+  const { data, isLoading } = useQuery<{ data: EmployeeListItem[]; total: number }>({
+    queryKey: ['employees', 'list'],
+    queryFn:  () => api.get('/employees?limit=200'),
+    staleTime: 30_000,
+    enabled:  isAdmin,   // don't fire for non-admins (backend rejects 403 anyway)
   })
 
-  const filteredCount = table.getFilteredRowModel().rows.length
+  const { data: sitesData } = useQuery<{ data: Site[] }>({
+    queryKey: ['sites'],
+    queryFn:  () => api.get('/masters/sites'),
+    staleTime: 120_000,
+  })
+
+  const allEmployees = data?.data ?? []
+  const sites        = sitesData?.data ?? []
+
+  // Unique departments + locations for filter dropdowns
+  const { departments, locations, cities } = useMemo(() => {
+    const depts = new Map<string, string>()
+    const locs  = new Map<string, string>()
+    const citySet = new Set<string>()
+    for (const e of allEmployees) {
+      if (e.department?.id) depts.set(e.department.id, e.department.name)
+      if (e.work_location?.id) {
+        locs.set(e.work_location.id, e.work_location.name)
+        if (e.work_location.city) citySet.add(e.work_location.city)
+      }
+    }
+    return {
+      departments: [...depts.entries()].map(([id, name]) => ({ id, name })),
+      locations:   [...locs.entries()].map(([id, name]) => ({ id, name })),
+      cities:      citySet.size,
+    }
+  }, [allEmployees])
+
+  // ── Filter + sort + paginate ───────────────────────────────────────────────
+
+  const filtered = useMemo(() => {
+    let arr = allEmployees
+
+    if (statusFilter !== 'all') {
+      // Map filter value to operational state label
+      arr = arr.filter(e => {
+        const op = deriveOpState(e)
+        return op.label.toLowerCase() === statusFilter.toLowerCase()
+      })
+    }
+
+    if (accessFilter !== 'all') {
+      arr = arr.filter(e => (e.user_account?.status ?? 'no_account') === accessFilter)
+    }
+
+    if (deptFilter !== 'all') {
+      arr = arr.filter(e => e.department?.id === deptFilter)
+    }
+
+    if (locFilter !== 'all') {
+      arr = arr.filter(e => e.work_location?.id === locFilter)
+    }
+
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      arr = arr.filter(e =>
+        `${e.first_name} ${e.last_name}`.toLowerCase().includes(q) ||
+        e.employee_code.toLowerCase().includes(q) ||
+        e.email.toLowerCase().includes(q) ||
+        (e.department?.name.toLowerCase().includes(q) ?? false) ||
+        (e.designation?.name.toLowerCase().includes(q) ?? false) ||
+        (e.work_location?.name.toLowerCase().includes(q) ?? false),
+      )
+    }
+
+    return arr
+  }, [allEmployees, statusFilter, accessFilter, deptFilter, locFilter, search])
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered]
+    const dir = sortDir === 'asc' ? 1 : -1
+    arr.sort((a, b) => {
+      switch (sortKey) {
+        case 'name':
+          return dir * `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`)
+        case 'code':
+          return dir * a.employee_code.localeCompare(b.employee_code)
+        case 'department':
+          return dir * (a.department?.name ?? '').localeCompare(b.department?.name ?? '')
+        case 'status':
+          return dir * deriveOpState(a).label.localeCompare(deriveOpState(b).label)
+        case 'joining_date':
+          return dir * (new Date(a.joining_date).getTime() - new Date(b.joining_date).getTime())
+        default: return 0
+      }
+    })
+    return arr
+  }, [filtered, sortKey, sortDir])
+
+  const selectedEmails = useMemo(
+    () => allEmployees.filter(e => selected.has(e.id)).map(e => e.email),
+    [allEmployees, selected],
+  )
+
+  const totalPages   = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const pageItems    = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const allPageIds   = pageItems.map(e => e.id)
+  const allSelected  = allPageIds.length > 0 && allPageIds.every(id => selected.has(id))
+  const someSelected = allPageIds.some(id => selected.has(id)) && !allSelected
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+    setPage(1)
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelected(prev => { const n = new Set(prev); allPageIds.forEach(id => n.delete(id)); return n })
+    } else {
+      setSelected(prev => { const n = new Set(prev); allPageIds.forEach(id => n.add(id)); return n })
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const n = new Set(prev)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+
+  // ── Column header helper ──────────────────────────────────────────────────
+
+  function ColHead({ label, field, width }: { label: string; field?: SortKey; width: string }) {
+    const active = field && sortKey === field
+    return (
+      <th
+        style={{ width, padding: '8px 10px', textAlign: 'left', fontWeight: 700, fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: active ? '#2f1f57' : '#9ca3af', whiteSpace: 'nowrap', cursor: field ? 'pointer' : 'default', userSelect: 'none', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}
+        onClick={() => field && toggleSort(field)}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {label}
+          {field && (
+            active
+              ? sortDir === 'asc'
+                ? <ChevronUp   className="w-3 h-3" />
+                : <ChevronDown className="w-3 h-3" />
+              : <ChevronDown className="w-3 h-3 opacity-30" />
+          )}
+        </span>
+      </th>
+    )
+  }
+
+  // ── Role guard — after all hooks ──────────────────────────────────────────
+  // Backend enforces this too; this prevents a confusing empty state for non-admins.
+  if (profile && !isAdmin) {
+    return <Navigate to="/" replace />
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">People Directory</h1>
-          <p className="text-sm text-muted-foreground">
-            {data?.total ?? 0} employees · {filteredCount} shown
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-9">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-          <Button size="sm" className="h-9" asChild>
-            <Link to={`${basePath}/employees/new`}>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add Employee
-            </Link>
-          </Button>
-        </div>
-      </div>
+    <div style={{ background: '#f6f7fb', minHeight: '100vh', padding: '20px 24px 32px' }}>
+      <div style={{ maxWidth: 1600, margin: '0 auto' }}>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by name, email, code..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-9 h-9"
-              />
+        {/* ── Page header ──────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: '-.02em', margin: 0 }}>
+                People Operations
+              </h1>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase',
+                background: '#1f2937', color: '#fff', padding: '3px 9px', borderRadius: 999,
+              }}>
+                WORKFORCE SURFACE
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-36 h-9">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                  <SelectItem value="on_notice">On Notice</SelectItem>
-                  <SelectItem value="separated">Separated</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id} className="border-b border-border">
-                    {headerGroup.headers.map((header) => (
-                      <th
-                        key={header.id}
-                        className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground"
-                        onClick={header.column.getToggleSortingHandler()}
-                      >
-                        <div className="flex items-center gap-1">
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          {header.column.getCanSort() && (
-                            <span className="text-muted-foreground/50">
-                              {header.column.getIsSorted() === 'asc' ? (
-                                <ChevronUp className="h-3 w-3" />
-                              ) : header.column.getIsSorted() === 'desc' ? (
-                                <ChevronDown className="h-3 w-3" />
-                              ) : (
-                                <ChevronsUpDown className="h-3 w-3" />
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                ))}
-              </thead>
-              <tbody>
-                {isLoading ? (
-                  Array.from({ length: 8 }).map((_, i) => (
-                    <tr key={i} className="border-b border-border animate-pulse">
-                      {columns.map((_, j) => (
-                        <td key={j} className="px-4 py-3">
-                          <div className="h-4 bg-muted rounded w-24" />
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                ) : table.getRowModel().rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={columns.length} className="px-4 py-12 text-center text-muted-foreground text-sm">
-                      No employees found. <Link to={`${basePath}/employees/new`} className="text-primary hover:underline">Add your first employee</Link>
-                    </td>
-                  </tr>
-                ) : (
-                  table.getRowModel().rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-border hover:bg-muted/30 transition-colors cursor-pointer"
-                      onClick={() => navigate(`${basePath}/employees/${row.original.id}`)}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-            <p className="text-xs text-muted-foreground">
-              Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+            <p style={{ fontSize: 12.5, color: '#9ca3af', margin: 0, fontWeight: 500 }}>
+              Live workforce operational stream — {allEmployees.length} people across {sites.length} site{sites.length !== 1 ? 's' : ''}
             </p>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()} className="h-7 text-xs">
-                Previous
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()} className="h-7 text-xs">
-                Next
-              </Button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
+              <Bookmark className="w-3.5 h-3.5" />
+              Saved Views
+            </button>
+            {isAdmin && (
+              <>
+                <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
+                  <Download className="w-3.5 h-3.5" />
+                  Export
+                </button>
+                <button
+                  style={{ height: 34, padding: '0 16px', borderRadius: 8, background: '#2f1f57', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'inherit' }}
+                  onClick={() => navigate(`${basePath}/employees/new`)}
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  + Add Employee
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Stats strip ──────────────────────────────────────────────────── */}
+        <div style={{ marginBottom: 20 }}>
+          <StatsStrip employees={allEmployees} sitesCount={sites.length} cities={cities} />
+        </div>
+
+        {/* ── Toolbar ──────────────────────────────────────────────────────── */}
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
+          {/* Search */}
+          <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#9ca3af', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              placeholder="Search name, code, email, department..."
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1) }}
+              style={{ width: '100%', paddingLeft: 32, paddingRight: 44, height: 34, border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none', color: '#111827', fontFamily: 'inherit', background: '#fff' }}
+            />
+            <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: '#d1d5db', fontFamily: '"Geist Mono",ui-monospace,monospace', fontWeight: 600, background: '#f9fafb', border: '1px solid #e5e7eb', padding: '2px 5px', borderRadius: 5 }}>
+              ⌘K
+            </span>
+          </div>
+
+          {/* Filters */}
+          {[
+            {
+              label: 'Status', value: statusFilter,
+              options: [
+                { v: 'all', l: 'Status' },
+                { v: 'Operational', l: 'Operational' },
+                { v: 'Probation',   l: 'Probation'   },
+                { v: 'Onboarding',  l: 'Onboarding'  },
+                { v: 'On Notice',   l: 'On Notice'    },
+                { v: 'Inactive',    l: 'Inactive'     },
+                { v: 'Separated',   l: 'Separated'    },
+              ],
+              onChange: (v: string) => { setStatusFilter(v); setPage(1) },
+            },
+            {
+              label: 'Access', value: accessFilter,
+              options: [
+                { v: 'all',                   l: 'Access'       },
+                { v: 'active',                l: 'Active'       },
+                { v: 'suspended',             l: 'Locked'       },
+                { v: 'pending_verification',  l: 'Invited'      },
+                { v: 'no_account',            l: 'No Account'   },
+              ],
+              onChange: (v: string) => { setAccessFilter(v); setPage(1) },
+            },
+            {
+              label: 'Dept', value: deptFilter,
+              options: [
+                { v: 'all', l: 'Dept' },
+                ...departments.map(d => ({ v: d.id, l: d.name })),
+              ],
+              onChange: (v: string) => { setDeptFilter(v); setPage(1) },
+            },
+            {
+              label: 'Location', value: locFilter,
+              options: [
+                { v: 'all', l: 'Location' },
+                ...locations.map(l => ({ v: l.id, l: l.name })),
+              ],
+              onChange: (v: string) => { setLocFilter(v); setPage(1) },
+            },
+          ].map(f => (
+            <div key={f.label} style={{ position: 'relative' }}>
+              <select
+                value={f.value}
+                onChange={e => f.onChange(e.target.value)}
+                style={{ height: 34, paddingLeft: 12, paddingRight: 28, border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12.5, fontWeight: 500, color: f.value !== 'all' ? '#2f1f57' : '#374151', background: f.value !== 'all' ? '#ede8f5' : '#fff', cursor: 'pointer', outline: 'none', appearance: 'none', fontFamily: 'inherit' }}
+              >
+                {f.options.map(o => (
+                  <option key={o.v} value={o.v}>{o.l}</option>
+                ))}
+              </select>
+              <ChevronDown style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: '#9ca3af', pointerEvents: 'none' }} />
+            </div>
+          ))}
+
+          {/* Right: count + view toggle */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 12.5, color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              {sorted.length} of {allEmployees.length} people
+            </span>
+            <div style={{ display: 'flex', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+              {[
+                { icon: Table2,      label: 'Table', active: true },
+                { icon: LayoutGrid,  label: 'Grid',  active: false },
+              ].map(v => (
+                <button
+                  key={v.label}
+                  style={{ height: 32, padding: '0 12px', background: v.active ? '#f3f4f6' : '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: v.active ? 600 : 500, color: v.active ? '#111827' : '#9ca3af', fontFamily: 'inherit' }}
+                >
+                  <v.icon className="w-3.5 h-3.5" />
+                  {v.label}
+                </button>
+              ))}
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* ── Table ────────────────────────────────────────────────────────── */}
+        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflowX: 'auto', marginTop: 10 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 800 }}>
+            <colgroup>
+              <col style={{ width: '3%'  }} />
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '9%'  }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '14%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                {/* Checkbox col */}
+                <th style={{ width: '3%', padding: '8px 0 8px 12px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected }}
+                    onChange={toggleSelectAll}
+                    style={{ width: 13, height: 13, accentColor: '#2f1f57', cursor: 'pointer' }}
+                  />
+                </th>
+                <ColHead label="Employee"   field="name"         width="20%" />
+                <ColHead label="Status"     field="status"       width="9%"  />
+                <ColHead label="Department" field="department"   width="12%" />
+                <ColHead label="Location"                        width="11%" />
+                <ColHead label="Tenure"     field="joining_date" width="16%" />
+                <ColHead label="Access"                          width="15%" />
+                <ColHead label="Actions"                         width="14%" />
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
+              ) : pageItems.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: '40px 24px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                      <Filter style={{ width: 28, height: 28, opacity: .4 }} />
+                      <span>No employees match your filters.</span>
+                      <button onClick={() => { setSearch(''); setStatusFilter('all'); setAccessFilter('all'); setDeptFilter('all'); setLocFilter('all') }} style={{ color: '#2f1f57', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>
+                        Clear all filters
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                pageItems.map(emp => (
+                  <MemoizedEmployeeRow
+                    key={emp.id}
+                    emp={emp}
+                    basePath={basePath}
+                    navigate={navigate}
+                    selected={selected.has(emp.id)}
+                    onSelect={() => toggleSelect(emp.id)}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Pagination ───────────────────────────────────────────────────── */}
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>
+              Page {page} of {totalPages} · {sorted.length} results
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <PageBtn disabled={page === 1} onClick={() => setPage(p => p - 1)}>
+                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+              </PageBtn>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const n = Math.min(Math.max(page - 2, 1) + i, totalPages)
+                return (
+                  <button
+                    key={n}
+                    onClick={() => setPage(n)}
+                    style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${n === page ? '#2f1f57' : '#e5e7eb'}`, background: n === page ? '#2f1f57' : '#fff', color: n === page ? '#fff' : '#374151', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
+              <PageBtn disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </PageBtn>
+            </div>
+          </div>
+        )}
+
+        <BulkBar
+          count={selected.size}
+          onClear={() => setSelected(new Set())}
+          selectedEmails={selectedEmails}
+        />
+
+      </div>
     </div>
+  )
+}
+
+// ── PageBtn ───────────────────────────────────────────────────────────────────
+
+function PageBtn({ children, disabled, onClick }: { children: React.ReactNode; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, opacity: disabled ? .4 : 1, fontFamily: 'inherit' }}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── EmployeeRow ───────────────────────────────────────────────────────────────
+
+function EmployeeRow({
+  emp,
+  basePath,
+  navigate,
+  selected,
+  onSelect,
+}: {
+  emp:      EmployeeListItem
+  basePath: string
+  navigate: ReturnType<typeof useNavigate>
+  selected: boolean
+  onSelect: () => void
+}) {
+  const opState  = deriveOpState(emp)
+  const access   = deriveAccessDisplay(emp)
+  const tenure   = tenureDisplay(emp.joining_date)
+  const initials = getInitials(emp.first_name, emp.last_name)
+  const avatar   = avatarPalette(emp.employee_code)
+  const dept     = emp.department
+  const loc      = emp.work_location
+  const AccessIcon = access.Icon
+
+  // Tenure bar: capped at 120 months (10 years) = 100%
+  const barPct = Math.min((tenure.months / 120) * 100, 100)
+  const barColor =
+    tenure.months < 3  ? '#fb923c' :
+    tenure.months < 12 ? '#facc15' :
+    tenure.months < 48 ? '#60a5fa' : '#34d399'
+
+  // Location: derive short city label and short office code
+  const locCity  = loc?.city ?? loc?.name ?? null
+  const locCode  = loc && loc.city && loc.name !== loc.city
+    ? loc.name.replace(/\s+/g, '').substring(0, 8).toUpperCase()
+    : null
+
+  return (
+    <tr
+      style={{ background: selected ? '#eef2ff' : '#fff', transition: 'background .08s', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+      onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.background = '#f9fafb' }}
+      onMouseLeave={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.background = '#fff' }}
+      onClick={() => navigate(`${basePath}/employees/${emp.id}`)}
+    >
+      {/* Checkbox */}
+      <td style={{ padding: '0 0 0 12px', width: 38 }} onClick={e => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onSelect}
+          style={{ width: 13, height: 13, accentColor: '#2f1f57', cursor: 'pointer' }}
+        />
+      </td>
+
+      {/* Employee */}
+      <td style={{ padding: '8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatar.bg, color: avatar.color, display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+            {emp.personal_info?.profile_photo
+              ? <img src={emp.personal_info.profile_photo} alt={initials} style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
+              : initials
+            }
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {emp.first_name} {emp.last_name}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1.5 }}>
+              <span style={{ fontSize: 10.5, fontFamily: '"Geist Mono",ui-monospace,monospace', color: '#9ca3af', fontWeight: 500, flexShrink: 0 }}>
+                {emp.employee_code}
+              </span>
+              {emp.designation?.name && (
+                <>
+                  <span style={{ color: '#d1d5db', fontSize: 9 }}>·</span>
+                  <span style={{ fontSize: 11, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {emp.designation.name}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </td>
+
+      {/* Status */}
+      <td style={{ padding: '8px 10px' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, background: opState.bg, color: opState.color, whiteSpace: 'nowrap' }}>
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: opState.dot, flexShrink: 0 }} />
+          {opState.label}
+        </span>
+      </td>
+
+      {/* Department */}
+      <td style={{ padding: '8px 10px' }}>
+        {dept ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: deptColor(dept.name), flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {dept.name}
+            </span>
+          </div>
+        ) : (
+          <span style={{ fontSize: 12, color: '#d1d5db' }}>—</span>
+        )}
+      </td>
+
+      {/* Location — single line: City · Code */}
+      <td style={{ padding: '8px 10px' }}>
+        {locCity ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Building2 style={{ width: 11, height: 11, color: '#9ca3af', flexShrink: 0 }} />
+              <span style={{ fontSize: 12.5, fontWeight: 500, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {locCity}
+              </span>
+            </div>
+            {locCode && (
+              <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 1, paddingLeft: 15 }}>{locCode}</div>
+            )}
+          </div>
+        ) : (
+          <span style={{ fontSize: 11.5, color: '#d1d5db', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <MapPin style={{ width: 10, height: 10 }} />
+            No location
+          </span>
+        )}
+      </td>
+
+      {/* Tenure — inline: "3y 11m · joined Jun 15, 22" + bar */}
+      <td style={{ padding: '8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#374151', fontFamily: '"Geist Mono",ui-monospace,monospace', flexShrink: 0 }}>
+            {tenure.short}
+          </span>
+          <span style={{ fontSize: 10.5, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            · joined {tenure.full}
+          </span>
+        </div>
+        <div style={{ height: 3, background: '#f3f4f6', borderRadius: 999, width: '85%' }}>
+          <div style={{ height: '100%', borderRadius: 999, background: barColor, width: `${barPct}%` }} />
+        </div>
+      </td>
+
+      {/* Access — icon dot + label + sub */}
+      <td style={{ padding: '8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 22, height: 22, borderRadius: 6, background: access.iconBg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+            <span style={{ color: access.iconColor, display: 'flex' }}><AccessIcon className="w-3 h-3" /></span>
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{access.label}</div>
+            <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{access.sub}</div>
+          </div>
+        </div>
+      </td>
+
+      {/* Actions */}
+      <td style={{ padding: '8px 10px' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <button
+            title="Send email"
+            onClick={() => window.open(`mailto:${emp.email}`)}
+            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#9ca3af', flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f3f4f6'; (e.currentTarget as HTMLButtonElement).style.color = '#374151' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#fff'; (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af' }}
+          >
+            <Mail className="w-3 h-3" />
+          </button>
+          <button
+            title="More options"
+            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#9ca3af', flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f3f4f6'; (e.currentTarget as HTMLButtonElement).style.color = '#374151' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#fff'; (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af' }}
+          >
+            <TrendingUp className="w-3 h-3 rotate-90" />
+          </button>
+          <button
+            onClick={() => navigate(`${basePath}/employees/${emp.id}`)}
+            style={{ height: 26, padding: '0 9px', borderRadius: 6, background: '#2f1f57', border: 'none', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#231645' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#2f1f57' }}
+          >
+            → Open Profile
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+const MemoizedEmployeeRow = memo(EmployeeRow)
+
+// ── BulkBar ───────────────────────────────────────────────────────────────────
+
+function BulkBar({
+  count,
+  onClear,
+  selectedEmails,
+}: {
+  count:          number
+  onClear:        () => void
+  selectedEmails: string[]
+}) {
+  if (count === 0) return null
+  return (
+    <div style={{
+      position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+      background: '#111827', borderRadius: 12, padding: '10px 16px',
+      display: 'flex', alignItems: 'center', gap: 12,
+      boxShadow: '0 8px 32px rgba(0,0,0,.22)',
+      zIndex: 50, minWidth: 360,
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>
+        {count} employee{count !== 1 ? 's' : ''} selected
+      </span>
+      <div style={{ height: 16, width: 1, background: '#374151' }} />
+      <button
+        onClick={() => window.open(`mailto:${selectedEmails.join(',')}`)}
+        style={{ fontSize: 12, fontWeight: 600, color: '#93c5fd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+      >
+        Send Email
+      </button>
+      <button
+        onClick={() => { /* export — toast placeholder */ }}
+        style={{ fontSize: 12, fontWeight: 600, color: '#86efac', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+      >
+        Export
+      </button>
+      <button
+        onClick={onClear}
+        style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+      >
+        ✕ Clear
+      </button>
+    </div>
+  )
+}
+
+// ── SkeletonRow ───────────────────────────────────────────────────────────────
+
+function SkeletonRow() {
+  return (
+    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+      <td style={{ padding: '8px 0 8px 12px', width: 38 }}>
+        <div style={{ width: 13, height: 13, borderRadius: 3, background: '#f3f4f6' }} />
+      </td>
+      <td style={{ padding: '8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f3f4f6', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ height: 11, background: '#f3f4f6', borderRadius: 4, width: '65%', marginBottom: 5 }} />
+            <div style={{ height: 9, background: '#f3f4f6', borderRadius: 4, width: '45%' }} />
+          </div>
+        </div>
+      </td>
+      {[90, 100, 110, 120, 110, 130].map((w, i) => (
+        <td key={i} style={{ padding: '8px 10px' }}>
+          <div style={{ height: 11, background: '#f3f4f6', borderRadius: 4, width: w }} />
+        </td>
+      ))}
+    </tr>
   )
 }

@@ -715,7 +715,6 @@ function GrantOverrideDialog({ open, onClose }: { open: boolean; onClose: () => 
   const [overrideType,  setOverrideType]  = useState<OverrideType | ''>('')
   const [grantedTo,     setGrantedTo]     = useState('')
   const [reason,        setReason]        = useState('')
-  const [justification, setJustification] = useState('')
   const [validUntil,    setValidUntil]    = useState('')
   const [maxUses,       setMaxUses]       = useState('')
 
@@ -725,7 +724,7 @@ function GrantOverrideDialog({ open, onClose }: { open: boolean; onClose: () => 
         override_type: overrideType,
         granted_to:    grantedTo,
         reason,
-        justification,
+        justification: reason,
         valid_until:   validUntil,
         max_uses:      maxUses ? Number(maxUses) : undefined,
       }),
@@ -733,13 +732,13 @@ function GrantOverrideDialog({ open, onClose }: { open: boolean; onClose: () => 
       qc.invalidateQueries({ queryKey: ['governance-overrides'] })
       onClose()
       setOverrideType(''); setGrantedTo(''); setReason('')
-      setJustification(''); setValidUntil(''); setMaxUses('')
+      setValidUntil(''); setMaxUses('')
       toast.success('Override granted')
     },
     onError: (e: Error) => toast.error('Failed to grant override', { description: e.message }),
   })
 
-  const valid = !!overrideType && !!grantedTo && !!reason && !!justification && !!validUntil
+  const valid = !!overrideType && !!grantedTo && !!reason && !!validUntil
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
@@ -775,26 +774,14 @@ function GrantOverrideDialog({ open, onClose }: { open: boolean; onClose: () => 
             />
           </div>
 
-          {/* Reason */}
+          {/* Reason / Justification */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Reason *</label>
+            <label className="text-xs font-medium text-muted-foreground">Reason &amp; Justification *</label>
             <textarea
               value={reason}
               onChange={e => setReason(e.target.value)}
-              rows={2}
-              placeholder="Business reason for this override…"
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50 resize-none"
-            />
-          </div>
-
-          {/* Justification */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Justification *</label>
-            <textarea
-              value={justification}
-              onChange={e => setJustification(e.target.value)}
-              rows={2}
-              placeholder="Detailed justification and authority basis…"
+              rows={3}
+              placeholder="Business reason and authority basis for this override…"
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50 resize-none"
             />
           </div>

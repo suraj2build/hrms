@@ -84,7 +84,10 @@ function fmt(n: number) {
 }
 
 function fmtDate(s: string) {
-  return new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 function StatusBadge({ status }: { status: 'pending' | 'approved' | 'rejected' }) {
@@ -229,9 +232,17 @@ function MakerCheckerTab() {
     mutationFn: (id: string) => api.post(`/payroll/governance/maker-checker/${id}/approve`).then((r: any) => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
+      // Approval changes run status/stats — keep ops pages in sync
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       toast.success('Entry approved')
     },
-    onError: (e: Error) => toast.error('Failed to approve entry', { description: e.message }),
+    onError: (e: Error) => {
+      // 409 means already actioned by another checker — refresh the list so the
+      // record shows its current (non-pending) status instead of remaining stale.
+      queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
+      toast.error('Failed to approve entry', { description: e.message })
+    },
   })
 
   const rejectMutation = useMutation({
@@ -239,10 +250,15 @@ function MakerCheckerTab() {
       api.post(`/payroll/governance/maker-checker/${id}/reject`, { reason }).then((r: any) => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       setRejectTarget(null)
       toast.success('Entry rejected')
     },
-    onError: (e: Error) => toast.error('Failed to reject entry', { description: e.message }),
+    onError: (e: Error) => {
+      queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
+      toast.error('Failed to reject entry', { description: e.message })
+    },
   })
 
   if (isLoading) return (
@@ -502,18 +518,28 @@ function VarianceApprovalsTab() {
     mutationFn: (id: string) => api.post(`/payroll/governance/variances/${id}/approve`).then((r: any) => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       toast.success('Variance approved')
     },
-    onError: (e: Error) => toast.error('Failed to approve variance', { description: e.message }),
+    onError: (e: Error) => {
+      queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
+      toast.error('Failed to approve variance', { description: e.message })
+    },
   })
 
   const rejectMutation = useMutation({
     mutationFn: (id: string) => api.post(`/payroll/governance/variances/${id}/reject`).then((r: any) => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       toast.success('Variance rejected')
     },
-    onError: (e: Error) => toast.error('Failed to reject variance', { description: e.message }),
+    onError: (e: Error) => {
+      queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
+      toast.error('Failed to reject variance', { description: e.message })
+    },
   })
 
   return (

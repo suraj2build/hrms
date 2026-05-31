@@ -28,6 +28,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogDescription,
@@ -119,15 +120,21 @@ const OP_LABEL: Record<string, string> = {
 
 function fmtDate(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -801,10 +808,9 @@ export function LeavePolicyEngine() {
                 <label className="text-xs font-medium text-foreground flex items-center gap-1">
                   <Calendar className="h-3 w-3" />Resolve As Of (optional)
                 </label>
-                <Input
-                  type="date"
+                <DateInput
                   value={simDate}
-                  onChange={e => setSimDate(e.target.value)}
+                  onChange={setSimDate}
                   className="h-8 text-xs"
                 />
               </div>

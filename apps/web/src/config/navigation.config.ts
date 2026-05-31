@@ -3,10 +3,70 @@
  *
  * Consumed by:
  *   · AdminSidebar.tsx        — grouped collapsible nav
- *   · EmployeeSidebar.tsx     — ESS nav
+ *   · EmployeeSidebar.tsx     — ESS nav  (ESS_NAV_ITEMS only)
  *   · CommandPalette.tsx      — ⌘K search targets
  *   · Breadcrumbs             — auto-generated trail
  *   · OperationalBanner.tsx   — deep-link hrefs
+ *
+ * ── Admin group structure ─────────────────────────────────────────────────────
+ *
+ *  PRIMARY NAVIGATION  (18 groups — all first-class operational domains)
+ *  ─────────────────────────────────────────────────────────────────────
+ *   1.  People & Workforce          (workforce)
+ *   2.  Attendance                  (attendance)              ← operational only
+ *   3.  Shifts & Rosters            (shifts-rosters)
+ *   4.  Leave                       (leave)                   ← operational only
+ *   5.  Compensation Management     (payroll-compensation)
+ *   6.  Payroll Operations          (payroll-operations)
+ *   7.  Statutory Compliance        (payroll-statutory)       ← was payroll-compliance
+ *   8.  Employee Financial Ops      (payroll-financial)
+ *   9.  Payroll Intelligence        (payroll-intelligence)
+ *  10.  Data Onboarding             (data-onboarding)
+ *  11.  Communications & Documents  (communications)
+ *  12.  Compliance & Governance     (compliance-governance)   ← canonical policy/audit/governance
+ *  13.  Reports & Intelligence      (reports-intelligence)    ← analytics, reports, executive
+ *
+ *  ADVANCED OPERATIONS  (4 sub-groups — promoted first-class domain, before Configuration)
+ *  ─────────────────────────────────────────────────────────────────────────────────────────
+ *  14.  Risk & Governance           (advanced-risk)           ← strategic oversight
+ *  15.  Simulation & Optimization   (advanced-simulation)     ← what-if / workforce planning
+ *  16.  Advanced Intelligence       (advanced-intelligence)   ← deep analytics
+ *  17.  Platform Orchestration      (advanced-platform)       ← workflow/saga engines
+ *
+ *  CONFIGURATION  (setup utilities only)
+ *  ─────────────────────────────────────
+ *  18.  Configuration & Masters     (configuration)           ← masters + settings
+ *
+ * ── Canonical ownership decisions ────────────────────────────────────────────
+ *
+ *  Governance      → compliance-governance  (single canonical home)
+ *  Policy systems  → compliance-governance  (attendance policy, leave policy, policy engine)
+ *  Audit           → compliance-governance  (audit log, access control)
+ *  Statutory       → payroll-statutory      (EPF/ESI/PTAX/TDS are payroll calculations —
+ *                                            requires payroll:view; stays payroll-scoped)
+ *  Analytics       → reports-intelligence   (workforce analytics, operational intelligence)
+ *  Executive BI    → reports-intelligence   (not buried in advanced)
+ *  Simulations     → advanced-simulation    (roster sim, policy sim, workforce opt.)
+ *  Risk scoring    → advanced-risk          (confidence, absenteeism risk, governance matrix)
+ *  Advanced intel  → advanced-intelligence  (session-level, health index)
+ *  Orchestration   → advanced-platform      (saga/event/orchestration tooling)
+ *
+ * ── Duplication removals / promotion history ─────────────────────────────────
+ *  – Attendance Policy:      Attendance       → compliance-governance
+ *  – Attendance Audit Log:   Attendance       → compliance-governance
+ *  – Operational Health:     Attendance       → compliance-governance
+ *  – Leave Policies:         Leave            → compliance-governance
+ *  – Policy Engine:          Leave            → compliance-governance
+ *  – Roles & Permissions:    Configuration    → compliance-governance
+ *  – Approval Workflows:     Configuration    → compliance-governance
+ *  – Exception Governance:   advanced         → compliance-governance
+ *  – Executive Intelligence: advanced         → reports-intelligence
+ *  – Workforce Analytics:    workforce        → reports-intelligence
+ *  – Intelligence (AI risk): workforce        → reports-intelligence
+ *  – payroll-compliance group renamed → payroll-statutory
+ *  – 'Freeze & Governance' item label → 'Payroll Freeze'
+ *  – Advanced Tools (collapsed bottom utility) → Advanced Operations (promoted primary domain)
+ *    positioned BEFORE Configuration — strategic ops > admin setup
  *
  * Design rules:
  *   · No inline permission logic — use permission strings only
@@ -15,19 +75,20 @@
  */
 
 import {
-  LayoutDashboard, Users, Brain, TrendingUp, LayoutGrid,
-  Clock, BarChart2, ClipboardEdit, ClipboardCheck, AlertTriangle,
+  Users, Brain, TrendingUp,
+  Clock, BarChart2, ClipboardCheck, AlertTriangle, Command,
   FileSearch, Target, Timer,
-  AlarmClock, UserCog, CalendarClock, CalendarDays,
+  AlarmClock, UserCog, CalendarClock, CalendarDays, CalendarHeart,
   ListChecks, BookOpen, Settings2, GitMerge, CalendarCheck, CalendarPlus,
   GitBranch, ShieldCheck, Zap, BadgeCheck, Lock,
   DollarSign, FileText, Stamp, Bell, BarChart3,
   Building2, Database, Upload, Settings, PlayCircle,
   PieChart, Shield, Users as UsersIcon, Radio,
   Landmark, Receipt, CreditCard, Banknote, TrendingDown,
-  Scale, CheckSquare, BookMarked, Inbox,
-  Layers, FlaskConical, Search,
-  FolderUp, UserPlus, Boxes,
+  Scale, BookMarked, Inbox,
+  Layers, FlaskConical, Search, Activity, GitMerge as GitMergeIcon,
+  FolderUp, UserPlus, ShieldAlert,
+  Calculator, ScrollText,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -61,6 +122,11 @@ export interface NavItem {
   badge?:        string
   /** If true, only exact pathname matches set the item as active */
   exact?:        boolean
+  /**
+   * If true, the item lives inside an Advanced Tools sub-group.
+   * Consumers (sidebar, command palette) collapse these by default.
+   */
+  advanced?:     boolean
 }
 
 export interface NavGroup {
@@ -81,64 +147,72 @@ export interface NavGroup {
    * Controls the group header tint and container background.
    */
   accentClass?:     string
+  /**
+   * If true, this group belongs to the Advanced Tools section.
+   * Sidebar renders all advanced groups inside a collapsible parent.
+   */
+  advanced?:        boolean
 }
 
 // ── Admin Groups ───────────────────────────────────────────────────────────────
 
 export const ADMIN_GROUPS: NavGroup[] = [
+
+  // ── 0. Control Center ────────────────────────────────────────────────────────
   {
-    id:               'workspaces',
-    label:            'Workspaces',
-    icon:             Boxes,
+    id:               'control-center',
+    label:            'Control Center',
+    icon:             Command,
     section:          'admin',
     defaultExpanded:  true,
-    accentClass:      'bg-primary/[0.05]',
+    accentClass:      'bg-primary/[0.06]',
   },
+
+  // ── 1. People & Workforce ────────────────────────────────────────────────────
   {
     id:               'workforce',
-    label:            'Workforce Operations',
+    label:            'People & Workforce',
     icon:             Users,
     section:          'admin',
     defaultExpanded:  true,
     accentClass:      'bg-muted/[0.15]',
   },
+
+  // ── 2. Attendance (operational workflows only) ───────────────────────────────
   {
     id:               'attendance',
-    label:            'Attendance Operations',
+    label:            'Attendance',
     icon:             Clock,
     section:          'admin',
     defaultExpanded:  false,
     accentClass:      'bg-muted/[0.15]',
   },
+
+  // ── 3. Shifts & Rosters ──────────────────────────────────────────────────────
   {
-    id:               'shifts',
-    label:            'Shift & Workforce Planning',
-    icon:             AlarmClock,
+    id:               'shifts-rosters',
+    label:            'Shifts & Rosters',
+    icon:             CalendarClock,
     section:          'admin',
     defaultExpanded:  false,
-    accentClass:      'bg-primary/[0.07]',
+    accentClass:      'bg-primary/[0.06]',
   },
+
+  // ── 4. Leave (operational + leave-specific config) ───────────────────────────
   {
     id:               'leave',
-    label:            'Leave Operations',
+    label:            'Leave',
     icon:             CalendarCheck,
     section:          'admin',
     defaultExpanded:  false,
     accentClass:      'bg-muted/[0.15]',
   },
-  {
-    id:               'governance',
-    label:            'Governance & Compliance',
-    icon:             ShieldCheck,
-    section:          'admin',
-    defaultExpanded:  false,
-    accentClass:      'bg-muted/[0.15]',
-  },
 
-  // ── Payroll Workspace — 5 focused groups ─────────────────────────────────────
+  // ── 5–9. Payroll (5 focused sub-groups under the Payroll domain) ─────────────
+
   {
     id:               'payroll-compensation',
-    label:            'Compensation Management',
+    label:            'Compensation',
     icon:             Landmark,
     section:          'admin',
     permission:       'payroll:view',
@@ -155,8 +229,11 @@ export const ADMIN_GROUPS: NavGroup[] = [
     accentClass:      'bg-primary/[0.05]',
   },
   {
-    id:               'payroll-compliance',
-    label:            'Compliance & Taxation',
+    // Renamed from 'payroll-compliance' to avoid confusion with the new
+    // Compliance & Governance group. EPF/ESI/PTAX/TDS intentionally remain
+    // payroll-scoped (require payroll:view and are payroll calculation concerns).
+    id:               'payroll-statutory',
+    label:            'Statutory Compliance',
     icon:             ShieldCheck,
     section:          'admin',
     permission:       'payroll:view',
@@ -182,6 +259,7 @@ export const ADMIN_GROUPS: NavGroup[] = [
     accentClass:      'bg-muted/[0.08]',
   },
 
+  // ── 10. Data Onboarding ──────────────────────────────────────────────────────
   {
     id:               'data-onboarding',
     label:            'Data Onboarding',
@@ -191,17 +269,93 @@ export const ADMIN_GROUPS: NavGroup[] = [
     defaultExpanded:  false,
     accentClass:      'bg-muted/[0.15]',
   },
+
+  // ── 11. Communications & Documents ──────────────────────────────────────────
   {
     id:               'communications',
-    label:            'Communication & Documents',
+    label:            'Communications & Documents',
     icon:             Stamp,
     section:          'admin',
     defaultExpanded:  false,
     accentClass:      'bg-muted/[0.15]',
   },
+
+  // ── 12. Compliance & Governance ──────────────────────────────────────────────
+  // Canonical home for: policies, governance, audit, access control,
+  // approval governance, and platform exception management.
+  // Note: statutory payroll compliance (EPF/ESI/PTAX/TDS) stays in
+  // payroll-statutory as it requires payroll:view and is payroll-calculation-scoped.
   {
-    id:               'system',
-    label:            'System Administration',
+    id:               'compliance-governance',
+    label:            'Compliance & Governance',
+    icon:             Scale,
+    section:          'admin',
+    defaultExpanded:  false,
+    accentClass:      'bg-muted/[0.10]',
+  },
+
+  // ── 13. Reports & Intelligence ───────────────────────────────────────────────
+  // Contains: operational reports, workforce analytics, executive BI,
+  // and operational AI intelligence.
+  {
+    id:               'reports-intelligence',
+    label:            'Reports & Intelligence',
+    icon:             BarChart3,
+    section:          'admin',
+    permission:       'reports:view',
+    defaultExpanded:  false,
+    accentClass:      'bg-muted/[0.08]',
+  },
+
+  // ── 14–17. ADVANCED OPERATIONS ───────────────────────────────────────────────
+  // First-class primary domain — positioned BEFORE Configuration.
+  // Strategic ops > admin setup. Each sub-group is a peer primary nav group.
+  // In nav-config.ts (ContextualSidebar / TopNav), these are owned by the
+  // 'advanced-ops' domain. Here they are individual sidebar groups for the
+  // legacy AdminSidebar and command palette.
+
+  {
+    id:               'advanced-risk',
+    label:            'Risk & Governance',
+    icon:             ShieldAlert,
+    section:          'admin',
+    permission:       'settings:view',
+    defaultExpanded:  false,
+    accentClass:      'bg-muted/[0.08]',
+  },
+  {
+    id:               'advanced-simulation',
+    label:            'Simulation & Optimization',
+    icon:             FlaskConical,
+    section:          'admin',
+    permission:       'settings:view',
+    defaultExpanded:  false,
+    accentClass:      'bg-muted/[0.08]',
+  },
+  {
+    id:               'advanced-intelligence',
+    label:            'Advanced Intelligence',
+    icon:             Brain,
+    section:          'admin',
+    permission:       'settings:view',
+    defaultExpanded:  false,
+    accentClass:      'bg-muted/[0.08]',
+  },
+  {
+    id:               'advanced-platform',
+    label:            'Platform Orchestration',
+    icon:             GitBranch,
+    section:          'admin',
+    permission:       'settings:view',
+    defaultExpanded:  false,
+    accentClass:      'bg-muted/[0.08]',
+  },
+
+  // ── 18. Configuration & Masters (setup utilities only — no governance) ────────
+  // Positioned LAST — admin setup is less frequently accessed than Advanced Operations.
+  {
+    id:               'configuration',
+    label:            'Configuration & Masters',
     icon:             Settings,
     section:          'admin',
     permission:       'settings:view',
@@ -214,68 +368,28 @@ export const ADMIN_GROUPS: NavGroup[] = [
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [
 
-  // ── Workspaces ─────────────────────────────────────────────────────────────
-  {
-    id:          'workspace-workforce',
-    label:       'People & Workforce',
-    breadcrumbLabel: 'Workforce',
-    route:       '/admin/workforce',
-    icon:        Users,
-    groupId:     'workspaces',
-    section:     'admin',
-    permission:  'employees:view',
-    keywords:    ['people', 'employees', 'onboarding', 'imports', 'workforce hub'],
-    description: 'Unified workspace: employees, onboarding, imports, and analytics',
-  },
-  {
-    id:          'workspace-attendance',
-    label:       'Attendance Hub',
-    breadcrumbLabel: 'Attendance',
-    route:       '/admin/attendance-workspace',
-    icon:        Clock,
-    groupId:     'workspaces',
-    section:     'admin',
-    permission:  'attendance:view',
-    keywords:    ['attendance workspace', 'muster', 'corrections', 'forensics', 'anomalies'],
-    description: 'Unified workspace: processing, corrections, forensics, and intelligence',
-  },
-  {
-    id:          'workspace-payroll',
-    label:       'Payroll Hub',
-    breadcrumbLabel: 'Payroll',
-    route:       '/admin/payroll-workspace',
-    icon:        DollarSign,
-    groupId:     'workspaces',
-    section:     'admin',
-    permission:  'payroll:view',
-    keywords:    ['payroll workspace', 'runs', 'compliance', 'reconciliation', 'ledger'],
-    description: 'Unified workspace: runs, compliance, reconciliation, and compensation',
-  },
-  {
-    id:          'workspace-operations',
-    label:       'Operations Hub',
-    breadcrumbLabel: 'Operations',
-    route:       '/admin/operations',
-    icon:        Zap,
-    groupId:     'workspaces',
-    section:     'admin',
-    permission:  'settings:view',
-    keywords:    ['operations', 'incidents', 'observability', 'webhooks', 'orchestration', 'inbox'],
-    description: 'Unified workspace: inbox, incidents, orchestration, and system health',
-  },
+  // ════════════════════════════════════════════════════════════════════════════
+  // 0. CONTROL CENTER  — Primary admin home
+  // ════════════════════════════════════════════════════════════════════════════
 
-  // ── Workforce Operations ────────────────────────────────────────────────────
   {
-    id:          'dashboard',
-    label:       'Dashboard',
-    route:       '/admin/dashboard',
-    icon:        LayoutDashboard,
-    groupId:     'workforce',
+    id:          'control-center',
+    label:       'Control Center',
+    route:       '/admin/control-center',
+    icon:        Command,
+    groupId:     'control-center',
     section:     'admin',
     exact:       true,
-    keywords:    ['home', 'overview', 'summary'],
-    description: 'Admin overview and key metrics',
+    keywords:    ['home', 'overview', 'operations', 'health', 'exceptions', 'kpi'],
+    description: 'Platform-wide operational command and live health monitoring',
   },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 1. PEOPLE & WORKFORCE
+  // Daily operational entry point: admin dashboard + people directory.
+  // Analytics and intelligence moved to Reports & Intelligence for clean separation.
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'people',
     label:       'People',
@@ -285,45 +399,37 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     section:     'admin',
     permission:  'employees:view',
     keywords:    ['employees', 'staff', 'directory', 'HR'],
-    description: 'Employee directory and profiles',
-  },
-  {
-    id:          'manager-dashboard',
-    label:       'Manager Dashboard',
-    breadcrumbLabel: 'Manager',
-    route:       '/admin/manager-dashboard',
-    icon:        LayoutGrid,
-    groupId:     'workforce',
-    section:     'admin',
-    permission:  'attendance:view_team',
-    keywords:    ['team', 'manager', 'reports', 'direct'],
-    description: 'Live team attendance and operational status',
-  },
-  {
-    id:          'workforce-analytics',
-    label:       'Workforce Analytics',
-    breadcrumbLabel: 'Analytics',
-    route:       '/admin/analytics/workforce',
-    icon:        TrendingUp,
-    groupId:     'workforce',
-    section:     'admin',
-    permission:  'reports:view',
-    keywords:    ['analytics', 'trends', 'stats', 'headcount'],
-    description: 'Workforce composition and headcount analytics',
-  },
-  {
-    id:          'intelligence',
-    label:       'Intelligence',
-    route:       '/admin/intelligence',
-    icon:        Brain,
-    groupId:     'workforce',
-    section:     'admin',
-    permission:  'attendance:view',
-    keywords:    ['ai', 'insights', 'risk', 'smart', 'ml'],
-    description: 'AI-powered workforce risk and attendance insights',
+    description: 'Employee directory and master records',
   },
 
-  // ── Attendance Operations ───────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 2. ATTENDANCE  (operational workflows only)
+  // Policy, audit, and health monitoring moved to Compliance & Governance.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  {
+    id:          'workspace-attendance',
+    label:       'Attendance Hub',
+    breadcrumbLabel: 'Attendance',
+    route:       '/admin/attendance-workspace',
+    icon:        Clock,
+    groupId:     'attendance',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['attendance workspace', 'muster', 'corrections', 'forensics', 'anomalies'],
+    description: 'Unified workspace: processing, corrections, forensics, and intelligence',
+  },
+  {
+    id:          'who-is-in',
+    label:       'Who Is In',
+    route:       '/admin/attendance/who-is-in',
+    icon:        Radio,
+    groupId:     'attendance',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['who is in', 'live', 'real-time', 'present', 'absent', 'late', 'on time', 'out of office', 'check-in', 'today'],
+    description: 'Real-time attendance status — who is in, late, or out of office today',
+  },
   {
     id:          'muster-roll',
     label:       'Muster Roll',
@@ -336,18 +442,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Monthly attendance register across all employees',
   },
   {
-    id:          'corrections',
-    label:       'Corrections',
-    route:       '/admin/attendance/corrections',
-    icon:        ClipboardEdit,
-    groupId:     'attendance',
-    section:     'admin',
-    permission:  'corrections:approve',
-    badge:       'Corrections',
-    keywords:    ['fix', 'punch correction', 'edit attendance', 'approve'],
-    description: 'Review and approve attendance correction requests',
-  },
-  {
     id:          'regularisation',
     label:       'Regularisation',
     route:       '/admin/attendance/regularisation',
@@ -355,8 +449,9 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     groupId:     'attendance',
     section:     'admin',
     permission:  'corrections:approve',
-    keywords:    ['regularize', 'approve', 'missing punch'],
-    description: 'Approve employee attendance regularisation requests',
+    badge:       'Corrections',
+    keywords:    ['regularise', 'regularisation', 'approve', 'missing punch', 'punch fix', 'attendance adjustment'],
+    description: 'Review and approve employee attendance regularisation requests',
   },
   {
     id:          'anomalies',
@@ -382,18 +477,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Per-employee forensic attendance timeline investigation',
   },
   {
-    id:          'audit-log',
-    label:       'Audit Log',
-    breadcrumbLabel: 'Audit',
-    route:       '/admin/attendance/audit',
-    icon:        FileSearch,
-    groupId:     'attendance',
-    section:     'admin',
-    permission:  'attendance:audit',
-    keywords:    ['history', 'changes', 'log', 'who changed'],
-    description: 'Full audit trail of all attendance record changes',
-  },
-  {
     id:          'overtime',
     label:       'Overtime',
     route:       '/admin/overtime',
@@ -404,15 +487,40 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     keywords:    ['OT', 'extra hours', 'overtime'],
     description: 'Overtime records and approval management',
   },
+  {
+    id:          'attendance-upload',
+    label:       'Attendance Upload',
+    route:       '/admin/attendance/upload',
+    icon:        Upload,
+    groupId:     'attendance',
+    section:     'admin',
+    permission:  'attendance:process',
+    keywords:    ['CSV', 'bulk upload', 'import', 'raw logs'],
+    description: 'Bulk attendance log upload via CSV',
+  },
+  {
+    id:          'period-locks',
+    label:       'Period Locks',
+    route:       '/admin/attendance/periods',
+    icon:        Lock,
+    groupId:     'attendance',
+    section:     'admin',
+    permission:  'attendance:process',
+    keywords:    ['lock', 'period', 'close month', 'freeze'],
+    description: 'Attendance period locking and freeze management',
+  },
 
-  // ── Shift & Workforce Planning ──────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 3. SHIFTS & ROSTERS
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'shift-definitions',
     label:       'Shift Definitions',
     breadcrumbLabel: 'Shifts',
     route:       '/admin/shift-master',
     icon:        AlarmClock,
-    groupId:     'shifts',
+    groupId:     'shifts-rosters',
     section:     'admin',
     permission:  'shifts:configure',
     keywords:    ['shifts', 'timing', 'schedule', 'define shift'],
@@ -420,21 +528,21 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   },
   {
     id:          'employee-shifts',
-    label:       'Employee Shifts',
+    label:       'Shift Overrides',
     route:       '/admin/employee-shifts',
     icon:        UserCog,
-    groupId:     'shifts',
+    groupId:     'shifts-rosters',
     section:     'admin',
     permission:  'shifts:configure',
-    keywords:    ['assign shift', 'employee schedule', 'standing shift'],
-    description: 'Assign standing shifts to employees',
+    keywords:    ['shift override', 'temporary shift', 'emergency coverage', 'exception shift', 'employee shift override'],
+    description: 'Exception-only shift overrides for temporary or emergency assignments',
   },
   {
     id:          'roster-planner',
     label:       'Roster Planner',
     route:       '/admin/roster',
     icon:        CalendarClock,
-    groupId:     'shifts',
+    groupId:     'shifts-rosters',
     section:     'admin',
     permission:  'roster:edit',
     keywords:    ['roster', 'calendar', 'assignment', 'daily shift'],
@@ -442,28 +550,44 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   },
   {
     id:          'roster-templates',
-    label:       'Roster Templates',
+    label:       'Roster Policies',
     route:       '/admin/masters/rosters',
     icon:        CalendarDays,
-    groupId:     'shifts',
+    groupId:     'shifts-rosters',
     section:     'admin',
     permission:  'roster:edit',
-    keywords:    ['template', 'pattern', 'preset'],
-    description: 'Reusable roster pattern templates',
+    keywords:    ['roster policy', 'weekly off', 'pattern', 'template', 'preset', 'governance'],
+    description: 'Enterprise roster & weekly-off governance policies',
   },
   {
-    id:          'sites',
-    label:       'Sites',
-    route:       '/admin/masters/sites',
-    icon:        Building2,
-    groupId:     'shifts',
+    id:          'rotation-policies-nav',
+    label:       'Rotation Policies',
+    route:       '/admin/masters/rotation-policies',
+    icon:        CalendarClock,
+    groupId:     'shifts-rosters',
     section:     'admin',
-    permission:  'masters:edit',
-    keywords:    ['location', 'office', 'site', 'branch'],
-    description: 'Work site and location management',
+    permission:  'roster:edit',
+    keywords:    ['rotation policy', 'shift mapping', 'weekday shift', 'saturday shift', 'condition shift', 'shift governance'],
+    description: 'Map working conditions (weekday/Saturday/Sunday) to specific shifts',
+  },
+  {
+    id:          'roster-intelligence-nav',
+    label:       'Roster Intelligence',
+    breadcrumbLabel: 'Roster Intel',
+    route:       '/admin/roster/intelligence',
+    icon:        Brain,
+    groupId:     'shifts-rosters',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['roster analytics', 'coverage report', 'rotation analysis'],
+    description: 'Roster analytics, coverage reports, and rotation analysis',
   },
 
-  // ── Leave Operations ────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 4. LEAVE  (operational + leave-specific config)
+  // Leave Policies and Policy Engine moved to Compliance & Governance.
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'leave-ledger',
     label:       'Leave Ledger',
@@ -485,17 +609,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     permission:  'leave:configure',
     keywords:    ['CL', 'SL', 'EL', 'leave config', 'leave setup'],
     description: 'Configure leave types (CL, SL, EL, etc.)',
-  },
-  {
-    id:          'leave-policies',
-    label:       'Leave Policies',
-    route:       '/admin/leave-policy',
-    icon:        Settings2,
-    groupId:     'leave',
-    section:     'admin',
-    permission:  'leave:configure',
-    keywords:    ['policy', 'rules', 'carry forward', 'encashment'],
-    description: 'Leave policy configuration and rules',
   },
   {
     id:          'accrual-rules',
@@ -565,53 +678,10 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Automated leave processing job schedules',
   },
 
-  // ── Governance & Compliance ─────────────────────────────────────────────────
-  {
-    id:          'policy-engine',
-    label:       'Policy Engine',
-    route:       '/admin/leave/policy-engine',
-    icon:        GitBranch,
-    groupId:     'governance',
-    section:     'admin',
-    permission:  'leave:configure',
-    keywords:    ['policy', 'rules', 'inheritance', 'hierarchy'],
-    description: 'Visual leave policy inheritance and rule engine',
-  },
-  {
-    id:          'operational-health',
-    label:       'Operational Health',
-    route:       '/admin/operational-health',
-    icon:        Zap,
-    groupId:     'governance',
-    section:     'admin',
-    permission:  'attendance:view',
-    keywords:    ['health', 'status', 'monitoring', 'processing', 'locks'],
-    description: 'Platform processing status and operational alerts',
-  },
-  {
-    id:          'attendance-policy',
-    label:       'Attendance Policy',
-    route:       '/admin/attendance/policy',
-    icon:        ShieldCheck,
-    groupId:     'governance',
-    section:     'admin',
-    permission:  'settings:edit',
-    keywords:    ['policy', 'rules', 'attendance config', 'grace period'],
-    description: 'Attendance policy configuration and rules',
-  },
-  {
-    id:          'period-locks',
-    label:       'Period Locks',
-    route:       '/admin/attendance/periods',
-    icon:        Lock,
-    groupId:     'governance',
-    section:     'admin',
-    permission:  'attendance:process',
-    keywords:    ['lock', 'period', 'close month', 'freeze'],
-    description: 'Attendance period locking and freeze management',
-  },
+  // ════════════════════════════════════════════════════════════════════════════
+  // 5. COMPENSATION MANAGEMENT
+  // ════════════════════════════════════════════════════════════════════════════
 
-  // ── Payroll — Compensation Management ──────────────────────────────────────
   {
     id:          'compensation-master',
     label:       'Compensation Master',
@@ -661,7 +731,12 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Configure salary component library and earning/deduction types',
   },
 
-  // ── Payroll — Payroll Operations ────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 6. PAYROLL OPERATIONS
+  // 'Freeze & Governance' renamed to 'Payroll Freeze' — the governance label
+  // is reserved for compliance-governance; this is a payroll workflow step.
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'payroll-runs',
     label:       'Payroll Runs',
@@ -677,6 +752,8 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   {
     id:          'payroll-readiness',
     label:       'Payroll Readiness',
+    // NOTE: path is /admin/payroll-readiness (not under /admin/payroll/) for legacy reasons;
+    // do not change route without a coordinated redirect migration.
     route:       '/admin/payroll-readiness',
     icon:        BadgeCheck,
     groupId:     'payroll-operations',
@@ -690,7 +767,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     label:       'Validation Center',
     breadcrumbLabel: 'Validation',
     route:       '/admin/payroll/validation',
-    icon:        CheckSquare,
+    icon:        ShieldCheck,
     groupId:     'payroll-operations',
     section:     'admin',
     permission:  'payroll:view',
@@ -698,16 +775,91 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Pre-run validation engine and reconciliation rules',
   },
   {
-    id:          'payroll-governance',
-    label:       'Freeze & Governance',
-    breadcrumbLabel: 'Governance',
-    route:       '/admin/payroll/governance',
-    icon:        ShieldCheck,
+    id:          'payroll-resolution-center',
+    label:       'Resolution Center',
+    breadcrumbLabel: 'Resolution',
+    route:       '/admin/payroll/blockers',
+    icon:        ShieldAlert,
     groupId:     'payroll-operations',
     section:     'admin',
     permission:  'payroll:view',
-    keywords:    ['maker checker', 'freeze', 'variance', 'governance', 'finalize'],
-    description: 'Maker-checker controls, payroll freeze, and variance approvals',
+    keywords:    ['blockers', 'failed', 'resolve', 'fix', 'retry', 'remediation', 'errors'],
+    description: 'Review and resolve payroll run blockers, retry failed employees',
+  },
+  {
+    // Renamed from 'Freeze & Governance' — this is a payroll workflow step,
+    // not a governance system. The 'governance' label is reserved for
+    // compliance-governance. Maker-checker and payroll freeze are operational.
+    id:          'payroll-governance',
+    label:       'Payroll Freeze',
+    breadcrumbLabel: 'Freeze',
+    route:       '/admin/payroll/governance',
+    icon:        Lock,
+    groupId:     'payroll-operations',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['maker checker', 'freeze', 'variance', 'finalize', 'lock payroll'],
+    description: 'Maker-checker controls and payroll period freeze',
+  },
+  {
+    id:          'payroll-finalization',
+    label:       'Finalization',
+    breadcrumbLabel: 'Finalization',
+    route:       '/admin/payroll/finalize',
+    icon:        BadgeCheck,
+    groupId:     'payroll-operations',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['finalize', 'lock', 'rollback', 'bank advice', 'export'],
+    description: 'Finalize payroll run, freeze month, export bank advice',
+  },
+  {
+    id:          'payroll-approval-workflow',
+    label:       'Approval Workflow',
+    breadcrumbLabel: 'Approvals',
+    route:       '/admin/payroll/approvals',
+    icon:        GitMergeIcon,
+    groupId:     'payroll-operations',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['approval', 'maker checker', 'multi-stage', 'HR review', 'finance', 'compliance'],
+    description: 'Multi-stage payroll approval: HR → Finance → Compliance → Approved',
+  },
+  {
+    id:          'payroll-variance-center',
+    label:       'Variance Intelligence',
+    breadcrumbLabel: 'Variance',
+    route:       '/admin/payroll/variance',
+    icon:        TrendingDown,
+    groupId:     'payroll-operations',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['variance', 'anomaly', 'MoM', 'net pay change', 'LOP spike', 'zero net'],
+    description: 'Month-over-month variance detection and anomaly investigation',
+  },
+  {
+    id:          'payroll-payout',
+    label:       'Payout Center',
+    breadcrumbLabel: 'Payout',
+    route:       '/admin/payroll/payout',
+    icon:        Banknote,
+    groupId:     'payroll-operations',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['payout', 'bank advice', 'disbursement', 'transfer', 'failed payout'],
+    description: 'Bank disbursement orchestration, advice export, and payout tracking',
+  },
+  {
+    id:          'payroll-payout-reconciliation',
+    label:       'Payout Reconciliation',
+    breadcrumbLabel: 'Payout Recon',
+    route:       '/admin/payroll/payout-reconciliation',
+    icon:        Scale,
+    groupId:     'payroll-operations',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['payout reconciliation', 'UTR', 'bank reference', 'disbursement status', 'failed payout', 'retry'],
+    description: 'Track and reconcile payout obligations against actual bank disbursements',
   },
   {
     id:          'payroll-calendar',
@@ -722,14 +874,31 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Payroll cycle calendar and disbursement schedule',
   },
 
-  // ── Payroll — Compliance & Taxation ────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 7. STATUTORY COMPLIANCE  (was 'Compliance & Taxation')
+  // EPF, ESI, PTAX, TDS — payroll-calculation scoped, require payroll:view.
+  // General compliance/governance lives in compliance-governance group.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  {
+    id:          'statutory-reconciliation',
+    label:       'Statutory Reconciliation',
+    breadcrumbLabel: 'Stat. Reconciliation',
+    route:       '/admin/payroll/statutory-reconciliation',
+    icon:        Scale,
+    groupId:     'payroll-statutory',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['PF', 'ESI', 'PT', 'TDS', 'reconciliation', 'filing', 'statutory'],
+    description: 'PF · ESI · PT · TDS reconciliation and ready-for-filing status',
+  },
   {
     id:          'statutory-epf',
     label:       'EPF Management',
     breadcrumbLabel: 'EPF',
     route:       '/admin/payroll/statutory/epf',
     icon:        Landmark,
-    groupId:     'payroll-compliance',
+    groupId:     'payroll-statutory',
     section:     'admin',
     permission:  'payroll:view',
     keywords:    ['EPF', 'PF', 'provident fund', 'EPS', 'EDLI'],
@@ -741,7 +910,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     breadcrumbLabel: 'ESI',
     route:       '/admin/payroll/statutory/esi',
     icon:        Landmark,
-    groupId:     'payroll-compliance',
+    groupId:     'payroll-statutory',
     section:     'admin',
     permission:  'payroll:view',
     keywords:    ['ESI', 'ESIC', 'medical insurance', 'health insurance statutory'],
@@ -753,7 +922,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     breadcrumbLabel: 'PTAX',
     route:       '/admin/payroll/statutory/ptax',
     icon:        Landmark,
-    groupId:     'payroll-compliance',
+    groupId:     'payroll-statutory',
     section:     'admin',
     permission:  'payroll:view',
     keywords:    ['PTAX', 'professional tax', 'state tax', 'PT'],
@@ -765,14 +934,29 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     breadcrumbLabel: 'TDS',
     route:       '/admin/payroll/statutory/tds',
     icon:        Landmark,
-    groupId:     'payroll-compliance',
+    groupId:     'payroll-statutory',
     section:     'admin',
     permission:  'payroll:view',
     keywords:    ['TDS', 'income tax', 'tax deduction', '80C', 'declarations'],
     description: 'TDS computation, declarations, and proof management',
   },
+  {
+    id:          'tax-governance',
+    label:       'Tax Governance',
+    breadcrumbLabel: 'Tax Governance',
+    route:       '/admin/payroll/tax-governance',
+    icon:        ScrollText,
+    groupId:     'payroll-statutory',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['tax governance', 'IT window', 'declaration window', 'regime policy', 'proof settings', 'compliance', '80C'],
+    description: 'IT declaration window, regime policy, proof settings, and compliance dashboard',
+  },
 
-  // ── Payroll — Employee Financial Operations ─────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 8. EMPLOYEE FINANCIAL OPS
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'advance-salary',
     label:       'Salary Advances',
@@ -830,7 +1014,36 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Calculate and process salary arrears for revision adjustments',
   },
 
-  // ── Payroll — Payroll Intelligence ─────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 9. PAYROLL INTELLIGENCE
+  // NOTE: Payslip Explainability is NOT a separate entry — it is accessed
+  // via Payroll Forensics → drill into a specific run.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  {
+    id:          'payroll-forensics',
+    label:       'Payroll Forensics',
+    breadcrumbLabel: 'Forensics',
+    route:       '/admin/payroll/forensics',
+    icon:        Activity,
+    groupId:     'payroll-intelligence',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['audit', 'forensics', 'timeline', 'snapshot', 'replay', 'integrity', 'hash', 'who changed', 'override', 'log', 'trail', 'explainability', 'payslip breakdown'],
+    description: 'Audit trail, immutable snapshots, deterministic replay, and per-employee payslip explainability',
+  },
+  {
+    id:          'payroll-accounting-center',
+    label:       'Accounting Center',
+    breadcrumbLabel: 'Accounting',
+    route:       '/admin/payroll/accounting',
+    icon:        BookOpen,
+    groupId:     'payroll-intelligence',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['GL', 'general ledger', 'journal entries', 'double entry', 'accounting', 'cost center', 'ERP export', 'SAP', 'Tally', 'Zoho', 'QuickBooks', 'accrual', 'reversal'],
+    description: 'Double-entry GL ledger, journal entries, cost allocations, and ERP exports',
+  },
   {
     id:          'payroll-ledger',
     label:       'Payroll Ledger',
@@ -867,7 +1080,11 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     keywords:    ['cost', 'workforce cost', 'headcount cost', 'department cost'],
     description: 'Workforce cost breakdown and trend analytics',
   },
-  // ── Data Onboarding ─────────────────────────────────────────────────────────
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 10. DATA ONBOARDING
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'master-import',
     label:       'Master Import',
@@ -891,7 +1108,10 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'AI-assisted employee onboarding via document extraction',
   },
 
-  // ── Communication & Documents ───────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 11. COMMUNICATIONS & DOCUMENTS
+  // ════════════════════════════════════════════════════════════════════════════
+
   {
     id:          'letters',
     label:       'Letter Generation',
@@ -929,24 +1149,163 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Unified operational inbox with escalation management',
   },
 
-  // ── System Administration ───────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // 12. COMPLIANCE & GOVERNANCE  ← NEW canonical group
+  //
+  // Consolidated from: Configuration (roles, workflows), Attendance (policy,
+  // audit, health), Leave (policies, policy engine), Advanced (exceptions).
+  //
+  // Ownership taxonomy within this group:
+  //   Access Control:   Roles & Permissions
+  //   Workflow Control: Approval Workflows, Exception Governance
+  //   Policy Systems:   Attendance Policy, Leave Policy, Policy Engine
+  //   Audit:            Attendance Audit Log
+  //   Platform Health:  Operational Health
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // — Access Control —
   {
     id:          'roles-permissions',
     label:       'Roles & Permissions',
     route:       '/admin/settings/roles',
     icon:        Shield,
-    groupId:     'system',
+    groupId:     'compliance-governance',
     section:     'admin',
     permission:  'settings:edit',
     keywords:    ['RBAC', 'roles', 'access control', 'permissions', 'users'],
     description: 'Role-based access control and permission governance',
+  },
+
+  // — Workflow Governance —
+  {
+    id:          'workflows',
+    label:       'Approval Workflows',
+    breadcrumbLabel: 'Workflows',
+    route:       '/admin/approvals/workflows',
+    icon:        GitMerge,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'workflows:configure',
+    keywords:    ['workflow', 'approval chain', 'escalation'],
+    description: 'Configure multi-level approval workflows',
+  },
+  {
+    // Moved from advanced — attendance exception governance is a compliance
+    // concern, not a simulation/experimental tool.
+    id:          'exception-governance',
+    label:       'Exception Governance',
+    breadcrumbLabel: 'Exceptions',
+    route:       '/admin/attendance/exceptions',
+    icon:        ShieldAlert,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['exception', 'rule override', 'governance engine', 'attendance exception'],
+    description: 'Fine-grained attendance exception tracking and governance rules',
+  },
+
+  // — Policy Systems —
+  {
+    // Moved from Attendance — policy configuration belongs in governance, not operations.
+    id:          'attendance-policy',
+    label:       'Attendance Policy',
+    route:       '/admin/attendance/policy',
+    icon:        Settings2,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'settings:edit',
+    keywords:    ['policy', 'rules', 'attendance config', 'grace period'],
+    description: 'Attendance policy configuration and rules',
+  },
+  {
+    // Moved from Leave — policy configuration belongs in governance, not operations.
+    id:          'leave-policies',
+    label:       'Leave Policy',
+    route:       '/admin/leave-policy',
+    icon:        Settings2,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'leave:configure',
+    keywords:    ['policy', 'rules', 'carry forward', 'encashment'],
+    description: 'Leave policy configuration and rules',
+  },
+  {
+    // Moved from Leave — rule engine is a governance/compliance concern.
+    id:          'policy-engine',
+    label:       'Policy Engine',
+    route:       '/admin/leave/policy-engine',
+    icon:        GitBranch,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'leave:configure',
+    keywords:    ['policy', 'rules', 'inheritance', 'hierarchy'],
+    description: 'Visual leave policy inheritance and rule engine',
+  },
+  {
+    id:          'leave-governance',
+    label:       'Leave Governance',
+    route:       '/admin/leave/governance',
+    icon:        CalendarHeart,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'leave:configure',
+    keywords:    ['birthday', 'anniversary', 'event grant', 'important dates', 'event leave'],
+    description: 'Configure important date types and event-triggered leave grants',
+  },
+
+  // — Audit —
+  {
+    // Moved from Attendance — audit trails are a compliance/governance concern.
+    id:          'audit-log',
+    label:       'Attendance Audit Log',
+    breadcrumbLabel: 'Audit',
+    route:       '/admin/attendance/audit',
+    icon:        FileSearch,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'attendance:audit',
+    keywords:    ['history', 'changes', 'log', 'who changed', 'audit trail'],
+    description: 'Full audit trail of all attendance record changes',
+  },
+
+  // — Platform Health —
+  {
+    // Moved from Attendance — platform processing health is an operational
+    // governance concern, not an attendance workflow.
+    id:          'operational-health',
+    label:       'Operational Health',
+    route:       '/admin/operational-health',
+    icon:        Zap,
+    groupId:     'compliance-governance',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['health', 'status', 'monitoring', 'processing', 'locks'],
+    description: 'Platform processing status and operational alerts',
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 13. CONFIGURATION & MASTERS  (setup/config utilities only)
+  // Governance and compliance items removed — they live in compliance-governance.
+  // This group now contains ONLY: masters, locations, settings, observability.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  {
+    id:          'sites',
+    label:       'Sites',
+    route:       '/admin/masters/sites',
+    icon:        Building2,
+    groupId:     'configuration',
+    section:     'admin',
+    permission:  'masters:edit',
+    keywords:    ['location', 'office', 'site', 'branch'],
+    description: 'Work site and location management',
   },
   {
     id:          'users',
     label:       'Users',
     route:       '/admin/settings/users',
     icon:        UsersIcon,
-    groupId:     'system',
+    groupId:     'configuration',
     section:     'admin',
     permission:  'settings:edit',
     keywords:    ['users', 'accounts', 'login', 'admin users'],
@@ -958,41 +1317,18 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     breadcrumbLabel: 'Masters',
     route:       '/admin/masters',
     icon:        Database,
-    groupId:     'system',
+    groupId:     'configuration',
     section:     'admin',
     permission:  'masters:edit',
-    keywords:    ['config', 'setup', 'master data', 'reference data'],
-    description: 'Master data configuration for departments, grades, etc.',
-  },
-  {
-    id:          'workflows',
-    label:       'Approval Workflows',
-    breadcrumbLabel: 'Workflows',
-    route:       '/admin/approvals/workflows',
-    icon:        GitMerge,
-    groupId:     'system',
-    section:     'admin',
-    permission:  'workflows:configure',
-    keywords:    ['workflow', 'approval chain', 'escalation'],
-    description: 'Configure multi-level approval workflows',
-  },
-  {
-    id:          'attendance-upload',
-    label:       'Attendance Upload',
-    route:       '/admin/attendance/upload',
-    icon:        Upload,
-    groupId:     'system',
-    section:     'admin',
-    permission:  'attendance:process',
-    keywords:    ['CSV', 'bulk upload', 'import', 'raw logs'],
-    description: 'Bulk attendance log upload via CSV',
+    keywords:    ['config', 'setup', 'master data', 'reference data', 'departments', 'grades'],
+    description: 'Master data configuration for departments, grades, categories, etc.',
   },
   {
     id:          'settings',
     label:       'Settings',
     route:       '/admin/settings',
     icon:        Settings,
-    groupId:     'system',
+    groupId:     'configuration',
     section:     'admin',
     exact:       true,
     permission:  'settings:view',
@@ -1000,27 +1336,253 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     description: 'Platform configuration and tenant settings',
   },
   {
+    id:          'observability',
+    label:       'Observability Console',
+    breadcrumbLabel: 'Observability',
+    route:       '/admin/system/observability',
+    icon:        Radio,
+    groupId:     'configuration',
+    section:     'admin',
+    permission:  'settings:view',
+    keywords:    ['event bus', 'job queue', 'metrics', 'platform health', 'dead letter', 'modules'],
+    description: 'Live platform event bus, job queue, and module health console',
+  },
+  {
+    id:          'integration-registry',
+    label:       'Integration Registry',
+    breadcrumbLabel: 'Integrations',
+    route:       '/admin/system/integrations',
+    icon:        GitBranch,
+    groupId:     'configuration',
+    section:     'admin',
+    permission:  'settings:view',
+    keywords:    ['integration', 'API', 'biometric', 'ERP', 'connect', 'external', 'third party', 'connector'],
+    description: 'Register and manage external system integrations and API connections',
+  },
+  {
+    id:          'webhook-management',
+    label:       'Webhooks',
+    breadcrumbLabel: 'Webhooks',
+    route:       '/admin/system/webhooks',
+    icon:        Zap,
+    groupId:     'configuration',
+    section:     'admin',
+    permission:  'settings:edit',
+    keywords:    ['webhook', 'outbound', 'delivery', 'event push', 'API callback', 'http hook'],
+    description: 'Configure outbound webhooks and monitor delivery history',
+  },
+  {
+    id:          'automations-console',
+    label:       'Automations',
+    breadcrumbLabel: 'Automations',
+    route:       '/admin/system/automations',
+    icon:        Activity,
+    groupId:     'configuration',
+    section:     'admin',
+    permission:  'settings:view',
+    keywords:    ['automation', 'jobs', 'scheduler', 'cron', 'background tasks', 'triggers'],
+    description: 'Background automation jobs and scheduler management',
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 14. REPORTS & INTELLIGENCE
+  // Contains: operational reports, workforce analytics, operational AI intelligence,
+  // and executive BI. Advanced/experimental intelligence stays in advanced-intelligence.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  {
     id:          'reports',
     label:       'Reports',
     route:       '/admin/reports',
     icon:        BarChart3,
-    groupId:     'system',
+    groupId:     'reports-intelligence',
     section:     'admin',
     permission:  'reports:view',
     keywords:    ['export', 'download', 'analytics', 'data export'],
     description: 'Operational reports and data exports',
   },
   {
-    id:          'observability',
-    label:       'Observability Console',
-    breadcrumbLabel: 'Observability',
-    route:       '/admin/system/observability',
+    // Moved from workforce — analytics belongs in reports & intelligence,
+    // not in the operational people command center.
+    id:          'workforce-analytics',
+    label:       'Workforce Analytics',
+    breadcrumbLabel: 'Analytics',
+    route:       '/admin/analytics/workforce',
+    icon:        TrendingUp,
+    groupId:     'reports-intelligence',
+    section:     'admin',
+    permission:  'reports:view',
+    keywords:    ['analytics', 'trends', 'stats', 'headcount', 'attrition', 'retention'],
+    description: 'Workforce composition, headcount, and attrition analytics',
+  },
+  {
+    // Moved from workforce — operational AI intelligence belongs in the
+    // intelligence hub, not alongside the People directory.
+    id:          'intelligence',
+    label:       'Workforce Intelligence',
+    breadcrumbLabel: 'Intelligence',
+    route:       '/admin/intelligence',
+    icon:        Brain,
+    groupId:     'reports-intelligence',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['ai', 'insights', 'risk', 'smart', 'ml', 'workforce risk'],
+    description: 'AI-powered workforce risk scores and attendance intelligence',
+  },
+  {
+    // Moved from advanced — Executive Intelligence is a top-level BI capability,
+    // not a hidden advanced utility. It belongs alongside operational analytics.
+    id:          'executive-intelligence',
+    label:       'Executive Intelligence',
+    breadcrumbLabel: 'Executive',
+    route:       '/admin/analytics/executive',
+    icon:        PieChart,
+    groupId:     'reports-intelligence',
+    section:     'admin',
+    permission:  'reports:view',
+    keywords:    ['executive', 'C-suite', 'board', 'summary', 'scorecard', 'KPI'],
+    description: 'Board-level KPIs and executive workforce scorecard',
+  },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ADVANCED OPERATIONS  ── 4 sub-groups, promoted first-class domain
+  //
+  // Strategic enterprise oversight: risk scoring, simulations, advanced
+  // workforce intelligence, and platform orchestration. Positioned before
+  // Configuration — these are operational capabilities, not admin utilities.
+  // In nav-config.ts DOMAINS, these live under the 'advanced-ops' domain.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // ── Risk & Governance ────────────────────────────────────────────────────────
+
+  {
+    id:          'governance-matrix',
+    label:       'Governance Matrix',
+    breadcrumbLabel: 'Governance',
+    route:       '/admin/approvals/governance-matrix',
+    icon:        GitMerge,
+    groupId:     'advanced-risk',
+    section:     'admin',
+    permission:  'settings:edit',
+    keywords:    ['governance matrix', 'approval matrix', 'RACI', 'roles governance'],
+    description: 'Multi-module governance matrix and approval authority mapping',
+  },
+  {
+    id:          'event-governance',
+    label:       'Event Governance',
+    breadcrumbLabel: 'Events',
+    route:       '/admin/system/event-governance',
     icon:        Radio,
-    groupId:     'system',
+    groupId:     'advanced-risk',
     section:     'admin',
     permission:  'settings:view',
-    keywords:    ['event bus', 'job queue', 'metrics', 'platform health', 'dead letter', 'modules'],
-    description: 'Live platform event bus, job queue, and module health console',
+    keywords:    ['event bus', 'event governance', 'pub sub', 'domain events'],
+    description: 'Platform domain event governance and routing configuration',
+  },
+  {
+    id:          'attendance-risk',
+    label:       'Attendance Risk',
+    breadcrumbLabel: 'Risk',
+    route:       '/admin/attendance/risk',
+    icon:        AlertTriangle,
+    groupId:     'advanced-risk',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['risk', 'absenteeism', 'pattern', 'at-risk employees'],
+    description: 'Absenteeism risk scoring and early-warning indicators',
+  },
+  {
+    id:          'attendance-confidence',
+    label:       'Attendance Confidence',
+    breadcrumbLabel: 'Confidence',
+    route:       '/admin/attendance/confidence',
+    icon:        Target,
+    groupId:     'advanced-risk',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['confidence', 'accuracy', 'data quality', 'attendance score'],
+    description: 'Per-record confidence scoring for attendance data quality',
+  },
+
+  // ── Simulation & Optimization ────────────────────────────────────────────────
+
+  {
+    id:          'policy-simulation',
+    label:       'Policy Simulation',
+    breadcrumbLabel: 'Policy Sim',
+    route:       '/admin/attendance/simulate-policy',
+    icon:        FlaskConical,
+    groupId:     'advanced-simulation',
+    section:     'admin',
+    permission:  'settings:edit',
+    keywords:    ['simulate', 'policy impact', 'what-if', 'attendance policy'],
+    description: 'Model attendance policy changes before deployment',
+  },
+  {
+    id:          'workforce-optimization',
+    label:       'Workforce Optimization',
+    breadcrumbLabel: 'Optimization',
+    route:       '/admin/workforce/optimization',
+    icon:        TrendingUp,
+    groupId:     'advanced-simulation',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['optimization', 'scheduling', 'workforce planning', 'headcount'],
+    description: 'AI-powered workforce scheduling and headcount optimization',
+  },
+
+  // ── Advanced Intelligence ────────────────────────────────────────────────────
+
+  {
+    id:          'attendance-intelligence-center',
+    label:       'Session Intelligence',
+    breadcrumbLabel: 'Session Intelligence',
+    route:       '/admin/attendance/intelligence-center',
+    icon:        Activity,
+    groupId:     'advanced-intelligence',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['work session', 'punch pairing', 'cross midnight', 'missing punch', 'session replay', 'ot heatmap', 'payroll lock', 'anomaly', 'attendance state machine', 'temporal ownership'],
+    description: 'Punch pairing engine, cross-midnight sessions, anomaly detection, OT heatmap, and payroll locking',
+  },
+  {
+    id:          'health-index',
+    label:       'Health Index',
+    breadcrumbLabel: 'Health Index',
+    route:       '/admin/attendance/health-index',
+    icon:        Zap,
+    groupId:     'advanced-intelligence',
+    section:     'admin',
+    permission:  'attendance:view',
+    keywords:    ['health index', 'attendance health', 'team health'],
+    description: 'Composite attendance health index by department and team',
+  },
+
+  // ── Platform Orchestration ───────────────────────────────────────────────────
+
+  {
+    id:              'enterprise-control-center',
+    label:           'Enterprise Control Center',
+    breadcrumbLabel: 'Control Center',
+    route:           '/admin/enterprise',
+    icon:            Command,
+    groupId:         'advanced-platform',
+    section:         'admin',
+    permission:      'settings:view',
+    keywords:        ['enterprise', 'intelligence', 'governance', 'trust', 'control center', 'admin console', 'compliance', 'security', 'audit'],
+    description:     'Unified enterprise intelligence console — governance, trust, operations, security, and audit',
+  },
+  {
+    id:          'orchestration',
+    label:       'Orchestration Console',
+    breadcrumbLabel: 'Orchestration',
+    route:       '/admin/system/orchestration',
+    icon:        GitBranch,
+    groupId:     'advanced-platform',
+    section:     'admin',
+    permission:  'settings:view',
+    keywords:    ['orchestration', 'workflow engine', 'process', 'saga'],
+    description: 'Business process orchestration and saga management console',
   },
 ]
 
@@ -1037,16 +1599,7 @@ export const ESS_NAV_ITEMS: NavItem[] = [
     keywords:    ['attendance', 'check in', 'hours'],
     description: 'View your monthly attendance records',
   },
-  {
-    id:          'ess-schedule',
-    label:       'My Schedule',
-    route:       '/ess/schedule',
-    icon:        CalendarClock,
-    groupId:     'ess-main',
-    section:     'ess',
-    keywords:    ['shift', 'schedule', 'roster'],
-    description: 'Your upcoming shift schedule',
-  },
+  // ess-schedule removed from nav — shift info is now shown in the My Attendance heatmap hover
   {
     id:          'ess-leave',
     label:       'My Leave',
@@ -1057,26 +1610,10 @@ export const ESS_NAV_ITEMS: NavItem[] = [
     keywords:    ['leave', 'vacation', 'balance'],
     description: 'View and apply for leave',
   },
-  {
-    id:          'ess-apply-leave',
-    label:       'Apply for Leave',
-    route:       '/ess/leave/apply',
-    icon:        CalendarPlus,
-    groupId:     'ess-main',
-    section:     'ess',
-    keywords:    ['apply leave', 'request leave'],
-    description: 'Submit a new leave application',
-  },
-  {
-    id:          'ess-corrections',
-    label:       'Corrections',
-    route:       '/ess/attendance/corrections',
-    icon:        ClipboardEdit,
-    groupId:     'ess-main',
-    section:     'ess',
-    keywords:    ['correction', 'missing punch', 'fix'],
-    description: 'Request attendance corrections',
-  },
+  // ess-apply-leave removed from nav — apply leave is now embedded inside Leave Balance page
+  // ess-regularization removed from primary nav — regularisation requests are now
+  // accessible inline from My Attendance (/ess/attendance).  The page still exists
+  // at /ess/attendance/regularization for deep-links and the "View all" action.
   {
     id:          'ess-comp-off',
     label:       'Comp-Off',
@@ -1118,6 +1655,36 @@ export const ESS_NAV_ITEMS: NavItem[] = [
     description: 'Submit tax declarations and manage TDS regime election',
   },
   {
+    id:          'ess-tax-planner',
+    label:       'Tax Planner',
+    route:       '/ess/salary/tax-planner',
+    icon:        Calculator,
+    groupId:     'ess-main',
+    section:     'ess',
+    keywords:    ['tax planner', 'plan', '80C', 'IT planner', 'tax saving', 'regime comparison', 'TDS planner'],
+    description: 'Plan and compare tax declarations across multiple scenarios',
+  },
+  {
+    id:          'ess-it-statement',
+    label:       'IT Statement',
+    route:       '/ess/salary/it-statement',
+    icon:        ScrollText,
+    groupId:     'ess-main',
+    section:     'ess',
+    keywords:    ['IT statement', 'income tax statement', 'annual tax', 'form 16', 'taxable income'],
+    description: 'Annual projected income tax computation statement',
+  },
+  {
+    id:          'ess-ytd-statement',
+    label:       'YTD Statement',
+    route:       '/ess/salary/ytd',
+    icon:        ScrollText,
+    groupId:     'ess-main',
+    section:     'ess',
+    keywords:    ['YTD', 'year to date', 'payroll summary', 'cumulative salary', 'monthly earnings'],
+    description: 'Year-to-date payroll earnings and deductions summary',
+  },
+  {
     id:          'ess-reimbursements',
     label:       'Reimbursements',
     route:       '/ess/reimbursements',
@@ -1127,16 +1694,7 @@ export const ESS_NAV_ITEMS: NavItem[] = [
     keywords:    ['claim', 'expense', 'medical', 'reimbursement'],
     description: 'Submit and track expense reimbursement claims',
   },
-  {
-    id:          'ess-leave-ledger',
-    label:       'Leave Ledger',
-    route:       '/ess/leave/ledger',
-    icon:        BookMarked,
-    groupId:     'ess-main',
-    section:     'ess',
-    keywords:    ['leave balance', 'accrual', 'ledger', 'carry forward'],
-    description: 'View your leave balance history and accrual ledger',
-  },
+  // ess-leave-ledger removed from nav — accrual ledger is now the "Ledger" tab inside /ess/leave/balance
   {
     id:          'ess-optional-holidays',
     label:       'Optional Holidays',

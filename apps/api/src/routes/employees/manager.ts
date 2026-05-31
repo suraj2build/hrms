@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { logAction } from '../../lib/audit-service.js'
 
 const MAX_DEPTH = 20   // maximum manager-chain depth before aborting cycle check
 
@@ -146,6 +147,16 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
       req.log.error({ err: error }, 'employee manager update failed')
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update manager' })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'employees',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  id,
+      newData:     { manager_id },
+    })
 
     return reply.send({ data })
   })

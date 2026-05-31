@@ -197,7 +197,7 @@ export function StatutoryDashboard() {
   const activeTab = (searchParams.get('compliance') ?? 'epf') as TabKey
   const validTab  = TABS.some(t => t.key === activeTab) ? activeTab : 'epf'
 
-  const { data: stats, isLoading } = useQuery<ComplianceStats>({
+  const { data: stats, isLoading, isError: statsError } = useQuery<ComplianceStats>({
     queryKey:  ['compliance-stats'],
     queryFn:   () => api.get('/payroll/compliance/stats'),
     staleTime: 60_000,
@@ -230,6 +230,13 @@ export function StatutoryDashboard() {
         isLoading={isLoading}
         onDrilldown={setTab}
       />
+
+      {/* Compliance stats error banner */}
+      {statsError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive mx-6 mt-3">
+          Failed to load data. Please refresh and try again.
+        </div>
+      )}
 
       {/* Sub-tab bar */}
       <div className="flex items-center gap-0 border-b border-border px-4 pt-2 overflow-x-auto scrollbar-none">

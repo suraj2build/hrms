@@ -7,6 +7,7 @@
  * POST /leave/apply                  — submit a new leave request
  * GET  /leave/my-requests            — list caller's own requests (paginated, filterable)
  * POST /leave/:id/cancel             — cancel a PENDING request (requester only)
+ * GET  /leave/requests               — HR alias: list requests by employee_id (queue workspace)
  *
  * Business rules enforced at the service layer:
  *   · No overlapping PENDING/APPROVED requests for the same employee
@@ -176,6 +177,55 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
         has_more: result.value.length === limit,
       },
     })
+  })
+
+  // ── GET /leave/requests ───────────────────────────────────────────────────────
+  /**
+   * HR/admin alias for leave-requests, consumed by EmployeeResolutionWorkspace.
+   * Returns a plain array (not wrapped in { data: [] }) to match the workspace's
+   * Array.isArray() check.
+   *
+   * Query params:
+   *   employee_id  — UUID filter (required for meaningful results)
+   *   status       — PENDING | APPROVED | REJECTED | CANCELLED (case-insensitive)
+   *   limit        — default 20
+   */
+  fastify.get('/leave/requests', auth, async (req: any, reply) => {
+    const querySchema = z.object({
+      employee_id: z.string().uuid().optional(),
+      status:      z.string().optional(),
+      limit:       z.coerce.number().int().min(1).max(200).default(20),
+      offset:      z.coerce.number().int().min(0).default(0),
+    })
+
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { employee_id, limit, offset } = parsed.data
+
+    // Normalise status to uppercase to match the DB enum
+    const VALID_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] as const
+    type LeaveStatus = typeof VALID_STATUSES[number]
+    const rawStatus   = parsed.data.status?.toUpperCase()
+    const status: LeaveStatus | undefined = VALID_STATUSES.includes(rawStatus as LeaveStatus)
+      ? rawStatus as LeaveStatus
+      : undefined
+
+    const result = await listLeaveRequests(fastify.supabase, req.tenantId, {
+      employeeId: employee_id,
+      status,
+      limit,
+      offset,
+    })
+
+    if (!result.ok) {
+      return reply.code(500).send({ error: result.error.type, message: result.error.message })
+    }
+
+    // Return plain array — the workspace does Array.isArray(data) check
+    return reply.send(result.value)
   })
 
   // ── POST /leave/:id/cancel ────────────────────────────────────────────────────

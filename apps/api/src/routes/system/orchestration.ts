@@ -19,8 +19,12 @@
  *
  * Auth: all routes require JWT. Write/admin routes are role-gated.
  */
-import type { FastifyInstance } from 'fastify'
-import { z }                    from 'zod'
+import type { FastifyInstance }     from 'fastify'
+import { z }                        from 'zod'
+import {
+  orchestrateWorkforceEvent,
+  getOrchestrationChain,
+}                                   from '../../lib/workforce-orchestrator.js'
 
 const HR_ROLES    = ['super_admin', 'hr_admin'] as const
 const SUPER_ADMIN = ['super_admin']             as const
@@ -337,6 +341,109 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send({ data })
+  })
+
+  // ── POST /system/orchestration/rebuild ───────────────────────────────────
+  // Controlled entry point for manual retroactive cascade rebuilds.
+  // Triggers the full attendance → leave_balance → payroll rebuild chain for
+  // a specific employee and date range. Respects payroll freeze and approval state.
+  // Restricted to super_admin — this is a destructive operation.
+  fastify.post('/system/orchestration/rebuild', auth, async (req: any, reply) => {
+    if (!SUPER_ADMIN.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Super admin access required' })
+    }
+
+    const bodySchema = z.object({
+      employee_id:    z.string().uuid(),
+      from_date:      z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
+      to_date:        z.string().regex(dateRe, 'to_date must be YYYY-MM-DD').optional(),
+      reason:         z.string().min(5).max(500),
+      // Which trigger to model this as. Defaults to manual_trigger which rebuilds all three modules.
+      event_type:     z.enum([
+        'attendance_corrected',
+        'leave_approved',
+        'leave_cancelled',
+        'retro_leave_approved',
+        'policy_changed',
+      ]).default('attendance_corrected'),
+    })
+
+    const parsed = bodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { employee_id, from_date, to_date, reason, event_type } = parsed.data
+
+    // Generate a stable source_event_id for idempotency (manual rebuilds use a deterministic key)
+    const sourceEventId = crypto.randomUUID()
+
+    try {
+      const result = await orchestrateWorkforceEvent(fastify.supabase, {
+        tenantId:         req.tenantId,
+        eventType:        event_type,
+        sourceEventId,
+        employeeId:       employee_id,
+        affectedFromDate: from_date,
+        affectedToDate:   to_date,
+        triggeredBy:      req.userId,
+        metadata: {
+          manual_rebuild:  true,
+          reason,
+          initiated_by:    req.userId,
+          initiated_at:    new Date().toISOString(),
+        },
+      })
+
+      req.log.info(
+        { lineageId: result.orchestratorLineageId, employeeId: employee_id, from_date, to_date, triggeredBy: req.userId },
+        'manual retroactive rebuild initiated via /system/orchestration/rebuild',
+      )
+
+      return reply.code(202).send({
+        message:               'Retroactive rebuild initiated',
+        orchestrator_lineage_id: result.orchestratorLineageId,
+        rebuild_event_id:        result.rebuildEventId,
+        enqueued_stages:         result.enqueuedRebuildIds.length,
+        status:                  result.status,
+        freeze_constraint: {
+          blocked:        result.freezeConstraint.requiresAdjustmentWorkflow || result.freezeConstraint.auditOnly,
+          queued_only:    result.freezeConstraint.queuedOnly,
+          blocked_periods: result.freezeConstraint.blockedPeriods.map(p => p.period_month),
+        },
+      })
+    } catch (err: any) {
+      req.log.error({ err, employee_id, from_date }, 'manual rebuild orchestration failed')
+      return reply.code(500).send({ error: 'ORCHESTRATION_FAILED', message: err?.message ?? 'Failed to initiate rebuild' })
+    }
+  })
+
+  // ── GET /system/orchestration/rebuild/:lineageId ───────────────────────────
+  // Returns the full audit trail for a rebuild chain — rebuild event, enqueued stages,
+  // completion status, initiator, reason, impacted periods.
+  fastify.get('/system/orchestration/rebuild/:lineageId', auth, async (req: any, reply) => {
+    if (!HR_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { lineageId } = req.params as { lineageId: string }
+
+    const chain = await getOrchestrationChain(fastify.supabase, req.tenantId, lineageId)
+
+    if (!chain.rebuildEvent) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rebuild chain not found' })
+    }
+
+    return reply.send({
+      data: {
+        rebuild_event:  chain.rebuildEvent,
+        queue_entries:  chain.queueEntries,
+        stage_count:    chain.queueEntries.length,
+        completed_stages: chain.queueEntries.filter(q => q.status === 'completed').length,
+        failed_stages:    chain.queueEntries.filter(q => q.status === 'failed').length,
+        pending_stages:   chain.queueEntries.filter(q => q.status === 'pending').length,
+      },
+    })
   })
 
   // ── GET /system/orchestration/health ──────────────────────────────────────

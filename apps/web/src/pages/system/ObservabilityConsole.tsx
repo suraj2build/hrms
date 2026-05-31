@@ -40,6 +40,7 @@ import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
 import { cn }               from '@/lib/utils'
 import { AsyncStatusBadge } from '@/components/async'
+import { toast }            from 'sonner'
 
 // ── Types — in-memory observability ───────────────────────────────────────────
 
@@ -232,6 +233,29 @@ function fmtTs(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString()
 }
 
+function fmtRelativeTs(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const date   = new Date(iso)
+  const diffMs = Date.now() - date.getTime()
+  const diffSec = Math.floor(diffMs / 1000)
+  if (diffSec < 60)            return 'just now'
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60)            return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24)             return `${diffHr}h ago`
+  const diffDays = Math.floor(diffHr / 24)
+  if (diffDays === 1)          return 'Yesterday'
+  if (diffDays < 7)            return `${diffDays}d ago`
+  return date.toLocaleString()
+}
+
+function eventLogSeverityBorder(entry: EventGovernanceEntry): string {
+  if (entry.error || entry.status === 'failed')   return 'border-l-2 border-l-red-500'
+  if (entry.status === 'degraded')                return 'border-l-2 border-l-orange-500'
+  if (entry.status === 'warning')                 return 'border-l-2 border-l-amber-400'
+  return 'border-l-2 border-l-blue-400'
+}
+
 function fmtAge(seconds: number | null | undefined): string {
   if (seconds == null) return '—'
   if (seconds < 60)    return `${seconds}s ago`
@@ -416,6 +440,7 @@ export function ObservabilityConsole() {
       qc.invalidateQueries({ queryKey: ['durable-dead-jobs'], exact: true })
       qc.invalidateQueries({ queryKey: ['durable-queue'],     exact: true })
     },
+    onError: (e: Error) => toast.error('Failed to requeue job', { description: e.message }),
   })
 
   const acknowledgeMutation = useMutation({
@@ -424,6 +449,7 @@ export function ObservabilityConsole() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['retry-storm-incidents'], exact: true })
     },
+    onError: (e: Error) => toast.error('Failed to acknowledge storm incident', { description: e.message }),
   })
 
   const clearQuarantineMutation = useMutation({
@@ -433,6 +459,7 @@ export function ObservabilityConsole() {
       qc.invalidateQueries({ queryKey: ['quarantined-jobs'],  exact: true })
       qc.invalidateQueries({ queryKey: ['durable-dead-jobs'], exact: true })
     },
+    onError: (e: Error) => toast.error('Failed to clear job quarantine', { description: e.message }),
   })
 
   // ── Derived state ────────────────────────────────────────────────────────────
@@ -1197,6 +1224,7 @@ export function ObservabilityConsole() {
                         key={entry.id}
                         className={cn(
                           'border-b border-border/50',
+                          eventLogSeverityBorder(entry),
                           entry.error ? 'bg-destructive/5' : undefined,
                         )}
                       >
@@ -1221,8 +1249,11 @@ export function ObservabilityConsole() {
                         >
                           {entry.error ?? '—'}
                         </td>
-                        <td className="px-3 py-2 tabular-nums text-muted-foreground whitespace-nowrap">
-                          {fmtTs(entry.created_at)}
+                        <td
+                          className="px-3 py-2 tabular-nums text-muted-foreground whitespace-nowrap"
+                          title={fmtTs(entry.created_at)}
+                        >
+                          {fmtRelativeTs(entry.created_at)}
                         </td>
                       </tr>
                     ))}

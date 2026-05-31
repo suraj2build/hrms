@@ -2,25 +2,21 @@
  * LeavePolicy — /admin/leave-policy
  *
  * HR admin configuration page for leave entitlement policies.
- * One policy per leave type covering:
- *   • Accrual   — monthly / yearly / upfront, days per year, max balance
- *   • Eligibility — waiting days from joining, proration toggle
- *   • Carry-forward — enable/disable, max days to carry
- *   • Year type — calendar (Jan–Dec) or financial (Apr–Mar)
+ * Tab-based layout: Accrual & Eligibility / Session Governance /
+ * Application Windows / Lifecycle & Payroll
  *
- * Layout:
- *   Left  — list of all active leave types (tab-style selector)
- *   Right — policy form for the selected leave type
- *   Bottom — Entitlement Operations panel (run batch jobs)
+ * All form state is unified — single Save button writes the entire policy.
  */
 
 import { useState }                              from 'react'
+import { useNavigate }                           from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast }                                 from 'sonner'
 import {
   Settings2, ShieldAlert, CheckCircle2, AlertCircle,
-  Loader2, PlayCircle, CalendarClock, ArrowRight,
-  RotateCcw, ChevronRight, BookOpen,
+  Loader2, RotateCcw, ChevronRight, BookOpen,
+  Activity, ExternalLink, Info, Clock, Calendar,
+  Layers, Shield,
 } from 'lucide-react'
 
 import { PageContainer }        from '@/components/layout/PageContainer'
@@ -46,7 +42,7 @@ interface LeaveType {
 interface LeavePolicy {
   id:                     string
   leave_type_id:          string
-  accrual_type:           'monthly' | 'yearly' | 'upfront'
+  accrual_type:           'monthly' | 'quarterly' | 'yearly' | 'upfront'
   accrual_days_per_year:  number
   max_accrual_balance:    number | null
   eligibility_days:       number
@@ -54,6 +50,39 @@ interface LeavePolicy {
   carry_forward_enabled:  boolean
   carry_forward_max_days: number | null
   year_type:              'calendar' | 'financial'
+  allow_half_day:               boolean
+  allow_hourly_leave:           boolean
+  allow_cross_session:          boolean
+  minimum_leave_unit:           number
+  maximum_sessions_per_day:     number
+  session_calculation_mode:     string
+  holiday_session_handling:     string
+  weekoff_session_handling:     string
+  fractional_rounding_mode:     string
+  maximum_fractional_precision: number
+  hours_per_shift:              number
+  max_hours_per_day:            number | null
+  allow_past_dated_leave:               boolean
+  maximum_past_days:                    number
+  allow_current_period_leave:           boolean
+  allow_future_leave:                   boolean
+  maximum_future_days:                  number | null
+  future_application_requires_approval: boolean
+  same_day_application_mode:            'allowed' | 'restricted' | 'manager_override_only'
+  accrual_earning_basis:        string
+  accrual_credit_timing:        string
+  accrual_consumption_timing:   string
+  future_accrual_consumable:    boolean
+  advance_accrual_recovery_mode: string
+  joining_cycle_handling:       string
+  separation_cycle_handling:    string
+  payroll_cutoff_behavior:      string
+  accrual_freeze_mode:          string
+  minimum_service_days:         number
+  minimum_paid_days:            number
+  minimum_attendance_pct:       number
+  tiered_accrual_enabled:       boolean
+  service_anniversary_cycle:    boolean
 }
 
 interface PolicyWithType extends LeavePolicy {
@@ -62,12 +91,7 @@ interface PolicyWithType extends LeavePolicy {
 
 type PolicyForm = Omit<LeavePolicy, 'id' | 'leave_type_id'>
 
-interface BatchResult {
-  employees_processed: number
-  total_days_credited: number
-  skipped:             number
-  errors:              string[]
-}
+type PolicyTab = 'accrual' | 'sessions' | 'windows' | 'lifecycle'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -80,18 +104,78 @@ const EMPTY_FORM: PolicyForm = {
   carry_forward_enabled:  false,
   carry_forward_max_days: null,
   year_type:              'calendar',
+  allow_half_day:               true,
+  allow_hourly_leave:           false,
+  allow_cross_session:          true,
+  minimum_leave_unit:           0.5,
+  maximum_sessions_per_day:     2,
+  session_calculation_mode:     'standard',
+  holiday_session_handling:     'skip',
+  weekoff_session_handling:     'skip',
+  fractional_rounding_mode:     'nearest_0_5',
+  maximum_fractional_precision: 0.5,
+  hours_per_shift:              8,
+  max_hours_per_day:            null,
+  allow_past_dated_leave:               false,
+  maximum_past_days:                    0,
+  allow_current_period_leave:           true,
+  allow_future_leave:                   true,
+  maximum_future_days:                  null,
+  future_application_requires_approval: false,
+  same_day_application_mode:            'allowed',
+  accrual_earning_basis:        'earned',
+  accrual_credit_timing:        'cycle_start',
+  accrual_consumption_timing:   'immediate',
+  future_accrual_consumable:    true,
+  advance_accrual_recovery_mode: 'none',
+  joining_cycle_handling:       'prorate',
+  separation_cycle_handling:    'prorate',
+  payroll_cutoff_behavior:      'hold',
+  accrual_freeze_mode:          'skip',
+  minimum_service_days:         0,
+  minimum_paid_days:            0,
+  minimum_attendance_pct:       0,
+  tiered_accrual_enabled:       false,
+  service_anniversary_cycle:    false,
 }
 
 const ACCRUAL_OPTIONS = [
-  { value: 'monthly',  label: 'Monthly', description: 'Credit 1/12th each calendar month' },
-  { value: 'yearly',   label: 'Yearly',  description: 'Full credit at year start (prorated for new joiners)' },
-  { value: 'upfront',  label: 'Upfront', description: 'Full credit at year start regardless of joining date' },
+  { value: 'monthly',   label: 'Monthly',   description: 'Credit 1/12th each calendar month' },
+  { value: 'quarterly', label: 'Quarterly', description: 'Credit 1/4th on Jan, Apr, Jul, Oct' },
+  { value: 'yearly',    label: 'Yearly',    description: 'Full credit at year start, prorated for new joiners' },
+  { value: 'upfront',   label: 'Upfront',   description: 'Full credit at year start regardless of join date' },
 ] as const
 
 const YEAR_OPTIONS = [
-  { value: 'calendar',  label: 'Calendar Year',  description: 'Jan 1 – Dec 31' },
-  { value: 'financial', label: 'Financial Year',  description: 'Apr 1 – Mar 31 (Indian FY)' },
+  { value: 'calendar',  label: 'Calendar Year', description: 'Jan 1 – Dec 31' },
+  { value: 'financial', label: 'Financial Year', description: 'Apr 1 – Mar 31 (Indian FY)' },
 ] as const
+
+const MIN_UNIT_OPTIONS = [
+  { value: 0.25, label: 'Quarter-Day', description: '15-minute precision' },
+  { value: 0.5,  label: 'Half-Day',    description: '30-minute or half-day precision' },
+  { value: 1.0,  label: 'Full-Day',    description: 'Whole days only' },
+] as const
+
+const ROUNDING_OPTIONS = [
+  { value: 'nearest_0_5',  label: 'Nearest ½ Day', description: 'Round to nearest 0.5 (default)' },
+  { value: 'nearest_0_25', label: 'Nearest ¼ Day', description: 'Round to nearest 0.25' },
+  { value: 'half_up',      label: 'Round Up ½',    description: 'Standard arithmetic rounding' },
+  { value: 'floor',        label: 'Round Down',     description: 'Always round down (favors employer)' },
+] as const
+
+const CALC_MODE_OPTIONS = [
+  { value: 'standard',         label: 'Standard',          description: 'Session-aware + holiday/weekoff handling' },
+  { value: 'shift_aware',      label: 'Shift-Aware',       description: 'Uses shift hours for fractional calculation' },
+  { value: 'attendance_aware', label: 'Attendance-Aware',  description: 'Detects existing attendance to avoid overlap' },
+] as const
+
+const POLICY_TABS: { id: PolicyTab; label: string; icon: React.ReactNode }[] = [
+  { id: 'accrual',   label: 'Accrual & Eligibility', icon: <Calendar className="h-3.5 w-3.5" /> },
+  { id: 'sessions',  label: 'Session Governance',    icon: <Clock className="h-3.5 w-3.5" /> },
+  { id: 'windows',   label: 'Application Windows',  icon: <Layers className="h-3.5 w-3.5" /> },
+  { id: 'lifecycle', label: 'Lifecycle & Payroll',   icon: <Shield className="h-3.5 w-3.5" /> },
+]
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -101,9 +185,9 @@ function Toggle({
   label,
   disabled,
 }: {
-  checked: boolean
+  checked:  boolean
   onChange: (v: boolean) => void
-  label: string
+  label:    string
   disabled?: boolean
 }) {
   return (
@@ -114,7 +198,7 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+        'relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
         checked ? 'bg-primary' : 'bg-muted',
         disabled && 'opacity-40 cursor-not-allowed',
@@ -131,23 +215,30 @@ function Toggle({
   )
 }
 
-/** Pill row for accrual type / year type selection */
-function RadioPill<T extends string>({
+function RadioPill<T extends string | number>({
   options,
   value,
   onChange,
   disabled,
+  cols,
 }: {
-  options: readonly { value: T; label: string; description: string }[]
-  value: T
+  options:  readonly { value: T; label: string; description?: string }[]
+  value:    T
   onChange: (v: T) => void
   disabled?: boolean
+  cols?:    number
 }) {
   return (
-    <div className="grid grid-cols-1 gap-2">
+    <div className={cn(
+      'grid gap-2',
+      cols === 2 ? 'grid-cols-2'
+        : cols === 3 ? 'grid-cols-3'
+        : cols === 4 ? 'grid-cols-2 sm:grid-cols-4'
+        : 'grid-cols-1',
+    )}>
       {options.map(opt => (
         <button
-          key={opt.value}
+          key={String(opt.value)}
           type="button"
           disabled={disabled}
           onClick={() => onChange(opt.value)}
@@ -155,25 +246,22 @@ function RadioPill<T extends string>({
             'flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
             value === opt.value
-              ? 'border-primary/50 bg-primary/6 text-primary'
-              : 'border-border bg-card hover:bg-muted/40 text-foreground',
+              ? 'border-primary/50 bg-primary/5 text-primary'
+              : 'border-border bg-card hover:bg-muted/20 text-foreground',
             disabled && 'opacity-40 cursor-not-allowed',
           )}
         >
-          {/* Radio dot */}
-          <span
-            className={cn(
-              'mt-0.5 flex-shrink-0 h-4 w-4 rounded-full border-2 flex items-center justify-center',
-              value === opt.value ? 'border-primary' : 'border-muted-foreground/40',
-            )}
-          >
-            {value === opt.value && (
-              <span className="h-2 w-2 rounded-full bg-primary" />
-            )}
+          <span className={cn(
+            'mt-0.5 flex-shrink-0 h-4 w-4 rounded-full border-2 flex items-center justify-center',
+            value === opt.value ? 'border-primary' : 'border-muted-foreground/40',
+          )}>
+            {value === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
           </span>
           <div>
             <p className="text-sm font-medium leading-none">{opt.label}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+            {opt.description && (
+              <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+            )}
           </div>
         </button>
       ))}
@@ -181,7 +269,6 @@ function RadioPill<T extends string>({
   )
 }
 
-/** Horizontal divider with label */
 function SectionDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 py-1">
@@ -194,28 +281,777 @@ function SectionDivider({ label }: { label: string }) {
   )
 }
 
+// ── Tab panels ─────────────────────────────────────────────────────────────────
+
+function AccrualTab({
+  form, setForm,
+}: {
+  form: PolicyForm
+  setForm: React.Dispatch<React.SetStateAction<PolicyForm>>
+}) {
+  function num(v: string) { return parseFloat(v) || 0 }
+
+  return (
+    <div className="space-y-5">
+
+      {/* Accrual Type */}
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-foreground">Accrual Type</p>
+        <p className="text-[11px] text-muted-foreground mb-2">How and when leave days are credited to the employee.</p>
+        <RadioPill
+          options={ACCRUAL_OPTIONS}
+          value={form.accrual_type}
+          onChange={v => setForm(f => ({ ...f, accrual_type: v }))}
+          cols={2}
+        />
+      </div>
+
+      {/* Days + Max Balance */}
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          label="Days Per Year"
+          htmlFor="accrual-days"
+          required
+          description={
+            form.accrual_type === 'monthly'   ? `≈ ${(form.accrual_days_per_year / 12).toFixed(1)} days/month`
+            : form.accrual_type === 'quarterly' ? `≈ ${(form.accrual_days_per_year / 4).toFixed(1)} days/quarter`
+            : undefined
+          }
+        >
+          <Input
+            id="accrual-days"
+            type="number"
+            min={0} max={365} step={0.5}
+            value={form.accrual_days_per_year}
+            onChange={e => setForm(f => ({ ...f, accrual_days_per_year: num(e.target.value) }))}
+            placeholder="e.g. 12"
+          />
+        </FormField>
+
+        <FormField
+          label="Max Balance (days)"
+          htmlFor="max-balance"
+          description={form.max_accrual_balance == null ? 'Currently unlimited' : 'Capped at this value'}
+        >
+          <div className="flex gap-2 items-center">
+            <Input
+              id="max-balance"
+              type="number"
+              min={0} max={365} step={0.5}
+              value={form.max_accrual_balance ?? ''}
+              disabled={form.max_accrual_balance == null}
+              onChange={e => setForm(f => ({
+                ...f,
+                max_accrual_balance: e.target.value === '' ? null : num(e.target.value),
+              }))}
+              placeholder="—"
+              className={cn(form.max_accrual_balance == null && 'opacity-40')}
+            />
+            <button
+              type="button"
+              onClick={() => setForm(f => ({
+                ...f,
+                max_accrual_balance: f.max_accrual_balance == null ? 30 : null,
+              }))}
+              className="text-[11px] shrink-0 text-primary hover:underline whitespace-nowrap"
+            >
+              {form.max_accrual_balance == null ? 'Set limit' : 'Unlimited'}
+            </button>
+          </div>
+        </FormField>
+      </div>
+
+      <SectionDivider label="Eligibility" />
+
+      <div className="grid grid-cols-2 gap-4 items-start">
+        <FormField
+          label="Waiting Period (days)"
+          htmlFor="elig-days"
+          description="Days from joining before first credit. 0 = immediate."
+        >
+          <Input
+            id="elig-days"
+            type="number"
+            min={0} max={3650} step={1}
+            value={form.eligibility_days}
+            onChange={e => setForm(f => ({ ...f, eligibility_days: parseInt(e.target.value, 10) || 0 }))}
+            placeholder="0"
+          />
+        </FormField>
+
+        <div className="pt-1">
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-sm font-medium text-foreground">Prorate on Joining</p>
+              <p className="text-xs text-muted-foreground">Grant proportional days based on months remaining</p>
+            </div>
+            <Toggle
+              checked={form.prorate_on_joining}
+              onChange={v => setForm(f => ({ ...f, prorate_on_joining: v }))}
+              label="Prorate on Joining"
+              disabled={form.accrual_type === 'upfront'}
+            />
+          </div>
+        </div>
+      </div>
+
+      <SectionDivider label="Carry-forward" />
+
+      <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">Enable Carry-forward</p>
+          <p className="text-xs text-muted-foreground">Allow unused balance to roll over to the next year</p>
+        </div>
+        <Toggle
+          checked={form.carry_forward_enabled}
+          onChange={v => setForm(f => ({ ...f, carry_forward_enabled: v }))}
+          label="Enable Carry-forward"
+        />
+      </div>
+
+      {form.carry_forward_enabled && (
+        <FormField
+          label="Max Carry-forward Days"
+          htmlFor="cf-max"
+          description="Leave blank for unlimited carry-forward."
+        >
+          <Input
+            id="cf-max"
+            type="number"
+            min={0} max={365} step={0.5}
+            value={form.carry_forward_max_days ?? ''}
+            onChange={e => setForm(f => ({
+              ...f,
+              carry_forward_max_days: e.target.value === '' ? null : num(e.target.value),
+            }))}
+            placeholder="Unlimited"
+          />
+        </FormField>
+      )}
+
+      <SectionDivider label="Year Boundary" />
+
+      <RadioPill
+        options={YEAR_OPTIONS}
+        value={form.year_type}
+        onChange={v => setForm(f => ({ ...f, year_type: v }))}
+        cols={2}
+      />
+
+      {/* Policy summary */}
+      <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1 mt-1">
+        <p className="font-semibold text-foreground text-[11px] uppercase tracking-wide mb-1.5">Summary</p>
+        <p>
+          <span className="font-medium text-foreground">{form.accrual_days_per_year}</span> days/year
+          {' '}via <span className="font-medium text-foreground">{form.accrual_type}</span> accrual
+          {form.accrual_type === 'monthly' && <> ({(form.accrual_days_per_year / 12).toFixed(1)} days/month)</>}
+          {form.accrual_type === 'quarterly' && <> ({(form.accrual_days_per_year / 4).toFixed(1)} days/quarter · Jan, Apr, Jul, Oct)</>}
+        </p>
+        <p>
+          Eligible after <span className="font-medium text-foreground">{form.eligibility_days}</span> day(s) from joining
+          {form.prorate_on_joining && form.accrual_type !== 'upfront' && ' · prorated'}
+        </p>
+        <p>
+          Carry-forward:{' '}
+          {form.carry_forward_enabled
+            ? <span className="text-success font-medium">Enabled{form.carry_forward_max_days != null ? ` (max ${form.carry_forward_max_days} days)` : ' (unlimited)'}</span>
+            : <span className="text-muted-foreground">Disabled — balance expires at year end</span>
+          }
+        </p>
+        <p>
+          Year boundary: <span className="font-medium text-foreground">
+            {form.year_type === 'calendar' ? 'Jan 1 – Dec 31' : 'Apr 1 – Mar 31 (Indian FY)'}
+          </span>
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function SessionsTab({
+  form, setForm,
+}: {
+  form: PolicyForm
+  setForm: React.Dispatch<React.SetStateAction<PolicyForm>>
+}) {
+  return (
+    <div className="space-y-6">
+
+      <SectionDivider label="Session Permissions" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Allow Half-Day Leave</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Employees can request AM / PM sessions</p>
+          </div>
+          <Toggle
+            checked={form.allow_half_day}
+            onChange={v => setForm(f => ({ ...f, allow_half_day: v }))}
+            label="Allow Half-Day Leave"
+          />
+        </div>
+
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Allow Hourly Leave</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Employees can request leave in hour increments</p>
+          </div>
+          <Toggle
+            checked={form.allow_hourly_leave}
+            onChange={v => setForm(f => ({ ...f, allow_hourly_leave: v }))}
+            label="Allow Hourly Leave"
+          />
+        </div>
+
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3 sm:col-span-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Allow Cross-Session Multi-Day Leave</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Multi-day leave can have different start/end sessions (e.g. Second Half Mon → First Half Wed)
+            </p>
+          </div>
+          <Toggle
+            checked={form.allow_cross_session}
+            onChange={v => setForm(f => ({ ...f, allow_cross_session: v }))}
+            label="Allow Cross-Session"
+            disabled={!form.allow_half_day}
+          />
+        </div>
+
+        {form.allow_hourly_leave && (
+          <div className="sm:col-span-2 grid grid-cols-2 gap-4">
+            <FormField label="Hours Per Shift" htmlFor="hours-per-shift" description="Standard shift duration (1–24 h)">
+              <Input
+                id="hours-per-shift"
+                type="number" min={1} max={24} step={0.5}
+                value={form.hours_per_shift}
+                onChange={e => setForm(f => ({ ...f, hours_per_shift: parseFloat(e.target.value) || 8 }))}
+                placeholder="8"
+              />
+            </FormField>
+            <FormField label="Max Hours Per Day" htmlFor="max-hours" description="Blank = shift hours limit">
+              <Input
+                id="max-hours"
+                type="number" min={0} max={24} step={0.5}
+                value={form.max_hours_per_day ?? ''}
+                onChange={e => setForm(f => ({
+                  ...f,
+                  max_hours_per_day: e.target.value === '' ? null : parseFloat(e.target.value),
+                }))}
+                placeholder="Unlimited"
+              />
+            </FormField>
+          </div>
+        )}
+      </div>
+
+      {/* Live mode status grid */}
+      <div className="rounded-lg border border-border bg-muted/20 p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
+          Allowed Consumption Modes
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { label: 'Full Day',     allowed: true },
+            { label: 'Half Day',     allowed: form.allow_half_day },
+            { label: 'Cross-Session', allowed: form.allow_half_day && form.allow_cross_session },
+            { label: 'Hourly',       allowed: form.allow_hourly_leave },
+          ].map(({ label, allowed }) => (
+            <div
+              key={label}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md border px-2.5 py-2 text-xs font-medium',
+                allowed
+                  ? 'border-success/30 bg-success/5 text-success'
+                  : 'border-border bg-muted/30 text-muted-foreground',
+              )}
+            >
+              {allowed
+                ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                : <AlertCircle  className="h-3.5 w-3.5 shrink-0 opacity-50" />
+              }
+              {label}
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1">
+          <Info className="h-3 w-3 shrink-0" />
+          Min unit: <span className="font-medium text-foreground ml-0.5">
+            {form.minimum_leave_unit === 1.0 ? '1 day' : form.minimum_leave_unit === 0.5 ? '½ day' : '¼ day'}
+          </span>
+          {' · '}Max <span className="font-medium text-foreground mx-0.5">{form.maximum_sessions_per_day}</span> session request{form.maximum_sessions_per_day > 1 ? 's' : ''}/day
+        </p>
+      </div>
+
+      <SectionDivider label="Session Limits & Units" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-foreground">Max Session Requests / Day</p>
+          <p className="text-[11px] text-muted-foreground">Maximum separate leave segments per day.</p>
+          <select
+            value={form.maximum_sessions_per_day}
+            onChange={e => setForm(f => ({ ...f, maximum_sessions_per_day: Number(e.target.value) }))}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-foreground">Minimum Leave Unit</p>
+          <p className="text-[11px] text-muted-foreground">Smallest increment an employee can request.</p>
+          <RadioPill
+            options={MIN_UNIT_OPTIONS}
+            value={form.minimum_leave_unit}
+            onChange={v => setForm(f => ({ ...f, minimum_leave_unit: v }))}
+            cols={3}
+          />
+        </div>
+      </div>
+
+      <SectionDivider label="Holiday & Weekoff Handling" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-foreground">Holiday in Span</p>
+          <p className="text-[11px] text-muted-foreground">How public holidays within a leave span are treated.</p>
+          <select
+            value={form.holiday_session_handling}
+            onChange={e => setForm(f => ({ ...f, holiday_session_handling: e.target.value }))}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="skip">Skip — holidays not charged (default)</option>
+            <option value="include">Include — holidays charged as leave</option>
+            <option value="block">Block — reject spans containing holidays</option>
+          </select>
+        </div>
+
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-foreground">Weekoff in Span</p>
+          <p className="text-[11px] text-muted-foreground">How weekly-off days within a leave span are treated.</p>
+          <select
+            value={form.weekoff_session_handling}
+            onChange={e => setForm(f => ({ ...f, weekoff_session_handling: e.target.value }))}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="skip">Skip — weekoffs not charged (default)</option>
+            <option value="include">Include — weekoffs always charged</option>
+            <option value="sandwich_only">Sandwich Only — charged when sandwiched</option>
+          </select>
+        </div>
+      </div>
+
+      <SectionDivider label="Rounding & Calculation Mode" />
+
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Fractional Rounding Mode</p>
+          <p className="text-[11px] text-muted-foreground mb-2">How fractional leave days are rounded before deducting from balance.</p>
+          <RadioPill
+            options={ROUNDING_OPTIONS}
+            value={form.fractional_rounding_mode}
+            onChange={v => setForm(f => ({ ...f, fractional_rounding_mode: v }))}
+            cols={4}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Session Calculation Mode</p>
+          <p className="text-[11px] text-muted-foreground mb-2">Controls how session duration and deduction amounts are computed.</p>
+          <RadioPill
+            options={CALC_MODE_OPTIONS}
+            value={form.session_calculation_mode}
+            onChange={v => setForm(f => ({ ...f, session_calculation_mode: v }))}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WindowsTab({
+  form, setForm,
+}: {
+  form: PolicyForm
+  setForm: React.Dispatch<React.SetStateAction<PolicyForm>>
+}) {
+  return (
+    <div className="space-y-6">
+
+      <SectionDivider label="Past-Dated Leave" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Allow Past-Dated Leave</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Employee can apply leave for dates before today</p>
+          </div>
+          <Toggle
+            checked={form.allow_past_dated_leave}
+            onChange={v => setForm(f => ({
+              ...f,
+              allow_past_dated_leave: v,
+              maximum_past_days: v ? f.maximum_past_days || 7 : 0,
+            }))}
+            label="Allow Past-Dated Leave"
+          />
+        </div>
+
+        {form.allow_past_dated_leave && (
+          <FormField
+            label="Maximum Past Days"
+            htmlFor="max-past-days"
+            description="How many calendar days back is allowed"
+          >
+            <Input
+              id="max-past-days"
+              type="number" min={1} max={365} step={1}
+              value={form.maximum_past_days}
+              onChange={e => setForm(f => ({ ...f, maximum_past_days: Math.max(1, parseInt(e.target.value) || 1) }))}
+              placeholder="e.g. 7"
+            />
+          </FormField>
+        )}
+      </div>
+
+      <SectionDivider label="Same-Day Leave" />
+
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-foreground">Same-Day Application Mode</p>
+        <p className="text-[11px] text-muted-foreground mb-2">Controls whether employees can apply leave on the same calendar day.</p>
+        <RadioPill
+          options={[
+            { value: 'allowed',               label: 'Allowed',               description: 'Same-day leave is unrestricted' },
+            { value: 'restricted',            label: 'Restricted',            description: 'Same-day leave is blocked entirely' },
+            { value: 'manager_override_only', label: 'Manager Override Only', description: 'Blocked for self-service; manager can approve' },
+          ]}
+          value={form.same_day_application_mode}
+          onChange={v => setForm(f => ({ ...f, same_day_application_mode: v as typeof f.same_day_application_mode }))}
+        />
+      </div>
+
+      <SectionDivider label="Current Period" />
+
+      <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground">Allow Current-Month Leave</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            When disabled, employees cannot apply leave for any date in the current calendar month
+          </p>
+        </div>
+        <Toggle
+          checked={form.allow_current_period_leave}
+          onChange={v => setForm(f => ({ ...f, allow_current_period_leave: v }))}
+          label="Allow Current-Month Leave"
+        />
+      </div>
+
+      <SectionDivider label="Future Leave" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Allow Future Leave</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Employee can apply leave for dates after today</p>
+          </div>
+          <Toggle
+            checked={form.allow_future_leave}
+            onChange={v => setForm(f => ({ ...f, allow_future_leave: v }))}
+            label="Allow Future Leave"
+          />
+        </div>
+
+        {form.allow_future_leave && (
+          <FormField
+            label="Maximum Future Days"
+            htmlFor="max-future-days"
+            description="Days ahead allowed (blank = unlimited)"
+          >
+            <Input
+              id="max-future-days"
+              type="number" min={1} max={730} step={1}
+              value={form.maximum_future_days ?? ''}
+              onChange={e => setForm(f => ({
+                ...f,
+                maximum_future_days: e.target.value === '' ? null : Math.max(1, parseInt(e.target.value) || 1),
+              }))}
+              placeholder="Unlimited"
+            />
+          </FormField>
+        )}
+
+        {form.allow_future_leave && (
+          <div className="sm:col-span-2 flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">Future Leave Requires Approval</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Future leave requests are always flagged for mandatory manager review
+              </p>
+            </div>
+            <Toggle
+              checked={form.future_application_requires_approval}
+              onChange={v => setForm(f => ({ ...f, future_application_requires_approval: v }))}
+              label="Require Approval for Future Leave"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Application window summary */}
+      <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground space-y-1.5">
+        <p className="font-semibold text-foreground text-[11px] uppercase tracking-wide mb-1.5">Window Summary</p>
+        <div className="flex items-center gap-2">
+          {form.allow_past_dated_leave
+            ? <><CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" /><span>Past leave: up to <strong className="text-foreground">{form.maximum_past_days}</strong> day(s) back</span></>
+            : <><AlertCircle  className="h-3.5 w-3.5 text-destructive/70 shrink-0" /><span>Past leave: <span className="text-destructive font-medium">not allowed</span></span></>
+          }
+        </div>
+        <div className="flex items-center gap-2">
+          {form.same_day_application_mode === 'allowed'
+            ? <><CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" /><span>Same-day: <strong className="text-foreground">allowed</strong></span></>
+            : form.same_day_application_mode === 'manager_override_only'
+            ? <><Info className="h-3.5 w-3.5 text-warning shrink-0" /><span>Same-day: <strong className="text-foreground">manager override only</strong></span></>
+            : <><AlertCircle className="h-3.5 w-3.5 text-destructive/70 shrink-0" /><span>Same-day: <span className="text-destructive font-medium">restricted</span></span></>
+          }
+        </div>
+        <div className="flex items-center gap-2">
+          {form.allow_future_leave
+            ? <><CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" /><span>Future leave: up to <strong className="text-foreground">{form.maximum_future_days ?? '∞'}</strong> day(s){form.future_application_requires_approval && ' · approval required'}</span></>
+            : <><AlertCircle className="h-3.5 w-3.5 text-destructive/70 shrink-0" /><span>Future leave: <span className="text-destructive font-medium">not allowed</span></span></>
+          }
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LifecycleTab({
+  form, setForm,
+}: {
+  form: PolicyForm
+  setForm: React.Dispatch<React.SetStateAction<PolicyForm>>
+}) {
+  return (
+    <div className="space-y-6">
+
+      <SectionDivider label="Accrual Cycle & Credit Timings" />
+
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Earning Basis</p>
+          <p className="text-[11px] text-muted-foreground mb-2">
+            Advance: credit at cycle start (e.g. CL). Earned: credit at cycle end (e.g. EL).
+          </p>
+          <RadioPill
+            options={[
+              { value: 'earned',  label: 'Earned',  description: 'Credit issued at end of cycle' },
+              { value: 'advance', label: 'Advance', description: 'Credit issued at start of cycle' },
+            ]}
+            value={form.accrual_earning_basis}
+            onChange={v => setForm(f => ({ ...f, accrual_earning_basis: v }))}
+            cols={2}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Credit Timing</p>
+          <p className="text-[11px] text-muted-foreground mb-2">When in the cycle the credit is posted to the ledger.</p>
+          <RadioPill
+            options={[
+              { value: 'cycle_start', label: 'Cycle Start', description: 'Posted on the first day of each cycle' },
+              { value: 'cycle_end',   label: 'Cycle End',   description: 'Posted on the last day of each cycle' },
+            ]}
+            value={form.accrual_credit_timing}
+            onChange={v => setForm(f => ({ ...f, accrual_credit_timing: v }))}
+            cols={2}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Consumability Timing</p>
+          <p className="text-[11px] text-muted-foreground mb-2">When a posted credit becomes available for the employee to use.</p>
+          <RadioPill
+            options={[
+              { value: 'immediate',                     label: 'Immediate',            description: 'Available as soon as posted' },
+              { value: 'after_cycle_completion',        label: 'After Cycle',          description: 'Available after cycle completes' },
+              { value: 'after_payroll_lock',            label: 'After Payroll Lock',   description: 'Available after payroll is locked' },
+              { value: 'after_attendance_confirmation', label: 'After Attendance',     description: 'Available after attendance is confirmed' },
+            ]}
+            value={form.accrual_consumption_timing}
+            onChange={v => setForm(f => ({ ...f, accrual_consumption_timing: v }))}
+            cols={4}
+          />
+          {form.accrual_earning_basis === 'advance' && (
+            <div className="flex items-center gap-2 mt-3">
+              <Toggle
+                checked={form.future_accrual_consumable}
+                onChange={v => setForm(f => ({ ...f, future_accrual_consumable: v }))}
+                label="Allow advance credits before cycle completes"
+              />
+              <span className="text-xs text-foreground">Allow advance credits to be used before cycle completes</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <SectionDivider label="Mid-Cycle Handling" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Joining Cycle Handling</p>
+          <RadioPill
+            options={[
+              { value: 'full',       label: 'Full Credit', description: 'Full cycle credit on joining' },
+              { value: 'prorate',    label: 'Prorate',     description: 'Credit proportional to days remaining' },
+              { value: 'next_cycle', label: 'Next Cycle',  description: 'First credit on next full cycle' },
+            ]}
+            value={form.joining_cycle_handling}
+            onChange={v => setForm(f => ({ ...f, joining_cycle_handling: v }))}
+          />
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Separation Cycle Handling</p>
+          <RadioPill
+            options={[
+              { value: 'full',    label: 'Full Credit', description: 'Full cycle credit on exit' },
+              { value: 'prorate', label: 'Prorate',     description: 'Credit proportional to days worked' },
+              { value: 'none',    label: 'No Credit',   description: 'No credit in final partial cycle' },
+            ]}
+            value={form.separation_cycle_handling}
+            onChange={v => setForm(f => ({ ...f, separation_cycle_handling: v }))}
+          />
+        </div>
+      </div>
+
+      {form.accrual_earning_basis === 'advance' && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Advance Recovery on Separation</p>
+          <p className="text-[11px] text-muted-foreground mb-2">
+            How to handle unearned advance credits if the employee resigns mid-cycle.
+          </p>
+          <RadioPill
+            options={[
+              { value: 'none',         label: 'No Recovery',   description: 'Employee keeps unearned credits' },
+              { value: 'prorate',      label: 'Prorate',       description: 'Recover proportional unearned days' },
+              { value: 'full_recovery', label: 'Full Recovery', description: 'Recover all unearned advance credits' },
+              { value: 'lop_deduction', label: 'LOP Deduction', description: 'Deduct as Loss of Pay from final settlement' },
+            ]}
+            value={form.advance_accrual_recovery_mode}
+            onChange={v => setForm(f => ({ ...f, advance_accrual_recovery_mode: v }))}
+            cols={4}
+          />
+        </div>
+      )}
+
+      <SectionDivider label="Accrual Thresholds" />
+
+      <div className="grid grid-cols-3 gap-4">
+        <FormField label="Min Service Days" htmlFor="min-svc" description="Days after joining before first accrual">
+          <Input
+            id="min-svc"
+            type="number" min={0}
+            value={form.minimum_service_days}
+            onChange={e => setForm(f => ({ ...f, minimum_service_days: parseInt(e.target.value) || 0 }))}
+            placeholder="0"
+          />
+        </FormField>
+        <FormField label="Min Paid Days / Cycle" htmlFor="min-paid" description="0 = no minimum">
+          <Input
+            id="min-paid"
+            type="number" min={0}
+            value={form.minimum_paid_days}
+            onChange={e => setForm(f => ({ ...f, minimum_paid_days: parseInt(e.target.value) || 0 }))}
+            placeholder="0"
+          />
+        </FormField>
+        <FormField label="Min Attendance %" htmlFor="min-att" description="0 = no minimum">
+          <Input
+            id="min-att"
+            type="number" min={0} max={100} step={5}
+            value={form.minimum_attendance_pct}
+            onChange={e => setForm(f => ({ ...f, minimum_attendance_pct: parseFloat(e.target.value) || 0 }))}
+            placeholder="0"
+          />
+        </FormField>
+      </div>
+
+      <SectionDivider label="Advanced Options" />
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">Tiered Accrual Rates</p>
+            <p className="text-xs text-muted-foreground">Configure tiers in Governance → Lifecycle</p>
+          </div>
+          <Toggle
+            checked={form.tiered_accrual_enabled}
+            onChange={v => setForm(f => ({ ...f, tiered_accrual_enabled: v }))}
+            label="Enable tiered accrual"
+          />
+        </div>
+        <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">Service Anniversary Cycle</p>
+            <p className="text-xs text-muted-foreground">Accrue only in the employee's anniversary month</p>
+          </div>
+          <Toggle
+            checked={form.service_anniversary_cycle}
+            onChange={v => setForm(f => ({ ...f, service_anniversary_cycle: v }))}
+            label="Service anniversary cycle"
+          />
+        </div>
+      </div>
+
+      <SectionDivider label="Freeze & Payroll Cutoff" />
+
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Freeze Behaviour</p>
+          <p className="text-[11px] text-muted-foreground mb-2">What happens to credits when an employee's accrual is frozen.</p>
+          <RadioPill
+            options={[
+              { value: 'skip',   label: 'Skip',   description: 'Frozen cycles are skipped with no replay' },
+              { value: 'replay', label: 'Replay', description: 'Frozen cycles are replayed on unfreeze' },
+            ]}
+            value={form.accrual_freeze_mode}
+            onChange={v => setForm(f => ({ ...f, accrual_freeze_mode: v }))}
+            cols={2}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Payroll Cutoff Behaviour</p>
+          <p className="text-[11px] text-muted-foreground mb-2">What happens when an accrual falls near the payroll lock date.</p>
+          <RadioPill
+            options={[
+              { value: 'hold',         label: 'Hold',         description: 'Hold credits until after payroll lock' },
+              { value: 'release',      label: 'Release',      description: 'Release credits immediately' },
+              { value: 'defer_to_next', label: 'Defer',       description: 'Defer to next period' },
+            ]}
+            value={form.payroll_cutoff_behavior}
+            onChange={v => setForm(f => ({ ...f, payroll_cutoff_behavior: v }))}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function LeavePolicy() {
   const { profile }  = useAuthStore()
   const isAdmin      = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc           = useQueryClient()
+  const navigate     = useNavigate()
 
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null)
   const [form, setForm]                     = useState<PolicyForm>(EMPTY_FORM)
-  const [saveSuccess, setSaveSuccess]       = useState('')
-  const [saveError,   setSaveError]         = useState('')
+  const [activeTab, setActiveTab]           = useState<PolicyTab>('accrual')
 
-  // Entitlement operation state
-  const thisYear  = new Date().getFullYear()
-  const thisMonth = new Date().getMonth() + 1
-  const [opYear,  setOpYear]  = useState(String(thisYear))
-  const [opMonth, setOpMonth] = useState(String(thisMonth))
-  const [cfFrom,  setCfFrom]  = useState(String(thisYear))
-  const [cfTo,    setCfTo]    = useState(String(thisYear + 1))
-  const [opResult, setOpResult] = useState<{ msg: string; result?: BatchResult } | null>(null)
-
-  // ── Queries ────────────────────────────────────────────────────────────────
+  // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: ltData, isLoading: ltLoading } = useQuery<{ data: LeaveType[] }>({
     queryKey: ['leave-types'],
     queryFn:  () => api.get('/masters/leave-types'),
@@ -228,64 +1064,30 @@ export function LeavePolicy() {
     queryFn:  () => api.get('/masters/leave-policies'),
     staleTime: 60_000,
   })
-  const policies    = policiesData?.data ?? []
-  const policyById  = new Map(policies.map(p => [p.leave_type_id, p]))
+  const policies   = policiesData?.data ?? []
+  const policyById = new Map(policies.map(p => [p.leave_type_id, p]))
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // ── Mutations ────────────────────────────────────────────────────────────────
   const saveMutation = useMutation({
     mutationFn: (body: PolicyForm & { leave_type_id: string }) => {
       const existing = policyById.get(body.leave_type_id)
-      if (existing) {
-        return api.put(`/masters/leave-policies/${existing.id}`, body)
-      }
-      return api.post('/masters/leave-policies', body)
+      return existing
+        ? api.put(`/masters/leave-policies/${existing.id}`, body)
+        : api.post('/masters/leave-policies', body)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leave-policies'] })
-      setSaveSuccess('Policy saved successfully.')
-      setSaveError('')
-      setTimeout(() => setSaveSuccess(''), 3000)
       toast.success('Policy saved')
     },
     onError: (e) => {
-      setSaveError((e as Error).message ?? 'Save failed')
-      setSaveSuccess('')
       toast.error('Policy save failed', { description: (e as Error).message })
     },
   })
 
-  const monthlyMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ data: BatchResult; message: string }>('/leave/entitlement/monthly', {
-        year:  parseInt(opYear, 10),
-        month: parseInt(opMonth, 10),
-      }),
-    onSuccess: (r) => { setOpResult({ msg: r.message, result: r.data }); toast.success('Monthly accrual updated') },
-    onError:   (e) => { setOpResult({ msg: (e as Error).message }); toast.error('Monthly accrual failed', { description: (e as Error).message }) },
-  })
-
-  const yearlyMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ data: BatchResult; message: string }>('/leave/entitlement/yearly', {
-        leave_year: parseInt(opYear, 10),
-      }),
-    onSuccess: (r) => { setOpResult({ msg: r.message, result: r.data }); toast.success('Yearly grant updated') },
-    onError:   (e) => { setOpResult({ msg: (e as Error).message }); toast.error('Yearly grant failed', { description: (e as Error).message }) },
-  })
-
-  const carryForwardMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ data: BatchResult; message: string }>('/leave/entitlement/carry-forward', {
-        from_year: parseInt(cfFrom, 10),
-        to_year:   parseInt(cfTo,   10),
-      }),
-    onSuccess: (r) => { setOpResult({ msg: r.message, result: r.data }); toast.success('Carry-forward rules updated') },
-    onError:   (e) => { setOpResult({ msg: (e as Error).message }); toast.error('Carry-forward failed', { description: (e as Error).message }) },
-  })
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   function selectType(lt: LeaveType) {
     setSelectedTypeId(lt.id)
+    setActiveTab('accrual')
     const existing = policyById.get(lt.id)
     if (existing) {
       setForm({
@@ -297,12 +1099,43 @@ export function LeavePolicy() {
         carry_forward_enabled:  existing.carry_forward_enabled,
         carry_forward_max_days: existing.carry_forward_max_days,
         year_type:              existing.year_type,
+        allow_past_dated_leave:               existing.allow_past_dated_leave               ?? false,
+        maximum_past_days:                    existing.maximum_past_days                    ?? 0,
+        allow_current_period_leave:           existing.allow_current_period_leave           ?? true,
+        allow_future_leave:                   existing.allow_future_leave                   ?? true,
+        maximum_future_days:                  existing.maximum_future_days                  ?? null,
+        future_application_requires_approval: existing.future_application_requires_approval ?? false,
+        same_day_application_mode:            existing.same_day_application_mode            ?? 'allowed',
+        allow_half_day:               existing.allow_half_day               ?? true,
+        allow_hourly_leave:           existing.allow_hourly_leave           ?? false,
+        allow_cross_session:          existing.allow_cross_session          ?? true,
+        minimum_leave_unit:           existing.minimum_leave_unit           ?? 0.5,
+        maximum_sessions_per_day:     existing.maximum_sessions_per_day     ?? 2,
+        session_calculation_mode:     existing.session_calculation_mode     ?? 'standard',
+        holiday_session_handling:     existing.holiday_session_handling     ?? 'skip',
+        weekoff_session_handling:     existing.weekoff_session_handling     ?? 'skip',
+        fractional_rounding_mode:     existing.fractional_rounding_mode     ?? 'nearest_0_5',
+        maximum_fractional_precision: existing.maximum_fractional_precision ?? 0.5,
+        hours_per_shift:              existing.hours_per_shift              ?? 8,
+        max_hours_per_day:            existing.max_hours_per_day            ?? null,
+        accrual_earning_basis:        existing.accrual_earning_basis        ?? 'earned',
+        accrual_credit_timing:        existing.accrual_credit_timing        ?? 'cycle_start',
+        accrual_consumption_timing:   existing.accrual_consumption_timing   ?? 'immediate',
+        future_accrual_consumable:    existing.future_accrual_consumable    ?? true,
+        advance_accrual_recovery_mode: existing.advance_accrual_recovery_mode ?? 'none',
+        joining_cycle_handling:       existing.joining_cycle_handling       ?? 'prorate',
+        separation_cycle_handling:    existing.separation_cycle_handling    ?? 'prorate',
+        payroll_cutoff_behavior:      existing.payroll_cutoff_behavior      ?? 'hold',
+        accrual_freeze_mode:          existing.accrual_freeze_mode          ?? 'skip',
+        minimum_service_days:         existing.minimum_service_days         ?? 0,
+        minimum_paid_days:            existing.minimum_paid_days            ?? 0,
+        minimum_attendance_pct:       existing.minimum_attendance_pct       ?? 0,
+        tiered_accrual_enabled:       existing.tiered_accrual_enabled       ?? false,
+        service_anniversary_cycle:    existing.service_anniversary_cycle    ?? false,
       })
     } else {
       setForm(EMPTY_FORM)
     }
-    setSaveSuccess('')
-    setSaveError('')
     saveMutation.reset()
   }
 
@@ -311,18 +1144,15 @@ export function LeavePolicy() {
     saveMutation.mutate({ ...form, leave_type_id: selectedTypeId })
   }
 
-  function num(val: string): number { return parseFloat(val) || 0 }
-
   const selectedType = leaveTypes.find(lt => lt.id === selectedTypeId)
   const hasPolicy    = selectedTypeId ? policyById.has(selectedTypeId) : false
-  const anyPending   = monthlyMutation.isPending || yearlyMutation.isPending || carryForwardMutation.isPending
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <PageContainer>
       <PageHeader
         title="Leave Policy"
-        subtitle="Configure accrual, eligibility, carry-forward and expiry rules per leave type"
+        subtitle="Configure accrual, eligibility, carry-forward and governance rules per leave type"
       />
 
       {!isAdmin && (
@@ -337,14 +1167,14 @@ export function LeavePolicy() {
 
       {isAdmin && (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
 
-            {/* ── Left: Leave type selector ──────────────────────────────── */}
+            {/* ── Left: Leave type selector ──────────────────────────────────── */}
             <div className="lg:col-span-1">
               <SectionCard
                 title="Leave Types"
                 icon={<BookOpen className="h-4 w-4 text-muted-foreground" />}
-                description="Select a leave type to configure its policy"
+                description="Select a type to configure"
               >
                 {ltLoading ? (
                   <div className="flex items-center gap-2 py-6 text-muted-foreground text-sm">
@@ -353,12 +1183,12 @@ export function LeavePolicy() {
                   </div>
                 ) : leaveTypes.length === 0 ? (
                   <p className="text-xs text-muted-foreground py-4">
-                    No active leave types found. Create them in Leave Types first.
+                    No active leave types. Create them in Leave Types first.
                   </p>
                 ) : (
                   <div className="space-y-1 -mx-1">
                     {leaveTypes.map(lt => {
-                      const hasP = policyById.has(lt.id)
+                      const hasP      = policyById.has(lt.id)
                       const isSelected = lt.id === selectedTypeId
                       return (
                         <button
@@ -381,19 +1211,16 @@ export function LeavePolicy() {
                               >
                                 {lt.is_paid ? 'Paid' : 'Unpaid'}
                               </Badge>
-                              {hasP ? (
-                                <span className="text-[9px] text-success font-medium">● Policy set</span>
-                              ) : (
-                                <span className="text-[9px] text-muted-foreground">○ No policy</span>
-                              )}
+                              {hasP
+                                ? <span className="text-[9px] text-success font-medium">● Policy set</span>
+                                : <span className="text-[9px] text-muted-foreground">○ No policy</span>
+                              }
                             </div>
                           </div>
-                          <ChevronRight
-                            className={cn(
-                              'h-3.5 w-3.5 flex-shrink-0 transition-colors',
-                              isSelected ? 'text-primary' : 'text-muted-foreground/40',
-                            )}
-                          />
+                          <ChevronRight className={cn(
+                            'h-3.5 w-3.5 flex-shrink-0 transition-colors',
+                            isSelected ? 'text-primary' : 'text-muted-foreground/40',
+                          )} />
                         </button>
                       )
                     })}
@@ -402,11 +1229,11 @@ export function LeavePolicy() {
               </SectionCard>
             </div>
 
-            {/* ── Right: Policy form ─────────────────────────────────────── */}
-            <div className="lg:col-span-2">
+            {/* ── Right: Tab-based policy form ───────────────────────────────── */}
+            <div className="lg:col-span-3">
               {!selectedTypeId ? (
                 <SectionCard>
-                  <div className="flex flex-col items-center justify-center gap-2 py-16 text-muted-foreground">
+                  <div className="flex flex-col items-center justify-center gap-2 py-20 text-muted-foreground">
                     <Settings2 className="h-10 w-10 opacity-20" />
                     <p className="text-sm font-medium text-foreground">Select a leave type</p>
                     <p className="text-xs">Click a leave type on the left to configure its policy.</p>
@@ -416,239 +1243,88 @@ export function LeavePolicy() {
                 <SectionCard
                   title={`${selectedType?.name ?? ''} Policy`}
                   icon={<Settings2 className="h-4 w-4 text-muted-foreground" />}
-                  description={hasPolicy ? 'Policy configured — editing existing settings' : 'No policy yet — fill in the form to create one'}
+                  description={hasPolicy ? 'Editing existing policy' : 'No policy yet — configure and save to create one'}
                 >
                   {policyLoading ? (
-                    <div className="flex items-center gap-2 py-6 text-muted-foreground text-sm">
+                    <div className="flex items-center gap-2 py-8 text-muted-foreground text-sm">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Loading policy…
                     </div>
                   ) : (
-                    <div className="space-y-5">
+                    <div className="space-y-0">
 
-                      {/* ── Accrual ─────────────────────────────────────── */}
-                      <SectionDivider label="Accrual" />
-
-                      <div className="space-y-1">
-                        <p className="text-xs font-medium text-foreground">Accrual Type</p>
-                        <p className="text-[11px] text-muted-foreground mb-2">How and when leave days are credited to the employee.</p>
-                        <RadioPill
-                          options={ACCRUAL_OPTIONS}
-                          value={form.accrual_type}
-                          onChange={v => setForm(f => ({ ...f, accrual_type: v }))}
-                        />
+                      {/* ── Tab bar ──────────────────────────────────────────── */}
+                      <div className="flex gap-1 border-b border-border -mx-1 mb-5 overflow-x-auto">
+                        {POLICY_TABS.map(tab => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setActiveTab(tab.id)}
+                            className={cn(
+                              'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap',
+                              'border-b-2 -mb-px transition-colors',
+                              activeTab === tab.id
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
+                            )}
+                          >
+                            {tab.icon}
+                            {tab.label}
+                          </button>
+                        ))}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          label="Days Per Year"
-                          htmlFor="accrual-days"
-                          required
-                          description={
-                            form.accrual_type === 'monthly'
-                              ? `≈ ${(form.accrual_days_per_year / 12).toFixed(1)} days/month`
-                              : undefined
-                          }
-                        >
-                          <Input
-                            id="accrual-days"
-                            type="number"
-                            min={0}
-                            max={365}
-                            step={0.5}
-                            value={form.accrual_days_per_year}
-                            onChange={e => setForm(f => ({ ...f, accrual_days_per_year: num(e.target.value) }))}
-                            placeholder="e.g. 12"
-                          />
-                        </FormField>
+                      {/* ── Tab content ──────────────────────────────────────── */}
+                      {activeTab === 'accrual' && (
+                        <AccrualTab form={form} setForm={setForm} />
+                      )}
+                      {activeTab === 'sessions' && (
+                        <SessionsTab form={form} setForm={setForm} />
+                      )}
+                      {activeTab === 'windows' && (
+                        <WindowsTab form={form} setForm={setForm} />
+                      )}
+                      {activeTab === 'lifecycle' && (
+                        <LifecycleTab form={form} setForm={setForm} />
+                      )}
 
-                        <FormField
-                          label="Max Balance (days)"
-                          htmlFor="max-balance"
-                          description="Leave blank for unlimited accumulation"
-                        >
-                          <Input
-                            id="max-balance"
-                            type="number"
-                            min={0}
-                            max={365}
-                            step={0.5}
-                            value={form.max_accrual_balance ?? ''}
-                            onChange={e =>
-                              setForm(f => ({
-                                ...f,
-                                max_accrual_balance: e.target.value === '' ? null : num(e.target.value),
-                              }))
-                            }
-                            placeholder="None"
-                          />
-                        </FormField>
-                      </div>
-
-                      {/* ── Eligibility ─────────────────────────────────── */}
-                      <SectionDivider label="Eligibility" />
-
-                      <div className="grid grid-cols-2 gap-4 items-start">
-                        <FormField
-                          label="Waiting Period (days)"
-                          htmlFor="elig-days"
-                          description="Days from joining before first credit or usage. 0 = immediate."
-                        >
-                          <Input
-                            id="elig-days"
-                            type="number"
-                            min={0}
-                            max={3650}
-                            step={1}
-                            value={form.eligibility_days}
-                            onChange={e => setForm(f => ({ ...f, eligibility_days: parseInt(e.target.value, 10) || 0 }))}
-                            placeholder="0"
-                          />
-                        </FormField>
-
-                        <div className="pt-1">
-                          <div className="flex items-center justify-between py-1">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">Prorate on Joining</p>
-                              <p className="text-xs text-muted-foreground">
-                                For yearly accrual: grant proportional days based on months remaining
-                              </p>
-                            </div>
-                            <Toggle
-                              checked={form.prorate_on_joining}
-                              onChange={v => setForm(f => ({ ...f, prorate_on_joining: v }))}
-                              label="Prorate on Joining"
-                              disabled={form.accrual_type === 'upfront'}
+                      {/* ── Single save bar ──────────────────────────────────── */}
+                      <div className="flex items-center justify-between gap-3 border-t border-border mt-6 pt-4">
+                        <div className="flex gap-1">
+                          {POLICY_TABS.map(tab => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setActiveTab(tab.id)}
+                              className={cn(
+                                'h-1.5 rounded-full transition-all',
+                                activeTab === tab.id ? 'w-5 bg-primary' : 'w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50',
+                              )}
+                              aria-label={tab.label}
                             />
-                          </div>
+                          ))}
                         </div>
-                      </div>
-
-                      {/* ── Carry-forward ───────────────────────────────── */}
-                      <SectionDivider label="Carry-forward" />
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Enable Carry-forward</p>
-                          <p className="text-xs text-muted-foreground">
-                            Allow unused balance to roll over to the next year
-                          </p>
-                        </div>
-                        <Toggle
-                          checked={form.carry_forward_enabled}
-                          onChange={v => setForm(f => ({ ...f, carry_forward_enabled: v }))}
-                          label="Enable Carry-forward"
-                        />
-                      </div>
-
-                      {form.carry_forward_enabled && (
-                        <FormField
-                          label="Max Carry-forward Days"
-                          htmlFor="cf-max"
-                          description="Maximum days to carry to the next year. Leave blank for unlimited."
-                        >
-                          <Input
-                            id="cf-max"
-                            type="number"
-                            min={0}
-                            max={365}
-                            step={0.5}
-                            value={form.carry_forward_max_days ?? ''}
-                            onChange={e =>
-                              setForm(f => ({
-                                ...f,
-                                carry_forward_max_days: e.target.value === '' ? null : num(e.target.value),
-                              }))
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => selectedType && selectType(selectedType)}
+                            disabled={saveMutation.isPending}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                            Reset
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={saveMutation.isPending}
+                          >
+                            {saveMutation.isPending
+                              ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving…</>
+                              : hasPolicy ? 'Update Policy' : 'Create Policy'
                             }
-                            placeholder="Unlimited"
-                          />
-                        </FormField>
-                      )}
-
-                      {/* ── Year boundary ────────────────────────────────── */}
-                      <SectionDivider label="Year Boundary" />
-
-                      <div className="space-y-1">
-                        <p className="text-xs font-medium text-foreground">Year Type</p>
-                        <p className="text-[11px] text-muted-foreground mb-2">
-                          Determines the leave year start/end for accrual and carry-forward.
-                        </p>
-                        <RadioPill
-                          options={YEAR_OPTIONS}
-                          value={form.year_type}
-                          onChange={v => setForm(f => ({ ...f, year_type: v }))}
-                        />
-                      </div>
-
-                      {/* ── Policy summary ───────────────────────────────── */}
-                      <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
-                        <p className="font-semibold text-foreground text-[11px] uppercase tracking-wide mb-1.5">Policy Summary</p>
-                        <p>
-                          <span className="font-medium text-foreground">{form.accrual_days_per_year}</span> days/year
-                          {' '}via <span className="font-medium text-foreground">{form.accrual_type}</span> accrual
-                          {form.accrual_type === 'monthly' && (
-                            <> ({(form.accrual_days_per_year / 12).toFixed(1)} days/month)</>
-                          )}
-                        </p>
-                        <p>
-                          Eligible after{' '}
-                          <span className="font-medium text-foreground">{form.eligibility_days}</span> day(s) from joining
-                          {form.prorate_on_joining && form.accrual_type !== 'upfront' && ' · prorated'}
-                        </p>
-                        <p>
-                          Carry-forward:{' '}
-                          {form.carry_forward_enabled ? (
-                            <span className="text-success font-medium">
-                              Enabled
-                              {form.carry_forward_max_days != null
-                                ? ` (max ${form.carry_forward_max_days} days)`
-                                : ' (unlimited)'}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">Disabled — unused balance expires at year end</span>
-                          )}
-                        </p>
-                        <p>
-                          Year boundary:{' '}
-                          <span className="font-medium text-foreground">
-                            {form.year_type === 'calendar' ? 'Jan 1 – Dec 31' : 'Apr 1 – Mar 31 (Indian FY)'}
-                          </span>
-                        </p>
-                      </div>
-
-                      {/* ── Status messages ──────────────────────────────── */}
-                      {saveSuccess && (
-                        <div className="flex items-center gap-2 text-sm text-success p-3 rounded-lg bg-success/10 border border-success/20">
-                          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                          {saveSuccess}
+                          </Button>
                         </div>
-                      )}
-                      {saveError && (
-                        <div className="flex items-center gap-2 text-sm text-destructive p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-                          <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                          {saveError}
-                        </div>
-                      )}
-
-                      {/* ── Actions ──────────────────────────────────────── */}
-                      <div className="flex justify-end gap-2 pt-1">
-                        <Button
-                          variant="outline"
-                          onClick={() => selectedType && selectType(selectedType)}
-                          disabled={saveMutation.isPending}
-                        >
-                          <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                          Reset
-                        </Button>
-                        <Button
-                          onClick={handleSave}
-                          disabled={saveMutation.isPending}
-                        >
-                          {saveMutation.isPending
-                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving…</>
-                            : hasPolicy ? 'Update Policy' : 'Create Policy'
-                          }
-                        </Button>
                       </div>
                     </div>
                   )}
@@ -657,181 +1333,40 @@ export function LeavePolicy() {
             </div>
           </div>
 
-          {/* ── Entitlement Operations ─────────────────────────────────────── */}
-          <SectionCard
-            title="Entitlement Operations"
-            icon={<CalendarClock className="h-4 w-4 text-muted-foreground" />}
-            description="Run batch jobs to credit leave or carry forward balances"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-              {/* Monthly Accrual */}
-              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Monthly Accrual</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Credit 1/12th of annual entitlement to all eligible employees for the selected month.
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Year</label>
-                    <Input
-                      type="number"
-                      min={2000}
-                      max={2100}
-                      value={opYear}
-                      onChange={e => setOpYear(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Month</label>
-                    <select
-                      value={opMonth}
-                      onChange={e => setOpMonth(e.target.value)}
-                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                    >
-                      {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
-                        <option key={m} value={i + 1}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  className="w-full h-8 text-xs gap-1.5"
-                  disabled={anyPending}
-                  onClick={() => { setOpResult(null); monthlyMutation.mutate() }}
-                >
-                  {monthlyMutation.isPending
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Running…</>
-                    : <><PlayCircle className="h-3.5 w-3.5" />Run Monthly Accrual</>
-                  }
-                </Button>
+          {/* ── Automation notice ────────────────────────────────────────────── */}
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0 rounded-md bg-primary/10 p-2">
+                <Activity className="h-4 w-4 text-primary" />
               </div>
-
-              {/* Yearly Credit */}
-              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Yearly Credit</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Credit full (prorated) annual entitlement at year start for yearly / upfront policies.
-                  </p>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">
+                  Entitlement operations are managed by the Leave Automation Engine
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  Monthly accrual, yearly credit, carry-forward, expiry and event grants run automatically
+                  on schedule. The scheduler is the single authoritative execution engine — use the Engine
+                  Status dashboard for observability and recovery.
+                </p>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
+                    onClick={() => navigate('/admin/leave-jobs')}
+                  >
+                    <Activity className="h-3.5 w-3.5" />
+                    Engine Status
+                    <ExternalLink className="h-3 w-3 opacity-60" />
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Info className="h-3 w-3" />
+                    Use Advanced Recovery in Engine Status for manual replay with audit trail
+                  </span>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Leave Year</label>
-                  <Input
-                    type="number"
-                    min={2000}
-                    max={2100}
-                    value={opYear}
-                    onChange={e => setOpYear(e.target.value)}
-                    className="h-8 text-xs"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full h-8 text-xs gap-1.5"
-                  disabled={anyPending}
-                  onClick={() => { setOpResult(null); yearlyMutation.mutate() }}
-                >
-                  {yearlyMutation.isPending
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Running…</>
-                    : <><PlayCircle className="h-3.5 w-3.5" />Run Yearly Credit</>
-                  }
-                </Button>
-              </div>
-
-              {/* Carry-forward */}
-              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Carry-forward</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Move eligible unused balances from one year to the next. Run once at year-end.
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2 items-center">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">From Year</label>
-                    <Input
-                      type="number"
-                      min={2000}
-                      max={2100}
-                      value={cfFrom}
-                      onChange={e => { setCfFrom(e.target.value); setCfTo(String(parseInt(e.target.value, 10) + 1)) }}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-                      <ArrowRight className="h-3 w-3" />To Year
-                    </label>
-                    <Input
-                      type="number"
-                      min={2000}
-                      max={2100}
-                      value={cfTo}
-                      onChange={e => setCfTo(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full h-8 text-xs gap-1.5"
-                  disabled={anyPending}
-                  onClick={() => { setOpResult(null); carryForwardMutation.mutate() }}
-                >
-                  {carryForwardMutation.isPending
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Running…</>
-                    : <><ArrowRight className="h-3.5 w-3.5" />Run Carry-forward</>
-                  }
-                </Button>
               </div>
             </div>
-
-            {/* Operation result */}
-            {opResult && (
-              <div
-                className={cn(
-                  'mt-4 p-3 rounded-lg border text-sm',
-                  opResult.result?.errors?.length
-                    ? 'bg-warning/10 border-warning/30 text-warning'
-                    : 'bg-success/10 border-success/30 text-success',
-                )}
-              >
-                <p className="font-medium">{opResult.msg}</p>
-                {opResult.result && (
-                  <div className="mt-1.5 grid grid-cols-3 gap-3 text-xs">
-                    <span>
-                      <span className="font-semibold">{opResult.result.employees_processed}</span> processed
-                    </span>
-                    <span>
-                      <span className="font-semibold">{opResult.result.total_days_credited}</span> days
-                    </span>
-                    <span>
-                      <span className="font-semibold">{opResult.result.skipped}</span> skipped
-                    </span>
-                  </div>
-                )}
-                {!!opResult.result?.errors?.length && (
-                  <div className="mt-2 space-y-0.5">
-                    {opResult.result.errors.slice(0, 5).map((e, i) => (
-                      <p key={i} className="text-[11px] text-destructive">{e}</p>
-                    ))}
-                    {opResult.result.errors.length > 5 && (
-                      <p className="text-[11px] text-muted-foreground">
-                        + {opResult.result.errors.length - 5} more errors
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </SectionCard>
+          </div>
         </>
       )}
     </PageContainer>

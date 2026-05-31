@@ -366,12 +366,35 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Persist health status and timestamp
+    // Read current stats for rolling average computation
+    const { data: currentStats } = await fastify.supabase
+      .from('integration_registry')
+      .select('total_calls, avg_latency_ms, error_rate_pct')
+      .eq('id', id)
+      .single()
+
+    const prevCalls      = currentStats?.total_calls     ?? 0
+    const prevAvgLatency = currentStats?.avg_latency_ms   ?? 0
+    const prevErrorPct   = Number(currentStats?.error_rate_pct ?? 0)
+
+    const newCalls      = prevCalls + 1
+    const newAvgLatency = latency_ms != null
+      ? Math.round((prevAvgLatency * prevCalls + latency_ms) / newCalls)
+      : prevAvgLatency
+
+    // Rolling error rate: (prevErrorPct * prevCalls + isError * 100) / newCalls
+    const isError       = health_status === 'unhealthy' || health_status === 'degraded'
+    const newErrorPct   = Math.round(((prevErrorPct * prevCalls) + (isError ? 100 : 0)) / newCalls * 10) / 10
+
+    // Persist health status, timestamp, and updated stats
     await fastify.supabase
       .from('integration_registry')
       .update({
         health_status,
         last_health_check_at: new Date().toISOString(),
+        total_calls:          newCalls,
+        avg_latency_ms:       newAvgLatency,
+        error_rate_pct:       newErrorPct,
       })
       .eq('id', id)
 

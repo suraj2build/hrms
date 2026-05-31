@@ -18,14 +18,16 @@ import {
   XCircle, AlertTriangle, Loader2, ShieldAlert, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import * as XLSX from 'xlsx'
 
-import { PageContainer } from '@/components/layout/PageContainer'
-import { PageHeader }    from '@/components/layout/PageHeader'
-import { SectionCard }   from '@/components/layout/SectionCard'
-import { Button }        from '@/components/ui/button'
-import { api }           from '@/lib/api/client'
-import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { PageContainer }         from '@/components/layout/PageContainer'
+import { PageHeader }            from '@/components/layout/PageHeader'
+import { SectionCard }           from '@/components/layout/SectionCard'
+import { Button }                from '@/components/ui/button'
+import { OperationalErrorBanner } from '@/components/async'
+import { api }                   from '@/lib/api/client'
+import { useAuthStore }          from '@/stores/authStore'
+import { cn }                    from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -79,10 +81,6 @@ function parseCsvLine(line: string): string[] {
   return fields
 }
 
-function normaliseTime(t: string) {
-  return t.length === 5 ? `${t}:00` : t.slice(0, 8)
-}
-
 function validateRow(fields: Record<string, string>): string[] {
   const warnings: string[] = []
 
@@ -96,11 +94,9 @@ function validateRow(fields: Record<string, string>): string[] {
   if (!fields.out_time) warnings.push('out_time is empty')
   else if (!TIME_RE.test(fields.out_time)) warnings.push(`out_time "${fields.out_time}" is not HH:MM[:SS]`)
 
-  if (!warnings.length && fields.in_time && fields.out_time) {
-    if (normaliseTime(fields.in_time) >= normaliseTime(fields.out_time)) {
-      warnings.push('in_time must be earlier than out_time')
-    }
-  }
+  // Note: out_time < in_time is valid for night shifts (cross-midnight).
+  // The server detects this and places the OUT punch on the next calendar day.
+  // No client-side error is raised here for that case.
 
   return warnings
 }
@@ -140,6 +136,16 @@ export function AttendanceUpload() {
       })
   }
 
+  // ── XLSX → CSV converter ────────────────────────────────────────────────────
+  function xlsxToCsv(buffer: ArrayBuffer): string {
+    const workbook  = XLSX.read(new Uint8Array(buffer), { type: 'array' })
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName) return ''
+    const sheet = workbook.Sheets[sheetName]
+    // sheet_to_csv produces RFC-4180 CSV with CRLF line endings
+    return XLSX.utils.sheet_to_csv(sheet, { forceQuotes: false, blankrows: false })
+  }
+
   // ── File pick + parse ──────────────────────────────────────────────────────
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,18 +154,38 @@ export function AttendanceUpload() {
 
       setResult(null)
       setParseError(null)
-
-      const text = await file.text()
       setFileName(file.name)
+
+      // Convert XLSX/XLS to CSV text first; CSV files pass through as-is
+      let text: string
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+      if (ext === 'xlsx' || ext === 'xls') {
+        try {
+          const buffer = await file.arrayBuffer()
+          text = xlsxToCsv(buffer)
+          if (!text) {
+            setParseError('The spreadsheet appears to be empty or could not be read.')
+            setHeaders([]); setPreviewRows([]); setMissingCols([]); setTotalRows(0)
+            e.target.value = ''
+            return
+          }
+        } catch (err) {
+          setParseError(`Failed to parse spreadsheet: ${err instanceof Error ? err.message : String(err)}`)
+          setHeaders([]); setPreviewRows([]); setMissingCols([]); setTotalRows(0)
+          e.target.value = ''
+          return
+        }
+      } else {
+        text = await file.text()
+      }
+
       setCsvText(text)
 
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
       if (lines.length < 2) {
         setParseError('The file must contain a header row and at least one data row.')
-        setHeaders([])
-        setPreviewRows([])
-        setMissingCols([])
-        setTotalRows(0)
+        setHeaders([]); setPreviewRows([]); setMissingCols([]); setTotalRows(0)
+        e.target.value = ''
         return
       }
 
@@ -253,7 +279,7 @@ export function AttendanceUpload() {
 
           {/* ── Action strip ─────────────────────────────────────────────── */}
           <SectionCard
-            title="Upload CSV"
+            title="Upload CSV / XLSX"
             icon={<FileText className="h-4 w-4 text-muted-foreground" />}
           >
             <div className="flex flex-wrap items-center gap-3">
@@ -273,7 +299,7 @@ export function AttendanceUpload() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -284,7 +310,7 @@ export function AttendanceUpload() {
                 disabled={uploadMutation.isPending}
               >
                 <Upload className="h-3.5 w-3.5" />
-                {fileName ? 'Replace CSV' : 'Choose CSV File'}
+                {fileName ? 'Replace File' : 'Choose CSV / XLSX File'}
               </Button>
 
               {/* Selected file name */}
@@ -312,7 +338,7 @@ export function AttendanceUpload() {
               </p>
               <p>
                 <span className="font-medium">date</span> — YYYY-MM-DD &nbsp;|&nbsp;
-                <span className="font-medium">in_time / out_time</span> — HH:MM or HH:MM:SS (UTC)
+                <span className="font-medium">in_time / out_time</span> — HH:MM or HH:MM:SS in <strong>tenant local time</strong> (e.g. IST for India — <em>not</em> UTC)
               </p>
             </div>
           </SectionCard>
@@ -441,7 +467,7 @@ export function AttendanceUpload() {
               )}
 
               {/* Submit */}
-              <div className="mt-4 flex items-center gap-3">
+              <div className="mt-4 space-y-3">
                 <Button
                   onClick={handleSubmit}
                   disabled={!canSubmit || uploadMutation.isPending}
@@ -453,10 +479,16 @@ export function AttendanceUpload() {
                     <><Upload className="h-3.5 w-3.5" />Submit {totalRows} Row{totalRows !== 1 ? 's' : ''}</>
                   )}
                 </Button>
+
+                {/* Upload failure — prominent retry banner */}
                 {uploadMutation.isError && (
-                  <span className="text-xs text-destructive">
-                    {uploadMutation.error?.message ?? 'Upload failed'}
-                  </span>
+                  <OperationalErrorBanner
+                    error={uploadMutation.error?.message ?? 'Upload failed — the server rejected the request.'}
+                    severity="high"
+                    remediationText="Check that your CSV is well-formed, all required columns are present, and the file is under 2,000 rows. Then retry."
+                    onRetry={() => csvText && uploadMutation.mutate(csvText)}
+                    retrying={uploadMutation.isPending}
+                  />
                 )}
               </div>
             </SectionCard>

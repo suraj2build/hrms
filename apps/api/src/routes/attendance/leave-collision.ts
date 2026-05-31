@@ -1,11 +1,12 @@
 /**
  * Leave Collision Routes
  *
- * GET  /leave/collision/preview        — preview collision analysis for a date range
- * GET  /leave/collision/log            — audit log of collision resolutions
- * GET  /leave/optional-holidays        — list optional holidays available for employee
- * POST /leave/optional-holidays/select — employee selects an optional holiday
- * DELETE /leave/optional-holidays/:id  — remove selection
+ * GET  /leave/collision/preview          — preview collision analysis for a date range
+ * GET  /leave/collision/log              — audit log of collision resolutions
+ * POST /leave/collision/log/:id/resolve  — acknowledge/dismiss a collision log entry
+ * GET  /leave/optional-holidays          — list optional holidays available for employee
+ * POST /leave/optional-holidays/select   — employee selects an optional holiday
+ * DELETE /leave/optional-holidays/:id    — remove selection
  */
 
 import type { FastifyInstance } from 'fastify'
@@ -64,49 +65,103 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
     }
 
     const querySchema = z.object({
-      employee_id: z.string().uuid().optional(),
-      from:        z.string().regex(dateRe).optional(),
-      to:          z.string().regex(dateRe).optional(),
-      limit:       z.coerce.number().int().min(1).max(200).default(100),
-      offset:      z.coerce.number().int().min(0).default(0),
+      employee_id:        z.string().uuid().optional(),
+      from:               z.string().regex(dateRe).optional(),
+      to:                 z.string().regex(dateRe).optional(),
+      limit:              z.coerce.number().int().min(1).max(200).default(100),
+      offset:             z.coerce.number().int().min(0).default(0),
+      show_acknowledged:  z.enum(['true', 'false']).optional().default('false'),
     })
 
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
-    const { employee_id, from, to, limit, offset } = parsed.data
+    const { employee_id, from, to, limit, offset, show_acknowledged } = parsed.data
 
     let q = fastify.supabase
       .from('leave_collision_log')
       .select(`
-        id, collision_date, collision_type, resolution, original_status, resolved_status, created_at,
+        id, collision_date, collision_type, resolution, original_status, resolved_status,
+        acknowledged_at, created_at,
         employees!inner(id, first_name, last_name, employee_code)
       `, { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
+    // By default hide acknowledged entries (dismissed from the operations dashboard)
+    if (show_acknowledged !== 'true') {
+      q = q.is('acknowledged_at', null)
+    }
+
     if (employee_id) q = q.eq('employee_id', employee_id)
     if (from)        q = q.gte('collision_date', from)
     if (to)          q = q.lte('collision_date', to)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch collision log' })
+    if (error) {
+      // Table may not exist yet in this deployment — return empty rather than 500
+      // so the operational work queue degrades gracefully
+      if (error.code === '42P01' || error.message?.includes('does not exist')) {
+        return reply.send({ data: [], total: 0, limit, offset })
+      }
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch collision log' })
+    }
 
     const rows = (data ?? []).map((r: any) => ({
-      id:              r.id,
-      collision_date:  r.collision_date,
-      collision_type:  r.collision_type,
-      resolution:      r.resolution,
-      original_status: r.original_status,
-      resolved_status: r.resolved_status,
-      created_at:      r.created_at,
-      employee_name:   r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
-      employee_code:   r.employees?.employee_code ?? null,
+      id:               r.id,
+      collision_date:   r.collision_date,
+      collision_type:   r.collision_type,
+      resolution:       r.resolution,
+      original_status:  r.original_status,
+      resolved_status:  r.resolved_status,
+      acknowledged_at:  r.acknowledged_at ?? null,
+      created_at:       r.created_at,
+      employee_name:    r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
+      employee_code:    r.employees?.employee_code ?? null,
     }))
 
     return reply.send({ data: rows, total: count ?? 0, limit, offset })
+  })
+
+  // ── POST /leave/collision/log/:id/resolve ───────────────────────────────
+  // HR admin acknowledges/dismisses a collision log entry.
+  // The record is retained for audit; acknowledged_at is set so it no longer
+  // appears in the default (unfiltered) log view.
+  fastify.post('/leave/collision/log/:id/resolve', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+
+    // Verify the entry belongs to this tenant
+    const { data: entry, error: fetchErr } = await fastify.supabase
+      .from('leave_collision_log')
+      .select('id, acknowledged_at')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (!entry)   return reply.code(404).send({ error: 'NOT_FOUND', message: 'Collision log entry not found' })
+
+    // Idempotent — already acknowledged is fine
+    if (entry.acknowledged_at) {
+      return reply.send({ message: 'Already acknowledged', acknowledged_at: entry.acknowledged_at })
+    }
+
+    const now = new Date().toISOString()
+    const { error: updateErr } = await fastify.supabase
+      .from('leave_collision_log')
+      .update({ acknowledged_at: now, acknowledged_by: req.userId })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+
+    return reply.send({ message: 'Collision entry acknowledged', acknowledged_at: now })
   })
 
   // ── GET /leave/optional-holidays ────────────────────────────────────────

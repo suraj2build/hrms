@@ -119,19 +119,21 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       balance_days:    Number(lb.balance_days ?? 0),
     }))
 
-    // Compensation data for payroll preview
+    // Compensation data for payroll preview — table is employee_compensations (plural)
+    // ctc_monthly is the stored column; daily_rate and hourly_rate are derived
     const { data: compData } = await fastify.supabase
-      .from('employee_compensation')
-      .select('gross_salary, daily_rate, hourly_rate')
+      .from('employee_compensations')
+      .select('ctc_monthly')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .order('effective_date', { ascending: false })
+      .eq('is_active', true)
+      .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    const dailyRate  = Number(compData?.daily_rate  ?? 0)
-    const hourlyRate = Number(compData?.hourly_rate ?? 0)
-    const grossSalary = Number(compData?.gross_salary ?? 0)
+    const grossSalary = Number(compData?.ctc_monthly ?? 0)
+    const dailyRate   = grossSalary > 0 ? grossSalary / 26 : 0
+    const hourlyRate  = dailyRate   > 0 ? dailyRate   / 8  : 0
 
     const lop_amount = lop_days * dailyRate
     const ot_amount  = total_ot_hours * 1.5 * hourlyRate

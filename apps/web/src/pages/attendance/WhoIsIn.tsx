@@ -16,6 +16,7 @@ import { api }             from '@/lib/api/client'
 import { PageContainer }   from '@/components/layout/PageContainer'
 import { PageHeader }      from '@/components/layout/PageHeader'
 import { Input }           from '@/components/ui/input'
+import { DateInput }       from '@/components/ui/date-input'
 import { Button }          from '@/components/ui/button'
 import { Badge }           from '@/components/ui/badge'
 import { cn }              from '@/lib/utils'
@@ -52,7 +53,11 @@ function today(): string {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function downloadCSV(filename: string, rows: string[][]) {
@@ -221,10 +226,9 @@ export function WhoIsIn() {
         {/* Date picker */}
         <div className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 bg-card">
           <Calendar className="h-4 w-4 text-muted-foreground" />
-          <input
-            type="date"
+          <DateInput
             value={date}
-            onChange={e => setDate(e.target.value)}
+            onChange={setDate}
             className="text-sm bg-transparent outline-none text-foreground"
           />
         </div>

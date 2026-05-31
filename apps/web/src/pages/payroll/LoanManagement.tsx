@@ -17,6 +17,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import {
   Dialog,
   DialogContent,
@@ -78,8 +79,14 @@ const LOAN_TYPES = ['personal', 'emergency', 'vehicle', 'education', 'other']
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
-const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+const fmtDate = (d: string | null) => {
+  if (!d) return '—'
+  const s = d
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
+}
 
 // ── New Loan Dialog ────────────────────────────────────────────────────────────
 
@@ -159,7 +166,7 @@ function NewLoanDialog({ open, onClose }: { open: boolean; onClose: () => void }
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-foreground">Disbursement Date</label>
-            <Input type="date" value={form.disbursement_date} onChange={e => set('disbursement_date', e.target.value)} />
+            <DateInput value={form.disbursement_date} onChange={v => set('disbursement_date', v)} />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -223,7 +230,7 @@ function RecordPaymentDialog({
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-foreground">Payment Date</label>
-            <Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+            <DateInput value={paymentDate} onChange={setPaymentDate} />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>

@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import {
@@ -48,7 +49,7 @@ async function uploadOnboardingFile(
 interface OnboardingDocument {
   id: string
   session_id: string
-  doc_type: string
+  document_type: string
   file_name: string
   storage_path: string
   extraction_status: string
@@ -61,8 +62,9 @@ interface ExtractedField {
   field_name: string
   value: string | null
   confidence_score: number | null
-  source_doc_type: string | null
+  source_document_type: string | null
   is_conflicting: boolean
+  is_hr_override?: boolean
   conflict_values?: Array<{ value: string; source: string }>
 }
 
@@ -102,7 +104,7 @@ interface OnboardingSession {
   status: string
   assigned_to: string | null
   created_at: string
-  draft_profile_id: string | null
+  draft_profile?: { id: string; status: string; overall_confidence?: number | null } | null
   documents?: OnboardingDocument[]
 }
 
@@ -115,21 +117,24 @@ interface ValidationResult {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// Values must exactly match the CHECK constraint in migration 109_employee_onboarding.sql
 const DOC_TYPES = [
-  { value: 'aadhaar', label: 'Aadhaar Card', icon: '🪪' },
-  { value: 'pan', label: 'PAN Card', icon: '💳' },
-  { value: 'passport', label: 'Passport', icon: '📕' },
-  { value: 'resume', label: 'Resume / CV', icon: '📄' },
-  { value: 'offer_letter', label: 'Offer Letter', icon: '📋' },
-  { value: 'salary_slip', label: 'Salary Slip', icon: '💰' },
-  { value: 'bank_proof', label: 'Bank Proof', icon: '🏦' },
-  { value: 'experience_letter', label: 'Experience Letter', icon: '🏢' },
-  { value: 'pf_uan_document', label: 'PF / UAN Document', icon: '🔖' },
-  { value: 'driving_license', label: 'Driving License', icon: '🪪' },
-  { value: 'degree_certificate', label: 'Degree Certificate', icon: '🎓' },
-  { value: 'birth_certificate', label: 'Birth Certificate', icon: '📜' },
-  { value: 'form_16', label: 'Form 16', icon: '📊' },
-  { value: 'other', label: 'Other Document', icon: '📎' },
+  { value: 'aadhaar',             label: 'Aadhaar Card',         icon: '🪪' },
+  { value: 'pan',                 label: 'PAN Card',             icon: '💳' },
+  { value: 'passport',            label: 'Passport',             icon: '📕' },
+  { value: 'driving_license',     label: 'Driving License',      icon: '🪪' },
+  { value: 'resume',              label: 'Resume / CV',          icon: '📄' },
+  { value: 'offer_letter',        label: 'Offer Letter',         icon: '📋' },
+  { value: 'experience_letter',   label: 'Experience Letter',    icon: '🏢' },
+  { value: 'relieving_letter',    label: 'Relieving Letter',     icon: '📑' },
+  { value: 'joining_letter',      label: 'Joining Letter',       icon: '✉️'  },
+  { value: 'salary_slip',         label: 'Salary Slip',          icon: '💰' },
+  { value: 'compensation_letter', label: 'Compensation Letter',  icon: '📃' },
+  { value: 'bank_proof',          label: 'Bank Proof',           icon: '🏦' },
+  { value: 'pf_uan_document',     label: 'PF / UAN Document',   icon: '🔖' },
+  { value: 'esi_document',        label: 'ESI Document',         icon: '🏥' },
+  { value: 'tax_document',        label: 'Tax Document (Form 16 etc.)', icon: '📊' },
+  { value: 'other',               label: 'Other Document',       icon: '📎' },
 ]
 
 const DOC_TYPE_ICON: Record<string, string> = Object.fromEntries(
@@ -164,52 +169,109 @@ const FIELD_SECTIONS: Array<{ title: string; fields: Array<{ key: string; label:
   {
     title: 'Identity',
     fields: [
-      { key: 'first_name', label: 'First Name' },
-      { key: 'last_name', label: 'Last Name' },
-      { key: 'email', label: 'Email' },
-      { key: 'phone', label: 'Phone' },
-      { key: 'dob', label: 'Date of Birth' },
-      { key: 'gender', label: 'Gender' },
+      { key: 'first_name',   label: 'First Name' },
+      { key: 'last_name',    label: 'Last Name' },
+      { key: 'email',        label: 'Email' },
+      { key: 'phone',        label: 'Phone' },
+      { key: 'dob',          label: 'Date of Birth' },
+      { key: 'gender',       label: 'Gender' },
     ],
   },
   {
     title: 'Address',
     fields: [
-      { key: 'address_line1', label: 'Address Line 1' },
-      { key: 'address_city', label: 'City' },
-      { key: 'address_state', label: 'State' },
-      { key: 'address_pincode', label: 'Pincode' },
+      { key: 'address_line1',    label: 'Address Line 1' },
+      { key: 'address_city',     label: 'City' },
+      { key: 'address_state',    label: 'State' },
+      { key: 'address_pincode',  label: 'Pincode' },
     ],
   },
   {
     title: 'Employment',
     fields: [
-      { key: 'joining_date', label: 'Joining Date' },
-      { key: 'employment_type', label: 'Employment Type' },
-      { key: 'department', label: 'Department' },
-      { key: 'designation', label: 'Designation' },
-      { key: 'employee_code', label: 'Employee Code' },
+      { key: 'joining_date',     label: 'Joining Date' },
+      { key: 'employment_type',  label: 'Employment Type' },
+      { key: 'department_id',    label: 'Department' },
+      { key: 'designation_id',   label: 'Designation' },
+      { key: 'grade_id',         label: 'Grade' },
+      { key: 'employee_code',    label: 'Employee Code' },
     ],
   },
   {
     title: 'Compliance',
     fields: [
-      { key: 'pan_number', label: 'PAN Number' },
-      { key: 'uan_number', label: 'UAN Number' },
-      { key: 'esi_number', label: 'ESI Number' },
-      { key: 'pf_number', label: 'PF Number' },
+      { key: 'pan_number',  label: 'PAN Number' },
+      { key: 'uan_number',  label: 'UAN Number' },
+      { key: 'esi_number',  label: 'ESI Number' },
+      { key: 'pf_number',   label: 'PF Number' },
     ],
   },
   {
     title: 'Payroll & Banking',
     fields: [
-      { key: 'bank_name', label: 'Bank Name' },
+      { key: 'bank_name',           label: 'Bank Name' },
       { key: 'bank_account_number', label: 'Account Number' },
-      { key: 'bank_ifsc', label: 'IFSC Code' },
-      { key: 'ctc_annual', label: 'Annual CTC' },
+      { key: 'bank_ifsc',           label: 'IFSC Code' },
+      { key: 'bank_account_type',   label: 'Account Type' },
+      { key: 'ctc_annual',          label: 'Annual CTC' },
     ],
   },
 ]
+
+// ── Dropdown config ───────────────────────────────────────────────────────────
+
+type FieldOption = { value: string; label: string }
+
+/** Fixed-choice fields — no API fetch needed */
+const ENUM_OPTIONS: Record<string, FieldOption[]> = {
+  gender: [
+    { value: 'male',             label: 'Male' },
+    { value: 'female',           label: 'Female' },
+    { value: 'other',            label: 'Other' },
+    { value: 'prefer_not_to_say',label: 'Prefer not to say' },
+  ],
+  employment_type: [
+    { value: 'permanent',  label: 'Permanent' },
+    { value: 'contract',   label: 'Contract' },
+    { value: 'intern',     label: 'Intern' },
+    { value: 'probation',  label: 'Probation' },
+    { value: 'consultant', label: 'Consultant' },
+  ],
+  bank_account_type: [
+    { value: 'savings', label: 'Savings' },
+    { value: 'current', label: 'Current' },
+    { value: 'salary',  label: 'Salary' },
+  ],
+}
+
+/** Master-driven fields — values are UUIDs, fetched from API */
+const MASTER_FIELD_KEYS: Record<string, string> = {
+  department_id:  'departments',
+  designation_id: 'designations',
+  grade_id:       'grades',
+}
+
+// ── Source badge config ───────────────────────────────────────────────────────
+
+const SOURCE_BADGE_CONFIG: Record<string, { label: string; className: string }> = {
+  aadhaar:              { label: 'Aadhaar',       className: 'bg-blue-100 text-blue-700 border-blue-200' },
+  pan:                  { label: 'PAN',            className: 'bg-orange-100 text-orange-700 border-orange-200' },
+  passport:             { label: 'Passport',       className: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  driving_license:      { label: 'DL',             className: 'bg-cyan-100 text-cyan-700 border-cyan-200' },
+  resume:               { label: 'Resume',         className: 'bg-purple-100 text-purple-700 border-purple-200' },
+  offer_letter:         { label: 'Offer',          className: 'bg-green-100 text-green-700 border-green-200' },
+  experience_letter:    { label: 'Exp. Letter',    className: 'bg-teal-100 text-teal-700 border-teal-200' },
+  relieving_letter:     { label: 'Relieving',      className: 'bg-teal-100 text-teal-700 border-teal-200' },
+  joining_letter:       { label: 'Joining',        className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  salary_slip:          { label: 'Salary Slip',    className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+  compensation_letter:  { label: 'CTC Letter',     className: 'bg-lime-100 text-lime-700 border-lime-200' },
+  bank_proof:           { label: 'Bank Proof',     className: 'bg-sky-100 text-sky-700 border-sky-200' },
+  pf_uan_document:      { label: 'PF/UAN',         className: 'bg-violet-100 text-violet-700 border-violet-200' },
+  esi_document:         { label: 'ESI',            className: 'bg-rose-100 text-rose-700 border-rose-200' },
+  tax_document:         { label: 'Tax Doc',        className: 'bg-amber-100 text-amber-700 border-amber-200' },
+  other:                { label: 'Other',          className: 'bg-muted text-muted-foreground border-border' },
+  hr_override:          { label: 'Manual',         className: 'bg-slate-100 text-slate-600 border-slate-200' },
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -223,11 +285,25 @@ function ConfidenceBadge({ score }: { score: number | null }) {
   return <span className={`text-xs font-mono font-medium ${cls}`}>{pct}%</span>
 }
 
+function SourceBadge({ source, isHrOverride }: { source: string | null; isHrOverride?: boolean }) {
+  const key = isHrOverride ? 'hr_override' : (source ?? '')
+  const cfg = SOURCE_BADGE_CONFIG[key]
+  if (!cfg && !source) return <span className="text-[10px] text-muted-foreground">—</span>
+  const { label, className } = cfg ?? { label: source!.replace(/_/g, ' '), className: 'bg-muted text-muted-foreground border-border' }
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-semibold leading-4 whitespace-nowrap ${className}`}>
+      {isHrOverride && <span className="mr-0.5">✎</span>}
+      {label}
+    </span>
+  )
+}
+
 function ExtractionStatusBadge({ status }: { status: string }) {
   const map: Record<string, BadgeVariant> = {
     pending: 'outline',
     processing: 'warning',
-    completed: 'success',
+    extracted: 'success',   // DB value after successful extraction
+    completed: 'success',   // legacy alias
     failed: 'destructive',
   }
   return (
@@ -246,6 +322,22 @@ interface FieldRowProps {
   onStartEdit: (key: string) => void
   onSaveOverride: (fieldName: string, value: string) => void
   onCancelEdit: () => void
+  /** If set, renders a Select dropdown instead of a plain text input */
+  options?: FieldOption[]
+  /** Resolved human-readable display text (for UUID → name master fields) */
+  displayValue?: string
+}
+
+/** Fields whose value is an ISO date (YYYY-MM-DD) — use DateInput for edit + format for display */
+const DATE_FIELDS = new Set(['joining_date', 'dob', 'date_of_birth', 'probation_end_date'])
+
+/** Format ISO date to readable DD-MMM-YYYY for display */
+function fmtIsoDate(iso: string | null): string {
+  if (!iso || iso.length < 10) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (!y || !m || !d || m < 1 || m > 12) return iso
+  return `${String(d).padStart(2,'0')}-${months[m-1]}-${y}`
 }
 
 function FieldRow({
@@ -257,32 +349,40 @@ function FieldRow({
   onStartEdit,
   onSaveOverride,
   onCancelEdit,
+  options,
+  displayValue,
 }: FieldRowProps) {
   const [editValue, setEditValue] = useState('')
+  const isDateField = DATE_FIELDS.has(fieldKey)
 
   const extractedField = fields.find((f) => f.field_name === fieldKey)
-  const currentValue =
+  const rawValue =
     ((draft as unknown) as Record<string, unknown>)?.[fieldKey] as string | null ??
     extractedField?.value ??
     null
 
+  // For display: use resolved human-readable name if available (master fields show UUID otherwise)
+  const shownValue = displayValue ?? rawValue
+
   const isEditing = editingField === fieldKey
   const isConflicting = extractedField?.is_conflicting ?? false
+  const isHrOverride = extractedField?.is_hr_override ?? false
   const confidence = extractedField?.confidence_score ?? null
-  const sourceDocType = extractedField?.source_doc_type ?? null
+  const sourceDocType = extractedField?.source_document_type ?? null
 
   function handleStartEdit() {
-    setEditValue(currentValue ?? '')
+    setEditValue(rawValue ?? '')
     onStartEdit(fieldKey)
   }
 
   function handleSave() {
+    if (options && options.length > 0 && !editValue) return  // don't save blank selection
     onSaveOverride(fieldKey, editValue)
   }
 
   return (
     <div
-      className={`grid grid-cols-[160px_1fr_64px_80px_32px] items-center gap-2 px-3 py-2 rounded-md transition-colors group ${
+      className={`grid grid-cols-[160px_1fr_56px_90px_32px] items-center gap-2 px-3 py-2 rounded-md transition-colors group ${
         isConflicting
           ? 'bg-warning/5 border border-warning/30 ring-1 ring-warning/20'
           : 'hover:bg-muted/30'
@@ -299,23 +399,46 @@ function FieldRow({
       {/* Value / Edit Input */}
       <div className="min-w-0">
         {isEditing ? (
-          <Input
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSave()
-              if (e.key === 'Escape') onCancelEdit()
-            }}
-            className="h-7 text-xs"
-            autoFocus
-          />
+          options && options.length > 0 ? (
+            <Select value={editValue} onValueChange={(v) => setEditValue(v)}>
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue placeholder="Select…" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : isDateField ? (
+            <DateInput
+              value={editValue}
+              onChange={(iso) => setEditValue(iso)}
+              className="h-7 text-xs"
+            />
+          ) : (
+            <Input
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSave()
+                if (e.key === 'Escape') onCancelEdit()
+              }}
+              className="h-7 text-xs"
+              autoFocus
+            />
+          )
         ) : (
           <span
             className={`text-sm truncate block ${
-              currentValue ? 'text-foreground' : 'text-muted-foreground italic'
+              shownValue ? 'text-foreground' : 'text-muted-foreground italic'
             }`}
           >
-            {currentValue ?? 'Not extracted'}
+            {shownValue
+              ? (isDateField ? fmtIsoDate(shownValue) : shownValue)
+              : 'Not extracted'}
           </span>
         )}
       </div>
@@ -325,15 +448,9 @@ function FieldRow({
         <ConfidenceBadge score={confidence} />
       </div>
 
-      {/* Source */}
-      <div className="text-right">
-        {sourceDocType ? (
-          <span className="text-[10px] text-muted-foreground">
-            {DOC_TYPE_ICON[sourceDocType] ?? '📎'} {sourceDocType.replace('_', ' ')}
-          </span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground">—</span>
-        )}
+      {/* Source badge */}
+      <div className="flex justify-end">
+        <SourceBadge source={sourceDocType} isHrOverride={isHrOverride} />
       </div>
 
       {/* Edit actions */}
@@ -392,7 +509,7 @@ function UploadDocDialog({ open, onOpenChange, sessionId, tenantId, onUploaded }
     try {
       const storagePath = await uploadOnboardingFile(tenantId, sessionId, file)
       await api.post(`/onboarding/sessions/${sessionId}/documents`, {
-        doc_type: docType,
+        document_type: docType,
         file_name: file.name,
         storage_path: storagePath,
         file_size: file.size,
@@ -598,15 +715,15 @@ export function HRReviewWorkspace() {
     staleTime: 30_000,
   })
 
-  const { data: docsData } = useQuery<{ data: OnboardingDocument[] }>({
-    queryKey: ['onboarding-docs', sessionId],
-    queryFn: () => api.get(`/onboarding/sessions/${sessionId}/documents`),
-    enabled: !!sessionId,
-    staleTime: 30_000,
-  })
-
   const session = sessionData?.data
-  const draftProfileId = session?.draft_profile_id ?? null
+
+  // promotedDraftId: set immediately from the extraction response so the draft
+  // query fires without waiting for the session to refetch and return draft_profile.id
+  const [promotedDraftId, setPromotedDraftId] = useState<string | null>(null)
+  const draftProfileId = session?.draft_profile?.id ?? promotedDraftId ?? null
+
+  // Documents come from the session response (GET /sessions/:id returns them inline)
+  const documents: OnboardingDocument[] = session?.documents ?? []
 
   const { data: draftData, isLoading: draftLoading } = useQuery<{ data: DraftProfile }>({
     queryKey: ['onboarding-draft', draftProfileId],
@@ -617,16 +734,63 @@ export function HRReviewWorkspace() {
 
   const draft = draftData?.data ?? null
   const fields = draft?.fields ?? []
-  const documents = docsData?.data ?? session?.documents ?? []
+
+  // ── Master data for dropdowns ──────────────────────────────────────────────
+  const { data: deptData } = useQuery<{ data: Array<{ id: string; name: string }> }>({
+    queryKey: ['departments'],
+    queryFn: () => api.get('/departments'),
+    staleTime: 5 * 60_000,
+  })
+  const { data: desgData } = useQuery<{ data: Array<{ id: string; name: string }> }>({
+    queryKey: ['designations'],
+    queryFn: () => api.get('/designations'),
+    staleTime: 5 * 60_000,
+  })
+  const { data: gradeData } = useQuery<{ data: Array<{ id: string; name: string }> }>({
+    queryKey: ['grades'],
+    queryFn: () => api.get('/grades'),
+    staleTime: 5 * 60_000,
+  })
+
+  const masterOptions: Record<string, FieldOption[]> = {
+    departments:  (deptData?.data  ?? []).map((d) => ({ value: d.id, label: d.name })),
+    designations: (desgData?.data  ?? []).map((d) => ({ value: d.id, label: d.name })),
+    grades:       (gradeData?.data ?? []).map((d) => ({ value: d.id, label: d.name })),
+  }
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
 
   const { mutate: runExtraction, isPending: extracting } = useMutation({
-    mutationFn: () => api.post(`/onboarding/sessions/${sessionId}/extract`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
-      qc.invalidateQueries({ queryKey: ['onboarding-docs', sessionId] })
-      toast.success('Extraction started', { description: 'AI is processing the uploaded documents.' })
+    mutationFn: () => api.post<{ data: { documents_extracted: number; draft_profile_id: string | null; doc_errors?: Array<{ docId: string; step: string; reason: string }> } }>(
+      `/onboarding/sessions/${sessionId}/extract`, {}
+    ),
+    onSuccess: async (resp) => {
+      const count = resp?.data?.documents_extracted ?? 0
+      const profileId = resp?.data?.draft_profile_id
+      const docErrors = resp?.data?.doc_errors ?? []
+
+      // Promote the draft id immediately so the draft query fires right away
+      // without waiting for the session refetch to return draft_profile.id
+      if (profileId) setPromotedDraftId(profileId)
+
+      if (count > 0) {
+        toast.success(`Extraction complete — ${count} document${count !== 1 ? 's' : ''} processed`)
+        setActiveTab('extracted')
+      } else {
+        const firstError = docErrors[0]
+        const description = firstError
+          ? `${firstError.step}: ${firstError.reason}`
+          : 'Check document status — it may have failed to download or parse.'
+        toast.warning('Extraction ran but 0 documents were processed', { description })
+      }
+
+      // Small delay so the DB writes (doc status + draft profile) are fully committed
+      // before we pull fresh data
+      await new Promise(r => setTimeout(r, 600))
+      await qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
+      if (profileId) {
+        await qc.invalidateQueries({ queryKey: ['onboarding-draft', profileId] })
+      }
     },
     onError: (e: Error) => toast.error('Extraction failed', { description: e.message }),
   })
@@ -760,9 +924,7 @@ export function HRReviewWorkspace() {
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-0.5">
-              {new Date(session.created_at).toLocaleDateString([], {
-                month: 'short', day: 'numeric', year: 'numeric',
-              })}
+              {(() => { const d=new Date(session.created_at.length===10?session.created_at+'T12:00:00Z':session.created_at); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()}
             </p>
           </div>
 
@@ -792,10 +954,10 @@ export function HRReviewWorkspace() {
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-base leading-none">
-                        {DOC_TYPE_ICON[doc.doc_type] ?? '📎'}
+                        {DOC_TYPE_ICON[doc.document_type] ?? '📎'}
                       </span>
                       <span className="text-xs font-medium text-foreground truncate">
-                        {doc.doc_type.replace(/_/g, ' ')}
+                        {doc.document_type.replace(/_/g, ' ')}
                       </span>
                     </div>
                     <p className="text-[10px] text-muted-foreground truncate mb-1">
@@ -880,7 +1042,7 @@ export function HRReviewWorkspace() {
                 {draft && !draftLoading && (
                   <>
                     {/* Column headers */}
-                    <div className="grid grid-cols-[160px_1fr_64px_80px_32px] gap-2 px-3 pb-1 border-b border-border">
+                    <div className="grid grid-cols-[160px_1fr_56px_90px_32px] gap-2 px-3 pb-1 border-b border-border">
                       {['Field', 'Value', 'Confidence', 'Source', ''].map((h) => (
                         <span key={h} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
                           {h}
@@ -893,21 +1055,34 @@ export function HRReviewWorkspace() {
                         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 pt-2">
                           {section.title}
                         </h3>
-                        {section.fields.map(({ key, label }) => (
-                          <FieldRow
-                            key={key}
-                            fieldKey={key}
-                            label={label}
-                            draft={draft}
-                            fields={fields}
-                            editingField={editingField}
-                            onStartEdit={(k) => setEditingField(k)}
-                            onSaveOverride={(fieldName, value) =>
-                              saveOverride({ fieldName, value })
-                            }
-                            onCancelEdit={() => setEditingField(null)}
-                          />
-                        ))}
+                        {section.fields.map(({ key, label }) => {
+                          // Resolve dropdown options
+                          const enumOpts = ENUM_OPTIONS[key]
+                          const masterKey = MASTER_FIELD_KEYS[key]
+                          const opts = enumOpts ?? (masterKey ? masterOptions[masterKey] : undefined)
+
+                          // Resolve UUID → human-readable name for master fields
+                          const rawVal = ((draft as any)?.[key] as string | null) ?? null
+                          const displayVal = masterKey && rawVal
+                            ? (masterOptions[masterKey]?.find((o) => o.value === rawVal)?.label ?? rawVal)
+                            : undefined
+
+                          return (
+                            <FieldRow
+                              key={key}
+                              fieldKey={key}
+                              label={label}
+                              draft={draft}
+                              fields={fields}
+                              editingField={editingField}
+                              onStartEdit={(k) => setEditingField(k)}
+                              onSaveOverride={(fieldName, value) => saveOverride({ fieldName, value })}
+                              onCancelEdit={() => setEditingField(null)}
+                              options={opts}
+                              displayValue={displayVal}
+                            />
+                          )
+                        })}
                       </div>
                     ))}
                   </>
@@ -1041,10 +1216,10 @@ export function HRReviewWorkspace() {
                 </p>
                 <div className="rounded-lg border border-border p-3 space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">{DOC_TYPE_ICON[selectedDoc.doc_type] ?? '📎'}</span>
+                    <span className="text-xl">{DOC_TYPE_ICON[selectedDoc.document_type] ?? '📎'}</span>
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-foreground capitalize">
-                        {selectedDoc.doc_type.replace(/_/g, ' ')}
+                        {selectedDoc.document_type.replace(/_/g, ' ')}
                       </p>
                       <p className="text-[10px] text-muted-foreground truncate">
                         {selectedDoc.file_name}
@@ -1218,7 +1393,6 @@ export function HRReviewWorkspace() {
         sessionId={sessionId!}
         tenantId={tenant?.id ?? 'default'}
         onUploaded={() => {
-          qc.invalidateQueries({ queryKey: ['onboarding-docs', sessionId] })
           qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
         }}
       />

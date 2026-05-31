@@ -4,13 +4,25 @@
  * GET /attendance/payroll-summary?month=YYYY-MM
  *
  * Aggregates attendance_daily per employee for a given month and returns
- * per-employee totals alongside a tenant-wide summary StatCard rollup.
+ * per-employee totals alongside a tenant-wide summary for StatCards.
+ *
+ * ── Source of truth ────────────────────────────────────────────────────────
+ * All aggregation is delegated to attendance-read-model.ts.
+ *
+ * Previous implementation queried is_payable + day_fraction directly, which
+ * produced wrong results for CSV-sourced rows (recomputeRange only writes
+ * status/work_hours — is_payable and day_fraction remain NULL for those rows).
+ *
+ * The read model derives payable_days and lop_days from status using the
+ * canonical PAYABLE_STATUSES / LOP_STATUSES constants, which is correct for
+ * all pipeline sources.
  *
  * Auth: hr_admin / super_admin only.
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { buildMonthReadModel } from '../../lib/attendance-read-model.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -32,89 +44,58 @@ export default async function payrollSummaryRoute(fastify: FastifyInstance) {
 
     const { month } = parsed.data
     const [year, mon] = month.split('-').map(Number)
+    const lastDay     = new Date(year, mon, 0).getDate()
+    const from        = `${month}-01`
+    const to          = `${month}-${String(lastDay).padStart(2, '0')}`
 
-    // First and last day of the month
-    const from = `${month}-01`
-    const lastDay = new Date(year, mon, 0).getDate()  // 0th day of next month = last day of this month
-    const to   = `${month}-${String(lastDay).padStart(2, '0')}`
+    // Build full read model: employees + daily rows + per-employee summaries + totals
+    const result = await buildMonthReadModel(fastify.supabase, req.tenantId, month)
 
-    // Fetch all active employees
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code, first_name, last_name')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-      .order('employee_code')
-
-    if (empErr) {
-      req.log.error({ err: empErr }, 'payroll-summary employees query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+    if ('error' in result) {
+      req.log.error({ err: result.error }, 'payroll-summary read model failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: result.error })
     }
 
-    // Fetch all daily attendance rows for the month
-    const { data: daily, error: dailyErr } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status, is_payable, day_fraction')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', from)
-      .lte('date', to)
+    const { summaries, totals } = result
 
-    if (dailyErr) {
-      req.log.error({ err: dailyErr }, 'payroll-summary daily query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
-    }
-
-    // Group daily rows by employee
-    const byEmployee = new Map<string, typeof daily>()
-    for (const row of daily ?? []) {
-      const empId = row.employee_id as string
-      if (!byEmployee.has(empId)) byEmployee.set(empId, [])
-      byEmployee.get(empId)!.push(row)
-    }
-
-    // Compute per-employee summary
-    const employeeSummaries = (employees ?? []).map((emp: any) => {
-      const rows    = byEmployee.get(emp.id) ?? []
-      const total_days    = lastDay                                                               // calendar days in month
-      const present       = rows.filter((r: any) => r.status === 'present' || r.status === 'late').length
-      const absent        = rows.filter((r: any) => r.status === 'absent').length
-      const on_leave      = rows.filter((r: any) => r.status === 'leave').length
-      const payable_days  = rows.filter((r: any) => r.is_payable === true)
-                               .reduce((sum: number, r: any) => sum + (Number(r.day_fraction) || 1), 0)
-      const lop_days      = rows.filter((r: any) => r.status === 'absent').length
-
-      return {
-        employee_id:   emp.id,
-        employee_code: emp.employee_code,
-        name:          `${emp.first_name} ${emp.last_name}`,
-        total_days,
-        present,
-        absent,
-        on_leave,
-        payable_days,
-        lop_days,
-      }
-    })
-
-    // Tenant-wide totals for StatCards
-    const totals = employeeSummaries.reduce(
-      (acc, e) => ({
-        total_employees: acc.total_employees + 1,
-        total_payable_days:  acc.total_payable_days  + e.payable_days,
-        total_lop_days:      acc.total_lop_days      + e.lop_days,
-        total_present:       acc.total_present       + e.present,
-        total_absent:        acc.total_absent        + e.absent,
-        total_on_leave:      acc.total_on_leave      + e.on_leave,
-      }),
-      { total_employees: 0, total_payable_days: 0, total_lop_days: 0, total_present: 0, total_absent: 0, total_on_leave: 0 },
-    )
+    // Map to the response shape callers expect
+    const employees = summaries.map(s => ({
+      employee_id:   s.employee_id,
+      employee_code: s.employee_code ?? '',
+      name:          s.name          ?? '',
+      total_days:    lastDay,
+      present:       s.present,
+      absent:        s.absent,
+      on_leave:      s.on_leave,
+      half_day:      s.half_day,
+      late:          s.late,
+      overtime:      s.overtime,
+      missing_punch: s.missing_punch,
+      payable_days:  s.payable_days,
+      lop_days:      s.lop_days,
+    }))
 
     return reply.send({
       month,
       from,
       to,
-      totals,
-      employees: employeeSummaries,
+      totals: {
+        total_employees:    totals.active_employees,
+        total_payable_days: totals.total_payable_days,
+        total_lop_days:     totals.total_lop_days,
+        total_present:      totals.total_present,
+        total_absent:       totals.total_absent,
+        total_on_leave:     totals.total_on_leave,
+        total_late:         totals.total_late,
+        total_half_day:     totals.total_half_day,
+        total_overtime:     totals.total_overtime,
+        total_missing_punch: totals.total_missing_punch,
+        employees_with_absence:       totals.employees_with_absence,
+        employees_with_late:          totals.employees_with_late,
+        employees_with_missing_punch: totals.employees_with_missing_punch,
+        employees_lop_risk:           totals.employees_lop_risk,
+      },
+      employees,
     })
   })
 }

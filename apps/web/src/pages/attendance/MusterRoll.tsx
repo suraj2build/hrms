@@ -9,7 +9,7 @@
  * Design rules: design system tokens only — no raw hex / bg-gray-*.
  */
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Link }          from 'react-router-dom'
 import { useQuery }      from '@tanstack/react-query'
 import {
@@ -20,6 +20,7 @@ import {
   AlertTriangle, Activity, FileText,
   ClipboardEdit, ClipboardCheck,
   CheckSquare, Square, CheckCircle2,
+  Calendar, Loader2,
 } from 'lucide-react'
 
 import { PageContainer }    from '@/components/layout/PageContainer'
@@ -33,6 +34,15 @@ import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import {
+  FORENSICS_LINKABLE,
+  computeSummary,
+  computePayableDays,
+  computeMonthTotals,
+  countMissingRecords,
+  computeEmployeeSummary,
+} from '@/lib/attendance/selectors'
+import { formatMonthLabel } from '@/lib/attendance/attendance-period-context'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,18 +65,14 @@ interface MusterData {
   employees: EmployeeMuster[]
 }
 
-interface PayrollTotals {
-  total_employees:    number
-  total_payable_days: number
-  total_lop_days:     number
-  total_present:      number
-  total_absent:       number
-  total_on_leave:     number
-}
+// PayrollTotals and PayrollSummaryData removed — payroll metrics are now
+// computed client-side from the muster data to guarantee a single source of
+// truth. The /attendance/payroll-summary endpoint used is_payable + day_fraction
+// which are NULL for CSV-sourced rows and produced incorrect values.
 
-interface PayrollSummaryData {
-  month:   string
-  totals:  PayrollTotals
+interface LatestMonthData {
+  month:         string | null
+  current_month: string
 }
 
 // Phase 6 — 'lop-risk' and 'missing-records' added for operational scanning
@@ -113,18 +119,7 @@ const STATUS_CELL: Record<string, string> = {
 
 const DOW_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
-// Statuses worth deep-linking to forensics (not weekend/holiday padding)
-// Phase 4: missing_punch and no_punch are the most important to investigate
-const FORENSICS_LINKABLE = new Set([
-  'present', 'late', 'absent', 'half_day', 'leave',
-  'overtime', 'missing_punch', 'no_punch',
-])
-
-// Payable statuses for per-row payable days computation
-// Phase 3: overtime is always a payable day
-const PAYABLE_STATUSES = new Set([
-  'present', 'late', 'holiday', 'weekend', 'weekly_off', 'overtime',
-])
+// PAYABLE_STATUSES and FORENSICS_LINKABLE are imported from @/lib/attendance/selectors
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,22 +127,7 @@ function monthStr(y: number, m: number) {
   return `${y}-${String(m + 1).padStart(2, '0')}`
 }
 
-function computeSummary(days: DayRecord[]) {
-  const counts: Record<string, number> = {}
-  for (const d of days) {
-    if (d.status) counts[d.status] = (counts[d.status] ?? 0) + 1
-  }
-  return counts
-}
-
-function computePayableDays(days: DayRecord[]): number {
-  return days.reduce((acc, d) => {
-    if (!d.status) return acc
-    if (d.status === 'half_day') return acc + 0.5
-    if (PAYABLE_STATUSES.has(d.status)) return acc + 1
-    return acc
-  }, 0)
-}
+// computeSummary and computePayableDays are imported from @/lib/attendance/selectors
 
 /** Generate and trigger download of a CSV export for the visible muster grid. */
 function exportMusterCsv(employees: EmployeeMuster[], dates: string[], monthLabel: string) {
@@ -190,22 +170,23 @@ export function MusterRoll() {
   const { profile } = useAuthStore()
   const isAdmin     = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
 
-  const [viewDate,     setViewDate]     = useState(() => new Date())
-  const [search,       setSearch]       = useState('')
-  const [compact,      setCompact]      = useState(false)
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [selected,     setSelected]     = useState<Set<string>>(new Set())
+  const [viewDate,         setViewDate]         = useState(() => new Date())
+  const [search,           setSearch]           = useState('')
+  const [compact,          setCompact]          = useState(false)
+  const [statusFilter,     setStatusFilter]     = useState<StatusFilter>('all')
+  const [selected,         setSelected]         = useState<Set<string>>(new Set())
+  // Tracks the real-world month we were on before the auto-navigation kicked in
+  const [autoNavigatedFrom, setAutoNavigatedFrom] = useState<string | null>(null)
+  const hasAutoNavigated = useRef(false)
 
   const year  = viewDate.getFullYear()
   const month = viewDate.getMonth()
   const ms    = monthStr(year, month)
 
-  const isCurrentMonth = ms === monthStr(new Date().getFullYear(), new Date().getMonth())
-
   // ── Period lock awareness ──────────────────────────────────────────────────
   const { state: periodState } = usePeriodLock(ms)
 
-  const monthLabel = new Date(year, month, 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+  const monthLabel = formatMonthLabel(ms)
   const todayStr   = new Date().toISOString().slice(0, 10)
 
   // ── Queries ────────────────────────────────────────────────────────────────
@@ -216,64 +197,150 @@ export function MusterRoll() {
     staleTime: 60_000,
   })
 
-  const { data: payrollData, isLoading: payrollLoading } = useQuery<PayrollSummaryData>({
-    queryKey: ['payroll-summary', ms],
-    queryFn:  () => api.get<PayrollSummaryData>(`/attendance/payroll-summary?month=${ms}`),
+  // ── Latest active month — auto-navigate away from empty current month ────────
+  const { data: latestMonthData } = useQuery<LatestMonthData>({
+    queryKey: ['muster-latest-month'],
+    queryFn:  () => api.get<LatestMonthData>('/attendance/muster/latest-month'),
     enabled:  isAdmin,
-    staleTime: 60_000,
+    staleTime: 300_000,   // 5 min — changes rarely
   })
 
-  const payrollTotals = payrollData?.totals
-  const allEmployees  = data?.employees ?? []
+  useEffect(() => {
+    if (hasAutoNavigated.current) return
+    if (!latestMonthData?.month) return
+    const currentMonthStr = monthStr(new Date().getFullYear(), new Date().getMonth())
+    if (latestMonthData.month === currentMonthStr) return   // data exists for current month; no action needed
+    // Auto-navigate to last active period
+    const [ly, lm] = latestMonthData.month.split('-').map(Number)
+    setViewDate(new Date(ly, lm - 1, 1))
+    setAutoNavigatedFrom(currentMonthStr)
+    hasAutoNavigated.current = true
+  }, [latestMonthData?.month])
 
-  // ── Roster summary (derived from muster data — no extra query) ─────────────
-  const rosterSummary = useMemo(() => {
-    let totalAbsent = 0, totalLate = 0, totalLeave = 0, totalMissingPunch = 0
-    let empWithAbsence = 0, empWithLate = 0, empWithMissingPunch = 0
-    let todayAbsent = 0, todayLate = 0, todayPresent = 0, todayOnLeave = 0
+  const allEmployees = data?.employees ?? []
 
-    for (const emp of allEmployees) {
-      const s = computeSummary(emp.days)
-      const a  = s.absent ?? 0
-      const l  = s.late   ?? 0
-      const mp = (s.missing_punch ?? 0) + (s.no_punch ?? 0)
-      totalAbsent       += a
-      totalLate         += l
-      totalLeave        += (s.leave ?? 0)
-      totalMissingPunch += mp
-      if (a > 0)  empWithAbsence++
-      if (l > 0)  empWithLate++
-      if (mp > 0) empWithMissingPunch++
+  // ── Canonical metrics — all derived from shared selectors (attendance/selectors.ts)
+  // Selectors use the same PAYABLE_STATUSES / LOP_STATUSES constants as the backend
+  // read model, ensuring the stat chips, Payroll Impact rail, and the grid are all
+  // consistent with each other and with /attendance/payroll-summary.
+  const monthTotals = useMemo(() => {
+    const summaries = allEmployees.map(emp => computeEmployeeSummary(emp.days))
+    return computeMonthTotals(summaries)
+  }, [allEmployees])
 
-      if (isCurrentMonth) {
-        const todayRec = emp.days.find(d => d.date === todayStr)
-        if (todayRec?.status === 'absent')  todayAbsent++
-        else if (todayRec?.status === 'late')    todayLate++
-        else if (todayRec?.status === 'present') todayPresent++
-        else if (todayRec?.status === 'leave')   todayOnLeave++
-      }
-    }
-    return {
-      totalAbsent, totalLate, totalLeave, totalMissingPunch,
-      empWithAbsence, empWithLate, empWithMissingPunch,
-      todayAbsent, todayLate, todayPresent, todayOnLeave,
-    }
-  }, [allEmployees, isCurrentMonth, todayStr])
+  // Aliases kept for template readability (used in JSX below)
+  const payrollMetrics = useMemo(() => ({
+    totalPayableDays: monthTotals.totalPayableDays,
+    totalLopDays:     monthTotals.totalLopDays,
+    totalOnLeave:     monthTotals.totalOnLeave,
+  }), [monthTotals])
+
+  const rosterSummary = useMemo(() => ({
+    totalPresent:       monthTotals.totalPresent,
+    totalAbsent:        monthTotals.totalAbsent,
+    totalLate:          monthTotals.totalLate,
+    totalLeave:         monthTotals.totalOnLeave,
+    totalMissingPunch:  monthTotals.totalMissingPunch,
+    empWithAbsence:     monthTotals.empWithAbsence,
+    empWithLate:        monthTotals.empWithLate,
+    empWithMissingPunch: monthTotals.empWithMissingPunch,
+  }), [monthTotals])
 
   // Phase 7 — Missing records: past working weekdays (Mon–Fri) with no status.
   // These are unprocessed days — a payroll-critical signal.
-  const missingRecordCount = useMemo(() => {
-    let count = 0
-    for (const emp of allEmployees) {
+  const missingRecordCount = useMemo(
+    () => countMissingRecords(allEmployees, todayStr),
+    [allEmployees, todayStr],
+  )
+
+  // ── Runtime payload trace ─────────────────────────────────────────────────
+  // Logs the complete data transformation chain to the browser console every
+  // time the muster data or the derived month changes.  Open DevTools → Console
+  // and look for the "[MusterRoll] Payload trace" group to see the raw counts
+  // at every step of the pipeline.
+  //
+  // What to look for:
+  //   • rawStatusDist  — exactly what attendance_daily returned for each status
+  //   • rosterSummary  — derived from the same raw rows
+  //   • payrollMetrics — derived from the same raw rows
+  //
+  // If rawStatusDist has 'present': N but rosterSummary.totalPresent is 0,
+  // there is a React state inconsistency (allEmployees stale / wrong reference).
+  //
+  // If rawStatusDist has 0 rows with status != null, the attendance_daily rows
+  // are empty for this month — the backend recompute has not completed yet.
+  useEffect(() => {
+    if (!data) return
+
+    // Build raw status distribution directly from the API response
+    const rawStatusDist: Record<string, number> = {}
+    let rawNullDays    = 0
+    let rawNonNullDays = 0
+    for (const emp of data.employees) {
       for (const d of emp.days) {
-        if (!d.status && d.date < todayStr) {
-          const dow = new Date(`${d.date}T12:00:00.000Z`).getUTCDay()
-          if (dow >= 1 && dow <= 5) count++
+        if (d.status) {
+          rawStatusDist[d.status] = (rawStatusDist[d.status] ?? 0) + 1
+          rawNonNullDays++
+        } else {
+          rawNullDays++
         }
       }
     }
-    return count
-  }, [allEmployees, todayStr])
+
+    // Build per-employee breakdown from allEmployees (should match data.employees)
+    const derivedStatusDist: Record<string, number> = {}
+    for (const emp of allEmployees) {
+      const s = computeSummary(emp.days)
+      for (const [status, count] of Object.entries(s)) {
+        derivedStatusDist[status] = (derivedStatusDist[status] ?? 0) + (count as number)
+      }
+    }
+
+    console.group(
+      `%c[MusterRoll] Payload trace — ${ms} (%d employees)`,
+      'color:#6366f1;font-weight:bold',
+      data.employees.length,
+    )
+    console.log('─── 1. Raw API response ───────────────────────────────')
+    console.log('  employees in response:', data.employees.length)
+    console.log('  days per employee:    ', data.employees[0]?.days.length ?? 0)
+    console.log('  days WITH status:     ', rawNonNullDays, '←', rawStatusDist)
+    console.log('  days WITHOUT status:  ', rawNullDays, '(no attendance_daily row)')
+    console.log('─── 2. allEmployees (same reference) ──────────────────')
+    console.log('  allEmployees.length:  ', allEmployees.length)
+    console.log('  derived status dist:  ', derivedStatusDist)
+    console.log('─── 3. rosterSummary (useMemo from allEmployees) ──────')
+    console.log(rosterSummary)
+    console.log('─── 4. payrollMetrics (useMemo from allEmployees) ─────')
+    console.log(payrollMetrics)
+    console.log('─── 5. First employee deep sample ─────────────────────')
+    if (data.employees[0]) {
+      const e0 = data.employees[0]
+      console.log('  employee:', e0.employee_code, e0.name)
+      console.log('  statusCounts:', computeSummary(e0.days))
+      console.log('  payableDays:', computePayableDays(e0.days))
+      console.log('  first 7 days:', e0.days.slice(0, 7).map(d => `${d.date}=${d.status ?? 'null'}`).join(' | '))
+    }
+    console.log('─── 6. Mismatch check ─────────────────────────────────')
+    const rawPresent  = rawStatusDist['present']  ?? 0
+    const rawLate     = rawStatusDist['late']     ?? 0
+    const rawAbsent   = rawStatusDist['absent']   ?? 0
+    const mismatch = rawPresent !== (derivedStatusDist['present'] ?? 0)
+                  || rawLate    !== (derivedStatusDist['late']    ?? 0)
+                  || rawAbsent  !== (derivedStatusDist['absent']  ?? 0)
+    if (mismatch) {
+      console.warn(
+        '⚠️  MISMATCH: rawStatusDist ≠ derivedStatusDist — allEmployees is a stale reference!',
+        '\n  raw.present:', rawPresent, '  derived.present:', derivedStatusDist['present'] ?? 0,
+        '\n  raw.late:   ', rawLate,    '  derived.late:   ', derivedStatusDist['late']    ?? 0,
+        '\n  raw.absent: ', rawAbsent,  '  derived.absent: ', derivedStatusDist['absent']  ?? 0,
+      )
+    } else {
+      console.log('  ✅ rawStatusDist matches derivedStatusDist — no React stale reference issue')
+    }
+    console.groupEnd()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, ms])
 
   // ── Filtered employees ─────────────────────────────────────────────────────
   const employees = useMemo(() => {
@@ -365,25 +432,118 @@ export function MusterRoll() {
 
       {isAdmin && (
         <>
+          {/* ── Auto-navigation notice: shown when we jumped to the last active period ── */}
+          {autoNavigatedFrom && (
+            <div className="rounded-md border border-info/30 bg-info/5 px-3 py-2 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3.5 w-3.5 text-info flex-shrink-0" />
+                <span className="text-[12px] text-foreground">
+                  No attendance data for the current month — showing last active period:{' '}
+                  <span className="font-semibold">{monthLabel}</span>
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setAutoNavigatedFrom(null)
+                  setViewDate(new Date())
+                }}
+                className="text-[11px] text-muted-foreground hover:text-foreground flex-shrink-0 whitespace-nowrap"
+              >
+                Go to current month ×
+              </button>
+            </div>
+          )}
+
+          {/* ── Data Verification Panel ─────────────────────────────────────
+               Collapsed by default. Expand to see raw vs. derived counts at
+               every step of the pipeline. Shows exactly what attendance_daily
+               returned and what each widget is deriving from it.
+               Also check browser DevTools → Console for the full "Payload trace"
+               group with deep per-employee samples.
+          ────────────────────────────────────────────────────────────────── */}
+          {data && !isLoading && (
+            <details className="rounded-md border border-border/60 bg-muted/30 text-[10px] font-mono">
+              <summary className="px-3 py-1.5 cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                ▶ Data Verification Panel — {ms} ({allEmployees.length} employees, {(data.employees).flatMap(e => e.days).filter(d => d.status !== null).length} status rows)
+              </summary>
+              <div className="px-3 pb-3 pt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-1 text-muted-foreground">
+                {/* Column 1 — Raw API status distribution */}
+                <div>
+                  <div className="font-semibold text-foreground mb-1">1. Raw API (attendance_daily)</div>
+                  {Object.entries(
+                    data.employees.flatMap(e => e.days)
+                      .reduce<Record<string, number>>((acc, d) => {
+                        if (d.status) acc[d.status] = (acc[d.status] ?? 0) + 1
+                        return acc
+                      }, {})
+                  ).sort().map(([s, n]) => (
+                    <div key={s}><span className="text-foreground">{s}:</span> {n}</div>
+                  ))}
+                  <div className="mt-1 border-t border-border/40 pt-1">
+                    <span className="text-foreground">null (no row):</span>{' '}
+                    {data.employees.flatMap(e => e.days).filter(d => d.status === null).length}
+                  </div>
+                </div>
+
+                {/* Column 2 — rosterSummary derived values */}
+                <div>
+                  <div className="font-semibold text-foreground mb-1">2. rosterSummary (derived)</div>
+                  <div><span className="text-foreground">totalPresent:</span> {rosterSummary.totalPresent}</div>
+                  <div><span className="text-foreground">totalLate:</span> {rosterSummary.totalLate}</div>
+                  <div><span className="text-foreground">totalAbsent:</span> {rosterSummary.totalAbsent}</div>
+                  <div><span className="text-foreground">totalLeave:</span> {rosterSummary.totalLeave}</div>
+                  <div><span className="text-foreground">totalMissingPunch:</span> {rosterSummary.totalMissingPunch}</div>
+                  <div><span className="text-foreground">empWithAbsence:</span> {rosterSummary.empWithAbsence}</div>
+                </div>
+
+                {/* Column 3 — payrollMetrics derived values */}
+                <div>
+                  <div className="font-semibold text-foreground mb-1">3. payrollMetrics (derived)</div>
+                  <div><span className="text-foreground">totalPayableDays:</span> {payrollMetrics.totalPayableDays.toFixed(2)}</div>
+                  <div><span className="text-foreground">totalLopDays:</span> {payrollMetrics.totalLopDays}</div>
+                  <div><span className="text-foreground">totalOnLeave:</span> {payrollMetrics.totalOnLeave}</div>
+                </div>
+
+                {/* Column 4 — What the widgets actually render */}
+                <div>
+                  <div className="font-semibold text-foreground mb-1">4. Widget values (rendered)</div>
+                  <div><span className="text-foreground">Payable Days chip:</span> {payrollMetrics.totalPayableDays.toFixed(1)}</div>
+                  <div><span className="text-foreground">LOP Days chip:</span> {payrollMetrics.totalLopDays}</div>
+                  <div><span className="text-foreground">On Leave chip:</span> {payrollMetrics.totalOnLeave}</div>
+                  <div><span className="text-foreground">LOP Risk chip:</span> {rosterSummary.empWithAbsence}</div>
+                  <div className="mt-1 border-t border-border/40 pt-1">
+                    <span className="text-foreground">Month Exceptions rail:</span>
+                    <div className="pl-2">Absent: {rosterSummary.totalAbsent} | Late: {rosterSummary.totalLate}</div>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-foreground">allEmployees:</span> {allEmployees.length}
+                    {' / '}
+                    <span className="text-foreground">filtered:</span> {employees.length}
+                  </div>
+                </div>
+              </div>
+            </details>
+          )}
+
           {/* ── Phase 6: Compact Payroll Stat Chips (4-up) ──────────────── */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               {
                 label:    'Payable Days',
                 icon:     <CalendarCheck2 className="h-3.5 w-3.5 text-success" />,
-                value:    payrollLoading ? '…' : (payrollTotals?.total_payable_days?.toFixed(1) ?? '—'),
+                value:    isLoading ? '…' : payrollMetrics.totalPayableDays.toFixed(1),
                 colorCls: 'text-success',
               },
               {
                 label:    'LOP Days',
                 icon:     <CalendarX2 className="h-3.5 w-3.5 text-destructive" />,
-                value:    payrollLoading ? '…' : (payrollTotals?.total_lop_days ?? '—'),
+                value:    isLoading ? '…' : payrollMetrics.totalLopDays,
                 colorCls: 'text-destructive',
               },
               {
                 label:    'On Leave',
                 icon:     <Users className="h-3.5 w-3.5 text-info" />,
-                value:    payrollLoading ? '…' : (payrollTotals?.total_on_leave ?? '—'),
+                value:    isLoading ? '…' : payrollMetrics.totalOnLeave,
                 colorCls: 'text-info',
               },
               {
@@ -833,32 +993,30 @@ export function MusterRoll() {
             {/* ── Phase 8 — Right rail (xl screens only) ──────────────── */}
             <div className="hidden xl:flex flex-col gap-3 w-56 flex-shrink-0">
 
-              {/* Today's Status — only for current month */}
-              {isCurrentMonth && (
-                <div className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex items-center gap-1.5 mb-2.5">
-                    <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-[11px] font-semibold text-foreground">Today's Status</span>
-                  </div>
-                  {isLoading ? (
-                    <div className="text-[11px] text-muted-foreground animate-pulse">Loading…</div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {[
-                        { label: 'Present',  value: rosterSummary.todayPresent,  cls: 'text-success' },
-                        { label: 'Late',     value: rosterSummary.todayLate,     cls: 'text-warning' },
-                        { label: 'Absent',   value: rosterSummary.todayAbsent,   cls: 'text-destructive' },
-                        { label: 'On Leave', value: rosterSummary.todayOnLeave,  cls: 'text-info' },
-                      ].map(({ label, value, cls }) => (
-                        <div key={label} className="flex items-center justify-between text-[11px]">
-                          <span className="text-muted-foreground">{label}</span>
-                          <span className={cn('font-semibold tabular-nums', value === 0 ? 'text-muted-foreground' : cls)}>{value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              {/* Active Period Status — month-aggregate totals from canonical selectors */}
+              <div className="rounded-lg border border-border bg-card p-3">
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-semibold text-foreground">Active Period Status</span>
                 </div>
-              )}
+                {isLoading ? (
+                  <div className="flex items-center gap-1.5 py-1 text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /><span className="text-[11px]">Loading…</span></div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {[
+                      { label: 'Present',  value: rosterSummary.totalPresent,  cls: 'text-success' },
+                      { label: 'Late',     value: rosterSummary.totalLate,     cls: 'text-warning' },
+                      { label: 'Absent',   value: rosterSummary.totalAbsent,   cls: 'text-destructive' },
+                      { label: 'On Leave', value: rosterSummary.totalLeave,    cls: 'text-info' },
+                    ].map(({ label, value, cls }) => (
+                      <div key={label} className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className={cn('font-semibold tabular-nums', value === 0 ? 'text-muted-foreground' : cls)}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Phase 8 — Month Exceptions: extended with missing punch + unprocessed signals */}
               <div className="rounded-lg border border-border bg-card p-3">
@@ -867,7 +1025,7 @@ export function MusterRoll() {
                   <span className="text-[11px] font-semibold text-foreground">Month Exceptions</span>
                 </div>
                 {isLoading ? (
-                  <div className="text-[11px] text-muted-foreground animate-pulse">Loading…</div>
+                  <div className="flex items-center gap-1.5 py-1 text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /><span className="text-[11px]">Loading…</span></div>
                 ) : (
                   <div className="space-y-1.5">
                     {[
@@ -892,14 +1050,14 @@ export function MusterRoll() {
                   <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-[11px] font-semibold text-foreground">Payroll Impact</span>
                 </div>
-                {payrollLoading ? (
-                  <div className="text-[11px] text-muted-foreground animate-pulse">Loading…</div>
+                {isLoading ? (
+                  <div className="flex items-center gap-1.5 py-1 text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /><span className="text-[11px]">Loading…</span></div>
                 ) : (
                   <div className="space-y-1.5">
                     {[
-                      { label: 'Payable days', value: payrollTotals?.total_payable_days?.toFixed(1) ?? '—', cls: 'text-success' },
-                      { label: 'LOP days',     value: String(payrollTotals?.total_lop_days ?? '—'),          cls: 'text-destructive' },
-                      { label: 'On leave',     value: String(payrollTotals?.total_on_leave ?? '—'),          cls: 'text-info' },
+                      { label: 'Payable days', value: payrollMetrics.totalPayableDays.toFixed(1), cls: 'text-success' },
+                      { label: 'LOP days',     value: String(payrollMetrics.totalLopDays),         cls: 'text-destructive' },
+                      { label: 'On leave',     value: String(payrollMetrics.totalOnLeave),          cls: 'text-info' },
                     ].map(({ label, value, cls }) => (
                       <div key={label} className="flex items-center justify-between text-[11px]">
                         <span className="text-muted-foreground">{label}</span>

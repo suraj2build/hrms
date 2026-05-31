@@ -28,6 +28,7 @@ import {
   Receipt, GitMerge, Layers,
   ChevronDown, ChevronRight,
   CheckCircle2, ArrowRight, Clock, Calendar,
+  AlertCircle, RefreshCw, BarChart2,
 } from 'lucide-react'
 
 import { PageContainer }       from '@/components/layout/PageContainer'
@@ -138,8 +139,17 @@ interface QuickAction {
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
+  // ── Finalization & Governance ────────────────────────────────────────────
+  { label: 'Finalization',      description: 'Finalize, freeze, rollback, and export bank advice', href: '/admin/payroll/finalize',               icon: Lock,         accent: 'success'  },
+  { label: 'Approval Workflow', description: 'Multi-stage approval: HR → Finance → Compliance',   href: '/admin/payroll/approvals',              icon: GitMerge,     accent: 'warning'  },
+  { label: 'Variance Center',   description: 'MoM anomaly detection and net-pay variance',        href: '/admin/payroll/variance',               icon: TrendingDown, accent: 'warning'  },
+  { label: 'Payout Center',     description: 'Bank disbursement, advice export, payout tracking', href: '/admin/payroll/payout',                 icon: BadgeCheck,   accent: 'success'  },
+  { label: 'Forensics',         description: 'Complete payroll audit trail and event timeline',   href: '/admin/payroll/forensics',              icon: Activity,     accent: 'neutral'  },
+  { label: 'Stat. Reconciliation', description: 'PF · ESI · PT · TDS ready-for-filing status',   href: '/admin/payroll/statutory-reconciliation', icon: Scale,      accent: 'warning'  },
+  // ── Core Operations ──────────────────────────────────────────────────────
   { label: 'Payroll Runs',      description: 'Run and manage payroll cycles',              href: '/admin/payroll',                       icon: DollarSign,   accent: 'neutral'  },
-  { label: 'Validation',        description: 'Pre-run validation and readiness checks',    href: '/admin/payroll/validation',             icon: CheckSquare,  accent: 'warning'  },
+  { label: 'Resolution Center', description: 'Investigate and resolve payroll run blockers', href: '/admin/payroll',                       icon: ShieldCheck,  accent: 'destructive' },
+  { label: 'Validation Rules',  description: 'Governance — rule configuration and toggles', href: '/admin/payroll/validation',            icon: CheckSquare,  accent: 'warning'  },
   { label: 'Reconciliation',    description: 'Payroll vs attendance and deduction checks', href: '/admin/payroll/reconciliation',          icon: Scale,        accent: 'warning'  },
   { label: 'Governance',        description: 'Freeze controls and maker-checker flows',    href: '/admin/payroll/governance',             icon: ShieldCheck,  accent: 'neutral'  },
   { label: 'Ledger',            description: 'Explainability ledger for all changes',      href: '/admin/payroll/ledger',                 icon: BookMarked,   accent: 'neutral'  },
@@ -171,13 +181,31 @@ export function PayrollOperationsCenter() {
   const navigate    = useNavigate()
   const [toolsOpen, setToolsOpen] = useState(false)
 
-  // ── Queries (both preserved exactly as original) ───────────────────────────
-  const { data: stats, isLoading } = useQuery<PayrollRunStats>({
+  // ── Queries ────────────────────────────────────────────────────────────────
+  const { data: stats, isLoading, isError, dataUpdatedAt, refetch } = useQuery<PayrollRunStats>({
     queryKey:  ['payroll-run-stats'],
     queryFn:   () => api.get('/payroll/runs/stats'),
     staleTime: 30_000,
     retry:     false,
   })
+
+  // Fetch latest failed/partial_failed run ID so blocker CTAs can deep-link
+  // to the Resolution Center for that specific run. Only runs this query when
+  // there are active blockers to avoid unnecessary API calls.
+  const { data: recentRunsData } = useQuery<{ data: Array<{ id: string; status: string }> }>({
+    queryKey:  ['payroll-recent-runs-for-blockers'],
+    queryFn:   () => api.get('/payroll/runs?limit=3&offset=0'),
+    staleTime: 30_000,
+    enabled:   (stats?.blockers ?? 0) > 0,
+  })
+  // The run we want to open in the Resolution Center — most recent failed/partial_failed
+  const blockerRunId = recentRunsData?.data?.find(
+    r => r.status === 'failed' || r.status === 'partial_failed',
+  )?.id
+  // Deep-link if we have a run ID, fall back to Payroll Runs list otherwise
+  const blockerHref = blockerRunId
+    ? `/admin/payroll/blockers/${blockerRunId}`
+    : '/admin/payroll'
 
   const { data: events, isLoading: eventsLoading } = useQuery<{
     data: Array<{
@@ -191,15 +219,47 @@ export function PayrollOperationsCenter() {
     retry:     false,
   })
 
+  // ── Compensation coverage audit ──────────────────────────────────────────
+  interface CoverageAudit {
+    total_active_employees:              number
+    employees_with_active_compensation:  number
+    employees_missing_compensation:      number
+    employees_future_dated:              number
+    employees_zero_ctc:                  number
+    employees_with_no_components:        number
+    employees_with_invalid_components:   number
+    coverage_percent:                    number
+    ready_for_payroll:                   boolean
+    as_of:                               string
+  }
+  const { data: coverageRaw, isLoading: coverageLoading, refetch: refetchCoverage } = useQuery<{ data: CoverageAudit }>({
+    queryKey:  ['payroll-compensation-coverage'],
+    queryFn:   () => api.get('/payroll/compensation-coverage'),
+    staleTime: 60_000,
+    retry:     false,
+  })
+  const coverage = coverageRaw?.data
+
+  // ── Readiness score ─────────────────────────────────────────────────────────
+  const { data: readinessRaw } = useQuery<{ data: { score: number; max: number; grade: string; ready: boolean; month: string } }>({
+    queryKey:  ['payroll-readiness-score-ops'],
+    queryFn:   () => api.get('/payroll/readiness-score'),
+    staleTime: 60_000,
+    retry:     false,
+  })
+  const readinessScore = readinessRaw?.data
+
   // ── Derived state ───────────────────────────────────────────────────────────
   const stage      = deriveStage(stats)
   const stageIdx   = STAGES.indexOf(stage)
   const hasBlockers  = (stats?.blockers ?? 0) > 0
   const hasCritical  = hasBlockers || (stats?.failed_payouts ?? 0) > 0 || (stats?.failed_bank_transfers ?? 0) > 0
   const readyToRun   = !isLoading
+    && !coverageLoading
     && (stats?.blockers ?? 0) === 0
     && !stats?.is_frozen
     && (stats?.pending_validations ?? 0) === 0
+    && (coverage?.ready_for_payroll !== false)  // undefined (loading) = don't block
 
   // ── Attention items ─────────────────────────────────────────────────────────
   const attentionItems = useMemo(() => {
@@ -212,7 +272,7 @@ export function PayrollOperationsCenter() {
     if ((stats.failed_bank_transfers ?? 0) > 0)
       items.push({ id: 'bank-transfers',  severity: 'critical', title: 'Bank transfer failures',        desc: 'Disbursement file rejected by bank',                   count: stats.failed_bank_transfers, href: '/admin/payroll' })
     if ((stats.blockers ?? 0) > 0)
-      items.push({ id: 'run-blockers',    severity: 'critical', title: 'Payroll run blockers',          desc: 'Validation issues preventing payroll processing',       count: stats.blockers,              href: '/admin/payroll/validation' })
+      items.push({ id: 'run-blockers',    severity: 'critical', title: 'Payroll run blockers',          desc: 'Employee-level issues blocking payroll — review and resolve', count: stats.blockers, href: blockerHref })
     if ((stats.ot_mismatches ?? 0) > 0)
       items.push({ id: 'ot-mismatch',     severity: 'warning',  title: 'OT vs payroll mismatch',        desc: "Overtime hours in attendance don't match payroll OT",  count: stats.ot_mismatches,         href: '/admin/payroll/reconciliation' })
     if ((stats.variance_cases ?? 0) > 0)
@@ -250,6 +310,42 @@ export function PayrollOperationsCenter() {
           </Button>
         }
       />
+
+      {/* ── Error / stale-data banners ─────────────────────────────────────── */}
+      {isError && (
+        <div className="flex items-center justify-between p-3 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+          <span className="flex items-center gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            Failed to load payroll statistics. Data shown below may be stale.
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs text-destructive gap-1 px-2"
+            onClick={() => refetch()}
+          >
+            <RefreshCw className="h-3 w-3" />
+            Retry
+          </Button>
+        </div>
+      )}
+      {!isError && !isLoading && dataUpdatedAt > 0 && (Date.now() - dataUpdatedAt > 5 * 60_000) && (
+        <div className="flex items-center justify-between p-3 rounded-md bg-warning/10 border border-warning/20 text-xs text-warning">
+          <span className="flex items-center gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+            Statistics last updated {Math.floor((Date.now() - dataUpdatedAt) / 60_000)} min ago — data may not reflect recent changes.
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs text-warning gap-1 px-2"
+            onClick={() => refetch()}
+          >
+            <RefreshCw className="h-3 w-3" />
+            Refresh
+          </Button>
+        </div>
+      )}
 
       {/* ── 1. Payroll Pipeline Strip ───────────────────────────────────────── */}
       <div className={cn(
@@ -326,10 +422,10 @@ export function PayrollOperationsCenter() {
               <Button
                 size="sm"
                 className="h-7 text-xs bg-destructive hover:bg-destructive/90"
-                onClick={() => navigate('/admin/payroll/validation')}
+                onClick={() => navigate(blockerHref)}
               >
-                <XCircle className="h-3 w-3 mr-1" />
-                Fix {stats!.blockers} Blocker{stats!.blockers === 1 ? '' : 's'}
+                <ShieldCheck className="h-3 w-3 mr-1" />
+                Review {stats!.blockers} Blocker{stats!.blockers === 1 ? '' : 's'}
               </Button>
             ) : !isLoading && readyToRun ? (
               <Button
@@ -357,7 +453,7 @@ export function PayrollOperationsCenter() {
           label="Run Blockers"
           value={stats?.blockers ?? 0}
           colorClass={(stats?.blockers ?? 0) > 0 ? 'text-destructive' : 'text-success'}
-          href="/admin/payroll/validation"
+          href={(stats?.blockers ?? 0) > 0 ? blockerHref : '/admin/payroll'}
           loading={isLoading}
         />
         <KpiChip
@@ -416,6 +512,151 @@ export function PayrollOperationsCenter() {
 
         {/* ── Left — 2/3 width ──────────────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-4">
+
+          {/* ── Compensation Health Card ─────────────────────────────────────── */}
+          <SectionCard
+            title="Compensation Health"
+            icon={<DollarSign className="h-4 w-4 text-muted-foreground" />}
+            action={
+              coverageLoading ? undefined :
+              coverage?.ready_for_payroll
+                ? <Badge variant="success"  className="rounded-full text-[10px]">Payroll Safe</Badge>
+                : <Badge variant="destructive" className="rounded-full text-[10px]">Action Required</Badge>
+            }
+          >
+            {coverageLoading ? (
+              <div className="grid grid-cols-3 gap-2">
+                {[1,2,3].map(i => <div key={i} className="h-14 rounded-md bg-muted/40 animate-pulse" />)}
+              </div>
+            ) : !coverage ? (
+              <div className="text-xs text-muted-foreground/60 py-3">Could not load coverage data.</div>
+            ) : (
+              <>
+                {/* Coverage metric row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                  {/* Coverage % */}
+                  <div className={cn(
+                    'rounded-md border px-3 py-2.5',
+                    coverage.coverage_percent >= 90 ? 'border-success/30 bg-success/5' :
+                    coverage.coverage_percent >= 70 ? 'border-warning/30 bg-warning/5' :
+                                                      'border-destructive/30 bg-destructive/5',
+                  )}>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Coverage</p>
+                    <p className={cn(
+                      'text-lg font-bold tabular-nums',
+                      coverage.coverage_percent >= 90 ? 'text-success' :
+                      coverage.coverage_percent >= 70 ? 'text-warning' : 'text-destructive',
+                    )}>{coverage.coverage_percent}%</p>
+                    <p className="text-[10px] text-muted-foreground">{coverage.employees_with_active_compensation}/{coverage.total_active_employees} employees</p>
+                  </div>
+
+                  {/* Missing */}
+                  <div className={cn(
+                    'rounded-md border px-3 py-2.5',
+                    coverage.employees_missing_compensation > 0 ? 'border-destructive/30 bg-destructive/5' : 'border-success/30 bg-success/5',
+                  )}>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Missing Comp.</p>
+                    <p className={cn('text-lg font-bold tabular-nums', coverage.employees_missing_compensation > 0 ? 'text-destructive' : 'text-success')}>
+                      {coverage.employees_missing_compensation}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">employees</p>
+                  </div>
+
+                  {/* No components */}
+                  <div className={cn(
+                    'rounded-md border px-3 py-2.5',
+                    coverage.employees_with_no_components > 0 ? 'border-destructive/30 bg-destructive/5' : 'border-success/30 bg-success/5',
+                  )}>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">No Components</p>
+                    <p className={cn('text-lg font-bold tabular-nums', coverage.employees_with_no_components > 0 ? 'text-destructive' : 'text-success')}>
+                      {coverage.employees_with_no_components}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">employees</p>
+                  </div>
+
+                  {/* Invalid / future */}
+                  <div className={cn(
+                    'rounded-md border px-3 py-2.5',
+                    coverage.employees_with_invalid_components > 0 ? 'border-destructive/30 bg-destructive/5' :
+                    coverage.employees_future_dated > 0 ? 'border-warning/30 bg-warning/5' :
+                                                          'border-success/30 bg-success/5',
+                  )}>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Invalid / Future</p>
+                    <p className={cn(
+                      'text-lg font-bold tabular-nums',
+                      coverage.employees_with_invalid_components > 0 ? 'text-destructive' :
+                      coverage.employees_future_dated > 0 ? 'text-warning' : 'text-success',
+                    )}>
+                      {coverage.employees_with_invalid_components + coverage.employees_future_dated}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {coverage.employees_with_invalid_components > 0 ? 'invalid' : 'future-dated'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Blocker rows */}
+                {!coverage.ready_for_payroll && (
+                  <div className="space-y-1.5">
+                    {coverage.employees_missing_compensation > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-md bg-destructive/5 border border-destructive/20 text-xs">
+                        <div className="flex items-center gap-2">
+                          <XCircle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+                          <span className="text-destructive font-medium">{coverage.employees_missing_compensation} employee{coverage.employees_missing_compensation !== 1 ? 's' : ''} with no active compensation</span>
+                        </div>
+                        <Badge variant="destructive" className="rounded-full text-[9px] h-4 px-1.5">Blocker</Badge>
+                      </div>
+                    )}
+                    {coverage.employees_with_no_components > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-md bg-destructive/5 border border-destructive/20 text-xs">
+                        <div className="flex items-center gap-2">
+                          <XCircle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+                          <span className="text-destructive font-medium">{coverage.employees_with_no_components} employee{coverage.employees_with_no_components !== 1 ? 's' : ''} with no salary components (gross pay = ₹0)</span>
+                        </div>
+                        <Badge variant="destructive" className="rounded-full text-[9px] h-4 px-1.5">Blocker</Badge>
+                      </div>
+                    )}
+                    {coverage.employees_with_invalid_components > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-md bg-destructive/5 border border-destructive/20 text-xs">
+                        <div className="flex items-center gap-2">
+                          <XCircle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+                          <span className="text-destructive font-medium">{coverage.employees_with_invalid_components} employee{coverage.employees_with_invalid_components !== 1 ? 's' : ''} with invalid component amounts</span>
+                        </div>
+                        <Badge variant="destructive" className="rounded-full text-[9px] h-4 px-1.5">Blocker</Badge>
+                      </div>
+                    )}
+                    {coverage.employees_future_dated > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-md bg-warning/5 border border-warning/20 text-xs">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-3.5 w-3.5 text-warning flex-shrink-0" />
+                          <span className="text-warning font-medium">{coverage.employees_future_dated} future-dated compensation{coverage.employees_future_dated !== 1 ? 's' : ''} — will use prior active record</span>
+                        </div>
+                        <Badge variant="warning" className="rounded-full text-[9px] h-4 px-1.5">Warning</Badge>
+                      </div>
+                    )}
+                    <div className="flex justify-end pt-1">
+                      <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1"
+                        onClick={() => navigate('/admin/workforce/employees')}>
+                        <ArrowRight className="h-3 w-3" />Fix Compensation Issues
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {coverage.ready_for_payroll && coverage.employees_future_dated > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-warning/5 border border-warning/20 text-xs">
+                    <AlertTriangle className="h-3.5 w-3.5 text-warning flex-shrink-0" />
+                    <span className="text-warning">{coverage.employees_future_dated} future-dated record{coverage.employees_future_dated !== 1 ? 's' : ''} — payroll will use previous active compensation</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
+                  <span className="text-[10px] text-muted-foreground">Last checked: {coverage.as_of}</span>
+                  <Button size="sm" variant="ghost" className="h-5 text-[10px] px-2" onClick={() => refetchCoverage()}>
+                    <RefreshCw className="h-3 w-3 mr-1" />Refresh
+                  </Button>
+                </div>
+              </>
+            )}
+          </SectionCard>
 
           {/* Attention Queue */}
           <SectionCard
@@ -481,21 +722,44 @@ export function PayrollOperationsCenter() {
             title="Payroll Readiness"
             icon={<BadgeCheck className="h-4 w-4 text-muted-foreground" />}
             action={
-              isLoading ? undefined :
-              readyToRun
-                ? <Badge variant="success" className="rounded-full text-[10px]">Ready to Run</Badge>
-                : <Badge variant="warning" className="rounded-full text-[10px]">Not Ready</Badge>
+              <div className="flex items-center gap-2">
+                {readinessScore && (
+                  <div className={cn(
+                    'flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold tabular-nums',
+                    readinessScore.score >= 80 ? 'text-success border-success/30 bg-success/10' :
+                    readinessScore.score >= 60 ? 'text-warning border-warning/30 bg-warning/10' :
+                                                  'text-destructive border-destructive/30 bg-destructive/10',
+                  )}>
+                    <BarChart2 className="h-3 w-3" />{readinessScore.score}/{readinessScore.max} Grade {readinessScore.grade}
+                  </div>
+                )}
+                {isLoading ? undefined :
+                  readyToRun
+                    ? <Badge variant="success" className="rounded-full text-[10px]">Ready to Run</Badge>
+                    : <Badge variant="warning" className="rounded-full text-[10px]">Not Ready</Badge>
+                }
+              </div>
             }
           >
             <div className="space-y-1.5">
               <ReadinessCheck
-                label="No validation blockers"
-                ok={(stats?.blockers ?? 0) === 0}
-                count={stats?.blockers}
-                href="/admin/payroll/validation"
+                label="Compensation coverage complete"
+                ok={coverage?.ready_for_payroll !== false}
+                count={
+                  (coverage?.employees_missing_compensation ?? 0) +
+                  (coverage?.employees_with_no_components   ?? 0) +
+                  (coverage?.employees_with_invalid_components ?? 0)
+                }
+                href="/admin/workforce/employees"
               />
               <ReadinessCheck
-                label="No pending validations"
+                label="No payroll run blockers"
+                ok={(stats?.blockers ?? 0) === 0}
+                count={stats?.blockers}
+                href={blockerHref}
+              />
+              <ReadinessCheck
+                label="Validation rules passing"
                 ok={(stats?.pending_validations ?? 0) === 0}
                 count={stats?.pending_validations}
                 href="/admin/payroll/validation"
@@ -518,15 +782,15 @@ export function PayrollOperationsCenter() {
                 href="/admin/payroll/statutory-dashboard"
               />
             </div>
-            {!isLoading && readyToRun && (
-              <Button
-                size="sm"
-                className="w-full mt-3 h-8 text-xs"
-                onClick={() => navigate('/admin/payroll')}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                Proceed to Payroll Runs
-              </Button>
+            {!isLoading && (
+              <div className="flex gap-2 mt-3">
+                <Button size="sm" variant="outline" className="flex-1 h-8 text-xs" onClick={() => navigate('/admin/payroll')}>
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Run Payroll
+                </Button>
+                <Button size="sm" className="flex-1 h-8 text-xs" onClick={() => navigate('/admin/payroll/finalize')}>
+                  <Lock className="h-3.5 w-3.5 mr-1.5" />Finalize
+                </Button>
+              </div>
             )}
           </SectionCard>
 
@@ -641,15 +905,17 @@ export function PayrollOperationsCenter() {
               {/* Quick-nav shortcuts */}
               <div className="pt-1 space-y-0.5">
                 {([
-                  { label: 'Governance',     href: '/admin/payroll/governance',          icon: ShieldCheck },
-                  { label: 'Statutory',      href: '/admin/payroll/statutory-dashboard', icon: BarChart3 },
-                  { label: 'Reconciliation', href: '/admin/payroll/reconciliation',       icon: Scale },
-                  { label: 'Investigations', href: '/admin/payroll/investigate',          icon: Search },
-                  { label: 'Cost Intel',     href: '/admin/payroll/cost-intelligence',   icon: PieChart },
-                  { label: 'Comp. Revisions',href: '/admin/payroll/compensation-revisions', icon: FileWarning },
-                ] as const).map(({ label, href, icon: Icon }) => (
+                  { label: 'Resolution Center', href: blockerHref,                            icon: ShieldCheck },
+                  { label: 'Validation Rules',  href: '/admin/payroll/validation',             icon: CheckSquare },
+                  { label: 'Governance',        href: '/admin/payroll/governance',             icon: Lock },
+                  { label: 'Statutory',         href: '/admin/payroll/statutory-dashboard',    icon: BarChart3 },
+                  { label: 'Reconciliation',    href: '/admin/payroll/reconciliation',          icon: Scale },
+                  { label: 'Investigations',    href: '/admin/payroll/investigate',             icon: Search },
+                  { label: 'Cost Intel',        href: '/admin/payroll/cost-intelligence',      icon: PieChart },
+                  { label: 'Comp. Revisions',   href: '/admin/payroll/compensation-revisions', icon: FileWarning },
+                ] as Array<{ label: string; href: string; icon: React.ComponentType<{ className?: string }> }>).map(({ label, href, icon: Icon }) => (
                   <Link
-                    key={href}
+                    key={label}
                     to={href}
                     className="flex items-center justify-between px-2.5 py-1.5 rounded-md hover:bg-muted/50 transition-colors group"
                   >

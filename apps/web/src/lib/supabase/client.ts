@@ -12,5 +12,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
+    // prevent NavigatorLockAcquireTimeoutError on HMR / multi-tab
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...(({ lockAcquireTimeout: 10_000 }) as any),
   },
 })

@@ -38,6 +38,15 @@ const KPI_ICON_STYLES: Record<OperationalVariant, { chip: string; icon: string; 
   info:        { chip: 'bg-info/10',            icon: 'text-info',             spark: 'chart5' },
 }
 
+// Top accent bar color per variant — 3px strip at card top edge
+const KPI_ACCENT_BAR: Record<OperationalVariant, string> = {
+  neutral:     'bg-muted-foreground/25',
+  success:     'bg-success',
+  warning:     'bg-warning',
+  destructive: 'bg-destructive',
+  info:        'bg-info',
+}
+
 export interface OperationalKPICardProps {
   label:      string
   value:      number | string
@@ -66,6 +75,9 @@ export function OperationalKPICard({
       )}
       onClick={onClick}
     >
+      {/* 3px top accent bar — clipped by overflow-hidden on parent */}
+      <div className={cn('absolute top-0 left-0 right-0 h-[3px]', KPI_ACCENT_BAR[variant])} />
+
       <div className="p-4 pb-3">
         {/* Row: label + icon chip */}
         <div className="flex items-start justify-between gap-2 mb-3">

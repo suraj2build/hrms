@@ -22,6 +22,7 @@ import { SectionCard }      from '@/components/layout/SectionCard'
 import { Button }           from '@/components/ui/button'
 import { Badge }            from '@/components/ui/badge'
 import { Input }            from '@/components/ui/input'
+import { DateInput }        from '@/components/ui/date-input'
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,10 @@ import { toast }            from 'sonner'
 import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
 import { cn }               from '@/lib/utils'
+import {
+  IntelligenceLoadingSkeleton,
+  IntelligenceEmptyState,
+} from '@/components/ui/intelligence/index.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -92,7 +97,10 @@ function fmt(n: number | null | undefined) {
 }
 
 function fmtDate(s: string) {
-  return new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 // ── Submit form component ──────────────────────────────────────────────────────
@@ -165,9 +173,9 @@ function SubmitRevisionForm({ onSuccess, onCancel }: SubmitFormProps) {
         </div>
         <div>
           <label className={labelCls}>Effective Date *</label>
-          <Input className={inputCls} type="date"
+          <DateInput className={inputCls}
             value={form.effective_date}
-            onChange={e => setForm(p => ({ ...p, effective_date: e.target.value }))} />
+            onChange={v => setForm(p => ({ ...p, effective_date: v }))} />
         </div>
         <div>
           <label className={labelCls}>Retro Months</label>
@@ -372,17 +380,20 @@ export function CompensationRevisions() {
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/compensation/revisions/${id}/approve`, {}),
     onSuccess: invalidate,
+    onError: (e: Error) => toast.error('Failed to approve revision', { description: e.message }),
   })
 
   const rejectMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.post(`/compensation/revisions/${id}/reject`, { rejection_reason: reason }),
     onSuccess: () => { setRejectId(null); setRejectReason(''); invalidate() },
+    onError: (e: Error) => toast.error('Failed to reject revision', { description: e.message }),
   })
 
   const withdrawMut = useMutation({
     mutationFn: (id: string) => api.post(`/compensation/revisions/${id}/withdraw`, {}),
     onSuccess: invalidate,
+    onError: (e: Error) => toast.error('Failed to withdraw revision', { description: e.message }),
   })
 
   // ── Summary stats ─────────────────────────────────────────────────────────
@@ -471,10 +482,7 @@ export function CompensationRevisions() {
         }
       >
         {isLoading && (
-          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Loading…</span>
-          </div>
+          <IntelligenceLoadingSkeleton rows={5} />
         )}
         {isError && (
           <div className="flex items-center gap-2 text-sm text-destructive py-4">
@@ -484,16 +492,10 @@ export function CompensationRevisions() {
           </div>
         )}
         {!isLoading && !isError && revisions.length === 0 && (
-          <div className="text-center py-10">
-            <TrendingUp className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No compensation revisions found.</p>
-            {isAdmin && (
-              <Button size="sm" className="mt-3 h-8 text-xs gap-1.5"
-                onClick={() => setShowForm(true)}>
-                <Plus className="h-3.5 w-3.5" />Submit First Revision
-              </Button>
-            )}
-          </div>
+          <IntelligenceEmptyState
+            title="No revisions found"
+            description="Compensation revisions will appear here once initiated."
+          />
         )}
         {!isLoading && !isError && revisions.length > 0 && (
           <div className="space-y-2">

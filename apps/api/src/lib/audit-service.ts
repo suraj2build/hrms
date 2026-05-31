@@ -29,6 +29,7 @@ export interface LogActionOpts {
   recordId:    string                      // closest meaningful UUID for the affected record
   action:      AuditAction
   performedBy?: string | null             // userId (profiles.id); null for system actions
+  onBehalfOf?: string | null             // employees.id of the employee being acted upon when an HR admin acts for them
   oldData?:    Record<string, unknown> | null
   newData?:    Record<string, unknown> | null
 }
@@ -40,7 +41,7 @@ export async function logAction(
   supabase: SupabaseClient,
   opts:     LogActionOpts,
 ): Promise<void> {
-  const { tenantId, tableName, recordId, action, performedBy, oldData, newData } = opts
+  const { tenantId, tableName, recordId, action, performedBy, onBehalfOf, oldData, newData } = opts
 
   const { error } = await supabase.from('audit_logs').insert({
     tenant_id:    tenantId,
@@ -48,6 +49,7 @@ export async function logAction(
     record_id:    recordId,
     action,
     performed_by: performedBy ?? null,
+    on_behalf_of: onBehalfOf  ?? null,
     old_data:     oldData     ?? null,
     new_data:     newData     ?? null,
   })
@@ -78,6 +80,7 @@ export async function logBulkAction(
     tableName:   string
     action:      AuditAction
     performedBy?: string | null
+    onBehalfOf?: string | null             // employees.id of the employee being acted upon when an HR admin acts for them
     summary:     Record<string, unknown>   // high-level description of what changed
   },
 ): Promise<void> {
@@ -92,6 +95,7 @@ export async function logBulkAction(
     record_id:    BULK_SENTINEL,
     action:       opts.action,
     performed_by: opts.performedBy ?? null,
+    on_behalf_of: opts.onBehalfOf  ?? null,
     old_data:     null,
     new_data:     opts.summary,
   })

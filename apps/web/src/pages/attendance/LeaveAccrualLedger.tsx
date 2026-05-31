@@ -19,6 +19,7 @@ import {
   BookOpen,
   AlertTriangle,
   Search,
+  ArrowRight,
 }                                                        from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -102,9 +103,11 @@ const ACCRUAL_BADGE: Record<string, string> = {
 
 function fmt(dateStr: string | null): string {
   if (!dateStr) return '—'
-  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  })
+  const s = dateStr
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function buildYears(): number[] {
@@ -374,7 +377,7 @@ export function LeaveAccrualLedger() {
   return (
     <PageContainer>
       <PageHeader
-        breadcrumb={[{ label: 'Leave', href: '/admin/holidays' }, { label: 'Leave Ledger' }]}
+        breadcrumb={[{ label: 'Leave Management', href: '/admin/leave' }, { label: 'Leave Ledger' }]}
         title="Leave Ledger"
         subtitle="History of leave credits, carry-forwards, and comp-off grants"
       />
@@ -382,25 +385,36 @@ export function LeaveAccrualLedger() {
       {/* Admin: Employee picker */}
       {isAdmin && (
         <SectionCard
-          title="Employee"
-          icon={<BookOpen className="h-4 w-4 text-muted-foreground" />}
+          title="Employee Lookup"
+          icon={<Search className="h-4 w-4 text-muted-foreground" />}
         >
-          <div className="flex gap-2 items-center">
-            <Input
-              placeholder="Employee UUID"
-              value={empIdInput}
-              onChange={e => setEmpIdInput(e.target.value)}
-              className="h-8 text-xs max-w-sm font-mono"
-            />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative flex items-center flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Paste employee ID (UUID)…"
+                value={empIdInput}
+                onChange={e => setEmpIdInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && empIdInput.trim()) {
+                    setAppliedEmpId(empIdInput.trim())
+                    setOffset(0)
+                  }
+                }}
+                className="h-8 text-xs pl-8 font-mono"
+              />
+            </div>
             <Button
               size="sm"
-              className="h-8 text-xs"
+              className="h-8 text-xs gap-1.5"
               onClick={() => {
                 setAppliedEmpId(empIdInput.trim() || null)
                 setOffset(0)
               }}
+              disabled={!empIdInput.trim()}
             >
-              Load
+              <ArrowRight className="h-3.5 w-3.5" />
+              Load Ledger
             </Button>
             {appliedEmpId && (
               <Button
@@ -413,6 +427,9 @@ export function LeaveAccrualLedger() {
               </Button>
             )}
           </div>
+          <p className="text-[10px] text-muted-foreground mt-1.5">
+            Copy the employee UUID from the People directory or employee profile URL.
+          </p>
         </SectionCard>
       )}
 
@@ -427,22 +444,32 @@ export function LeaveAccrualLedger() {
         </SectionCard>
       )}
 
-      {/* Balance summary pills */}
+      {/* Balance summary pills — click to filter ledger by that leave type */}
       {targetEmpId && balances.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {balances.map(b => (
-            <div
-              key={b.id}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-card text-xs"
-            >
-              <span className="font-medium text-foreground">{b.leave_types?.name ?? '—'}</span>
-              <span className="text-muted-foreground">·</span>
-              <span className={cn('font-bold', b.balance <= 0 ? 'text-destructive' : 'text-success')}>
-                {b.balance} day{b.balance !== 1 ? 's' : ''}
-              </span>
-              <span className="text-muted-foreground text-[10px]">({b.year})</span>
-            </div>
-          ))}
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-[10px] text-muted-foreground/60 mr-0.5">Balances:</span>
+          {balances.map(b => {
+            const isActive = leaveTypeId === b.leave_type_id
+            return (
+              <button
+                key={b.id}
+                onClick={() => applyFilter(() => setLeaveTypeId(isActive ? '' : b.leave_type_id))}
+                title={isActive ? 'Click to clear filter' : `Filter ledger to ${b.leave_types?.name ?? 'this type'}`}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs transition-colors',
+                  isActive
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/[0.04]',
+                )}
+              >
+                <span className="font-medium">{b.leave_types?.name ?? '—'}</span>
+                <span className={cn('font-bold', b.balance <= 0 ? 'text-destructive' : isActive ? 'text-primary' : 'text-success')}>
+                  {b.balance}d
+                </span>
+                <span className="text-muted-foreground text-[10px]">{b.year}</span>
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -484,8 +511,11 @@ export function LeaveAccrualLedger() {
       {isAdmin && !appliedEmpId && (
         <SectionCard>
           <div className="flex flex-col items-center py-10 gap-2 text-center text-muted-foreground">
-            <Search className="h-8 w-8 opacity-30" />
-            <p className="text-sm">Enter an employee UUID above to view their ledger</p>
+            <BookOpen className="h-7 w-7 opacity-25" />
+            <p className="text-sm font-medium text-foreground">No employee selected</p>
+            <p className="text-xs max-w-xs">
+              Paste an employee ID above to view their leave accrual history, carry-forwards, and current balances.
+            </p>
           </div>
         </SectionCard>
       )}

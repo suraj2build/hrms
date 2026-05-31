@@ -578,7 +578,7 @@ export function RolesPermissions() {
                       </thead>
                       <tbody>
                         {mod.permissions.map(perm => (
-                          <tr key={perm.id} className="border-b border-border/20 last:border-0 hover:bg-muted/10">
+                          <tr key={perm.id} className="border-b border-border/20 last:border-0 hover:bg-muted/20">
                             <td className="px-4 py-2">
                               <div className="flex items-center gap-2">
                                 <span className="text-foreground">{perm.label}</span>

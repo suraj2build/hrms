@@ -126,7 +126,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
         employee_code,
         first_name,
         last_name,
-        job_history!inner(
+        job_history!job_history_employee_id_fkey(
           is_current,
           departments(name),
           manager_id

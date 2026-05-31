@@ -43,17 +43,32 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
     }
 
-    // Fetch all fields with confidence/conflict/source info
-    const { data: fields, error: fieldsError } = await fastify.supabase
+    // Fetch all fields — DB column is draft_id (not session_id)
+    const { data: rawFields, error: fieldsError } = await fastify.supabase
       .from('draft_employee_fields')
       .select('*')
-      .eq('session_id', draft.session_id)
+      .eq('draft_id', id)
       .eq('tenant_id', req.tenantId)
       .order('field_name', { ascending: true })
 
-    if (fieldsError) return reply.code(500).send({ error: 'DB_ERROR', message: fieldsError.message })
+    if (fieldsError) {
+      fastify.log.error({ fieldsError, draftId: id }, 'GET /drafts/:id — fields sub-query failed')
+      // Don't 500 — return draft without fields so extracted data tab still renders
+    }
 
-    return reply.send({ data: { ...draft, fields: fields ?? [] } })
+    // Map DB column names → frontend-expected shape
+    const fields = (rawFields ?? []).map((f: any) => ({
+      field_name:           f.field_name,
+      value:                f.extracted_value ?? f.normalized_value ?? null,
+      confidence_score:     f.confidence_score ?? null,
+      source_document_type: f.source_document_type ?? null,
+      is_conflicting:       f.is_conflicting ?? false,
+      conflict_note:        f.conflict_note ?? null,
+      is_hr_override:       f.is_hr_override ?? false,
+      document_id:          f.document_id ?? null,
+    }))
+
+    return reply.send({ data: { ...draft, fields } })
   })
 
   // ── PATCH /onboarding/drafts/:id/fields ───────────────────────────────────
@@ -96,22 +111,31 @@ export default async function draftRoutes(fastify: FastifyInstance) {
 
     if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
 
-    // Upsert draft_employee_fields rows with is_hr_override = true
+    // Delete existing HR-override field rows for this draft + field names, then re-insert
+    const overrideFieldNames = overrides.map((o) => o.field_name)
+    await fastify.supabase
+      .from('draft_employee_fields')
+      .delete()
+      .eq('draft_id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('is_hr_override', true)
+      .in('field_name', overrideFieldNames)
+
     const fieldRows = overrides.map((o) => ({
-      tenant_id: req.tenantId,
-      session_id: draft.session_id,
-      document_id: null,
-      field_name: o.field_name,
-      value: o.value,
-      confidence_score: 1.0,
-      reasoning: 'HR manual override',
+      tenant_id:            req.tenantId,
+      draft_id:             id,
+      document_id:          null,
+      field_name:           o.field_name,
+      extracted_value:      o.value,
+      confidence_score:     1.0,
+      extraction_reasoning: 'HR manual override',
       source_document_type: 'hr_override',
-      is_hr_override: true,
+      is_hr_override:       true,
     }))
 
     await fastify.supabase
       .from('draft_employee_fields')
-      .upsert(fieldRows, { onConflict: 'session_id,field_name,is_hr_override' })
+      .insert(fieldRows)
 
     // Audit log
     await fastify.supabase
@@ -119,10 +143,10 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .insert({
         tenant_id: req.tenantId,
         session_id: draft.session_id,
-        draft_profile_id: id,
+        draft_id: id,
         action: 'field_overridden',
-        performed_by: req.userId,
-        metadata: { overrides },
+        actor_id: req.userId,
+        details: { overrides },
       })
 
     // Return updated draft
@@ -250,8 +274,39 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // ── Required field presence warnings ─────────────────────────────────
-    if (!draft.first_name && !draft.full_name) {
+    // ── Master-field existence checks ─────────────────────────────────────
+    if (draft.department_id) {
+      const { data: dept } = await fastify.supabase
+        .from('departments')
+        .select('id')
+        .eq('id', draft.department_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!dept) validationErrors.push('Selected department does not exist in master data')
+    }
+
+    if (draft.designation_id) {
+      const { data: desg } = await fastify.supabase
+        .from('designations')
+        .select('id')
+        .eq('id', draft.designation_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!desg) validationErrors.push('Selected designation does not exist in master data')
+    }
+
+    if (draft.grade_id) {
+      const { data: grade } = await fastify.supabase
+        .from('grades')
+        .select('id')
+        .eq('id', draft.grade_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!grade) validationErrors.push('Selected grade does not exist in master data')
+    }
+
+    // ── Required field presence checks ────────────────────────────────────
+    if (!draft.first_name && !(draft as any).full_name) {
       validationErrors.push('first_name or full_name is required')
     }
     if (!draft.email) {
@@ -259,6 +314,14 @@ export default async function draftRoutes(fastify: FastifyInstance) {
     }
     if (!draft.joining_date) {
       validationErrors.push('joining_date is required')
+    }
+
+    // ── Master-field presence warnings ────────────────────────────────────
+    if (!draft.department_id) {
+      validationWarnings.push('Department not set — required before creating employee record')
+    }
+    if (!draft.designation_id) {
+      validationWarnings.push('Designation not set — required before creating employee record')
     }
 
     const hasErrors = validationErrors.length > 0
@@ -351,6 +414,60 @@ export default async function draftRoutes(fastify: FastifyInstance) {
 
     const employeeId = employee.id
 
+    // ── Copy onboarding documents → employee documents tab ─────────────────
+    // Map onboarding document_type → documents.doc_type CHECK constraint values
+    const DOC_TYPE_MAP: Record<string, string> = {
+      aadhaar:           'aadhaar',
+      pan:               'pan',
+      offer_letter:      'offer_letter',
+      experience_letter: 'experience_letter',
+      relieving_letter:  'relieving_letter',
+      passport:          'certificate',
+      driving_license:   'certificate',
+      resume:            'other',
+      salary_slip:       'other',
+      compensation_letter: 'other',
+      bank_proof:        'other',
+      pf_uan_document:   'other',
+      esi_document:      'other',
+      tax_document:      'other',
+      joining_letter:    'offer_letter',
+      certificate:       'certificate',
+      contract:          'contract',
+    }
+
+    const { data: onboardingDocs, error: onboardingDocsError } = await fastify.supabase
+      .from('onboarding_documents')
+      .select('document_type, file_name, storage_path, file_size, mime_type, uploaded_by')
+      .eq('session_id', draft.session_id)
+      .eq('tenant_id', req.tenantId)
+
+    if (onboardingDocsError) {
+      fastify.log.warn({ onboardingDocsError, sessionId: draft.session_id }, 'approve — failed to fetch onboarding docs for copy')
+    } else if (onboardingDocs && onboardingDocs.length > 0) {
+      const docRows = onboardingDocs.map((d: any) => ({
+        tenant_id:    req.tenantId,
+        employee_id:  employeeId,
+        doc_type:     DOC_TYPE_MAP[d.document_type] ?? 'other',
+        name:         d.file_name,
+        storage_path: d.storage_path,
+        file_size:    d.file_size ?? null,
+        mime_type:    d.mime_type ?? null,
+        uploaded_by:  d.uploaded_by ?? null,
+      }))
+
+      const { error: docInsertError } = await fastify.supabase
+        .from('documents')
+        .insert(docRows)
+
+      if (docInsertError) {
+        // Non-fatal — employee was created successfully; just log the copy failure
+        fastify.log.warn({ docInsertError, employeeId, docCount: docRows.length }, 'approve — document copy to employee tab failed (non-fatal)')
+      } else {
+        fastify.log.info({ employeeId, docCount: docRows.length }, 'approve — onboarding documents copied to employee tab')
+      }
+    }
+
     // Create employee_personal_info if dob/gender available
     if (draft.dob || draft.gender) {
       await fastify.supabase
@@ -402,10 +519,10 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .insert({
         tenant_id: req.tenantId,
         session_id: draft.session_id,
-        draft_profile_id: id,
+        draft_id: id,
         action: 'employee_created',
-        performed_by: req.userId,
-        metadata: { employee_id: employeeId, employee_code: employeeCode },
+        actor_id: req.userId,
+        details: { employee_id: employeeId, employee_code: employeeCode },
       })
 
     return reply.code(201).send({ data: { employee_id: employeeId, employee_code: employeeCode } })
@@ -458,10 +575,10 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .insert({
         tenant_id: req.tenantId,
         session_id: draft.session_id,
-        draft_profile_id: id,
+        draft_id: id,
         action: 'rejected',
-        performed_by: req.userId,
-        metadata: { reason: parsed.data.reason },
+        actor_id: req.userId,
+        details: { reason: parsed.data.reason },
       })
 
     // Return updated draft

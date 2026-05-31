@@ -37,6 +37,7 @@ import { PeriodLockBanner } from '@/components/layout/PeriodLockBanner'
 import { Badge }            from '@/components/ui/badge'
 import { Button }           from '@/components/ui/button'
 import { Input }            from '@/components/ui/input'
+import { DateInput }        from '@/components/ui/date-input'
 import {
   Dialog,
   DialogContent,
@@ -124,16 +125,21 @@ function fmtTime(iso: string | null) {
 
 function fmtDate(iso: string | null) {
   if (!iso) return '—'
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtDatetime(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 /** Returns number of whole days elapsed since `iso` timestamp */
@@ -261,7 +267,10 @@ export function RegularisationApproval() {
     queryKey: ['regularisation-pending'],
     queryFn:  () => api.get<PendingRequest[]>('/attendance/regularisation/pending'),
     enabled:  isAdmin,
-    staleTime: 30_000,
+    // staleTime == AUTO_REFRESH_MS — prevents the mount + interval double-fetch
+    // pattern where a remount within the 30–60 s window triggers both a
+    // mount-refetch (stale at 30 s) AND the next interval fire (at 60 s).
+    staleTime:       AUTO_REFRESH_MS,
     refetchInterval: AUTO_REFRESH_MS,
   })
 
@@ -339,6 +348,7 @@ export function RegularisationApproval() {
     setAppliedFrom(filterFrom)
     setAppliedTo(filterTo)
     setPage(1)
+    setSelectedIds(new Set())   // H2: clear phantom selections when filter changes
   }
 
   function clearFilters() {
@@ -348,6 +358,7 @@ export function RegularisationApproval() {
     setAppliedTo('')
     setEmployeeSearch('')
     setPage(1)
+    setSelectedIds(new Set())   // H2: clear phantom selections when filter resets
   }
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -359,12 +370,15 @@ export function RegularisationApproval() {
     onSuccess: () => {
       const count = selectedIds.size
       queryClient.invalidateQueries({ queryKey: ['regularisation-pending'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
       setSelectedIds(new Set())
+      setBulkConfirmOpen(false)   // L2: close dialog after success so loading state is visible
       toast.success(`${count} request${count !== 1 ? 's' : ''} approved`, {
         description: 'Attendance records have been recomputed.',
       })
     },
     onError: (err) => {
+      // L2: keep dialog open on error so operator sees the failure and can retry
       toast.error('Bulk approval failed', { description: (err as Error).message })
     },
   })
@@ -377,6 +391,7 @@ export function RegularisationApproval() {
     onSuccess: () => {
       const count = selectedIds.size
       queryClient.invalidateQueries({ queryKey: ['regularisation-pending'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
       setSelectedIds(new Set())
       setBulkRejectOpen(false)
       setBulkRejectReason('')
@@ -425,6 +440,7 @@ export function RegularisationApproval() {
       const body = type === 'reject' ? { rejection_reason: rejectionReason ?? '' } : {}
       await api.post(`/attendance/regularisation/${id}/${type}`, body)
       queryClient.invalidateQueries({ queryKey: ['regularisation-pending'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
       // Close dialogs if they were open for this row
       if (drawerRequest?.id === id) setDrawerRequest(null)
       if (rejectTarget?.id === id) { setRejectTarget(null); setRejectReason('') }
@@ -479,23 +495,8 @@ export function RegularisationApproval() {
               {row.reason}
             </p>
           )}
-          {/* Compact context icons */}
+          {/* Detail drawer trigger — kept in employee cell for contextual access */}
           <div className="flex items-center gap-0.5 mt-1">
-            {row.employee_id && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-info"
-                title="View attendance timeline"
-                onClick={() => setForensicsTarget({
-                  employeeId:   row.employee_id!,
-                  date:         row.date,
-                  employeeName: row.employee_name ?? undefined,
-                })}
-              >
-                <GitBranch className="h-3 w-3" />
-              </Button>
-            )}
             <Button
               size="sm"
               variant="ghost"
@@ -590,11 +591,11 @@ export function RegularisationApproval() {
       },
     },
 
-    // ⑥ Actions — Approve + Reject only (Timeline/Eye moved to employee cell)
+    // ⑥ Actions — Approve + Reject + Timeline (forensics moved here from employee cell)
     {
       id: 'actions',
       header: 'Actions',
-      className: 'min-w-[145px]',
+      className: 'min-w-[175px]',
       cell: (row) => {
         const isActioning = actionRowId === row.id
         if (isActioning) return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -620,6 +621,22 @@ export function RegularisationApproval() {
               <XCircle className="h-3.5 w-3.5" />
               Reject
             </Button>
+            {/* Q2 — forensics trigger in actions column (consistent placement) */}
+            {row.employee_id && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-info"
+                title="View attendance timeline"
+                onClick={() => setForensicsTarget({
+                  employeeId:   row.employee_id!,
+                  date:         row.date,
+                  employeeName: row.employee_name ?? undefined,
+                })}
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
         )
       },
@@ -630,6 +647,7 @@ export function RegularisationApproval() {
   return (
     <PageContainer>
       <PageHeader
+        breadcrumb={[{ label: 'Attendance Operations', href: '/admin/attendance/center' }, { label: 'Regularisation' }]}
         title="Regularisation Requests"
         subtitle="HR governance layer — SLA-tracked approval, escalation, and payroll auditability"
         actions={isAdmin ? (
@@ -785,17 +803,15 @@ export function RegularisationApproval() {
                   />
                 </div>
                 {/* Date range */}
-                <Input
-                  type="date"
+                <DateInput
                   value={filterFrom}
-                  onChange={e => setFilterFrom(e.target.value)}
+                  onChange={setFilterFrom}
                   className="h-7 text-xs w-32"
                 />
                 <span className="text-xs text-muted-foreground">to</span>
-                <Input
-                  type="date"
+                <DateInput
                   value={filterTo}
-                  onChange={e => setFilterTo(e.target.value)}
+                  onChange={setFilterTo}
                   className="h-7 text-xs w-32"
                 />
                 <Button size="sm" className="h-7 text-xs" onClick={applyFilters}>Apply</Button>
@@ -837,9 +853,9 @@ export function RegularisationApproval() {
               ...(employeeSearch ? [{ key: 'search', label: `Employee: ${employeeSearch}` }] : []),
             ]}
             onRemoveChip={(key) => {
-              if (key === 'from')   { setFilterFrom(''); setAppliedFrom('') }
-              if (key === 'to')     { setFilterTo('');   setAppliedTo('') }
-              if (key === 'search') { setEmployeeSearch('') }
+              if (key === 'from')   { setFilterFrom(''); setAppliedFrom(''); setPage(1) }
+              if (key === 'to')     { setFilterTo('');   setAppliedTo('');   setPage(1) }
+              if (key === 'search') { setEmployeeSearch('');                 setPage(1) }  // M1: was missing setPage(1)
             }}
             onClearAllChips={clearFilters}
           />
@@ -904,6 +920,14 @@ export function RegularisationApproval() {
             getRowId={(r) => r.id}
           />
 
+          {/* M2: PaginationBar directly after DataTable — before the actioned trail */}
+          <PaginationBar
+            total={filteredRows.length}
+            page={page}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
+
           {/* ── Recently actioned trail ──────────────────────────────────── */}
           {recentlyActioned.length > 0 && (
             <div className="px-4 py-3 border-t border-border bg-muted/20">
@@ -937,13 +961,6 @@ export function RegularisationApproval() {
               </div>
             </div>
           )}
-
-          <PaginationBar
-            total={filteredRows.length}
-            page={page}
-            pageSize={PAGE_SIZE}
-            onPageChange={setPage}
-          />
         </SectionCard>
       )}
 
@@ -987,20 +1004,18 @@ export function RegularisationApproval() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">From</label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={bulkFrom}
-                    onChange={e => setBulkFrom(e.target.value)}
+                    onChange={setBulkFrom}
                     className="h-8 text-xs"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">To</label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={bulkTo}
                     min={bulkFrom}
-                    onChange={e => setBulkTo(e.target.value)}
+                    onChange={setBulkTo}
                     className="h-8 text-xs"
                   />
                 </div>
@@ -1060,7 +1075,7 @@ export function RegularisationApproval() {
               size="sm"
               className="flex-1 h-8 text-xs border-success/40 text-success hover:bg-success/10"
               disabled={bulkApproveMutation.isPending}
-              onClick={() => { bulkApproveMutation.mutate(); setBulkConfirmOpen(false) }}
+              onClick={() => bulkApproveMutation.mutate()}
             >
               {bulkApproveMutation.isPending
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Approving…</>

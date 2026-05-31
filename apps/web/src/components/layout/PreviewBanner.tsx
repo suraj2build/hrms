@@ -1,69 +1,105 @@
 /**
- * PreviewBanner
+ * WorkspaceContextBanner
  *
- * ⚠️  DEV / STAGING ONLY — tree-shaken in production.
+ * Renders a compact strip below the Topbar when the user has switched from the
+ * default Admin Portal workspace into either:
+ *   • Employee Self Service — viewing a specific employee's worklife hub
+ *   • Manager Workspace     — viewing a manager's operational view
  *
- * Renders a compact amber strip when a role preview is active, reminding
- * developers that they are seeing a simulated permission view — NOT a real
- * role change. Backend API calls are unaffected.
+ * The banner is always visible (dev + staging + production) whenever an
+ * impersonated identity is active. Provides a one-click exit back to Admin Portal.
  *
  * Rendered by AdminShell between Topbar and <main>.
  */
 
-import { FlaskConical, X } from 'lucide-react'
-import { useAuthStore }    from '@/stores/authStore'
-import { useUIStore }      from '@/stores/uiStore'
-import { useNavigate }     from 'react-router-dom'
-
-const ROLE_LABELS: Record<string, string> = {
-  super_admin: 'Super Admin',
-  hr_admin:    'HR Admin',
-  manager:     'Manager',
-  employee:    'Employee',
-}
+import { User2, Users, X } from 'lucide-react'
+import { useUIStore }       from '@/stores/uiStore'
+import { useNavigate }      from 'react-router-dom'
+import { cn }               from '@/lib/utils'
 
 export function PreviewBanner() {
-  // Only render in dev/staging — tree-shaken in production via import.meta.env.DEV
-  if (!import.meta.env.DEV) return null
+  const {
+    activeRole,
+    impersonatedEmployee,
+    impersonatedManager,
+    clearWorkspaceContext,
+  } = useUIStore()
+  const navigate = useNavigate()
 
-  const activeRole = useUIStore(s => s.activeRole)
-  const setActiveRole = useUIStore(s => s.setActiveRole)
-  const realRole   = useAuthStore(s => s.profile?.role)
-  const navigate   = useNavigate()
-
-  if (!activeRole) return null
-
-  const label = ROLE_LABELS[activeRole] ?? activeRole
-
-  function reset() {
-    setActiveRole(null)
+  function exitWorkspace() {
+    clearWorkspaceContext()
     navigate('/admin/dashboard')
   }
 
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="flex items-center gap-2 px-4 py-1.5 bg-warning/[0.12] border-b border-warning/25 text-warning text-xs select-none"
-    >
-      <FlaskConical className="h-3 w-3 flex-shrink-0" />
-      <span className="flex-1">
-        <span className="font-semibold">Dev Preview</span>
-        {' — '}viewing admin portal as{' '}
-        <span className="font-semibold">{label}</span>.
-        {' '}
-        <span className="text-warning/70">
-          API calls still use your real role ({ROLE_LABELS[realRole ?? ''] ?? realRole}).
-        </span>
-      </span>
-      <button
-        onClick={reset}
-        className="flex items-center gap-1 font-medium hover:text-warning/80 transition-colors"
-        aria-label="Exit preview mode"
+  // ── Employee Self Service context ─────────────────────────────────────────
+  if (activeRole === 'employee' && impersonatedEmployee) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className={cn(
+          'flex items-center justify-between gap-3 px-4 py-1.5',
+          'bg-info/[0.08] border-b border-info/20 text-info text-xs select-none',
+        )}
       >
-        <X className="h-3 w-3" />
-        Exit preview
-      </button>
-    </div>
-  )
+        <div className="flex items-center gap-2">
+          <div className="h-5 w-5 rounded-full bg-info/15 flex items-center justify-center flex-shrink-0">
+            <User2 className="h-3 w-3" />
+          </div>
+          <span>
+            <span className="font-semibold">Employee Self Service</span>
+            {' — '}
+            viewing as{' '}
+            <span className="font-semibold">{impersonatedEmployee.name}</span>
+            <span className="opacity-60 ml-1">({impersonatedEmployee.code})</span>
+          </span>
+        </div>
+        <button
+          onClick={exitWorkspace}
+          className="flex items-center gap-1 font-medium opacity-70 hover:opacity-100 transition-opacity"
+          aria-label="Exit Employee Self Service workspace"
+        >
+          <X className="h-3 w-3" />
+          Exit
+        </button>
+      </div>
+    )
+  }
+
+  // ── Manager Workspace context ─────────────────────────────────────────────
+  if (activeRole === 'manager' && impersonatedManager) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className={cn(
+          'flex items-center justify-between gap-3 px-4 py-1.5',
+          'bg-warning/[0.08] border-b border-warning/20 text-warning text-xs select-none',
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <div className="h-5 w-5 rounded-full bg-warning/15 flex items-center justify-center flex-shrink-0">
+            <Users className="h-3 w-3" />
+          </div>
+          <span>
+            <span className="font-semibold">Manager Workspace</span>
+            {' — '}
+            viewing as{' '}
+            <span className="font-semibold">{impersonatedManager.name}</span>
+            <span className="opacity-60 ml-1">({impersonatedManager.code})</span>
+          </span>
+        </div>
+        <button
+          onClick={exitWorkspace}
+          className="flex items-center gap-1 font-medium opacity-70 hover:opacity-100 transition-opacity"
+          aria-label="Exit Manager Workspace"
+        >
+          <X className="h-3 w-3" />
+          Exit
+        </button>
+      </div>
+    )
+  }
+
+  return null
 }

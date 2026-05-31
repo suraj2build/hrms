@@ -14,10 +14,13 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 
 const schema = z.object({
-  name:           z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
-  is_paid:        z.boolean().default(true),
-  allow_sandwich: z.boolean().default(false),
-  is_active:      z.boolean().default(true),
+  name:              z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
+  is_paid:           z.boolean().default(true),
+  allow_sandwich:    z.boolean().default(false),
+  allow_half_day:    z.boolean().default(false),
+  allow_hourly:      z.boolean().default(false),
+  max_hours_per_day: z.number().min(0).max(24).nullable().optional(),
+  is_active:         z.boolean().default(true),
 })
 
 export default async function leaveTypesRoutes(fastify: FastifyInstance) {
@@ -38,7 +41,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('leave_types')
-      .select('id, name, is_paid, allow_sandwich, is_active, created_at')
+      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
       .eq('tenant_id', req.tenantId)
       .order('name')
 
@@ -65,7 +68,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('leave_types')
       .insert({ tenant_id: req.tenantId, ...parsed.data })
-      .select('id, name, is_paid, allow_sandwich, is_active, created_at')
+      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
       .single()
 
     if (error) {
@@ -99,7 +102,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       .update(parsed.data)
       .eq('id', (req.params as { id: string }).id)
       .eq('tenant_id', req.tenantId)
-      .select('id, name, is_paid, allow_sandwich, is_active, created_at')
+      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
       .single()
 
     if (error) {
@@ -118,16 +121,16 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
   })
 
   // ── DELETE /masters/leave-types/:id ───────────────────────────────────────────
-  // Soft-deactivates if any leave_applications reference this type;
+  // Soft-deactivates if any leave_requests reference this type;
   // hard-deletes otherwise.
   fastify.delete('/:id', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
     const id = (req.params as { id: string }).id
 
-    // Check if any leave applications reference this type
+    // Check if any leave requests reference this type
     const { count, error: countErr } = await fastify.supabase
-      .from('leave_applications')
+      .from('leave_requests')
       .select('id', { count: 'exact', head: true })
       .eq('leave_type_id', id)
       .eq('tenant_id', req.tenantId)
@@ -151,7 +154,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       }
 
       return reply.send({
-        message: 'Leave type deactivated — it has existing applications and cannot be deleted',
+        message: 'Leave type deactivated — it has existing leave requests and cannot be deleted',
         deactivated: true,
       })
     }

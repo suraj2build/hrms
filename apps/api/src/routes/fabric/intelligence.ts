@@ -1,0 +1,180 @@
+/**
+ * Fabric Intelligence Routes — Sprint 5 Enterprise Orchestration Fabric.
+ * Exposes composition, federation, simulation, decision graph,
+ * orchestration, replay, and knowledge layer endpoints.
+ */
+import type { FastifyInstance }            from 'fastify'
+import { intelligenceCompositionService }  from '../../platform/fabric/composition/intelligence-composition.service.js'
+import { federationService }               from '../../platform/fabric/federation/federation.service.js'
+import { unifiedSimulationService }        from '../../platform/fabric/simulation-engine/unified-simulation.service.js'
+import { decisionGraphService }            from '../../platform/fabric/decision-graph/decision-graph.service.js'
+import { workflowOrchestrationService }    from '../../platform/fabric/orchestration/workflow-orchestration.service.js'
+import { replayIntelligenceService }       from '../../platform/fabric/replay/replay-intelligence.service.js'
+import { knowledgeLayerService }           from '../../platform/fabric/knowledge/knowledge-layer.service.js'
+import { fabricControlPlaneService }       from '../../platform/fabric/control-plane/fabric-control-plane.service.js'
+
+export default async function fabricRoutes(fastify: FastifyInstance) {
+
+  // GET /fabric/health — fabric control plane health snapshot
+  fastify.get('/fabric/health', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const orgId = (req as any).user.tenant_id
+    try {
+      const snapshot = await fabricControlPlaneService.computeFabricHealth(fastify.supabase, orgId)
+      return snapshot
+    } catch (err: unknown) {
+      return reply.status(500).send({ error: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  })
+
+  // POST /fabric/compose — compute intelligence composition for an entity
+  fastify.post('/fabric/compose', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const body = req.body as any
+    const orgId = (req as any).user.tenant_id
+    const composition = intelligenceCompositionService.compose({
+      entity_id:        body.entity_id,
+      entity_type:      body.entity_type ?? 'employee',
+      org_id:           orgId,
+      governance_score: body.governance_score,
+      trust_score:      body.trust_score,
+    })
+    return composition
+  })
+
+  // POST /fabric/compose/batch — batch composition
+  fastify.post('/fabric/compose/batch', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const body = req.body as any
+    const orgId = (req as any).user.tenant_id
+    const compositions = intelligenceCompositionService.composeBatch(orgId, body.entities ?? [])
+    return { compositions, total: compositions.length }
+  })
+
+  // GET /fabric/federation/dependencies — module dependency map
+  fastify.get('/fabric/federation/dependencies', { preHandler: [fastify.authenticate] }, async (_req, _reply) => {
+    const deps = federationService.getModuleDependencies()
+    return { dependencies: deps, total: deps.length }
+  })
+
+  // GET /fabric/federation/chain/:entityId — federation chain for entity
+  fastify.get('/fabric/federation/chain/:entityId', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const { entityId } = req.params as any
+    const orgId = (req as any).user.tenant_id
+    const chain = federationService.buildFederationChain(fastify.supabase, entityId, 'employee', orgId)
+    return chain
+  })
+
+  // POST /fabric/simulate/policy — policy change simulation
+  fastify.post('/fabric/simulate/policy', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const body = req.body as any
+    const orgId = (req as any).user.tenant_id
+    const run = unifiedSimulationService.simulatePolicyChange({
+      org_id:           orgId,
+      policy_name:      body.policy_name ?? 'unnamed',
+      change_type:      body.change_type ?? 'new',
+      affected_modules: body.affected_modules ?? [],
+      affected_count:   Number(body.affected_count) || 0,
+      estimated_admin_hours: Number(body.estimated_admin_hours) || 0,
+      created_by:       (req as any).user.id,
+    })
+    void fastify.supabase.from('simulation_runs').insert({
+      org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
+      input_params: run.input_params, result_summary: run.result_summary,
+      created_at: run.created_at, created_by: run.created_by ?? null,
+    })
+    return run
+  })
+
+  // POST /fabric/simulate/governance-drift — governance drift projection
+  fastify.post('/fabric/simulate/governance-drift', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const body = req.body as any
+    const orgId = (req as any).user.tenant_id
+    const run = unifiedSimulationService.simulateGovernanceDrift({
+      org_id:             orgId,
+      current_drift_rate: Number(body.current_drift_rate) || 20,
+      trend_direction:    body.trend_direction ?? 'stable',
+      weeks_ahead:        Number(body.weeks_ahead) || 12,
+      created_by:         (req as any).user.id,
+    })
+    void fastify.supabase.from('simulation_runs').insert({
+      org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
+      input_params: run.input_params, result_summary: run.result_summary,
+      created_at: run.created_at, created_by: run.created_by ?? null,
+    })
+    return run
+  })
+
+  // GET /fabric/decisions — recent decision graph nodes
+  fastify.get('/fabric/decisions', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const orgId = (req as any).user.tenant_id
+    const { limit = '50' } = req.query as any
+    const nodes = await decisionGraphService.getRecentNodes(fastify.supabase, orgId, Number(limit))
+    return { nodes, total: nodes.length }
+  })
+
+  // GET /fabric/decisions/lineage/:entityId — entity decision lineage
+  fastify.get('/fabric/decisions/lineage/:entityId', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const { entityId } = req.params as any
+    const orgId = (req as any).user.tenant_id
+    const nodes = await decisionGraphService.getEntityLineage(fastify.supabase, entityId, orgId)
+    return { nodes, entity_id: entityId, total: nodes.length }
+  })
+
+  // GET /fabric/orchestration — recent orchestration activities
+  fastify.get('/fabric/orchestration', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const orgId = (req as any).user.tenant_id
+    const { limit = '20' } = req.query as any
+    const activities = await workflowOrchestrationService.getRecentActivities(fastify.supabase, orgId, Number(limit))
+    return { activities, total: activities.length }
+  })
+
+  // POST /fabric/orchestration/escalate — coordinate an escalation (advisory)
+  fastify.post('/fabric/orchestration/escalate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const body = req.body as any
+    const orgId = (req as any).user.tenant_id
+    const activityId = await workflowOrchestrationService.coordinateEscalation(fastify.supabase, {
+      org_id:      orgId,
+      entity_id:   body.entity_id,
+      entity_type: body.entity_type ?? 'employee',
+      reason:      body.reason ?? '',
+      escalate_to: body.escalate_to,
+    })
+    return reply.status(201).send({ activity_id: activityId })
+  })
+
+  // POST /fabric/replay — start a replay session
+  fastify.post('/fabric/replay', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const body = req.body as any
+    const orgId = (req as any).user.tenant_id
+    const session = await replayIntelligenceService.replay(fastify.supabase, {
+      org_id:      orgId,
+      entity_id:   body.entity_id,
+      entity_type: body.entity_type ?? 'employee',
+      from:        body.from,
+      to:          body.to,
+      created_by:  (req as any).user.id,
+    })
+    return session
+  })
+
+  // GET /fabric/replay/sessions — list replay sessions
+  fastify.get('/fabric/replay/sessions', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const orgId = (req as any).user.tenant_id
+    const { limit = '20' } = req.query as any
+    const sessions = await replayIntelligenceService.listSessions(fastify.supabase, orgId, Number(limit))
+    return { sessions, total: sessions.length }
+  })
+
+  // GET /fabric/knowledge — search knowledge layer
+  fastify.get('/fabric/knowledge', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+    const { domain, text } = req.query as any
+    const results = knowledgeLayerService.search({ domain, text })
+    return { entries: results, total: results.length }
+  })
+
+  // GET /fabric/knowledge/:key — get specific knowledge entry
+  fastify.get('/fabric/knowledge/:key', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const { key } = req.params as any
+    const entry = knowledgeLayerService.get(key)
+    if (!entry) return reply.status(404).send({ error: 'Knowledge entry not found' })
+    return entry
+  })
+}

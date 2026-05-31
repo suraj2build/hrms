@@ -51,10 +51,18 @@ interface CompOffReq {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string) {
-  return new Date(`${s}T12:00:00Z`).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 function fmtDatetime(s: string) {
-  return new Date(s).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const d = new Date(s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 const PENDING_LEAVE   = (s: string) => s === 'pending'
@@ -133,7 +141,7 @@ function PendingRow({
   status: string
 }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-border/40 last:border-0 gap-3">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between py-2 border-b border-border/40 last:border-0 gap-2 sm:gap-3">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           {left}
@@ -141,7 +149,7 @@ function PendingRow({
         </div>
         <p className="text-[10px] text-muted-foreground mt-0.5">{meta}</p>
       </div>
-      {right && <div className="flex-shrink-0">{right}</div>}
+      {right && <div className="flex-shrink-0 w-full sm:w-auto">{right}</div>}
     </div>
   )
 }
@@ -329,11 +337,11 @@ export function EssApprovals() {
                   {r.category_name ?? 'Claim'} — ₹{r.claimed_amount.toLocaleString('en-IN')}
                 </span>
               }
-              meta={`${new Date(r.claim_month + '-01').toLocaleDateString([], { month: 'long', year: 'numeric' })} · ${fmtDatetime(r.created_at)}`}
+              meta={`${(() => { const d=new Date(r.claim_month.slice(0,7)+'-01T12:00:00Z'); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()} · ${fmtDatetime(r.created_at)}`}
               right={
                 r.status === 'draft' ? (
                   <Link to="/ess/reimbursements">
-                    <Button size="sm" variant="outline" className="h-6 text-[10px] px-2">Submit</Button>
+                    <Button size="sm" variant="outline" className="h-9 w-full sm:w-auto sm:h-6 text-[10px] px-2">Submit</Button>
                   </Link>
                 ) : undefined
               }

@@ -22,6 +22,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 
@@ -86,11 +87,20 @@ function resolutionBadge(resolution: string) {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function fmtDatetime(iso: string) {
-  return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
@@ -172,20 +182,18 @@ export function CollisionLog() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">From</label>
-            <Input
-              type="date"
+            <DateInput
               value={filters.from}
-              onChange={e => setFilters(p => ({ ...p, from: e.target.value }))}
+              onChange={v => setFilters(p => ({ ...p, from: v }))}
               className="h-8 text-xs w-36"
             />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">To</label>
-            <Input
-              type="date"
+            <DateInput
               value={filters.to}
               min={filters.from}
-              onChange={e => setFilters(p => ({ ...p, to: e.target.value }))}
+              onChange={v => setFilters(p => ({ ...p, to: v }))}
               className="h-8 text-xs w-36"
             />
           </div>

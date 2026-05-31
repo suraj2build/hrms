@@ -70,7 +70,10 @@ function statusIcon(status: ChecklistItem['status'], count: number | null) {
 
 function monthLabel(m: string): string {
   const [y, mo] = m.split('-').map(Number)
-  return new Date(y, mo - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' })
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
+  if (isNaN(d.getTime())) return '—'
+  return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function prevMonth(m: string): string {
@@ -190,7 +193,8 @@ export function PayrollReadiness() {
     mutationFn: (action: 'lock' | 'unlock') =>
       api.post(`/attendance/period-locks/${action}`, { month }),
     onSuccess: (_data, action) => {
-      qc.invalidateQueries({ queryKey: ['period-lock'] })
+      // Exact key with month prevents invalidating period-lock entries for other months
+      qc.invalidateQueries({ queryKey: ['period-lock', month], exact: true })
       toast.success(action === 'lock' ? 'Period locked' : 'Period unlocked', {
         description: monthLabel(month),
       })
@@ -211,7 +215,7 @@ export function PayrollReadiness() {
       id:          'period-lock',
       label:       'Period Locked',
       description: isLocked
-        ? `Period locked on ${lockState?.locked_at ? new Date(lockState.locked_at).toLocaleDateString() : '—'}`
+        ? `Period locked on ${lockState?.locked_at ? (() => { const _d = new Date(lockState.locked_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getDate()).padStart(2,'0')}-${_M[_d.getMonth()]}-${_d.getFullYear()}` })() : '—'}`
         : 'Period is not yet locked — employees can still submit requests',
       count:       isLocked ? 0 : 1,
       status:      lockLoading ? 'loading' : isLocked ? 'ok' : 'warning',
@@ -389,7 +393,7 @@ export function PayrollReadiness() {
               {isLocked && lockState?.locked_at && (
                 <div className="text-xs space-y-0.5">
                   <p className="text-muted-foreground">
-                    Locked on {new Date(lockState.locked_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    Locked on {(() => { const _d = new Date(lockState.locked_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getDate()).padStart(2,'0')}-${_M[_d.getMonth()]}-${_d.getFullYear()}` })()}
                   </p>
                 </div>
               )}

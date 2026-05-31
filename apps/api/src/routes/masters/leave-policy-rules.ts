@@ -21,17 +21,22 @@ import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 
 const ruleSchema = z.object({
-  leave_type_id:          z.string().uuid(),
-  accrual_type:           z.enum(['monthly', 'quarterly', 'yearly', 'upfront']).default('yearly'),
-  accrual_days_per_year:  z.number().min(0).max(365),
-  max_accrual_balance:    z.number().min(0).max(365).nullable().optional(),
-  eligibility_days:       z.number().int().min(0).max(3650).default(0),
-  prorate_on_joining:     z.boolean().default(true),
-  carry_forward_enabled:  z.boolean().default(false),
-  carry_forward_max_days: z.number().min(0).max(365).nullable().optional(),
-  expiry_days:            z.number().int().min(1).nullable().optional(),
-  max_consecutive_days:   z.number().int().min(1).nullable().optional(),
-  min_gap_days:           z.number().int().min(0).max(365).default(0),
+  leave_type_id:                z.string().uuid(),
+  accrual_type:                 z.enum(['monthly', 'quarterly', 'yearly', 'upfront']).default('yearly'),
+  accrual_days_per_year:        z.number().min(0).max(365),
+  accrual_timing:               z.enum(['beginning_of_cycle', 'end_of_cycle']).default('beginning_of_cycle'),
+  max_accrual_balance:          z.number().min(0).max(365).nullable().optional(),
+  eligibility_days:             z.number().int().min(0).max(3650).default(0),
+  prorate_on_joining:           z.boolean().default(true),
+  carry_forward_enabled:        z.boolean().default(false),
+  carry_forward_max_days:       z.number().min(0).max(365).nullable().optional(),
+  expiry_days:                  z.number().int().min(1).nullable().optional(),
+  max_consecutive_days:         z.number().int().min(1).nullable().optional(),
+  min_gap_days:                 z.number().int().min(0).max(365).default(0),
+  // Event-triggered grant fields (optional — NULL = regular accrual rule)
+  event_trigger_date_type_id:   z.string().uuid().nullable().optional(),
+  event_grant_days:             z.number().min(0.5).max(30).nullable().optional(),
+  event_validity_days:          z.number().int().min(0).max(365).nullable().optional(),
 })
 
 export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
@@ -75,10 +80,11 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
       .from('leave_policy_rules')
       .select(`
         id, policy_id, leave_type_id,
-        accrual_type, accrual_days_per_year, max_accrual_balance,
+        accrual_type, accrual_days_per_year, accrual_timing, max_accrual_balance,
         eligibility_days, prorate_on_joining,
         carry_forward_enabled, carry_forward_max_days,
         expiry_days, max_consecutive_days, min_gap_days,
+        event_trigger_date_type_id, event_grant_days, event_validity_days,
         created_at, updated_at,
         leave_types(id, name, is_paid, is_active)
       `)
@@ -133,10 +139,11 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
       })
       .select(`
         id, policy_id, leave_type_id,
-        accrual_type, accrual_days_per_year, max_accrual_balance,
+        accrual_type, accrual_days_per_year, accrual_timing, max_accrual_balance,
         eligibility_days, prorate_on_joining,
         carry_forward_enabled, carry_forward_max_days,
         expiry_days, max_consecutive_days, min_gap_days,
+        event_trigger_date_type_id, event_grant_days, event_validity_days,
         created_at
       `)
       .single()
@@ -224,10 +231,11 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
       .eq('tenant_id', req.tenantId)
       .select(`
         id, policy_id, leave_type_id,
-        accrual_type, accrual_days_per_year, max_accrual_balance,
+        accrual_type, accrual_days_per_year, accrual_timing, max_accrual_balance,
         eligibility_days, prorate_on_joining,
         carry_forward_enabled, carry_forward_max_days,
         expiry_days, max_consecutive_days, min_gap_days,
+        event_trigger_date_type_id, event_grant_days, event_validity_days,
         updated_at
       `)
       .single()

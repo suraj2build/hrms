@@ -1,100 +1,134 @@
 /**
- * AdminShellV2 — Modern enterprise admin workspace shell.
+ * AdminShellV2 — Enterprise HRMS admin shell.
  *
  * Layout:
- *   ┌──────────────────────────────────────────────────────────────────┐
- *   │  TopNavV2  (h-14, full width, horizontal domain tabs)            │
- *   ├──────────────────────┬────────────────────────────┬─────────────┤
- *   │ ContextualSidebar    │   Page Content (<Outlet />) │ RightRail   │
- *   │ (200px | 52px)       │   overflow-y-auto           │ (240px)     │
- *   │ Domain-contextual    │                             │ priorities, │
- *   │ sub-nav              │                             │ deadlines,  │
- *   │                      │                             │ health,     │
- *   │                      │                             │ links       │
- *   └──────────────────────┴────────────────────────────┴─────────────┘
+ *   ┌─────────────────────────────────────────────────────────────────────┐
+ *   │  TopNavV2  (enterprise top nav with 8 domain tabs, full width)      │
+ *   ├──────────────────────────────────────────────────────────────────── │
+ *   │  PreviewBanner / OperationalBanner / PayrollDeadlineBanner          │
+ *   ├────────────────────────┬────────────────────────────────────────── │
+ *   │  ContextualSidebar     │  Page Content (<Outlet />)                 │
+ *   │  (200px / 52px icon)   │  fullscreen canvas                         │
+ *   └────────────────────────┴───────────────────────────────────────────┘
  *
  * Auth guard: super_admin, hr_admin, manager allowed.
  * Employees are redirected to /ess/dashboard.
- *
- * Preserved from AdminShell:
- *   · CommandPaletteProvider context
- *   · EventToast
- *   · PreviewBanner
- *   · OperationalBanner
  */
 
 import { Outlet, Navigate } from 'react-router-dom'
+import { Suspense, useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useAuthStore }           from '@/stores/authStore'
 import type { UserRole }          from '@/types'
 import { EventToast }             from '@/components/notifications'
 import { CommandPaletteProvider } from '@/components/operational/CommandPalette'
 import { OperationalBanner }      from '@/components/operational/OperationalBanner'
+import { PayrollDeadlineBanner }  from '@/components/operational/PayrollDeadlineBanner'
 import { PreviewBanner }          from '@/components/layout/PreviewBanner'
-import { TopNavV2 }               from './v2/TopNavV2'
-import { ContextualSidebar }      from './v2/ContextualSidebar'
-import { RightRail }              from './v2/RightRail'
+import { TopNavV2 }          from './v2/TopNavV2'
+import { ContextualSidebar } from './v2/ContextualSidebar'
+import { UniversalSearch }            from '@/components/search/UniversalSearch'
+import { OperationalContextProvider } from '@/contexts/OperationalContext'
+import { PayrollDeadlineProvider }    from '@/contexts/PayrollDeadlineContext'
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Page-level loading fallback ────────────────────────────────────────────────
 
-const ADMIN_ROLES: UserRole[] = ['super_admin', 'hr_admin', 'manager']
+function ShellPageLoader() {
+  return (
+    <div className="flex h-[60vh] items-center justify-center">
+      <div className="h-7 w-7 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+    </div>
+  )
+}
 
-// ── Loading screen ────────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+const ADMIN_ROLES: UserRole[] = ['super_admin', 'hr_admin']
+
+// ── Loading screen ─────────────────────────────────────────────────────────────
 
 function LoadingScreen() {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+        <p className="text-sm text-slate-500">Loading…</p>
       </div>
     </div>
   )
 }
 
-// ── AdminShellV2 ──────────────────────────────────────────────────────────────
+// ── AdminShellV2 ───────────────────────────────────────────────────────────────
 
 export function AdminShellV2() {
-  const { profile, isLoading } = useAuthStore()
+  const { profile, isBootstrapping } = useAuthStore()
+  const [searchOpen, setSearchOpen] = useState(false)
 
-  if (isLoading) return <LoadingScreen />
+  // ⌘K / Ctrl+K global shortcut → open universal search
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setSearchOpen(prev => !prev)
+      }
+      if (e.key === 'Escape') {
+        setSearchOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
-  // Not authenticated → login
-  if (!profile) return <Navigate to="/login" replace />
+  if (isBootstrapping) return <LoadingScreen />
+  if (!profile)        return <Navigate to="/login" replace />
 
-  // Wrong role → redirect to ESS portal
+  // Pure manager role → dedicated manager console (not admin portal).
+  // hr_admin / super_admin using RoleSwitcher to preview a manager identity
+  // still have profile.role = 'hr_admin'/'super_admin', so they pass through normally.
+  if (profile.role === 'manager') {
+    return <Navigate to="/manager/dashboard" replace />
+  }
+
   if (!ADMIN_ROLES.includes(profile.role)) {
     return <Navigate to="/ess/dashboard" replace />
   }
 
   return (
+    <PayrollDeadlineProvider>
+    <OperationalContextProvider>
     <CommandPaletteProvider>
       <div className="flex flex-col h-screen overflow-hidden bg-background">
 
-        {/* ── Horizontal top nav ──────────────────────────────────── */}
-        <TopNavV2 />
+        {/* ── Thin operational header ──────────────────────────────── */}
+        <TopNavV2 onSearchOpen={() => setSearchOpen(true)} />
 
-        {/* ── Preview + Operational banners (below topnav) ─────────── */}
+        {/* ── System banners (below header) ────────────────────────── */}
         <PreviewBanner />
         <OperationalBanner />
+        <PayrollDeadlineBanner />
 
-        {/* ── Body: sidebar + content ─────────────────────────────── */}
+        {/* ── Body: contextual sidebar + canvas ────────────────────── */}
         <div className="flex flex-1 overflow-hidden">
 
-          {/* Contextual left sidebar */}
+          {/* Contextual sidebar — 200px expanded / 52px icon-only */}
           <ContextualSidebar />
 
-          {/* Page workspace */}
-          <main className="flex-1 overflow-y-auto p-6 bg-background">
+          {/* Fullscreen page canvas */}
+          <main className="flex-1 overflow-y-auto bg-background op-canvas">
             <EventToast />
-            <Outlet />
+            <Suspense fallback={<ShellPageLoader />}>
+              <Outlet />
+            </Suspense>
           </main>
 
-          {/* Contextual right rail (operations panel) */}
-          <RightRail />
-
         </div>
+
+        {/* ── Global floating overlays ──────────────────────────────── */}
+        <UniversalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+
       </div>
     </CommandPaletteProvider>
+    </OperationalContextProvider>
+    </PayrollDeadlineProvider>
   )
 }

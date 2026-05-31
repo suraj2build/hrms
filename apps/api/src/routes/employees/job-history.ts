@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const createJobHistorySchema = z.object({
   department_id:     z.string().uuid().optional(),
@@ -22,19 +23,41 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
   return !!data
 }
 
+/** Resolves caller employee_id from profiles (tenant-scoped). */
+async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
+  const { data } = await fastify.supabase
+    .from('profiles')
+    .select('employee_id')
+    .eq('id', userId)
+    .eq('tenant_id', tenantId)
+    .single()
+  return data?.employee_id ?? null
+}
+
 export default async function jobHistoryRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // GET /employees/:id/job-info  → current job (latest is_current = true)
+  // Employees may only view their own; HR admins see all.
   fastify.get('/employees/:id/job-info', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    if (!isHrAdmin) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+      if (!callerEmpId || callerEmpId !== req.params.id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own job info' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('job_history')
       .select(`
         *,
         departments(id, name, code),
-        designations(id, name, level),
+        designations(id, name),
         grades(id, name, code),
         work_locations(id, name, city),
         cost_centers(id, name, code),
@@ -51,9 +74,19 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
   })
 
   // GET /employees/:id/job-history  → full history
+  // Employees may only view their own; HR admins see all.
   fastify.get('/employees/:id/job-history', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    if (!isHrAdmin) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+      if (!callerEmpId || callerEmpId !== req.params.id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own job history' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('job_history')
       .select(`
@@ -74,7 +107,8 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
   })
 
   // POST /employees/:id/job-history  → new job entry (trigger auto-closes previous)
-  fastify.post('/employees/:id/job-history', auth, async (req: any, reply) => {
+  // HR admin only — creating job history entries changes reporting structures.
+  fastify.post('/employees/:id/job-history', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = createJobHistorySchema.safeParse(req.body)
@@ -115,8 +149,8 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  // DELETE /employees/:id/job-history/:rowId
-  fastify.delete('/employees/:id/job-history/:rowId', auth, async (req: any, reply) => {
+  // DELETE /employees/:id/job-history/:rowId — HR admin only
+  fastify.delete('/employees/:id/job-history/:rowId', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { error } = await fastify.supabase

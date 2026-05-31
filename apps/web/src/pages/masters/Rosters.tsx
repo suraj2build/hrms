@@ -1,7 +1,7 @@
 import { useState }                               from 'react'
 import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient }  from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, CalendarDays }     from 'lucide-react'
+import { Plus, Pencil, Trash2, CalendarDays, Loader2 } from 'lucide-react'
 import { PageContainer }                          from '@/components/layout/PageContainer'
 import { PageHeader }                             from '@/components/layout/PageHeader'
 import { SectionCard }                            from '@/components/layout/SectionCard'
@@ -125,16 +125,22 @@ export function Rosters() {
 
       <SectionCard title="All Templates" icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />}>
         {isLoading ? (
-          <div className="text-xs text-muted-foreground animate-pulse py-6 text-center">Loading…</div>
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading…</span>
+          </div>
         ) : rosters.length === 0 ? (
-          <div className="text-xs text-muted-foreground py-6 text-center">No rosters configured yet.</div>
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+            <CalendarDays className="h-10 w-10 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No rosters configured yet.</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border">
+                <tr className="border-b border-border bg-muted/30">
                   {['Name', 'Code', 'Cycle', 'Weekly Off', ''].map((h) => (
-                    <th key={h} className="text-left text-xs text-muted-foreground font-semibold px-3 py-2">{h}</th>
+                    <th key={h} className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2.5">{h}</th>
                   ))}
                 </tr>
               </thead>

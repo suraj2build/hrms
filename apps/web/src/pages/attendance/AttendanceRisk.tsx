@@ -55,7 +55,12 @@ interface RiskSummary {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDatetime(iso: string): string {
-  return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function currentPeriod(): string {
@@ -129,14 +134,14 @@ export function AttendanceRisk() {
 
   const { data: listData, isLoading: listLoading, refetch: refetchList } = useQuery<{ data: RiskProfile[] }>({
     queryKey: ['risk-list', loadedPeriod],
-    queryFn:  () => api.get(`/attendance/risk/list?period=${loadedPeriod}&limit=50`),
+    queryFn:  () => api.get(`/attendance/risk?period_end=${loadedPeriod}&limit=50`),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
 
   const { data: summaryData, refetch: refetchSummary } = useQuery<{ data: RiskSummary }>({
     queryKey: ['risk-summary', loadedPeriod],
-    queryFn:  () => api.get(`/attendance/risk/summary?period=${loadedPeriod}`),
+    queryFn:  () => api.get(`/attendance/risk/summary?period_end=${loadedPeriod}`),
     enabled:  isAdmin,
     staleTime: 60_000,
   })

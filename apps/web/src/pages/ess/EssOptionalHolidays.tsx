@@ -43,9 +43,11 @@ interface OptionalHolidaysResponse {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDate(dateStr: string) {
-  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString([], {
-    weekday: 'short', day: '2-digit', month: 'long',
-  })
+  const d = new Date(dateStr + 'T12:00:00Z')
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const W = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  if (isNaN(d.getTime())) return '—'
+  return `${W[d.getUTCDay()]}, ${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 
 function getDayOfWeek(dateStr: string): string {

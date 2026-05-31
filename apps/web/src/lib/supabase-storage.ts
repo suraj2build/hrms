@@ -48,6 +48,27 @@ export async function uploadEmployeeFile(
 }
 
 /**
+ * Upload a company logo to the employee-files bucket.
+ * Path: {tenantId}/company/logo.{ext}
+ * Uses upsert so re-uploading replaces the previous logo.
+ * Returns the storage path — call getSignedUrl(path) to display it.
+ */
+export async function uploadCompanyLogo(
+  tenantId: string,
+  file:     File,
+): Promise<string> {
+  const ext  = file.name.split('.').pop()?.toLowerCase() ?? 'png'
+  const path = `${tenantId}/company/logo.${ext}`
+
+  const { error } = await storageClient.storage
+    .from(BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: true })
+
+  if (error) throw new Error(`Logo upload failed: ${error.message}`)
+  return path
+}
+
+/**
  * Generate a short-lived signed URL for a stored file.
  * Default expiry: 1 hour (3600 s).
  */

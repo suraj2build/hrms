@@ -65,7 +65,7 @@ export interface PolicyRule {
    *   'default'       — the default named policy
    *   'legacy'        — leave_policies (pre-engine) table
    */
-  source: 'employee' | 'department' | 'work_location' | 'default' | 'legacy'
+  source: 'employee_override' | 'employee' | 'department' | 'work_location' | 'site' | 'site_default' | 'default' | 'legacy'
 
   // ── Step 1 additions ──────────────────────────────────────────────────────
   /** UUID of the leave_policy_assignments row that provided this rule.
@@ -136,10 +136,14 @@ interface DbLegacyPolicy {
 // ── Employee job context (one DB query shared across resolvers) ────────────────
 
 interface EmployeeJobContext {
-  department_id:       string | null
-  work_location_id:    string | null
-  joining_date:        string | null   // Step 4 — for tenure check
-  employment_type:     string | null   // Step 4 — for employment-type check
+  department_id:              string | null
+  work_location_id:           string | null
+  joining_date:               string | null   // Step 4 — for tenure check
+  employment_type:            string | null   // Step 4 — for employment-type check
+  // Leave Governance (migration 156)
+  site_id:                    string | null   // employee's site — used for 'site' scope assignment
+  leave_policy_override_id:   string | null   // employees.leave_policy_override_id — highest priority
+  site_default_leave_policy_id: string | null // sites.default_leave_policy_id — FK fallback
 }
 
 // ── Published policy ID set (governance gate) ─────────────────────────────────
@@ -174,19 +178,37 @@ async function fetchJobContext(
     .eq('is_current',  true)
     .maybeSingle()
 
-  // Fetch joining_date from employees table for tenure calculation
+  // Fetch joining_date, site_id, and leave_policy_override_id from employees.
+  // Also join to sites to get the site's default_leave_policy_id.
   const { data: emp } = await supabase
     .from('employees')
-    .select('joining_date')
+    .select(`
+      joining_date,
+      site_id,
+      leave_policy_override_id,
+      sites!employees_site_id_fkey (
+        default_leave_policy_id
+      )
+    `)
     .eq('tenant_id', tenantId)
     .eq('id',        employeeId)
     .maybeSingle()
 
+  const empRow = emp as unknown as {
+    joining_date:             string | null
+    site_id:                  string | null
+    leave_policy_override_id: string | null
+    sites: { default_leave_policy_id: string | null } | null
+  } | null
+
   return {
-    department_id:    (job as any)?.department_id    ?? null,
-    work_location_id: (job as any)?.work_location_id ?? null,
-    employment_type:  (job as any)?.employment_type  ?? null,
-    joining_date:     (emp as any)?.joining_date     ?? null,
+    department_id:               (job as any)?.department_id    ?? null,
+    work_location_id:            (job as any)?.work_location_id ?? null,
+    employment_type:             (job as any)?.employment_type  ?? null,
+    joining_date:                empRow?.joining_date            ?? null,
+    site_id:                     empRow?.site_id                 ?? null,
+    leave_policy_override_id:    empRow?.leave_policy_override_id ?? null,
+    site_default_leave_policy_id: empRow?.sites?.default_leave_policy_id ?? null,
   }
 }
 
@@ -238,6 +260,20 @@ async function resolveAssignment(
   publishedPolicyIds?: Set<string>,
 ): Promise<ResolvedAssignment | null> {
 
+  // ── Priority 0: employees.leave_policy_override_id (highest, direct FK) ──────
+  // Bypasses the entire assignment lookup when set.
+  if (ctx.leave_policy_override_id) {
+    if (!publishedPolicyIds || publishedPolicyIds.has(ctx.leave_policy_override_id)) {
+      return {
+        policy_id:     ctx.leave_policy_override_id,
+        source:        'employee_override',
+        priority:      0,
+        assignment_id: 'direct_fk',   // synthetic — not an assignment row
+        scope_id:      employeeId,
+      }
+    }
+  }
+
   // Collect all relevant scope candidates (highest priority first)
   const candidates: Array<{
     scope_type: string
@@ -247,7 +283,9 @@ async function resolveAssignment(
     { scope_type: 'employee',      scope_id: employeeId,          priority: 1 },
     ...(ctx.department_id    ? [{ scope_type: 'department',    scope_id: ctx.department_id,    priority: 2 }] : []),
     ...(ctx.work_location_id ? [{ scope_type: 'work_location', scope_id: ctx.work_location_id, priority: 3 }] : []),
-    { scope_type: 'default',       scope_id: null,                priority: 4 },
+    // ── NEW (migration 156): site-level assignment ───────────────────────────
+    ...(ctx.site_id ? [{ scope_type: 'site', scope_id: ctx.site_id, priority: 4 }] : []),
+    { scope_type: 'default',       scope_id: null,                priority: 5 },
   ]
 
   // Fetch all assignments for this tenant that match any candidate scope_type.
@@ -258,43 +296,59 @@ async function resolveAssignment(
     .eq('tenant_id', tenantId)
     .in('scope_type', candidates.map(c => c.scope_type))
 
-  if (error || !assignments?.length) return null
-
   // Filter by effective date window (Step 2), then score by priority
   let best: ResolvedAssignment | null = null
 
-  for (const row of assignments as Array<{
-    id: string
-    policy_id: string
-    scope_type: string
-    scope_id: string | null
-    effective_from: string | null
-    effective_to: string | null
-  }>) {
-    // Step 2 — Skip assignments outside their effective window
-    if (!isActiveOn(row.effective_from, row.effective_to, asOf)) continue
+  if (!error && assignments?.length) {
+    for (const row of assignments as Array<{
+      id: string
+      policy_id: string
+      scope_type: string
+      scope_id: string | null
+      effective_from: string | null
+      effective_to: string | null
+    }>) {
+      // Step 2 — Skip assignments outside their effective window
+      if (!isActiveOn(row.effective_from, row.effective_to, asOf)) continue
 
-    // Governance gate — skip assignments pointing to non-published policies
-    if (publishedPolicyIds && !publishedPolicyIds.has(row.policy_id)) continue
+      // Governance gate — skip assignments pointing to non-published policies
+      if (publishedPolicyIds && !publishedPolicyIds.has(row.policy_id)) continue
 
-    // Match against our pre-built candidate list
-    const match = candidates.find(
-      c => c.scope_type === row.scope_type && c.scope_id === row.scope_id,
-    )
-    if (!match) continue
+      // Match against our pre-built candidate list
+      const match = candidates.find(
+        c => c.scope_type === row.scope_type && c.scope_id === row.scope_id,
+      )
+      if (!match) continue
 
-    if (!best || match.priority < best.priority) {
-      best = {
-        policy_id:     row.policy_id,
-        source:        row.scope_type as PolicyRule['source'],
-        priority:      match.priority,
-        assignment_id: row.id,
-        scope_id:      row.scope_id,
+      if (!best || match.priority < best.priority) {
+        best = {
+          policy_id:     row.policy_id,
+          source:        row.scope_type as PolicyRule['source'],
+          priority:      match.priority,
+          assignment_id: row.id,
+          scope_id:      row.scope_id,
+        }
       }
     }
   }
 
-  return best
+  if (best) return best
+
+  // ── Priority 6: sites.default_leave_policy_id (FK fallback) ─────────────────
+  // Used when no assignment-based match was found for this employee's site.
+  if (ctx.site_default_leave_policy_id) {
+    if (!publishedPolicyIds || publishedPolicyIds.has(ctx.site_default_leave_policy_id)) {
+      return {
+        policy_id:     ctx.site_default_leave_policy_id,
+        source:        'site_default',
+        priority:      6,
+        assignment_id: 'site_fk',   // synthetic — not an assignment row
+        scope_id:      ctx.site_id,
+      }
+    }
+  }
+
+  return null
 }
 
 // ── Policy rule loader ─────────────────────────────────────────────────────────
@@ -695,10 +749,13 @@ export async function resolveEffectivePolicyForEmployee(
     scope_id:   string | null
     priority:   number
   }> = [
+    ...(ctx.leave_policy_override_id ? [{ scope_type: 'employee_override', scope_id: employeeId, priority: 0 }] : []),
     { scope_type: 'employee',      scope_id: employeeId,          priority: 1 },
     ...(ctx.department_id    ? [{ scope_type: 'department',    scope_id: ctx.department_id,    priority: 2 }] : []),
     ...(ctx.work_location_id ? [{ scope_type: 'work_location', scope_id: ctx.work_location_id, priority: 3 }] : []),
-    { scope_type: 'default',       scope_id: null,                priority: 4 },
+    ...(ctx.site_id          ? [{ scope_type: 'site',          scope_id: ctx.site_id,          priority: 4 }] : []),
+    { scope_type: 'default',       scope_id: null,                priority: 5 },
+    ...(ctx.site_default_leave_policy_id ? [{ scope_type: 'site_default', scope_id: ctx.site_id, priority: 6 }] : []),
   ]
 
   // Fetch assignments to build debug output independently of assignment resolution

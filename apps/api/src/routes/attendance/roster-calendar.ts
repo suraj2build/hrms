@@ -1,0 +1,519 @@
+/**
+ * roster-calendar.ts — Advanced Roster & Weekly-Off Engine API
+ *
+ * Endpoints:
+ *   GET  /roster-calendar/:employeeId               — single-employee month calendar
+ *   POST /roster-calendar/bulk                      — multi-employee month calendar
+ *   GET  /roster-weekly-off-rules?rosterId=          — list rules for a roster
+ *   POST /roster-weekly-off-rules                   — create a rule
+ *   PUT  /roster-weekly-off-rules/:id               — update a rule
+ *   DELETE /roster-weekly-off-rules/:id             — delete a rule
+ *   GET  /shift-segments?shiftId=                   — list segments for a shift
+ *   POST /shift-segments                            — create a segment
+ *   PUT  /shift-segments/:id                        — update a segment
+ *   DELETE /shift-segments/:id                      — delete a segment
+ *   GET  /roster-rotation-groups                    — list rotation groups
+ *   POST /roster-rotation-groups                    — create rotation group
+ *   PUT  /roster-rotation-groups/:id                — update rotation group
+ *   GET  /roster-rotation-members?groupId=          — list members of a group
+ *   POST /roster-rotation-members                   — add member to group
+ *   DELETE /roster-rotation-members/:id             — remove member
+ *   GET  /roster-holiday-groups                     — list holiday groups
+ *   POST /roster-holiday-groups                     — create holiday group
+ *   PUT  /roster-holiday-groups/:id                 — update holiday group
+ *   GET  /roster-simulation/coverage?month=         — coverage analytics
+ */
+
+import type { FastifyInstance } from 'fastify'
+import {
+  buildEmployeeRosterCalendar,
+  resolveRosterDay,
+  checkFatigueRisk,
+  resolveShiftExpectation,
+  countRosterWorkingDays,
+  explainRosterDay,
+  validateRosterCalendar,
+  generateTestDataset,
+} from '../../lib/roster-calendar-engine.js'
+
+// ── Auth helper ───────────────────────────────────────────────────────────────
+
+function hrAdminAuth(req: any, reply: any, done: () => void) {
+  if (!req.userId) return reply.code(401).send({ error: 'Unauthorized' })
+  const role = req.userRole ?? ''
+  if (!['super_admin', 'hr_admin'].includes(role)) {
+    return reply.code(403).send({ error: 'HR admin access required' })
+  }
+  done()
+}
+
+// ── Plugin ────────────────────────────────────────────────────────────────────
+
+export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
+  const { supabase } = fastify as any
+
+  // ── Roster Calendar — per-employee ────────────────────────────────────────
+
+  fastify.get('/roster-calendar/:employeeId', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { employeeId }   = req.params as { employeeId: string }
+    const { month, detail } = req.query as { month?: string; detail?: string }
+    const tenantId          = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return reply.code(400).send({ error: 'month query param required (YYYY-MM)' })
+    }
+
+    const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, employeeId, month)
+
+    // Summary stats
+    const workingDays  = calendar.filter(d => d.is_working_day).length
+    const weeklyOffs   = calendar.filter(d => d.is_weekly_off).length
+    const holidays     = calendar.filter(d => d.is_holiday).length
+    const altSatOffs   = calendar.filter(d => d.is_alternate_saturday_off).length
+    const fatigueRisks = calendar.filter(d => d.fatigue_risk).length
+
+    return reply.send({
+      data: {
+        employee_id: employeeId,
+        month,
+        summary: { working_days: workingDays, weekly_offs: weeklyOffs, holidays, alt_sat_offs: altSatOffs, fatigue_risks: fatigueRisks },
+        days: detail === 'false' ? undefined : calendar,
+      },
+    })
+  })
+
+  // ── Roster Calendar — bulk (multiple employees) ───────────────────────────
+
+  fastify.post('/roster-calendar/bulk', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { employee_ids, month } = req.body as { employee_ids: string[]; month: string }
+    const tenantId                = req.tenantId as string
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return reply.code(400).send({ error: 'month required (YYYY-MM)' })
+    }
+    if (!Array.isArray(employee_ids) || !employee_ids.length) {
+      return reply.code(400).send({ error: 'employee_ids array required' })
+    }
+    if (employee_ids.length > 50) {
+      return reply.code(400).send({ error: 'Maximum 50 employees per bulk request' })
+    }
+
+    const results = await Promise.all(
+      employee_ids.map(async id => {
+        const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, id, month)
+        return {
+          employee_id:  id,
+          working_days: calendar.filter(d => d.is_working_day).length,
+          weekly_offs:  calendar.filter(d => d.is_weekly_off).length,
+          holidays:     calendar.filter(d => d.is_holiday).length,
+          alt_sat_offs: calendar.filter(d => d.is_alternate_saturday_off).length,
+          fatigue_days: calendar.filter(d => d.fatigue_risk).length,
+          days:         calendar,
+        }
+      })
+    )
+
+    return reply.send({ data: results, month })
+  })
+
+  // ── Single-day resolution ─────────────────────────────────────────────────
+
+  fastify.get('/roster-calendar/:employeeId/:date', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { employeeId, date } = req.params as { employeeId: string; date: string }
+    const tenantId             = req.tenantId as string
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return reply.code(400).send({ error: 'date must be YYYY-MM-DD' })
+    }
+
+    const [day, expectation, fatigue] = await Promise.all([
+      resolveRosterDay(supabase, tenantId, employeeId, date),
+      resolveShiftExpectation(supabase, tenantId, employeeId, date),
+      checkFatigueRisk(supabase, tenantId, employeeId, date, null),
+    ])
+
+    return reply.send({ data: { ...day, shift_expectation: expectation, fatigue_detail: fatigue } })
+  })
+
+  // ── Working-day count (payroll) ───────────────────────────────────────────
+
+  fastify.get('/roster-calendar/:employeeId/working-days', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { employeeId } = req.params as { employeeId: string }
+    const { month }      = req.query  as { month?: string }
+    const tenantId       = req.tenantId as string
+
+    if (!month) return reply.code(400).send({ error: 'month required' })
+    const count = await countRosterWorkingDays(supabase, tenantId, employeeId, month)
+    return reply.send({ data: { employee_id: employeeId, month, working_days: count } })
+  })
+
+  // ── Weekly-Off Rules CRUD ─────────────────────────────────────────────────
+
+  fastify.get('/roster-weekly-off-rules', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { rosterId } = req.query as { rosterId?: string }
+    const tenantId     = req.tenantId as string
+
+    let q = supabase.from('roster_weekly_off_rules').select('*').eq('tenant_id', tenantId)
+    if (rosterId) q = q.eq('roster_id', rosterId)
+    q = q.order('priority', { ascending: false }).order('effective_from')
+
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  fastify.post('/roster-weekly-off-rules', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_weekly_off_rules')
+      .insert({ ...body, tenant_id: tenantId })
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.put('/roster-weekly-off-rules/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_weekly_off_rules')
+      .update(body)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    if (!data) return reply.code(404).send({ error: 'Rule not found' })
+    return reply.send({ data })
+  })
+
+  fastify.delete('/roster-weekly-off-rules/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { error } = await supabase
+      .from('roster_weekly_off_rules')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(204).send()
+  })
+
+  // ── Shift Segments CRUD ───────────────────────────────────────────────────
+
+  fastify.get('/shift-segments', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { shiftId } = req.query as { shiftId?: string }
+    const tenantId    = req.tenantId as string
+
+    let q = supabase.from('shift_segments').select('*').eq('tenant_id', tenantId)
+    if (shiftId) q = q.eq('shift_id', shiftId)
+    q = q.order('shift_id').order('segment_order')
+
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  fastify.post('/shift-segments', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('shift_segments')
+      .insert({ ...body, tenant_id: tenantId })
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.put('/shift-segments/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('shift_segments')
+      .update(body)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    if (!data) return reply.code(404).send({ error: 'Segment not found' })
+    return reply.send({ data })
+  })
+
+  fastify.delete('/shift-segments/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { error } = await supabase
+      .from('shift_segments')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(204).send()
+  })
+
+  // ── Rotation Groups CRUD ──────────────────────────────────────────────────
+
+  fastify.get('/roster-rotation-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    const { data, error } = await supabase
+      .from('roster_rotation_groups')
+      .select('*, members:roster_rotation_members(id, employee_id, cohort_index, effective_from, effective_to)')
+      .eq('tenant_id', tenantId)
+      .order('name')
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  fastify.post('/roster-rotation-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_rotation_groups')
+      .insert({ ...body, tenant_id: tenantId })
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.put('/roster-rotation-groups/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_rotation_groups')
+      .update(body)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    if (!data) return reply.code(404).send({ error: 'Rotation group not found' })
+    return reply.send({ data })
+  })
+
+  // ── Rotation Members CRUD ─────────────────────────────────────────────────
+
+  fastify.get('/roster-rotation-members', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { groupId } = req.query as { groupId?: string }
+    const tenantId    = req.tenantId as string
+
+    let q = supabase
+      .from('roster_rotation_members')
+      .select('*, employee:employees(id, employee_code, first_name, last_name)')
+      .eq('tenant_id', tenantId)
+
+    if (groupId) q = q.eq('rotation_group_id', groupId)
+    q = q.order('cohort_index').order('effective_from')
+
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  fastify.post('/roster-rotation-members', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_rotation_members')
+      .insert({ ...body, tenant_id: tenantId })
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.delete('/roster-rotation-members/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { error } = await supabase
+      .from('roster_rotation_members')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(204).send()
+  })
+
+  // ── Holiday Groups CRUD ───────────────────────────────────────────────────
+
+  fastify.get('/roster-holiday-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    const { data, error } = await supabase
+      .from('roster_holiday_groups')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('name')
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data })
+  })
+
+  fastify.post('/roster-holiday-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_holiday_groups')
+      .insert({ ...body, tenant_id: tenantId })
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.put('/roster-holiday-groups/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { id }   = req.params as { id: string }
+    const tenantId = req.tenantId as string
+    const body     = req.body as Record<string, unknown>
+
+    const { data, error } = await supabase
+      .from('roster_holiday_groups')
+      .update(body)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select()
+      .single()
+
+    if (error) return reply.code(400).send({ error: error.message })
+    if (!data) return reply.code(404).send({ error: 'Holiday group not found' })
+    return reply.send({ data })
+  })
+
+  // ── Explain — full resolution chain for a single employee/date ───────────
+
+  fastify.get('/roster-simulation/explain', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { employeeId, date } = req.query as { employeeId?: string; date?: string }
+    const tenantId             = req.tenantId as string
+
+    if (!employeeId) return reply.code(400).send({ error: 'employeeId query param required' })
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return reply.code(400).send({ error: 'date query param required (YYYY-MM-DD)' })
+    }
+
+    const explanation = await explainRosterDay(supabase, tenantId, employeeId, date)
+    return reply.send({ data: explanation })
+  })
+
+  // ── Validate — check a month calendar for logical issues ─────────────────
+
+  fastify.get('/roster-simulation/validate', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { employeeId, month } = req.query as { employeeId?: string; month?: string }
+    const tenantId              = req.tenantId as string
+
+    if (!employeeId) return reply.code(400).send({ error: 'employeeId query param required' })
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return reply.code(400).send({ error: 'month query param required (YYYY-MM)' })
+    }
+
+    const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, employeeId, month)
+    const issues   = validateRosterCalendar(calendar)
+
+    return reply.send({
+      data: {
+        employee_id:   employeeId,
+        month,
+        total_days:    calendar.length,
+        issue_count:   issues.length,
+        errors:        issues.filter(i => i.severity === 'error').length,
+        warnings:      issues.filter(i => i.severity === 'warning').length,
+        issues,
+        is_valid:      issues.filter(i => i.severity === 'error').length === 0,
+      },
+    })
+  })
+
+  // ── Test Dataset — return 8 edge-case scenarios for QA seeding ───────────
+
+  fastify.get('/roster-simulation/test-dataset', { preHandler: hrAdminAuth }, async (_req, reply) => {
+    return reply.send({ data: generateTestDataset() })
+  })
+
+  // ── Coverage Analytics ────────────────────────────────────────────────────
+
+  fastify.get('/roster-simulation/coverage', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    const { month, rosterIds } = req.query as { month?: string; rosterIds?: string }
+    const tenantId             = req.tenantId as string
+
+    if (!month) return reply.code(400).send({ error: 'month required (YYYY-MM)' })
+
+    // Fetch all employees (optionally filtered by roster)
+    let empQ = supabase
+      .from('employees')
+      .select('id, first_name, last_name, roster_id, site_id')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+
+    if (rosterIds) {
+      empQ = empQ.in('roster_id', rosterIds.split(','))
+    }
+
+    const { data: employees, error: empErr } = await empQ.limit(200)
+    if (empErr) return reply.code(500).send({ error: empErr.message })
+
+    // Build calendars for all employees (parallel, batched)
+    const BATCH = 10
+    const allCalendars: Array<{ employee_id: string; working_days: number; weekly_offs: number; alt_sat_offs: number; fatigue_days: number }> = []
+
+    for (let i = 0; i < (employees ?? []).length; i += BATCH) {
+      const batch = (employees ?? []).slice(i, i + BATCH)
+      const results = await Promise.all(
+        batch.map(async (emp: Record<string, string>) => {
+          const cal = await buildEmployeeRosterCalendar(supabase, tenantId, emp.id, month)
+          return {
+            employee_id:  emp.id,
+            working_days: cal.filter(d => d.is_working_day).length,
+            weekly_offs:  cal.filter(d => d.is_weekly_off).length,
+            alt_sat_offs: cal.filter(d => d.is_alternate_saturday_off).length,
+            fatigue_days: cal.filter(d => d.fatigue_risk).length,
+          }
+        })
+      )
+      allCalendars.push(...results)
+    }
+
+    const totalWorking = allCalendars.reduce((s, c) => s + c.working_days, 0)
+    const avgWorking   = allCalendars.length ? (totalWorking / allCalendars.length).toFixed(1) : 0
+    const fatigueCount = allCalendars.filter(c => c.fatigue_days > 0).length
+
+    return reply.send({
+      data: {
+        month,
+        employee_count:     allCalendars.length,
+        avg_working_days:   Number(avgWorking),
+        total_fatigue_risk: fatigueCount,
+        by_employee:        allCalendars,
+      },
+    })
+  })
+}

@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { eventBus } from '../../lib/event-bus.js'
+import { recomputeRange } from '../../lib/attendance-engine.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -20,7 +21,7 @@ const hrQuerySchema = z.object({
   from:        z.string().regex(dateRe).optional(),
   to:          z.string().regex(dateRe).optional(),
   employee_id: z.string().uuid().optional(),
-  type:        z.enum(['missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
+  type:        z.enum(['missing_punch', 'missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
   severity:    z.enum(['low', 'medium', 'high']).optional(),
   resolved:    z.enum(['true', 'false']).optional(),
   limit:       z.coerce.number().int().min(1).max(200).default(100),
@@ -30,7 +31,7 @@ const hrQuerySchema = z.object({
 const myQuerySchema = z.object({
   from:   z.string().regex(dateRe).optional(),
   to:     z.string().regex(dateRe).optional(),
-  type:   z.enum(['missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
+  type:   z.enum(['missing_punch', 'missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
   limit:  z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 })
@@ -93,6 +94,181 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
+  // ── GET /attendance/anomalies/summary ─────────────────────────────────────────
+  //    HR monitoring view — department-level anomaly rates, no individual rows.
+  //    Query param: month=YYYY-MM (defaults to current month)
+  //    Also returns 3-month trend and org-wide totals.
+  fastify.get('/attendance/anomalies/summary', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { month } = req.query as { month?: string }
+    const now = new Date()
+    const targetMonth = month && /^\d{4}-\d{2}$/.test(month)
+      ? month
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+    const periodStart = `${targetMonth}-01`
+    const nextMonthDate = new Date(`${targetMonth}-01`)
+    nextMonthDate.setUTCMonth(nextMonthDate.getUTCMonth() + 1)
+    const periodEnd = nextMonthDate.toISOString().slice(0, 10)
+
+    // ── Fetch anomalies for this month (flat — no nested join) ───────────────────
+    const { data: anomalies, error } = await fastify.supabase
+      .from('attendance_anomalies')
+      .select('id, type, severity, resolved, date, employee_id')
+      .eq('tenant_id', req.tenantId)
+      .gte('date', periodStart)
+      .lt('date', periodEnd)
+
+    if (error) {
+      req.log.error({ err: error }, 'anomaly summary query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomaly summary' })
+    }
+
+    // ── Fetch department info for all affected employees in one query ─────────────
+    const affectedEmpIds = [...new Set((anomalies ?? []).map((r: any) => r.employee_id).filter(Boolean))]
+
+    const { data: empDeptRows } = affectedEmpIds.length > 0
+      ? await fastify.supabase
+          .from('employees')
+          .select('id, department_id, departments(id, name)')
+          .eq('tenant_id', req.tenantId)
+          .in('id', affectedEmpIds)
+      : { data: [] }
+
+    // Build employee → dept lookup
+    const empDeptMap: Record<string, { department_id: string; department_name: string }> = {}
+    for (const e of (empDeptRows ?? []) as any[]) {
+      empDeptMap[e.id] = {
+        department_id:   e.department_id ?? '__none__',
+        department_name: e.departments?.name ?? 'Unassigned',
+      }
+    }
+
+    // ── Fetch active employee counts per department (for rate calculation) ────────
+    const { data: empCounts } = await fastify.supabase
+      .from('employees')
+      .select('department_id, departments(id, name)')
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'active')
+
+    // Build dept employee count map
+    const deptEmpCount: Record<string, { name: string; count: number }> = {}
+    for (const emp of (empCounts ?? []) as any[]) {
+      const deptId   = emp.department_id ?? '__none__'
+      const deptName = emp.departments?.name ?? 'Unassigned'
+      if (!deptEmpCount[deptId]) deptEmpCount[deptId] = { name: deptName, count: 0 }
+      deptEmpCount[deptId].count++
+    }
+
+    // ── Aggregate anomalies by department ────────────────────────────────────────
+    type TypeKey = 'no_punch' | 'missing_punch' | 'missing_out' | 'late' | 'excessive_hours'
+    interface DeptBucket {
+      department_id:   string
+      department_name: string
+      total:           number
+      unresolved:      number
+      high_severity:   number
+      employee_ids:    Set<string>
+      by_type:         Record<TypeKey, number>
+    }
+
+    const deptMap = new Map<string, DeptBucket>()
+    let orgTotal = 0, orgUnresolved = 0, orgHigh = 0
+
+    const orgByType: Record<string, number> = {}
+
+    for (const row of (anomalies ?? []) as any[]) {
+      const dept     = empDeptMap[row.employee_id] ?? { department_id: '__none__', department_name: 'Unassigned' }
+      const deptId   = dept.department_id
+      const deptName = dept.department_name
+
+      orgTotal++
+      if (!row.resolved) orgUnresolved++
+      if (row.severity === 'high') orgHigh++
+      orgByType[row.type] = (orgByType[row.type] ?? 0) + 1
+
+      if (!deptMap.has(deptId)) {
+        deptMap.set(deptId, {
+          department_id:   deptId,
+          department_name: deptName,
+          total: 0, unresolved: 0, high_severity: 0,
+          employee_ids: new Set(),
+          by_type: { no_punch: 0, missing_punch: 0, missing_out: 0, late: 0, excessive_hours: 0 },
+        })
+      }
+      const bucket = deptMap.get(deptId)!
+      bucket.total++
+      if (!row.resolved) bucket.unresolved++
+      if (row.severity === 'high') bucket.high_severity++
+      if (row.employee_id) bucket.employee_ids.add(row.employee_id)
+      bucket.by_type[row.type as TypeKey] = (bucket.by_type[row.type as TypeKey] ?? 0) + 1
+    }
+
+    // ── Build department summary rows ─────────────────────────────────────────────
+    const byDepartment = [...deptMap.values()]
+      .map(b => ({
+        department_id:        b.department_id === '__none__' ? null : b.department_id,
+        department_name:      b.department_name,
+        employee_count:       deptEmpCount[b.department_id]?.count ?? 0,
+        affected_employees:   b.employee_ids.size,
+        anomaly_count:        b.total,
+        unresolved_count:     b.unresolved,
+        high_severity_count:  b.high_severity,
+        anomaly_rate:         deptEmpCount[b.department_id]?.count
+          ? parseFloat((b.total / deptEmpCount[b.department_id].count).toFixed(2))
+          : null,
+        by_type: b.by_type,
+      }))
+      .sort((a, b) => b.anomaly_count - a.anomaly_count)
+
+    // ── 3-month trend ─────────────────────────────────────────────────────────────
+    const trendMonths: string[] = []
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(`${targetMonth}-01`)
+      d.setUTCMonth(d.getUTCMonth() - i)
+      trendMonths.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
+    }
+
+    const trendData: Array<{ month: string; total: number; unresolved: number }> = []
+    for (const m of trendMonths) {
+      if (m === targetMonth) {
+        trendData.push({ month: m, total: orgTotal, unresolved: orgUnresolved })
+      } else {
+        const mStart = `${m}-01`
+        const mNext  = new Date(`${m}-01`)
+        mNext.setUTCMonth(mNext.getUTCMonth() + 1)
+        const mEnd = mNext.toISOString().slice(0, 10)
+        const { count: mTotal } = await fastify.supabase
+          .from('attendance_anomalies')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .gte('date', mStart).lt('date', mEnd)
+        const { count: mUnres } = await fastify.supabase
+          .from('attendance_anomalies')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .eq('resolved', false)
+          .gte('date', mStart).lt('date', mEnd)
+        trendData.push({ month: m, total: mTotal ?? 0, unresolved: mUnres ?? 0 })
+      }
+    }
+
+    return reply.send({
+      month: targetMonth,
+      summary: {
+        total:         orgTotal,
+        unresolved:    orgUnresolved,
+        high_severity: orgHigh,
+        by_type:       orgByType,
+      },
+      by_department: byDepartment,
+      trend:         trendData,
+    })
+  })
+
   // ── GET /attendance/anomalies ──────────────────────────────────────────────────
   //    HR view — all anomalies for the tenant with rich filtering.
   fastify.get('/attendance/anomalies', auth, async (req: any, reply) => {
@@ -115,9 +291,8 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       .select(
         `
           id, date, type, message, severity, resolved, created_at, updated_at,
-          resolved_at,
-          employees!inner(id, first_name, last_name, employee_code),
-          profiles(id, full_name)
+          resolved_at, employee_id,
+          employees!inner(id, first_name, last_name, employee_code)
         `,
         { count: 'exact' },
       )
@@ -151,11 +326,10 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       created_at:  string
       updated_at:  string
       resolved_at: string | null
+      employee_id: string | null
       employees:   { id: string; first_name: string; last_name: string; employee_code: string } | Array<{ id: string; first_name: string; last_name: string; employee_code: string }> | null
-      profiles:    { id: string; full_name: string } | Array<{ id: string; full_name: string }> | null
     }>).map((r) => {
-      const emp  = Array.isArray(r.employees) ? r.employees[0] : r.employees
-      const prof = Array.isArray(r.profiles)  ? r.profiles[0]  : r.profiles
+      const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
       return {
         id:            r.id,
         date:          r.date,
@@ -165,10 +339,9 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
         resolved:      r.resolved,
         created_at:    r.created_at,
         resolved_at:   r.resolved_at,
-        employee_id:   emp?.id           ?? null,
+        employee_id:   emp?.id           ?? r.employee_id ?? null,
         employee_name: emp ? `${emp.first_name} ${emp.last_name}` : null,
         employee_code: emp?.employee_code ?? null,
-        resolved_by_name: prof?.full_name ?? null,
       }
     })
 
@@ -211,7 +384,24 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     }
 
     // ── Post-resolve side effects (non-fatal) ────────────────────────────────
-    // 1. Emit observable event for audit traceability
+    // 1. Recompute attendance_daily for the anomaly date so lop_days/payable_days
+    //    reflect the correction immediately (e.g. no_punch → punch restored).
+    //    Runs before notification so downstream payroll reads fresh data.
+    if (data.employee_id && data.date) {
+      try {
+        await recomputeRange(fastify.supabase, {
+          tenant_id:   data.tenant_id,
+          employee_id: data.employee_id,
+          from_date:   data.date,
+          to_date:     data.date,
+          changed_by:  req.userId,
+        })
+      } catch (recomputeErr) {
+        req.log.warn({ err: recomputeErr, anomaly_id: data.id }, 'attendance recompute failed after anomaly resolve (non-fatal)')
+      }
+    }
+
+    // 2. Emit observable event for audit traceability
     eventBus.emit({
       type:          'attendance.anomaly.resolved',
       tenantId:      data.tenant_id,
@@ -226,7 +416,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       },
     })
 
-    // 2. Notify the affected employee (look up their profile id) — fire-and-forget
+    // 3. Notify the affected employee (look up their profile id) — fire-and-forget
     if (data.employee_id) {
       void (async () => {
         try {
@@ -295,49 +485,74 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       .in('id', ids)
       .eq('tenant_id', req.tenantId)
       .eq('resolved', false)
-      .select('id')
+      // Select fields needed for recompute — employee_id and date are required
+      .select('id, employee_id, date, tenant_id, type')
 
     if (error) {
       req.log.error({ err: error }, 'bulk anomaly resolve failed')
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to bulk-resolve anomalies' })
     }
 
-    return reply.send({ resolved_count: (data ?? []).length })
-  })
+    const resolvedRows = (data ?? []) as Array<{
+      id: string
+      employee_id: string | null
+      date: string | null
+      tenant_id: string
+      type: string | null
+    }>
 
-  // ── GET /attendance/anomalies/summary ─────────────────────────────────────────
-  //    Lightweight counts for operational banner + health dashboard.
-  //    Auth: any authenticated user (admins see tenant totals, employees see own).
-  fastify.get('/attendance/anomalies/summary', auth, async (req: any, reply) => {
-    const isAdmin = ['super_admin', 'hr_admin', 'manager'].includes(req.userRole)
+    // ── Recompute attendance_daily for each unique employee+date ─────────────────
+    // Single-resolve calls recomputeRange; bulk-resolve must do the same so
+    // lop_days/payable_days reflect the correction rather than staying stale.
+    //
+    // Deduplicate by employee_id+date to avoid redundant recomputes when
+    // multiple anomalies for the same date are resolved in one batch.
+    const recomputeTargets = new Map<string, { employee_id: string; date: string; tenant_id: string }>()
+    for (const row of resolvedRows) {
+      if (row.employee_id && row.date) {
+        recomputeTargets.set(`${row.employee_id}:${row.date}`, {
+          employee_id: row.employee_id,
+          date:        row.date,
+          tenant_id:   row.tenant_id,
+        })
+      }
+    }
 
-    // Base query for open_count
-    const openQ = fastify.supabase
-      .from('attendance_anomalies')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', req.tenantId)
-      .eq('resolved', false)
+    let recomputeAttempted = 0
+    let recomputeFailed    = 0
 
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
+    for (const { employee_id, date, tenant_id } of recomputeTargets.values()) {
+      recomputeAttempted++
+      try {
+        await recomputeRange(fastify.supabase, {
+          tenant_id,
+          employee_id,
+          from_date:  date,
+          to_date:    date,
+          changed_by: req.userId,
+        })
+      } catch (recomputeErr) {
+        recomputeFailed++
+        req.log.warn(
+          { err: recomputeErr, employee_id, date },
+          'bulk anomaly resolve: attendance recompute failed for employee+date (non-fatal — anomaly is resolved but attendance_daily may be stale)',
+        )
+      }
+    }
 
-    const resolvedTodayQ = fastify.supabase
-      .from('attendance_anomalies')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', req.tenantId)
-      .eq('resolved', true)
-      .gte('resolved_at', todayStart.toISOString())
-
-    const [openRes, resolvedRes] = await Promise.all([
-      isAdmin ? openQ : openQ.eq('employee_id', req.userId),
-      isAdmin ? resolvedTodayQ : resolvedTodayQ.eq('employee_id', req.userId),
-    ])
-
-    if (openRes.error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch summary' })
+    if (recomputeFailed > 0) {
+      req.log.warn(
+        { recompute_attempted: recomputeAttempted, recompute_failed: recomputeFailed, resolved_count: resolvedRows.length },
+        'bulk anomaly resolve: some recomputes failed — payroll may reflect stale attendance for affected dates',
+      )
+    }
 
     return reply.send({
-      open_count:     openRes.count ?? 0,
-      resolved_today: resolvedRes.count ?? 0,
+      resolved_count:      resolvedRows.length,
+      recompute_attempted: recomputeAttempted,
+      // Only include failure field when there were failures (keeps happy-path response clean)
+      ...(recomputeFailed > 0 && { recompute_failed: recomputeFailed }),
     })
   })
+
 }

@@ -1,0 +1,967 @@
+/**
+ * Executive Intelligence Center — Read-Only Strategic Aggregation Layer
+ *
+ * Provides C-suite / CHRO views aggregated from existing SSOT tables.
+ * NO new calculations, NO duplicate business logic, NO alternative truths.
+ * All metrics derive from authoritative sources already maintained by
+ * payroll, attendance, leave, trust, and governance modules.
+ *
+ * GET /executive/ceo         — CEO composite snapshot
+ * GET /executive/chro        — CHRO composite snapshot
+ * GET /executive/workforce   — Workforce deep-dive
+ * GET /executive/financial   — Financial workforce metrics
+ * GET /executive/compliance  — Compliance & risk summary
+ * GET /executive/trends      — Strategic historical trends
+ *
+ * Auth: JWT required. hr_admin / super_admin only.
+ * Mode: READ-ONLY. No mutations, no approvals, no workflow execution.
+ */
+import type { FastifyInstance } from 'fastify'
+import { z }                    from 'zod'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+const EXEC_ROLES = ['super_admin', 'hr_admin'] as const
+const monthRe    = /^\d{4}-\d{2}$/
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function currentMonth(): string {
+  return new Date().toISOString().slice(0, 7)
+}
+
+function monthsAgo(n: number): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - n)
+  return d.toISOString().slice(0, 7)
+}
+
+function monthStart(m: string): string { return `${m}-01` }
+function monthEnd(m: string): string {
+  const [y, mo] = m.split('-').map(Number)
+  return new Date(y, mo, 0).toISOString().slice(0, 10)
+}
+
+function daysAgo(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
+function today(): string { return new Date().toISOString().slice(0, 10) }
+
+function safeRate(num: number, den: number, dec = 1): number {
+  return den > 0 ? parseFloat(((num / den) * 100).toFixed(dec)) : 0
+}
+
+function safeAvg(total: number, count: number, dec = 0): number {
+  return count > 0 ? parseFloat((total / count).toFixed(dec)) : 0
+}
+
+// ── Narrative helpers — deterministic text from metrics ───────────────────────
+
+function ceoNarrative(d: {
+  employee_count: number; joiners_30d: number; exits_30d: number
+  attendance_rate: number; open_exceptions: number; open_incidents: number
+  pending_revisions: number; payroll_cost_current: number
+}): string {
+  const parts: string[] = []
+
+  // Headcount movement
+  if (d.joiners_30d > 0 || d.exits_30d > 0) {
+    const net = d.joiners_30d - d.exits_30d
+    parts.push(
+      `Workforce is ${d.employee_count.toLocaleString()} active employees — ` +
+      `${d.joiners_30d} joined and ${d.exits_30d} exited in the last 30 days ` +
+      `(net ${net >= 0 ? '+' : ''}${net}).`,
+    )
+  } else {
+    parts.push(`Workforce headcount: ${d.employee_count.toLocaleString()} active employees.`)
+  }
+
+  // Attendance
+  if (d.attendance_rate >= 90) {
+    parts.push(`Attendance is healthy at ${d.attendance_rate}%.`)
+  } else if (d.attendance_rate >= 75) {
+    parts.push(`Attendance at ${d.attendance_rate}% — moderate absenteeism; review may be warranted.`)
+  } else if (d.attendance_rate > 0) {
+    parts.push(`Attendance is below target at ${d.attendance_rate}% — requires immediate review.`)
+  }
+
+  // Operational alerts
+  const alerts: string[] = []
+  if (d.open_exceptions > 0)  alerts.push(`${d.open_exceptions} open attendance exception${d.open_exceptions > 1 ? 's' : ''}`)
+  if (d.open_incidents > 0)   alerts.push(`${d.open_incidents} open incident${d.open_incidents > 1 ? 's' : ''}`)
+  if (d.pending_revisions > 0) alerts.push(`${d.pending_revisions} pending compensation revision${d.pending_revisions > 1 ? 's' : ''}`)
+  if (alerts.length > 0) {
+    parts.push(`Attention required: ${alerts.join(', ')}.`)
+  } else {
+    parts.push('No open operational alerts.')
+  }
+
+  return parts.join(' ')
+}
+
+function chroNarrative(d: {
+  employee_count: number; absence_rate: number; pending_revisions: number
+  trust_high_risk: number; leave_utilization_pct: number
+}): string {
+  const parts: string[] = []
+
+  if (d.absence_rate > 10) {
+    parts.push(`Absenteeism is elevated at ${d.absence_rate}% — consider reviewing leave and wellness policies.`)
+  } else if (d.absence_rate > 0) {
+    parts.push(`Absenteeism is within normal range at ${d.absence_rate}%.`)
+  }
+
+  if (d.leave_utilization_pct > 0) {
+    parts.push(`Leave utilization stands at ${d.leave_utilization_pct}% of available entitlement.`)
+  }
+
+  if (d.pending_revisions > 5) {
+    parts.push(`${d.pending_revisions} compensation revisions are pending approval — a high backlog may delay payroll.`)
+  } else if (d.pending_revisions > 0) {
+    parts.push(`${d.pending_revisions} compensation revision${d.pending_revisions > 1 ? 's' : ''} pending approval.`)
+  }
+
+  if (d.trust_high_risk > 0) {
+    parts.push(`${d.trust_high_risk} employee${d.trust_high_risk > 1 ? 's' : ''} flagged with high trust risk — verification review recommended.`)
+  }
+
+  return parts.length > 0 ? parts.join(' ') : 'All CHRO metrics are within normal operating parameters.'
+}
+
+// ── Route plugin ──────────────────────────────────────────────────────────────
+
+export default async function executiveRoutes(fastify: FastifyInstance) {
+  const auth = { preHandler: [fastify.authenticate] }
+
+  function requireExec(req: any, reply: any): boolean {
+    if (!EXEC_ROLES.includes(req.userRole)) {
+      reply.code(403).send({ error: 'FORBIDDEN', message: 'Executive access required' })
+      return false
+    }
+    return true
+  }
+
+  // ── GET /executive/ceo ────────────────────────────────────────────────────
+  // CEO composite snapshot: headcount, payroll cost, attendance, attention items.
+  // Source: employees, payroll_runs, attendance_daily, attendance_exceptions,
+  //         operational_incidents, compensation_revisions
+  fastify.get('/executive/ceo', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const from30 = daysAgo(30)
+    const to     = today()
+    const month  = currentMonth()
+
+    const [
+      activeEmpRes, joinersRes, exitsRes,
+      dailyRes, excOpenRes, incOpenRes,
+      pendingRevRes, payrollRunRes,
+    ] = await Promise.all([
+      // Active headcount
+      fastify.supabase
+        .from('employees')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'active'),
+
+      // Joiners last 30 days
+      fastify.supabase
+        .from('employees')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .gte('joining_date', from30)
+        .lte('joining_date', to),
+
+      // Exits last 30 days
+      fastify.supabase
+        .from('employees')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .gte('separation_date', from30)
+        .lte('separation_date', to),
+
+      // Attendance last 30 days (for rate)
+      fastify.supabase
+        .from('attendance_daily')
+        .select('status')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', from30)
+        .lte('date', to),
+
+      // Open exceptions
+      fastify.supabase
+        .from('attendance_exceptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'open'),
+
+      // Open incidents
+      fastify.supabase
+        .from('operational_incidents')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'open'),
+
+      // Pending compensation revisions
+      fastify.supabase
+        .from('compensation_revisions')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'pending'),
+
+      // Latest payroll run for current month
+      fastify.supabase
+        .from('payroll_runs')
+        .select('id, status, total_gross, total_net, employee_count, month')
+        .eq('tenant_id', req.tenantId)
+        .in('status', ['completed', 'finalized'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    const employee_count      = activeEmpRes.count ?? 0
+    const joiners_30d         = joinersRes.count ?? 0
+    const exits_30d           = exitsRes.count ?? 0
+    const open_exceptions     = excOpenRes.count ?? 0
+    const open_incidents      = incOpenRes.count ?? 0
+    const pending_revisions   = pendingRevRes.count ?? 0
+
+    const daily   = dailyRes.data ?? []
+    const present = daily.filter((r: any) => r.status === 'present' || r.status === 'late').length
+    const absent  = daily.filter((r: any) => r.status === 'absent').length
+    const attendance_rate = safeRate(present, daily.length)
+    const absence_rate    = safeRate(absent,  daily.length)
+
+    const payrollRun             = payrollRunRes.data
+    const payroll_cost_current   = payrollRun ? Number(payrollRun.total_gross ?? 0) : 0
+    const payroll_net_current    = payrollRun ? Number(payrollRun.total_net   ?? 0) : 0
+    const payroll_headcount      = payrollRun?.employee_count ?? 0
+    const payroll_month          = payrollRun?.month ?? month
+    const avg_cost_per_employee  = safeAvg(payroll_cost_current, payroll_headcount)
+
+    const narrative = ceoNarrative({
+      employee_count, joiners_30d, exits_30d, attendance_rate,
+      open_exceptions, open_incidents, pending_revisions, payroll_cost_current,
+    })
+
+    return reply.send({
+      // Workforce
+      employee_count,
+      joiners_30d,
+      exits_30d,
+      net_headcount_change: joiners_30d - exits_30d,
+      // Attendance
+      attendance_rate,
+      absence_rate,
+      // Payroll
+      payroll_cost_current,
+      payroll_net_current,
+      payroll_headcount,
+      payroll_month,
+      avg_cost_per_employee,
+      // Attention items
+      open_exceptions,
+      open_incidents,
+      pending_revisions,
+      total_attention_items: open_exceptions + open_incidents + pending_revisions,
+      // Narrative
+      narrative,
+      // Meta
+      generated_at: new Date().toISOString(),
+      period: { from: from30, to },
+    })
+  })
+
+  // ── GET /executive/chro ───────────────────────────────────────────────────
+  // CHRO composite: workforce distribution, leave/attendance, compensation, trust.
+  // Source: employees, job_history, departments, attendance_daily, leave_requests,
+  //         compensation_revisions, employee_trust_profiles
+  fastify.get('/executive/chro', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const from30 = daysAgo(30)
+    const to     = today()
+
+    const [
+      activeEmpRes, dailyRes, leaveRes,
+      pendingRevRes, approvedRevRes,
+      trustHighRiskRes, trustVerifiedRes, trustTotalRes,
+      deptRes,
+    ] = await Promise.all([
+      // Active headcount
+      fastify.supabase
+        .from('employees')
+        .select('id, employment_type, gender')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'active'),
+
+      // Attendance last 30 days
+      fastify.supabase
+        .from('attendance_daily')
+        .select('status')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', from30)
+        .lte('date', to),
+
+      // Leave requests last 30 days
+      fastify.supabase
+        .from('leave_requests')
+        .select('status, total_days')
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', `${from30}T00:00:00`)
+        .lte('created_at', `${to}T23:59:59`),
+
+      // Pending revisions
+      fastify.supabase
+        .from('compensation_revisions')
+        .select('id, revision_type', { count: 'exact' })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'pending')
+        .limit(50),
+
+      // Approved revisions last 30d
+      fastify.supabase
+        .from('compensation_revisions')
+        .select('delta_amount, delta_pct', { count: 'exact' })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'approved')
+        .gte('updated_at', `${from30}T00:00:00`),
+
+      // Trust high-risk employees
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('risk_level', 'high'),
+
+      // Trust verified employees
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('is_verified', true),
+
+      // Trust total profiles
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId),
+
+      // Department distribution via job_history
+      fastify.supabase
+        .from('job_history')
+        .select('department_id, departments(id, name)')
+        .eq('tenant_id', req.tenantId)
+        .eq('is_current', true),
+    ])
+
+    // Employment type distribution
+    const employees       = activeEmpRes.data ?? []
+    const employee_count  = employees.length
+
+    const typeMap = new Map<string, number>()
+    const genderMap = new Map<string, number>()
+    for (const e of employees) {
+      const t = (e as any).employment_type ?? 'unspecified'
+      const g = (e as any).gender ?? 'unspecified'
+      typeMap.set(t, (typeMap.get(t) ?? 0) + 1)
+      genderMap.set(g, (genderMap.get(g) ?? 0) + 1)
+    }
+    const employment_type_distribution = Object.fromEntries(typeMap)
+    const gender_distribution          = Object.fromEntries(genderMap)
+
+    // Attendance
+    const daily       = dailyRes.data ?? []
+    const present     = daily.filter((r: any) => r.status === 'present' || r.status === 'late').length
+    const absent      = daily.filter((r: any) => r.status === 'absent').length
+    const attendance_rate = safeRate(present, daily.length)
+    const absence_rate    = safeRate(absent,  daily.length)
+
+    // Leave
+    const leaveRows        = leaveRes.data ?? []
+    const leave_applied    = leaveRows.length
+    const leave_approved   = leaveRows.filter((r: any) => r.status === 'approved').length
+    const leave_pending    = leaveRows.filter((r: any) => r.status === 'pending').length
+    const total_days_taken = leaveRows
+      .filter((r: any) => r.status === 'approved')
+      .reduce((s: number, r: any) => s + (Number(r.total_days) || 0), 0)
+
+    // Compensation revisions
+    const pending_revisions  = pendingRevRes.count ?? 0
+    const approved_revisions = approvedRevRes.count ?? 0
+    const pendingByType = new Map<string, number>()
+    for (const r of (pendingRevRes.data ?? []) as any[]) {
+      const t = r.revision_type ?? 'other'
+      pendingByType.set(t, (pendingByType.get(t) ?? 0) + 1)
+    }
+    const pending_revisions_by_type = Object.fromEntries(pendingByType)
+
+    // Trust metrics
+    const trust_high_risk   = trustHighRiskRes.count ?? 0
+    const trust_verified    = trustVerifiedRes.count ?? 0
+    const trust_total       = trustTotalRes.count ?? 0
+    const trust_verification_pct = safeRate(trust_verified, trust_total)
+
+    // Department distribution
+    const deptMap2 = new Map<string, number>()
+    for (const jh of (deptRes.data ?? []) as any[]) {
+      const name = jh.departments?.name ?? 'Unassigned'
+      deptMap2.set(name, (deptMap2.get(name) ?? 0) + 1)
+    }
+    const dept_distribution = Object.fromEntries(deptMap2)
+
+    const leave_utilization_pct = employee_count > 0
+      ? safeRate(total_days_taken, employee_count * 30)
+      : 0
+
+    const narrative = chroNarrative({
+      employee_count, absence_rate, pending_revisions,
+      trust_high_risk, leave_utilization_pct,
+    })
+
+    return reply.send({
+      // Workforce distribution
+      employee_count,
+      employment_type_distribution,
+      gender_distribution,
+      dept_distribution,
+      // Attendance & leave
+      attendance_rate,
+      absence_rate,
+      leave_applied,
+      leave_approved,
+      leave_pending,
+      total_days_taken,
+      leave_utilization_pct,
+      // Compensation
+      pending_revisions,
+      approved_revisions,
+      pending_revisions_by_type,
+      // Trust
+      trust_high_risk,
+      trust_verified,
+      trust_total,
+      trust_verification_pct,
+      // Narrative
+      narrative,
+      generated_at: new Date().toISOString(),
+      period: { from: from30, to },
+    })
+  })
+
+  // ── GET /executive/workforce ──────────────────────────────────────────────
+  // Workforce deep-dive: headcount, joiner/exit trends, department breakdown.
+  // Source: employees, job_history, departments
+  fastify.get('/executive/workforce', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const querySchema = z.object({
+      months: z.coerce.number().int().min(1).max(12).default(6),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const monthCount = parsed.data.months
+
+    const [empRes, deptRes, separationRes, joinersRes] = await Promise.all([
+      // All active employees with joining date and type
+      fastify.supabase
+        .from('employees')
+        .select('id, joining_date, separation_date, employment_type, status, gender')
+        .eq('tenant_id', req.tenantId)
+        .in('status', ['active', 'separated']),
+
+      // Current department assignments
+      fastify.supabase
+        .from('job_history')
+        .select('employee_id, department_id, departments(id, name)')
+        .eq('tenant_id', req.tenantId)
+        .eq('is_current', true),
+
+      // Recent separations for trend
+      fastify.supabase
+        .from('employees')
+        .select('id, separation_date')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'separated')
+        .gte('separation_date', monthsAgo(monthCount + 1) + '-01'),
+
+      // Recent joiners for trend
+      fastify.supabase
+        .from('employees')
+        .select('id, joining_date')
+        .eq('tenant_id', req.tenantId)
+        .gte('joining_date', monthsAgo(monthCount + 1) + '-01'),
+    ])
+
+    const allEmp    = empRes.data ?? []
+    const active    = allEmp.filter((e: any) => e.status === 'active')
+    const separated = separationRes.data ?? []
+    const joiners   = joinersRes.data ?? []
+
+    // Build month boundaries
+    const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
+    for (let i = monthCount - 1; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(1)
+      d.setMonth(d.getMonth() - i)
+      const m = d.toISOString().slice(0, 7)
+      monthBoundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
+    }
+
+    // Monthly joiner/exit counts
+    const monthly_trends = monthBoundaries.map(({ month, from, to }) => {
+      const month_joiners = joiners.filter((e: any) => e.joining_date >= from && e.joining_date <= to).length
+      const month_exits   = separated.filter((e: any) => e.separation_date >= from && e.separation_date <= to).length
+      return { month, joiners: month_joiners, exits: month_exits, net: month_joiners - month_exits }
+    })
+
+    // Department distribution (current active only, via job_history)
+    const deptCounts = new Map<string, number>()
+    const deptByEmpId = new Map<string, string>()
+    for (const jh of (deptRes.data ?? []) as any[]) {
+      const name = jh.departments?.name ?? 'Unassigned'
+      deptByEmpId.set(jh.employee_id, name)
+    }
+    for (const e of active as any[]) {
+      const name = deptByEmpId.get(e.id) ?? 'Unassigned'
+      deptCounts.set(name, (deptCounts.get(name) ?? 0) + 1)
+    }
+    const dept_distribution = [...deptCounts.entries()]
+      .map(([dept, count]) => ({ dept, count, pct: safeRate(count, active.length) }))
+      .sort((a, b) => b.count - a.count)
+
+    // Employment type distribution
+    const typeCounts = new Map<string, number>()
+    for (const e of active as any[]) {
+      const t = e.employment_type ?? 'unspecified'
+      typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1)
+    }
+    const employment_type_distribution = [...typeCounts.entries()]
+      .map(([type, count]) => ({ type, count, pct: safeRate(count, active.length) }))
+      .sort((a, b) => b.count - a.count)
+
+    // Gender distribution
+    const genderCounts = new Map<string, number>()
+    for (const e of active as any[]) {
+      const g = e.gender ?? 'unspecified'
+      genderCounts.set(g, (genderCounts.get(g) ?? 0) + 1)
+    }
+    const gender_distribution = Object.fromEntries(genderCounts)
+
+    return reply.send({
+      employee_count: active.length,
+      monthly_trends,
+      dept_distribution,
+      employment_type_distribution,
+      gender_distribution,
+      total_joiners_period: joiners.length,
+      total_exits_period:   separated.length,
+      generated_at: new Date().toISOString(),
+    })
+  })
+
+  // ── GET /executive/financial ──────────────────────────────────────────────
+  // Financial workforce: payroll cost trends, compensation revision impact.
+  // Source: payroll_runs, payroll_dept_snapshots, compensation_revisions
+  fastify.get('/executive/financial', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const querySchema = z.object({
+      months: z.coerce.number().int().min(1).max(12).default(6),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const monthCount = parsed.data.months
+    const oldestMonth = monthsAgo(monthCount)
+
+    const [payrollRunsRes, revisionImpactRes, deptSnapshotRes] = await Promise.all([
+      // Payroll runs for trend
+      fastify.supabase
+        .from('payroll_runs')
+        .select('id, month, status, total_gross, total_net, employee_count')
+        .eq('tenant_id', req.tenantId)
+        .in('status', ['completed', 'finalized'])
+        .gte('month', oldestMonth)
+        .order('month', { ascending: true }),
+
+      // Compensation revision delta impact (approved in period)
+      fastify.supabase
+        .from('compensation_revisions')
+        .select('revision_type, delta_amount, delta_pct, effective_date, status')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'approved')
+        .gte('effective_date', monthStart(oldestMonth))
+        .order('effective_date', { ascending: true }),
+
+      // Latest month dept snapshot for cost breakdown
+      fastify.supabase
+        .from('payroll_dept_snapshots')
+        .select('department_id, department_name, headcount, total_gross, total_net, total_ot_cost')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', currentMonth())
+        .order('total_gross', { ascending: false })
+        .limit(10),
+    ])
+
+    const runs = payrollRunsRes.data ?? []
+
+    // Monthly payroll cost trend
+    const payroll_cost_trend = runs.map((r: any) => ({
+      month:             r.month,
+      total_gross:       Number(r.total_gross ?? 0),
+      total_net:         Number(r.total_net ?? 0),
+      employee_count:    r.employee_count ?? 0,
+      avg_cost_per_head: safeAvg(Number(r.total_gross ?? 0), r.employee_count ?? 0),
+    }))
+
+    // Latest run metrics
+    const latestRun = runs[runs.length - 1] as any
+    const payroll_current_gross    = latestRun ? Number(latestRun.total_gross ?? 0) : 0
+    const payroll_current_net      = latestRun ? Number(latestRun.total_net   ?? 0) : 0
+    const payroll_current_headcount = latestRun?.employee_count ?? 0
+    const payroll_current_month     = latestRun?.month ?? currentMonth()
+
+    // Month-over-month change
+    const prevRun = runs.length >= 2 ? runs[runs.length - 2] as any : null
+    const prev_gross = prevRun ? Number(prevRun.total_gross ?? 0) : 0
+    const payroll_mom_change = prev_gross > 0
+      ? parseFloat(((payroll_current_gross - prev_gross) / prev_gross * 100).toFixed(1))
+      : 0
+
+    // Revision impact
+    const revisions = revisionImpactRes.data ?? []
+    const total_revision_delta = revisions.reduce((s, r: any) => s + Number(r.delta_amount ?? 0), 0)
+    const avg_revision_pct     = revisions.length > 0
+      ? parseFloat((revisions.reduce((s, r: any) => s + Number(r.delta_pct ?? 0), 0) / revisions.length).toFixed(1))
+      : 0
+    const revisions_by_type = revisions.reduce((acc: Record<string, number>, r: any) => {
+      const t = r.revision_type ?? 'other'
+      acc[t] = (acc[t] ?? 0) + 1
+      return acc
+    }, {})
+
+    // Dept cost breakdown (latest month)
+    const dept_cost_breakdown = (deptSnapshotRes.data ?? []).map((d: any) => ({
+      dept:           d.department_name ?? 'Unassigned',
+      headcount:      d.headcount ?? 0,
+      total_gross:    Number(d.total_gross ?? 0),
+      total_net:      Number(d.total_net ?? 0),
+      ot_cost:        Number(d.total_ot_cost ?? 0),
+    }))
+
+    return reply.send({
+      payroll_current_gross,
+      payroll_current_net,
+      payroll_current_headcount,
+      payroll_current_month,
+      payroll_mom_change,
+      payroll_cost_trend,
+      total_revision_delta,
+      avg_revision_pct,
+      revisions_by_type,
+      approved_revisions_count: revisions.length,
+      dept_cost_breakdown,
+      generated_at: new Date().toISOString(),
+    })
+  })
+
+  // ── GET /executive/compliance ─────────────────────────────────────────────
+  // Compliance & risk: governance, SLA breaches, trust risks, verification.
+  // Source: operational_incidents, attendance_exceptions, employee_trust_profiles,
+  //         governance_events, duplicate_detection_events
+  fastify.get('/executive/compliance', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const from30 = daysAgo(30)
+    const to     = today()
+
+    const [
+      incOpenRes, incCriticalRes, incTotalRes,
+      excOpenRes, excBreachedRes, excTotalRes,
+      trustHighRes, trustMedRes, trustTotalRes,
+      trustVerifiedRes,
+      dupRes, govRes,
+    ] = await Promise.all([
+      // Open incidents
+      fastify.supabase
+        .from('operational_incidents')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'open'),
+
+      // Critical incidents
+      fastify.supabase
+        .from('operational_incidents')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .in('severity', ['critical', 'high'])
+        .eq('status', 'open'),
+
+      // Total incidents 30 days
+      fastify.supabase
+        .from('operational_incidents')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', `${from30}T00:00:00`),
+
+      // Open exceptions
+      fastify.supabase
+        .from('attendance_exceptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'open'),
+
+      // SLA-breached exceptions 30 days
+      fastify.supabase
+        .from('attendance_exceptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('sla_breached', true)
+        .gte('created_at', `${from30}T00:00:00`),
+
+      // Total exceptions 30 days
+      fastify.supabase
+        .from('attendance_exceptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', `${from30}T00:00:00`),
+
+      // High-risk trust profiles
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('risk_level', 'high'),
+
+      // Medium-risk trust profiles
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('risk_level', 'medium'),
+
+      // Total trust profiles
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId),
+
+      // Verified employees
+      fastify.supabase
+        .from('employee_trust_profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('is_verified', true),
+
+      // Duplicate detection events (recent)
+      fastify.supabase
+        .from('duplicate_detection_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', req.tenantId)
+        .eq('status', 'open'),
+
+      // Governance events 30d
+      fastify.supabase
+        .from('governance_events')
+        .select('id, severity', { count: 'exact' })
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', `${from30}T00:00:00`)
+        .limit(200),
+    ])
+
+    const open_incidents         = incOpenRes.count     ?? 0
+    const critical_incidents     = incCriticalRes.count ?? 0
+    const total_incidents_30d    = incTotalRes.count    ?? 0
+    const open_exceptions        = excOpenRes.count     ?? 0
+    const sla_breached_30d       = excBreachedRes.count ?? 0
+    const total_exceptions_30d   = excTotalRes.count    ?? 0
+    const trust_high_risk        = trustHighRes.count   ?? 0
+    const trust_medium_risk      = trustMedRes.count    ?? 0
+    const trust_total            = trustTotalRes.count  ?? 0
+    const trust_verified         = trustVerifiedRes.count ?? 0
+    const open_duplicates        = dupRes.count         ?? 0
+
+    const govEvents      = govRes.data ?? []
+    const gov_total_30d  = govRes.count ?? 0
+    const govBySeverity  = govEvents.reduce((acc: Record<string, number>, e: any) => {
+      const s = e.severity ?? 'unknown'
+      acc[s] = (acc[s] ?? 0) + 1
+      return acc
+    }, {})
+
+    const sla_breach_rate       = safeRate(sla_breached_30d, total_exceptions_30d)
+    const trust_verification_pct = safeRate(trust_verified, trust_total)
+    const trust_at_risk          = trust_high_risk + trust_medium_risk
+
+    // Overall risk score: weighted blend (0–100, lower is better)
+    const compliance_risk_score = Math.min(100, Math.round(
+      (sla_breach_rate * 0.3) +
+      (critical_incidents > 0 ? 25 : 0) +
+      (safeRate(trust_high_risk, trust_total) * 0.2) +
+      (open_duplicates > 0 ? 10 : 0) +
+      (open_exceptions > 20 ? 15 : open_exceptions > 5 ? 8 : 0),
+    ))
+
+    const risk_status = compliance_risk_score >= 50 ? 'high'
+      : compliance_risk_score >= 25 ? 'medium'
+      : 'low'
+
+    return reply.send({
+      // Incidents
+      open_incidents,
+      critical_incidents,
+      total_incidents_30d,
+      // Exceptions
+      open_exceptions,
+      sla_breached_30d,
+      total_exceptions_30d,
+      sla_breach_rate,
+      // Trust
+      trust_high_risk,
+      trust_medium_risk,
+      trust_at_risk,
+      trust_total,
+      trust_verified,
+      trust_verification_pct,
+      // Governance
+      gov_total_30d,
+      gov_by_severity: govBySeverity,
+      // Duplicates
+      open_duplicates,
+      // Composite
+      compliance_risk_score,
+      risk_status,
+      generated_at: new Date().toISOString(),
+      period: { from: from30, to },
+    })
+  })
+
+  // ── GET /executive/trends ─────────────────────────────────────────────────
+  // Strategic historical trends: attendance, leave, payroll, headcount — N months.
+  // Source: attendance_daily, payroll_runs, leave_requests, employees
+  // NO forecasting. Historical read-only.
+  fastify.get('/executive/trends', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const querySchema = z.object({
+      months: z.coerce.number().int().min(2).max(12).default(6),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const monthCount   = parsed.data.months
+    const oldestMonth  = monthsAgo(monthCount - 1)
+    const oldestDate   = monthStart(oldestMonth)
+
+    // Build boundaries
+    const boundaries: Array<{ month: string; from: string; to: string }> = []
+    for (let i = monthCount - 1; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(1)
+      d.setMonth(d.getMonth() - i)
+      const m = d.toISOString().slice(0, 7)
+      boundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
+    }
+
+    const [attRes, payrollRunsRes, leaveRes, empJoinerRes, empExitRes] = await Promise.all([
+      // Attendance for full period
+      fastify.supabase
+        .from('attendance_daily')
+        .select('date, status')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', oldestDate)
+        .lte('date', today()),
+
+      // Payroll runs for period
+      fastify.supabase
+        .from('payroll_runs')
+        .select('month, total_gross, total_net, employee_count, status')
+        .eq('tenant_id', req.tenantId)
+        .in('status', ['completed', 'finalized'])
+        .gte('month', oldestMonth)
+        .order('month', { ascending: true }),
+
+      // Leave approvals for period
+      fastify.supabase
+        .from('leave_requests')
+        .select('created_at, status, total_days')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'approved')
+        .gte('created_at', `${oldestDate}T00:00:00`),
+
+      // Joiners per month
+      fastify.supabase
+        .from('employees')
+        .select('joining_date')
+        .eq('tenant_id', req.tenantId)
+        .gte('joining_date', oldestDate),
+
+      // Exits per month
+      fastify.supabase
+        .from('employees')
+        .select('separation_date')
+        .eq('tenant_id', req.tenantId)
+        .gte('separation_date', oldestDate)
+        .not('separation_date', 'is', null),
+    ])
+
+    const attRows     = attRes.data ?? []
+    const payrollRuns = payrollRunsRes.data ?? []
+    const leaveRows   = leaveRes.data ?? []
+    const joinerRows  = empJoinerRes.data ?? []
+    const exitRows    = empExitRes.data ?? []
+
+    // Build a payroll run map by month
+    const payrollByMonth = new Map<string, any>()
+    for (const r of payrollRuns as any[]) {
+      payrollByMonth.set(r.month, r)
+    }
+
+    const trends = boundaries.map(({ month, from, to }) => {
+      // Attendance
+      const monthAtt     = attRows.filter((r: any) => r.date >= from && r.date <= to)
+      const attTotal     = monthAtt.length
+      const attPresent   = monthAtt.filter((r: any) => r.status === 'present' || r.status === 'late').length
+      const attendance_rate = safeRate(attPresent, attTotal)
+
+      // Leave
+      const monthLeave   = leaveRows.filter((r: any) => r.created_at.slice(0, 10) >= from && r.created_at.slice(0, 10) <= to)
+      const leave_days   = monthLeave.reduce((s, r: any) => s + (Number(r.total_days) || 0), 0)
+
+      // Payroll
+      const run          = payrollByMonth.get(month)
+      const payroll_gross = run ? Number(run.total_gross ?? 0) : null
+      const payroll_headcount = run?.employee_count ?? null
+
+      // Headcount movement
+      const joiners  = joinerRows.filter((r: any) => r.joining_date >= from && r.joining_date <= to).length
+      const exits    = exitRows.filter((r: any) => r.separation_date >= from && r.separation_date <= to).length
+
+      return {
+        month,
+        attendance_rate,
+        leave_days_approved: leave_days,
+        payroll_gross,
+        payroll_headcount,
+        joiners,
+        exits,
+        net_headcount: joiners - exits,
+      }
+    })
+
+    return reply.send({
+      months: trends,
+      month_count: monthCount,
+      generated_at: new Date().toISOString(),
+    })
+  })
+}

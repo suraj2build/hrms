@@ -19,6 +19,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { buildActivePeriodSummary } from '../../lib/attendance-read-model.js'
 
 export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -206,12 +207,16 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
 
   // ── GET /attendance/stats ────────────────────────────────────────────────────
   // AttendanceWorkspace command header
+  //
+  // All attendance aggregation is delegated to buildActivePeriodSummary() which
+  // internally calls buildMonthReadModel() — no inline status reducers here.
+  // No date=today attendance queries — the active period is determined by the
+  // most recent data in attendance_daily, not the current calendar date.
   fastify.get('/attendance/stats', auth, async (req: any, reply) => {
     if (!requireHR(req, reply)) return
     const tenantId: string = req.tenantId
 
-    const today      = new Date().toISOString().slice(0, 10)
-    const monthStart = today.slice(0, 7) + '-01'
+    const today        = new Date().toISOString().slice(0, 10)
     const recentCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
     const [
@@ -220,28 +225,26 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       overnightResult,
       confidenceResult,
       processorResult,
-      // staffing_pressure: departments where ≥2 employees are absent/on-leave today
-      todayAbsenceResult,
-      // recompute_backlog: regularisations approved in last 24h (need reprocessing attention)
+      staffingPressureResult,
       recentRegResult,
-      // payroll_continuity_gaps: active employees missing a compensation record
       missingCompResult,
+      activePeriodResult,
     ] = await Promise.all([
       // unresolved_anomalies
       fastify.supabase
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('is_resolved', false),
+        .eq('resolved', false),
 
-      // pending_corrections: regularisation requests pending approval
+      // pending_corrections
       fastify.supabase
         .from('attendance_regularisation')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('status', 'pending'),
 
-      // overnight_issues: attendance_daily rows with >2h late_minutes for today (night-shift proxy)
+      // overnight_issues: late_minutes > 120 today (night-shift proxy — operational signal)
       fastify.supabase
         .from('attendance_daily')
         .select('id', { count: 'exact', head: true })
@@ -249,13 +252,13 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('date', today)
         .gt('late_minutes', 120),
 
-      // confidence_warnings: unresolved anomalies of type 'low_confidence'
+      // confidence_warnings: low_confidence anomalies
       fastify.supabase
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('is_resolved', false)
-        .eq('anomaly_type', 'low_confidence'),
+        .eq('resolved', false)
+        .eq('type', 'low_confidence'),
 
       // is_processing: check lock table
       fastify.supabase
@@ -264,7 +267,8 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .maybeSingle(),
 
-      // staffing_pressure: today's absent + leave grouped by employee (we'll count distinct dept after)
+      // staffing_pressure: employees absent/on-leave in today's date
+      // Returns 0 when data is historical (correct — no one is absent "today")
       fastify.supabase
         .from('attendance_daily')
         .select('employee_id')
@@ -272,7 +276,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('date', today)
         .in('status', ['absent', 'leave']),
 
-      // recompute_backlog: regularisations approved in last 24h needing attention
+      // recompute_backlog: regularisations approved in last 24h
       fastify.supabase
         .from('attendance_regularisation')
         .select('id', { count: 'exact', head: true })
@@ -280,28 +284,38 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('status', 'approved')
         .gte('approved_at', recentCutoff),
 
-      // payroll_continuity_gaps: active employees with no active compensation record
+      // payroll_continuity_gaps: active employees with no active compensation
       fastify.supabase
         .from('employees')
         .select(`id, employee_compensations!left(id, is_active)`, { count: 'exact', head: false })
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .is('employee_compensations.is_active', null),
+
+      // ── CANONICAL ATTENDANCE AGGREGATION ────────────────────────────────────
+      // Finds the most recent month with data, builds a full month read model,
+      // returns ActivePeriodSummary.  This is the ONLY attendance count source
+      // for all dashboard widgets.  Zero inline reducers.
+      buildActivePeriodSummary(fastify.supabase, tenantId),
     ])
 
-    // staffing_pressure: count employees absent/on-leave today as the pressure metric
-    // (distinct count of employees out today — a simple but accurate operational signal)
-    const staffingPressure = (todayAbsenceResult.data ?? []).length
+    const activePeriod = 'error' in activePeriodResult ? null : activePeriodResult
 
     return reply.send({
+      // Operational metrics (action queue, processing health)
       unresolved_anomalies:    anomaliesResult.count    ?? 0,
       pending_corrections:     correctionsResult.count  ?? 0,
-      staffing_pressure:       staffingPressure,
+      staffing_pressure:       (staffingPressureResult.data ?? []).length,
       overnight_issues:        overnightResult.count    ?? 0,
       confidence_warnings:     confidenceResult.count   ?? 0,
-      recompute_backlog:        recentRegResult.count    ?? 0,
+      recompute_backlog:       recentRegResult.count    ?? 0,
       payroll_continuity_gaps: (missingCompResult.data ?? []).length,
       is_processing:           processorResult.data?.is_running ?? false,
+      // Canonical attendance period — the ONLY source for all KPI widgets
+      // Non-null unless there is a DB error.  is_historical=true when data is
+      // from a past month (e.g., imported 2025 data viewed in 2026).
+      active_period_summary:  activePeriod,
+      active_period_month:    activePeriod?.active_month ?? null,
     })
   })
 
@@ -340,6 +354,54 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     }))
 
     return reply.send({ data: events })
+  })
+
+  // ── GET /attendance/live-status ──────────────────────────────────────────────
+  // Returns employees sorted by anomaly risk (late_minutes desc) for the most
+  // recent date that has data.  Falls back to empty array if table is empty.
+  fastify.get('/attendance/live-status', auth, async (req: any, reply) => {
+    if (!requireHR(req, reply)) return
+    const tenantId: string = req.tenantId
+    const limit = Math.min(Number((req.query as any).limit ?? 10), 50)
+
+    try {
+      // Find most recent date with data
+      const { data: latestRow } = await fastify.supabase
+        .from('attendance_daily')
+        .select('date')
+        .eq('tenant_id', tenantId)
+        .order('date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!latestRow?.date) return reply.send({ data: [] })
+
+      const { data: rows } = await fastify.supabase
+        .from('attendance_daily')
+        .select(`
+          employee_id, status, late_minutes,
+          employees!inner(first_name, last_name, employee_code)
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('date', latestRow.date)
+        .order('late_minutes', { ascending: false })
+        .limit(limit)
+
+      const result = ((rows ?? []) as any[]).map(r => {
+        const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
+        return {
+          employee_id:   r.employee_id,
+          employee_name: emp ? `${emp.first_name} ${emp.last_name}` : r.employee_id,
+          employee_code: emp?.employee_code ?? '',
+          status:        r.status ?? 'unknown',
+          anomaly_risk:  Math.min(100, Math.round((r.late_minutes ?? 0) / 2)),
+        }
+      })
+
+      return reply.send({ data: result })
+    } catch {
+      return reply.send({ data: [] })
+    }
   })
 
   // ── GET /payroll/runs/stats ──────────────────────────────────────────────────
@@ -389,11 +451,12 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .is('employee_compensations.is_active', null),
 
       // Unresolved anomalies (affect payroll accuracy)
+      // Column is `resolved` (boolean), not `is_resolved` — see migration schema
       fastify.supabase
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('is_resolved', false),
+        .eq('resolved', false),
 
       // compliance_mismatches: active employees missing PAN (TDS) or UAN (EPF) — statutory gap
       fastify.supabase
@@ -458,11 +521,12 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const otMismatches = otEmpSet.size
 
     // variance_cases: employees whose gross changed by >10% vs previous month
+    // Query selects `gross_pay` — use that field name (not gross_amount)
     const currentSlips = new Map((currentSlipsResult.data ?? []).map(
-      (r: any) => [r.employee_id, Number(r.gross_amount ?? 0)]
+      (r: any) => [r.employee_id, Number(r.gross_pay ?? 0)]
     ))
     const prevSlips    = new Map((prevSlipsResult.data ?? []).map(
-      (r: any) => [r.employee_id, Number(r.gross_amount ?? 0)]
+      (r: any) => [r.employee_id, Number(r.gross_pay ?? 0)]
     ))
     let varianceCases = 0
     for (const [empId, currentGross] of currentSlips) {
@@ -631,8 +695,8 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const month = ((req.query as any).month as string) ?? new Date().toISOString().slice(0, 7)
 
-    // Parallel: slips, attendance LOP, OT rows, compliance data
-    const [slipsResult, attResult, otResult, complianceResult] = await Promise.all([
+    // Parallel: slips, attendance LOP, OT rows, compliance data, persisted actions
+    const [slipsResult, attResult, otResult, complianceResult, actionsResult] = await Promise.all([
       fastify.supabase
         .from('payroll_slips')
         .select(`
@@ -665,12 +729,41 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .from('employee_bank_statutory')
         .select('employee_id, pan_number, uan_number')
         .eq('tenant_id', tenantId),
+
+      // Persisted reconciliation actions for this month — latest action per item wins.
+      fastify.supabase
+        .from('payroll_reconciliation_actions')
+        .select('item_id, action_type, notes, actor_id, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('month', month)
+        .order('created_at', { ascending: false }),
     ])
 
-    const slips      = (slipsResult.data  ?? []) as any[]
-    const attRows    = (attResult.data    ?? []) as any[]
-    const otRows     = (otResult.data     ?? []) as any[]
+    const slips      = (slipsResult.data    ?? []) as any[]
+    const attRows    = (attResult.data      ?? []) as any[]
+    const otRows     = (otResult.data       ?? []) as any[]
     const statRows   = (complianceResult.data ?? []) as any[]
+    const actionRows = (actionsResult.data  ?? []) as any[]
+
+    // ── Build latest-action map (item_id → latest persisted action) ───────────
+    // Rows are already ordered DESC by created_at so the first row per item_id
+    // is the most recent action.
+    const ACTION_STATUS: Record<string, string> = {
+      acknowledge: 'acknowledged',
+      escalate:    'escalated',
+      resolve:     'resolved',
+    }
+    const latestActionMap = new Map<string, { status: string; notes: string | null; actor_id: string | null; created_at: string }>()
+    for (const row of actionRows) {
+      if (!latestActionMap.has(row.item_id)) {
+        latestActionMap.set(row.item_id, {
+          status:     ACTION_STATUS[row.action_type] ?? 'open',
+          notes:      row.notes ?? null,
+          actor_id:   row.actor_id ?? null,
+          created_at: row.created_at,
+        })
+      }
+    }
 
     // ── Aggregate attendance per employee ─────────────────────────────────────
     const attLopMap = new Map<string, number>()
@@ -787,14 +880,29 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // ── Enrich items with persisted lifecycle status ──────────────────────────
+    // Overrides the computed 'open' default with the latest stored action for
+    // each item. Also propagates the operator note and actor from the action row.
+    for (const item of items) {
+      const action = latestActionMap.get(item.id)
+      if (action) {
+        item.status     = action.status
+        item.notes      = action.notes
+        item.actor_id   = action.actor_id
+        item.actioned_at = action.created_at
+      }
+    }
+
     // ── Build summary ─────────────────────────────────────────────────────────
     const countBySeverity = { critical: 0, high: 0, medium: 0, low: 0, ok: 0 }
     const countByCategory: Record<string, number> = {}
     let totalVarianceAbs = 0
+    let resolvedCount    = 0
     for (const item of items) {
       countBySeverity[item.severity as keyof typeof countBySeverity]++
       countByCategory[item.category] = (countByCategory[item.category] ?? 0) + 1
       totalVarianceAbs += Math.abs(item.variance)
+      if (item.status === 'resolved') resolvedCount++
     }
 
     const summary = {
@@ -803,7 +911,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       high_count:         countBySeverity.high,
       medium_count:       countBySeverity.medium,
       low_count:          countBySeverity.low,
-      resolved_count:     0,
+      resolved_count:     resolvedCount,
       total_variance_abs: parseFloat(totalVarianceAbs.toFixed(2)),
       by_category:        countByCategory,
     }

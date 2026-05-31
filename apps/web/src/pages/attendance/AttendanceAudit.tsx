@@ -14,11 +14,12 @@
  * Design rules: design system tokens only — no raw hex / bg-gray-*.
  */
 
-import { useState, useMemo }  from 'react'
-import { useQuery }            from '@tanstack/react-query'
+import { useState, useMemo, useRef } from 'react'
+import { useQuery }                  from '@tanstack/react-query'
 import {
   FileSearch, ShieldAlert, RefreshCw,
   LayoutList, GitCommitVertical, Download,
+  Search, X,
 } from 'lucide-react'
 
 import { StatusChangePill }   from '@/components/operational/AttendanceDiff'
@@ -35,6 +36,7 @@ import {
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
@@ -81,6 +83,48 @@ const PAGE_SIZE = 50
 
 type ViewMode = 'table' | 'timeline'
 
+// ── Employee lookup type ───────────────────────────────────────────────────────
+
+interface EmpOption {
+  id:            string
+  first_name:    string
+  last_name:     string
+  employee_code: string
+}
+
+// ── Date-preset helpers ───────────────────────────────────────────────────────
+
+function isoToday(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+function isoDaysAgo(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+function isoMonthStart(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+function isoLastMonthRange(): [string, string] {
+  const now   = new Date()
+  const year  = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+  const month = now.getMonth() === 0 ? 12 : now.getMonth()
+  const from  = `${year}-${String(month).padStart(2, '0')}-01`
+  const to    = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`
+  return [from, to]
+}
+
+// Preset definitions — computed once so they're stable across renders.
+// "Last payroll period" = previous complete calendar month, which is the most
+// recently closed monthly payroll cycle for any standard monthly-pay tenant.
+const DATE_PRESETS = [
+  { label: 'Today',               from: isoToday(),              to: isoToday() },
+  { label: 'Last 7 days',         from: isoDaysAgo(6),           to: isoToday() },
+  { label: 'This month',          from: isoMonthStart(),         to: isoToday() },
+  { label: 'Last payroll period', from: isoLastMonthRange()[0],  to: isoLastMonthRange()[1] },
+] as const
+
 // ── Status badge helpers ──────────────────────────────────────────────────────
 
 type BadgeVariant = 'success' | 'warning' | 'destructive' | 'secondary' | 'outline' | 'default'
@@ -108,15 +152,20 @@ const SOURCE_DOT: Record<string, string> = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDatetime(iso: string) {
-  return new Date(iso).toLocaleString([], {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  const d = new Date(iso)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  const hr = String(d.getHours()).padStart(2,'0')
+  const mn = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function fmtDate(iso: string) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 /** Convert rows to CSV and trigger browser download */
@@ -256,6 +305,12 @@ export function AttendanceAudit() {
   const [page,     setPage]     = useState(1)
   const [viewMode, setViewMode] = useState<ViewMode>('table')
 
+  // H4 — employee name/code search state
+  const [empSearch,      setEmpSearch]      = useState('')
+  const [empDropOpen,    setEmpDropOpen]    = useState(false)
+  const [selectedEmpName,setSelectedEmpName]= useState('')
+  const empInputRef = useRef<HTMLInputElement>(null)
+
   // Period lock — show banner when filtering to a specific month
   const lockMonth = applied.from ? applied.from.slice(0, 7) : ''
   const { isLocked: periodLocked, state: periodState } = usePeriodLock(lockMonth || new Date().toISOString().slice(0, 7))
@@ -283,6 +338,28 @@ export function AttendanceAudit() {
   const rows  = data?.data  ?? []
   const total = data?.total ?? 0
 
+  // H4 — employee list for name/code lookup (long stale — rarely changes)
+  const { data: empListData } = useQuery<{ data: EmpOption[] }>({
+    queryKey: ['employees-lookup'],
+    queryFn:  () => api.get('/employees?status=active&limit=500'),
+    enabled:  isAdmin,
+    staleTime: 300_000,
+  })
+  const empOptions = empListData?.data ?? []
+
+  // Filter employees matching the typed search text
+  const empMatches = empSearch.trim().length >= 1
+    ? empOptions.filter(e => {
+        const q = empSearch.toLowerCase()
+        return (
+          e.first_name.toLowerCase().includes(q)       ||
+          e.last_name.toLowerCase().includes(q)        ||
+          e.employee_code.toLowerCase().includes(q)    ||
+          `${e.first_name} ${e.last_name}`.toLowerCase().includes(q)
+        )
+      }).slice(0, 8)
+    : []
+
   // ── Source breakdown counts ────────────────────────────────────────────────
   const systemCount         = rows.filter(r => r.source === 'system').length
   const regularisationCount = rows.filter(r => r.source === 'regularisation').length
@@ -301,6 +378,8 @@ export function AttendanceAudit() {
     setFilters(EMPTY_FILTERS)
     setApplied(EMPTY_FILTERS)
     setPage(1)
+    setEmpSearch('')
+    setSelectedEmpName('')
   }
 
   function handleRemoveChip(key: string) {
@@ -308,20 +387,33 @@ export function AttendanceAudit() {
     setFilters(next)
     setApplied(next)
     setPage(1)
+    if (key === 'employee_id') {
+      setEmpSearch('')
+      setSelectedEmpName('')
+    }
+  }
+
+  /** Immediately apply a date-range preset (sets both filters + applied). */
+  function applyPreset(from: string, to: string) {
+    const next = { ...filters, from, to }
+    setFilters(next)
+    setApplied(next)
+    setPage(1)
   }
 
   // ── Active chips ───────────────────────────────────────────────────────────
   const activeChips = [
-    ...(applied.from        ? [{ key: 'from',        label: `From: ${applied.from}` }]                           : []),
-    ...(applied.to          ? [{ key: 'to',          label: `To: ${applied.to}` }]                               : []),
-    ...(applied.source      ? [{ key: 'source',      label: `Source: ${SOURCE_LABEL[applied.source]}` }]         : []),
-    ...(applied.employee_id ? [{ key: 'employee_id', label: `Employee: ${applied.employee_id.slice(0, 8)}…` }]   : []),
+    ...(applied.from        ? [{ key: 'from',        label: `From: ${applied.from}` }]                                                  : []),
+    ...(applied.to          ? [{ key: 'to',          label: `To: ${applied.to}` }]                                                      : []),
+    ...(applied.source      ? [{ key: 'source',      label: `Source: ${SOURCE_LABEL[applied.source]}` }]                                : []),
+    ...(applied.employee_id ? [{ key: 'employee_id', label: `Employee: ${selectedEmpName || applied.employee_id.slice(0, 8) + '…'}` }]  : []),
   ]
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <PageContainer>
       <PageHeader
+        breadcrumb={[{ label: 'Attendance Operations', href: '/admin/attendance/center' }, { label: 'Audit Log' }]}
         title="Attendance Audit Log"
         subtitle="Track every attendance status change — system, leave, or correction"
       />
@@ -370,40 +462,127 @@ export function AttendanceAudit() {
           >
             <TableToolbar
               left={
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Input
-                    type="date"
-                    value={filters.from}
-                    onChange={e => setFilters(p => ({ ...p, from: e.target.value }))}
-                    className="h-7 text-xs w-32"
-                  />
-                  <span className="text-xs text-muted-foreground">to</span>
-                  <Input
-                    type="date"
-                    value={filters.to}
-                    onChange={e => setFilters(p => ({ ...p, to: e.target.value }))}
-                    className="h-7 text-xs w-32"
-                  />
-                  <select
-                    value={filters.source}
-                    onChange={e => setFilters(p => ({ ...p, source: e.target.value as Filters['source'] }))}
-                    className="h-7 text-xs rounded-md border border-input bg-background px-2 outline-none focus:ring-1 ring-primary/50"
-                  >
-                    <option value="">All Sources</option>
-                    <option value="system">System</option>
-                    <option value="regularisation">Regularisation</option>
-                    <option value="leave">Leave</option>
-                  </select>
-                  <Input
-                    placeholder="Employee UUID…"
-                    value={filters.employee_id}
-                    onChange={e => setFilters(p => ({ ...p, employee_id: e.target.value }))}
-                    className="h-7 text-xs w-40"
-                  />
-                  <Button size="sm" className="h-7 text-xs" onClick={handleApply}>Apply</Button>
-                  {hasActiveFilters && (
-                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleClear}>Clear</Button>
-                  )}
+                <div className="flex flex-col gap-1.5">
+
+                  {/* Q5 — date presets row */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground/60 mr-0.5 whitespace-nowrap">Quick:</span>
+                    {DATE_PRESETS.map(p => {
+                      const active = applied.from === p.from && applied.to === p.to
+                      return (
+                        <button
+                          key={p.label}
+                          onClick={() => applyPreset(p.from, p.to)}
+                          className={cn(
+                            'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors whitespace-nowrap',
+                            active
+                              ? 'border-primary/40 bg-primary/10 text-primary'
+                              : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/40',
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Main filter row */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <DateInput
+                      value={filters.from}
+                      onChange={v => setFilters(p => ({ ...p, from: v }))}
+                      className="h-7 text-xs w-32"
+                    />
+                    <span className="text-xs text-muted-foreground">to</span>
+                    <DateInput
+                      value={filters.to}
+                      onChange={v => setFilters(p => ({ ...p, to: v }))}
+                      className="h-7 text-xs w-32"
+                    />
+
+                    <select
+                      value={filters.source}
+                      onChange={e => setFilters(p => ({ ...p, source: e.target.value as Filters['source'] }))}
+                      className="h-7 text-xs rounded-md border border-input bg-background px-2 outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">All Sources</option>
+                      <option value="system">System</option>
+                      <option value="regularisation">Regularisation</option>
+                      <option value="leave">Leave</option>
+                    </select>
+
+                    {/* H4 — employee name/code combobox */}
+                    <div className="relative">
+                      <div className="relative flex items-center">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+                        <Input
+                          ref={empInputRef}
+                          placeholder="Employee name or code…"
+                          value={empSearch}
+                          onChange={e => {
+                            const v = e.target.value
+                            setEmpSearch(v)
+                            setEmpDropOpen(true)
+                            // Clear the UUID binding if the user edits the text
+                            if (selectedEmpName && v !== selectedEmpName) {
+                              setFilters(p => ({ ...p, employee_id: '' }))
+                              setSelectedEmpName('')
+                            }
+                          }}
+                          onFocus={() => setEmpDropOpen(true)}
+                          onBlur={() => setTimeout(() => setEmpDropOpen(false), 150)}
+                          className="h-7 text-xs w-44 pl-7 pr-6"
+                        />
+                        {empSearch && (
+                          <button
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                            onMouseDown={e => {
+                              e.preventDefault()
+                              setEmpSearch('')
+                              setSelectedEmpName('')
+                              setFilters(p => ({ ...p, employee_id: '' }))
+                            }}
+                            tabIndex={-1}
+                            aria-label="Clear employee filter"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Dropdown */}
+                      {empDropOpen && empMatches.length > 0 && (
+                        <div className="absolute top-full mt-1 left-0 z-50 w-56 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                          {empMatches.map(emp => (
+                            <button
+                              key={emp.id}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-muted/60 transition-colors flex items-center justify-between gap-2"
+                              onMouseDown={e => {
+                                e.preventDefault()
+                                const name = `${emp.first_name} ${emp.last_name}`
+                                setFilters(p => ({ ...p, employee_id: emp.id }))
+                                setEmpSearch(name)
+                                setSelectedEmpName(name)
+                                setEmpDropOpen(false)
+                              }}
+                            >
+                              <span className="font-medium text-foreground truncate">
+                                {emp.first_name} {emp.last_name}
+                              </span>
+                              <span className="text-muted-foreground font-mono text-[10px] flex-shrink-0">
+                                {emp.employee_code}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <Button size="sm" className="h-7 text-xs" onClick={handleApply}>Apply</Button>
+                    {hasActiveFilters && (
+                      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleClear}>Clear</Button>
+                    )}
+                  </div>
                 </div>
               }
               right={

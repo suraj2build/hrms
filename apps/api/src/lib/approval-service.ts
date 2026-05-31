@@ -235,18 +235,36 @@ export async function approveLeaveRequest(
       to_date:     req.to_date,
       changed_by:  ctx.approverId,
     })
-  } catch (engineErr) {
-    // Log but do not fail — approval already committed in the RPC
-    console.error('[ApprovalService] attendance recompute failed after leave approval', engineErr)
+  } catch (engineErr: unknown) {
+    // Log but do not fail — approval already committed in the RPC.
+    // Write structured JSON to stderr so production log aggregation (Datadog / CloudWatch / Loki)
+    // captures context fields.  approval-service is a lib module without access to a
+    // request-scoped fastify logger, so we use process.stderr directly.
+    const errMsg = engineErr instanceof Error ? engineErr.message : String(engineErr)
+    process.stderr.write(JSON.stringify({
+      level:            'error',
+      time:             new Date().toISOString(),
+      service:          'approval-service',
+      fn:               'approveLeaveRequest',
+      msg:              'attendance recompute failed after leave approval — leave is committed but attendance_daily may be stale for this period',
+      tenant_id:        tenantId,
+      employee_id:      req.employee_id,
+      leave_request_id: requestId,
+      from_date:        req.from_date,
+      to_date:          req.to_date,
+      err:              errMsg,
+    }) + '\n')
   }
 
   // ── 7. Audit (non-fatal) ─────────────────────────────────────────────────────
+  const isHrAdminApprove = ['super_admin', 'hr_admin'].includes(ctx.approverRole)
   await logAction(supabase, {
     tenantId,
     tableName:   'leave_requests',
     recordId:    requestId,
     action:      'UPDATE',
     performedBy: ctx.approverId,
+    onBehalfOf:  isHrAdminApprove ? req.employee_id : null,
     oldData:     { status: 'PENDING' },
     newData:     { status: 'APPROVED', approved_by: ctx.approverId, approved_at: now },
   })
@@ -316,12 +334,14 @@ export async function rejectLeaveRequest(
   const rejected = rpcData as { id: string; status: string }
 
   // 3. Audit
+  const isHrAdminReject = ['super_admin', 'hr_admin'].includes(ctx.approverRole)
   await logAction(supabase, {
     tenantId,
     tableName:   'leave_requests',
     recordId:    requestId,
     action:      'UPDATE',
     performedBy: ctx.approverId,
+    onBehalfOf:  isHrAdminReject ? req.employee_id : null,
     oldData:     { status: 'PENDING' },
     newData:     { status: 'REJECTED', rejection_reason: rejectionReason ?? null },
   })
@@ -422,12 +442,14 @@ export async function approveRegularisation(
   const approved = rpcData as ApprovedRegularisation
 
   // 3. Audit (non-fatal)
+  const isHrAdminRegApprove = ['super_admin', 'hr_admin'].includes(ctx.approverRole)
   await logAction(supabase, {
     tenantId,
     tableName:   'attendance_regularisation',
     recordId:    regularisationId,
     action:      'UPDATE',
     performedBy: ctx.approverId,
+    onBehalfOf:  isHrAdminRegApprove ? regRow.employee_id : null,
     oldData:     { status: 'pending' },
     newData:     { status: 'approved', approved_by: ctx.approverId, approved_at: now },
   })
@@ -496,12 +518,14 @@ export async function rejectRegularisation(
   const rejected = rpcData as { id: string; status: string }
 
   // Audit
+  const isHrAdminRegReject = ['super_admin', 'hr_admin'].includes(ctx.approverRole)
   await logAction(supabase, {
     tenantId,
     tableName:   'attendance_regularisation',
     recordId:    regularisationId,
     action:      'UPDATE',
     performedBy: ctx.approverId,
+    onBehalfOf:  isHrAdminRegReject ? regRow.employee_id : null,
     oldData:     { status: 'pending' },
     newData:     { status: 'rejected', rejection_reason: rejectionReason ?? null },
   })

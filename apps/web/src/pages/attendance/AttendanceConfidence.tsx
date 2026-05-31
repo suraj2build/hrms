@@ -19,6 +19,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
+import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -83,9 +84,11 @@ function levelBadgeVariant(level: string): BadgeVariant {
 }
 
 function fmtDate(iso: string) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
+  const s = iso
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 /** Return the top N factor keys by value, formatted as "factor_name (0.xx)" */
@@ -311,23 +314,21 @@ export function AttendanceConfidence() {
           {/* Date from */}
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground font-medium">Date From</label>
-            <Input
-              type="date"
+            <DateInput
               className="h-8 text-xs"
               value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
+              onChange={setDateFrom}
             />
           </div>
 
           {/* Date to */}
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground font-medium">Date To</label>
-            <Input
-              type="date"
+            <DateInput
               className="h-8 text-xs"
               value={dateTo}
               min={dateFrom}
-              onChange={e => setDateTo(e.target.value)}
+              onChange={setDateTo}
             />
           </div>
 

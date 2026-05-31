@@ -99,15 +99,23 @@ export function SalaryComponents() {
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
+  // Use a page-specific key to avoid colliding with the readiness-hooks cache
+  // (hooks.ts uses ['salary-components'] and stores { data: [...] }, not a plain array)
   const { data: components, isLoading } = useQuery<SalaryComponent[]>({
-    queryKey: ['salary-components'],
-    queryFn:  () => api.get('/masters/salary-components').then((r: any) => r.data ?? r),
+    queryKey: ['salary-components-mgmt'],
+    queryFn:  () => api.get('/masters/salary-components').then((r: any) => {
+      const raw = r?.data ?? r
+      return Array.isArray(raw) ? raw : (raw?.data ?? [])
+    }),
     staleTime: 60_000,
   })
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['salary-components'] })
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['salary-components-mgmt'] })
+    qc.invalidateQueries({ queryKey: ['salary-components'] })  // also bust readiness cache
+  }
 
   const createMutation = useMutation({
     mutationFn: (body: object) => api.post('/masters/salary-components', body),
@@ -268,8 +276,9 @@ export function SalaryComponents() {
         }
       >
         {isLoading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading components…
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading…</span>
           </div>
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
@@ -284,17 +293,17 @@ export function SalaryComponents() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-muted-foreground">
-                  <th className="px-4 pb-3 font-medium">Component</th>
-                  <th className="px-4 pb-3 font-medium">Type</th>
-                  <th className="px-4 pb-3 font-medium">Compliance Flags</th>
-                  <th className="px-4 pb-3 font-medium">Variable</th>
-                  <th className="px-4 pb-3 font-medium text-right">Actions</th>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Component</th>
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Type</th>
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Compliance Flags</th>
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Variable</th>
+                  <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map(c => (
-                  <tr key={c.id} className="border-b border-border hover:bg-muted/40 transition-colors">
+                  <tr key={c.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
                       <div className="font-medium text-foreground">{c.name}</div>
                       <div className="text-xs font-mono text-muted-foreground">{c.code}</div>

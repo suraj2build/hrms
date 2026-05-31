@@ -1,8 +1,8 @@
 /**
  * TDSManagement — /admin/payroll/statutory/tds
  *
- * HR admin page for managing TDS: tax declarations (verify/reject),
- * proof submissions (approve/reject), and TDS projections.
+ * HR admin page for managing TDS: tax declarations (approve/reject),
+ * proof verification, and TDS projections.
  *
  * Access: hr_admin and super_admin only.
  */
@@ -11,8 +11,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShieldAlert, RefreshCw, Loader2, AlertCircle,
-  CheckCircle2, XCircle, FileText, Receipt,
-  TrendingUp,
+  CheckCircle2, XCircle, FileText, Receipt, TrendingUp,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -27,52 +26,91 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { toast }          from 'sonner'
+import { toast }         from 'sonner'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type DeclarationStatus =
+  | 'draft' | 'declared' | 'submitted' | 'under_review'
+  | 'approved' | 'rejected' | 'revision_requested'
+  | 'locked' | 'payroll_applied' | 'archived'
+
+type DocumentState = 'uploaded' | 'under_review' | 'verified' | 'rejected'
+
+interface DeclarationProof {
+  id: string
+  file_name: string
+  document_state: DocumentState
+  uploaded_at: string
+}
+
 interface TaxDeclarationItem {
   id: string
   employee_id: string
   financial_year: string
-  declaration_type: string
-  section_code: string
+  declaration_category: string
+  section: string
+  description: string
   declared_amount: number
-  status: 'pending' | 'verified' | 'rejected'
-  employee_name?: string
-  employee_code?: string
+  approved_amount: number | null
+  status: DeclarationStatus
+  rejection_reason: string | null
+  declaration_proofs: DeclarationProof[]
+  employees?: {
+    employee_code: string
+    profiles: Array<{ full_name: string }>
+  }
 }
 
-interface TDSProjection {
+interface TDSProjectionRow {
   id: string
   employee_id: string
   financial_year: string
-  month: string
-  projected_tds: number
-  actual_tds: number | null
+  projection_month: string
+  tds_this_month: number
+  gross_income_projected: number
+  taxable_income_projected: number
   regime: 'old' | 'new'
-  employee_name?: string
+  employees?: {
+    employee_code: string
+    profiles: Array<{ full_name: string }>
+  }
 }
 
-interface ProofSubmission {
+interface ProofRow {
   id: string
-  declaration_id: string
-  proof_type: string
-  claimed_amount: number
-  status: 'pending' | 'approved' | 'rejected'
-  employee_name?: string
+  file_name: string
+  storage_path: string
+  mime_type: string | null
+  file_size_bytes: number | null
+  uploaded_at: string
+  document_state: DocumentState
+  verification_notes: string | null
+  rejection_reason: string | null
+  verified_at: string | null
+  tax_declarations: {
+    id: string
+    declaration_category: string
+    section: string
+    declared_amount: number
+    approved_amount: number | null
+    financial_year: string
+    employee_id: string
+    employees: {
+      employee_code: string
+      profiles: Array<{ full_name: string }>
+    }
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtCurrency(n: number): string {
   return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
+    style: 'currency', currency: 'INR', maximumFractionDigits: 0,
   }).format(n)
 }
 
@@ -82,16 +120,108 @@ function currentFY(): string {
   return `${year}-${String(year + 1).slice(2)}`
 }
 
-const DECLARATION_STATUS_BADGE: Record<string, string> = {
-  pending:  'warning',
-  verified: 'success',
-  rejected: 'destructive',
+const DECLARATION_STATUS_BADGE: Record<DeclarationStatus, string> = {
+  draft:              'outline',
+  declared:           'outline',
+  submitted:          'secondary',
+  under_review:       'secondary',
+  approved:           'success',
+  rejected:           'destructive',
+  revision_requested: 'destructive',
+  locked:             'secondary',
+  payroll_applied:    'success',
+  archived:           'outline',
 }
 
-const PROOF_STATUS_BADGE: Record<string, string> = {
-  pending:  'warning',
-  approved: 'success',
-  rejected: 'destructive',
+const DOCUMENT_STATE_BADGE: Record<DocumentState, string> = {
+  uploaded:     'outline',
+  under_review: 'secondary',
+  verified:     'success',
+  rejected:     'destructive',
+}
+
+function empName(row: { employees?: { profiles: Array<{ full_name: string }> } } | undefined): string {
+  return row?.employees?.profiles?.[0]?.full_name ?? '—'
+}
+function empCode(row: { employees?: { employee_code: string } } | undefined): string {
+  return row?.employees?.employee_code ?? ''
+}
+
+// ── ApproveDialog ─────────────────────────────────────────────────────────────
+
+function ApproveDialog({
+  declaration,
+  onConfirm,
+  onClose,
+  isPending,
+}: {
+  declaration: TaxDeclarationItem
+  onConfirm: (approvedAmount: number, notes?: string) => void
+  onClose: () => void
+  isPending: boolean
+}) {
+  const [amount, setAmount] = useState(String(declaration.declared_amount))
+  const [notes,  setNotes]  = useState('')
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <CheckCircle2 className="h-4 w-4 text-success" />
+            Approve Declaration
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground text-xs">
+            Declared: {fmtCurrency(declaration.declared_amount)} — {declaration.section} / {declaration.description}
+          </p>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">
+              Approved Amount (₹)
+            </label>
+            <Input
+              type="number"
+              min="0"
+              step="1"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className="h-8 text-xs"
+            />
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Enter the amount you approve. May be less than declared.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">
+              Notes (optional)
+            </label>
+            <Input
+              placeholder="Any notes for the employee…"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1 h-8 text-xs" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 h-8 text-xs"
+              disabled={isPending || !amount || Number(amount) < 0}
+              onClick={() => onConfirm(Number(amount), notes || undefined)}
+            >
+              {isPending
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Approving…</>
+                : 'Approve'
+              }
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // ── RejectDialog ──────────────────────────────────────────────────────────────
@@ -108,7 +238,6 @@ function RejectDialog({
   isPending: boolean
 }) {
   const [reason, setReason] = useState('')
-
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
@@ -118,20 +247,18 @@ function RejectDialog({
             {title}
           </DialogTitle>
         </DialogHeader>
-
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium text-muted-foreground block mb-1">
-              Rejection Reason
+              Reason
             </label>
             <Input
-              placeholder="Enter reason for rejection…"
+              placeholder="Enter reason…"
               value={reason}
               onChange={e => setReason(e.target.value)}
               className="h-8 text-xs"
             />
           </div>
-
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1 h-8 text-xs" onClick={onClose}>
               Cancel
@@ -158,41 +285,55 @@ function RejectDialog({
 
 function DeclarationsTab({ financialYear }: { financialYear: string }) {
   const qc = useQueryClient()
-  const [rejectTarget, setRejectTarget] = useState<TaxDeclarationItem | null>(null)
+  const [approveTarget, setApproveTarget] = useState<TaxDeclarationItem | null>(null)
+  const [rejectTarget,  setRejectTarget]  = useState<TaxDeclarationItem | null>(null)
+  const [statusFilter,  setStatusFilter]  = useState('')
 
-  const {
-    data: declarations,
-    isLoading,
-    isError,
-  } = useQuery<TaxDeclarationItem[]>({
-    queryKey: ['tds-declarations', financialYear],
-    queryFn:  () => api.get(`/payroll/statutory/tds/declarations?financial_year=${financialYear}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+  const { data: declarations, isLoading, isError } = useQuery<TaxDeclarationItem[]>({
+    queryKey:  ['tds-declarations', financialYear, statusFilter],
+    queryFn:   () => {
+      const params = new URLSearchParams({ financial_year: financialYear })
+      if (statusFilter) params.set('status', statusFilter)
+      return api.get(`/payroll/statutory/tds/declarations?${params}`)
+        .then((r: any) => Array.isArray(r?.data) ? r.data : [])
+    },
     staleTime: 30_000,
   })
 
-  const verifyMutation = useMutation({
-    mutationFn: (id: string) => api.put(`/payroll/statutory/tds/declarations/${id}/verify`, {}),
+  const approveMutation = useMutation({
+    mutationFn: ({ id, approved_amount, notes }: { id: string; approved_amount: number; notes?: string }) =>
+      api.post(`/payroll/statutory/tds/declarations/${id}/approve`, { approved_amount, notes }),
     onSuccess: () => {
+      setApproveTarget(null)
       qc.invalidateQueries({ queryKey: ['tds-declarations', financialYear] })
-      toast.success('Declaration verified')
+      toast.success('Declaration approved')
     },
-    onError: (e: any) => toast.error('Verification failed', { description: (e as any)?.message }),
+    onError: (e: any) => toast.error('Approval failed', { description: e?.message }),
   })
 
   const rejectMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.put(`/payroll/statutory/tds/declarations/${id}/reject`, { rejection_reason: reason }),
+    mutationFn: ({ id, rejection_reason }: { id: string; rejection_reason: string }) =>
+      api.post(`/payroll/statutory/tds/declarations/${id}/reject`, { rejection_reason }),
     onSuccess: () => {
       setRejectTarget(null)
       qc.invalidateQueries({ queryKey: ['tds-declarations', financialYear] })
       toast.success('Declaration rejected')
     },
-    onError: (e: any) => toast.error('Rejection failed', { description: (e as any)?.message }),
+    onError: (e: any) => toast.error('Rejection failed', { description: e?.message }),
   })
 
-  if (isLoading) return <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
-  if (isError)   return (
+  const revisionMutation = useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes: string }) =>
+      api.post(`/payroll/statutory/tds/declarations/${id}/request-revision`, { notes }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tds-declarations', financialYear] })
+      toast.success('Revision requested — employee notified')
+    },
+    onError: (e: any) => toast.error('Failed to request revision', { description: e?.message }),
+  })
+
+  if (isLoading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
+  if (isError) return (
     <div className="flex items-center gap-2 text-xs text-destructive py-2">
       <AlertCircle className="h-3.5 w-3.5" />
       Failed to load declarations.
@@ -200,82 +341,140 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
   )
 
   const list = Array.isArray(declarations) ? declarations : []
-
-  if (list.length === 0) {
-    return <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
-  }
+  const reviewable = (d: TaxDeclarationItem) => d.status === 'submitted' || d.status === 'under_review'
 
   return (
     <>
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Section</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Declaration Type</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Declared Amount</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Status</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map(d => (
-              <tr key={d.id} className="border-b border-border/50 hover:bg-muted/30">
-                <td className="px-3 py-2">
-                  <p className="text-xs font-medium">{d.employee_name ?? '—'}</p>
-                  <p className="text-[10px] text-muted-foreground font-mono">{d.employee_code ?? ''}</p>
-                </td>
-                <td className="px-3 py-2 text-xs font-mono font-semibold">{d.section_code}</td>
-                <td className="px-3 py-2 text-xs capitalize">{d.declaration_type}</td>
-                <td className="px-3 py-2 text-xs font-mono">{fmtCurrency(d.declared_amount)}</td>
-                <td className="px-3 py-2">
-                  <Badge
-                    variant={(DECLARATION_STATUS_BADGE[d.status] ?? 'secondary') as any}
-                    className="rounded-full text-[10px] capitalize"
-                  >
-                    {d.status}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">
-                  {d.status === 'pending' && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 text-[10px] gap-1 text-success border-success/30 hover:bg-success/10"
-                        disabled={verifyMutation.isPending && verifyMutation.variables === d.id}
-                        onClick={() => verifyMutation.mutate(d.id)}
-                      >
-                        {verifyMutation.isPending && verifyMutation.variables === d.id
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <CheckCircle2 className="h-3 w-3" />
-                        }
-                        Verify
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 text-[10px] gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
-                        onClick={() => setRejectTarget(d)}
-                      >
-                        <XCircle className="h-3 w-3" />
-                        Reject
-                      </Button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 mb-3">
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
+        >
+          <option value="">All Statuses</option>
+          <option value="submitted">Submitted</option>
+          <option value="under_review">Under Review</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+          <option value="revision_requested">Needs Revision</option>
+          <option value="payroll_applied">Payroll Applied</option>
+        </select>
+        {list.length > 0 && (
+          <span className="text-xs text-muted-foreground">{list.length} record{list.length !== 1 ? 's' : ''}</span>
+        )}
       </div>
 
+      {list.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Category / Section</th>
+                <th className="text-right text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Declared</th>
+                <th className="text-right text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Approved</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Status</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Proofs</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map(d => (
+                <tr key={d.id} className="border-b border-border/50 hover:bg-muted/30">
+                  <td className="px-3 py-2">
+                    <p className="text-xs font-medium">{empName(d)}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">{empCode(d)}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p className="text-xs font-mono font-semibold">{d.declaration_category}</p>
+                    <p className="text-[10px] text-muted-foreground">{d.section} — {d.description}</p>
+                  </td>
+                  <td className="px-3 py-2 text-xs font-mono text-right">{fmtCurrency(d.declared_amount)}</td>
+                  <td className="px-3 py-2 text-xs font-mono text-right">
+                    {d.approved_amount != null
+                      ? <span className="text-success font-medium">{fmtCurrency(d.approved_amount)}</span>
+                      : <span className="text-muted-foreground">—</span>
+                    }
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge
+                      variant={(DECLARATION_STATUS_BADGE[d.status] ?? 'secondary') as any}
+                      className="rounded-full text-[10px] capitalize"
+                    >
+                      {d.status.replace('_', ' ')}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2">
+                    {(d.declaration_proofs?.length ?? 0) === 0 ? (
+                      <span className="text-[10px] text-muted-foreground">None</span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">
+                        {d.declaration_proofs?.filter(p => p.document_state === 'verified').length ?? 0} / {d.declaration_proofs?.length ?? 0} verified
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {reviewable(d) && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] gap-1 text-success border-success/30 hover:bg-success/10"
+                          disabled={approveMutation.isPending}
+                          onClick={() => setApproveTarget(d)}
+                        >
+                          <CheckCircle2 className="h-3 w-3" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
+                          onClick={() => setRejectTarget(d)}
+                        >
+                          <XCircle className="h-3 w-3" />
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] gap-1 text-warning border-warning/30 hover:bg-warning/10"
+                          disabled={revisionMutation.isPending}
+                          onClick={() => {
+                            const notes = window.prompt('Reason for revision request (required):')
+                            if (notes?.trim()) revisionMutation.mutate({ id: d.id, notes: notes.trim() })
+                          }}
+                        >
+                          Revise
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {approveTarget && (
+        <ApproveDialog
+          declaration={approveTarget}
+          isPending={approveMutation.isPending}
+          onConfirm={(approvedAmount, notes) =>
+            approveMutation.mutate({ id: approveTarget.id, approved_amount: approvedAmount, notes })
+          }
+          onClose={() => setApproveTarget(null)}
+        />
+      )}
       {rejectTarget && (
         <RejectDialog
-          title={`Reject Declaration — ${rejectTarget.section_code}`}
+          title={`Reject Declaration — ${rejectTarget.section}`}
           isPending={rejectMutation.isPending}
-          onConfirm={reason => rejectMutation.mutate({ id: rejectTarget.id, reason })}
+          onConfirm={reason => rejectMutation.mutate({ id: rejectTarget.id, rejection_reason: reason })}
           onClose={() => setRejectTarget(null)}
         />
       )}
@@ -287,41 +486,43 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
 
 function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
   const qc = useQueryClient()
-  const [rejectTarget, setRejectTarget] = useState<ProofSubmission | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<ProofRow | null>(null)
+  const [stateFilter,  setStateFilter]  = useState('uploaded')
 
-  const {
-    data: proofs,
-    isLoading,
-    isError,
-  } = useQuery<ProofSubmission[]>({
-    queryKey: ['tds-proofs', financialYear],
-    queryFn:  () => api.get(`/payroll/statutory/tds/proofs?financial_year=${financialYear}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+  const { data: proofs, isLoading, isError } = useQuery<ProofRow[]>({
+    queryKey:  ['tds-proofs', financialYear, stateFilter],
+    queryFn:   () => {
+      const params = new URLSearchParams({ financial_year: financialYear })
+      if (stateFilter) params.set('document_state', stateFilter)
+      return api.get(`/payroll/statutory/tds/proofs?${params}`)
+        .then((r: any) => Array.isArray(r?.data) ? r.data : [])
+    },
     staleTime: 30_000,
   })
 
-  const approveMutation = useMutation({
-    mutationFn: (id: string) => api.put(`/payroll/statutory/tds/proofs/${id}/approve`, {}),
+  const verifyMutation = useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
+      api.post(`/payroll/statutory/tds/proofs/${id}/verify`, { verification_notes: notes }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tds-proofs', financialYear] })
-      toast.success('Proof submission approved')
+      toast.success('Proof verified')
     },
-    onError: (e: any) => toast.error('Approval failed', { description: (e as any)?.message }),
+    onError: (e: any) => toast.error('Verification failed', { description: e?.message }),
   })
 
   const rejectMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.put(`/payroll/statutory/tds/proofs/${id}/reject`, { rejection_reason: reason }),
+    mutationFn: ({ id, rejection_reason }: { id: string; rejection_reason: string }) =>
+      api.post(`/payroll/statutory/tds/proofs/${id}/reject`, { rejection_reason }),
     onSuccess: () => {
       setRejectTarget(null)
       qc.invalidateQueries({ queryKey: ['tds-proofs', financialYear] })
-      toast.success('Proof submission rejected')
+      toast.success('Proof rejected')
     },
-    onError: (e: any) => toast.error('Rejection failed', { description: (e as any)?.message }),
+    onError: (e: any) => toast.error('Rejection failed', { description: e?.message }),
   })
 
-  if (isLoading) return <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
-  if (isError)   return (
+  if (isLoading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
+  if (isError) return (
     <div className="flex items-center gap-2 text-xs text-destructive py-2">
       <AlertCircle className="h-3.5 w-3.5" />
       Failed to load proof submissions.
@@ -330,76 +531,107 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
 
   const list = Array.isArray(proofs) ? proofs : []
 
-  if (list.length === 0) {
-    return <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
-  }
-
   return (
     <>
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Proof Type</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Claimed Amount</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Status</th>
-              <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map(p => (
-              <tr key={p.id} className="border-b border-border/50 hover:bg-muted/30">
-                <td className="px-3 py-2 text-xs font-medium">{p.employee_name ?? '—'}</td>
-                <td className="px-3 py-2 text-xs capitalize">{p.proof_type}</td>
-                <td className="px-3 py-2 text-xs font-mono">{fmtCurrency(p.claimed_amount)}</td>
-                <td className="px-3 py-2">
-                  <Badge
-                    variant={(PROOF_STATUS_BADGE[p.status] ?? 'secondary') as any}
-                    className="rounded-full text-[10px] capitalize"
-                  >
-                    {p.status}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">
-                  {p.status === 'pending' && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 text-[10px] gap-1 text-success border-success/30 hover:bg-success/10"
-                        disabled={approveMutation.isPending && approveMutation.variables === p.id}
-                        onClick={() => approveMutation.mutate(p.id)}
-                      >
-                        {approveMutation.isPending && approveMutation.variables === p.id
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <CheckCircle2 className="h-3 w-3" />
-                        }
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 text-[10px] gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
-                        onClick={() => setRejectTarget(p)}
-                      >
-                        <XCircle className="h-3 w-3" />
-                        Reject
-                      </Button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="flex items-center gap-2 mb-3">
+        <select
+          value={stateFilter}
+          onChange={e => setStateFilter(e.target.value)}
+          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
+        >
+          <option value="">All States</option>
+          <option value="uploaded">Uploaded (Pending)</option>
+          <option value="under_review">Under Review</option>
+          <option value="verified">Verified</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        {list.length > 0 && (
+          <span className="text-xs text-muted-foreground">{list.length} record{list.length !== 1 ? 's' : ''}</span>
+        )}
       </div>
+
+      {list.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">File</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Declaration</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">State</th>
+                <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map(p => (
+                <tr key={p.id} className="border-b border-border/50 hover:bg-muted/30">
+                  <td className="px-3 py-2">
+                    <p className="text-xs font-medium">{empName(p.tax_declarations)}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">{empCode(p.tax_declarations)}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p className="text-xs font-medium max-w-[140px] truncate">{p.file_name}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {(() => { const _s = p.uploaded_at; const _dt = new Date(_s.length === 10 ? _s + 'T12:00:00Z' : _s); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_dt.getTime()) ? '—' : `${String(_dt.getUTCDate()).padStart(2,'0')}-${_M[_dt.getUTCMonth()]}-${_dt.getUTCFullYear()}` })()}
+                    </p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p className="text-xs font-mono font-semibold">{p.tax_declarations.declaration_category}</p>
+                    <p className="text-[10px] text-muted-foreground">{p.tax_declarations.section}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge
+                      variant={(DOCUMENT_STATE_BADGE[p.document_state] ?? 'secondary') as any}
+                      className="rounded-full text-[10px] capitalize"
+                    >
+                      {p.document_state.replace('_', ' ')}
+                    </Badge>
+                    {p.rejection_reason && (
+                      <p className="text-[10px] text-destructive mt-0.5 max-w-[140px] truncate">{p.rejection_reason}</p>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {(p.document_state === 'uploaded' || p.document_state === 'under_review') && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] gap-1 text-success border-success/30 hover:bg-success/10"
+                          disabled={verifyMutation.isPending && verifyMutation.variables?.id === p.id}
+                          onClick={() => verifyMutation.mutate({ id: p.id })}
+                        >
+                          {verifyMutation.isPending && verifyMutation.variables?.id === p.id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <CheckCircle2 className="h-3 w-3" />
+                          }
+                          Verify
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
+                          onClick={() => setRejectTarget(p)}
+                        >
+                          <XCircle className="h-3 w-3" />
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {rejectTarget && (
         <RejectDialog
-          title={`Reject Proof — ${rejectTarget.proof_type}`}
+          title={`Reject Proof — ${rejectTarget.file_name}`}
           isPending={rejectMutation.isPending}
-          onConfirm={reason => rejectMutation.mutate({ id: rejectTarget.id, reason })}
+          onConfirm={reason => rejectMutation.mutate({ id: rejectTarget.id, rejection_reason: reason })}
           onClose={() => setRejectTarget(null)}
         />
       )}
@@ -410,19 +642,15 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
 // ── TDSProjectionsTab ─────────────────────────────────────────────────────────
 
 function TDSProjectionsTab({ selectedMonth }: { selectedMonth: string }) {
-  const {
-    data: projections,
-    isLoading,
-    isError,
-  } = useQuery<TDSProjection[]>({
-    queryKey: ['tds-projections', selectedMonth],
-    queryFn:  () => api.get(`/payroll/statutory/tds/projections?month=${selectedMonth}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+  const { data: projections, isLoading, isError } = useQuery<TDSProjectionRow[]>({
+    queryKey:  ['tds-projections', selectedMonth],
+    queryFn:   () => api.get(`/payroll/statutory/tds/projections?month=${selectedMonth}`)
+      .then((r: any) => Array.isArray(r?.data) ? r.data : []),
     staleTime: 30_000,
   })
 
-  if (isLoading) return <div className="text-xs text-muted-foreground animate-pulse py-4">Loading…</div>
-  if (isError)   return (
+  if (isLoading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
+  if (isError) return (
     <div className="flex items-center gap-2 text-xs text-destructive py-2">
       <AlertCircle className="h-3.5 w-3.5" />
       Failed to load TDS projections.
@@ -432,55 +660,50 @@ function TDSProjectionsTab({ selectedMonth }: { selectedMonth: string }) {
   const list = Array.isArray(projections) ? projections : []
 
   if (list.length === 0) {
-    return <div className="text-center py-12 text-muted-foreground text-sm">No records found.</div>
+    return <div className="text-center py-12 text-muted-foreground text-sm">No projections for this month.</div>
   }
 
   return (
     <div className="overflow-x-auto rounded-md border border-border">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border">
+          <tr className="border-b border-border bg-muted/30">
             <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Employee</th>
             <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Regime</th>
-            <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Projected TDS</th>
-            <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Actual TDS</th>
-            <th className="text-left text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Diff</th>
+            <th className="text-right text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Gross Income</th>
+            <th className="text-right text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">Taxable Income</th>
+            <th className="text-right text-xs text-muted-foreground font-semibold px-3 py-2 whitespace-nowrap">TDS This Month</th>
           </tr>
         </thead>
         <tbody>
-          {list.map(p => {
-            const diff = p.actual_tds != null ? p.actual_tds - p.projected_tds : null
-            return (
-              <tr key={p.id} className="border-b border-border/50 hover:bg-muted/30">
-                <td className="px-3 py-2">
-                  <p className="text-xs font-medium">{p.employee_name ?? '—'}</p>
-                </td>
-                <td className="px-3 py-2">
-                  <Badge
-                    variant={p.regime === 'new' ? 'success' : 'secondary'}
-                    className="rounded-full text-[10px] capitalize"
-                  >
-                    {p.regime}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2 text-xs font-mono">{fmtCurrency(p.projected_tds)}</td>
-                <td className="px-3 py-2 text-xs font-mono">
-                  {p.actual_tds != null ? fmtCurrency(p.actual_tds) : <span className="text-muted-foreground">—</span>}
-                </td>
-                <td className={cn(
-                  'px-3 py-2 text-xs font-mono font-semibold',
-                  diff == null
-                    ? 'text-muted-foreground'
-                    : diff > 0 ? 'text-destructive' : diff < 0 ? 'text-success' : 'text-muted-foreground',
-                )}>
-                  {diff == null
-                    ? '—'
-                    : diff === 0 ? '—' : diff > 0 ? `+${fmtCurrency(diff)}` : fmtCurrency(diff)
-                  }
-                </td>
-              </tr>
-            )
-          })}
+          {list.map(p => (
+            <tr key={p.id} className="border-b border-border/50 hover:bg-muted/30">
+              <td className="px-3 py-2">
+                <p className="text-xs font-medium">{empName(p)}</p>
+                <p className="text-[10px] text-muted-foreground font-mono">{empCode(p)}</p>
+              </td>
+              <td className="px-3 py-2">
+                <Badge
+                  variant={p.regime === 'new' ? 'success' : 'secondary'}
+                  className="rounded-full text-[10px] capitalize"
+                >
+                  {p.regime}
+                </Badge>
+              </td>
+              <td className="px-3 py-2 text-right text-xs font-mono">
+                {fmtCurrency(p.gross_income_projected)}
+              </td>
+              <td className="px-3 py-2 text-right text-xs font-mono">
+                {fmtCurrency(p.taxable_income_projected)}
+              </td>
+              <td className={cn(
+                'px-3 py-2 text-right text-xs font-mono font-semibold',
+                p.tds_this_month > 0 ? 'text-foreground' : 'text-muted-foreground',
+              )}>
+                {fmtCurrency(p.tds_this_month)}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -492,9 +715,9 @@ function TDSProjectionsTab({ selectedMonth }: { selectedMonth: string }) {
 type TabId = 'declarations' | 'proofs' | 'projections'
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
-  { id: 'declarations', label: 'Declarations',     icon: FileText   },
-  { id: 'proofs',       label: 'Proof Submissions', icon: Receipt    },
-  { id: 'projections',  label: 'TDS Projections',  icon: TrendingUp },
+  { id: 'declarations', label: 'Declarations',      icon: FileText   },
+  { id: 'proofs',       label: 'Proof Submissions',  icon: Receipt    },
+  { id: 'projections',  label: 'TDS Projections',   icon: TrendingUp },
 ]
 
 export function TDSManagement() {
@@ -502,12 +725,11 @@ export function TDSManagement() {
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc          = useQueryClient()
 
-  const todayYM       = new Date().toISOString().slice(0, 7)
-  const [activeTab, setActiveTab]       = useState<TabId>('declarations')
-  const [financialYear, setFinancialYear] = useState(currentFY())
-  const [selectedMonth, setSelectedMonth] = useState(todayYM)
+  const todayYM         = new Date().toISOString().slice(0, 7)
+  const [activeTab,      setActiveTab]       = useState<TabId>('declarations')
+  const [financialYear,  setFinancialYear]   = useState(currentFY())
+  const [selectedMonth,  setSelectedMonth]   = useState(todayYM)
 
-  // ── Guard ─────────────────────────────────────────────────────────────────────
   if (!isAdmin) {
     return (
       <PageContainer>
@@ -531,14 +753,9 @@ export function TDSManagement() {
     <PageContainer>
       <PageHeader
         title="TDS Management"
-        subtitle="Manage tax declarations, proof submissions, and TDS projections"
+        subtitle="Manage tax declarations, proof verification, and monthly TDS projections"
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5"
-            onClick={handleRefresh}
-          >
+          <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={handleRefresh}>
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>

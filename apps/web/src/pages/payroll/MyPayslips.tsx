@@ -9,13 +9,13 @@
  * Design rules: design system tokens only — no raw hex / bg-gray-*.
  */
 
-import { useState }   from 'react'
-import { useQuery }   from '@tanstack/react-query'
+import { useState }            from 'react'
+import { useQuery }            from '@tanstack/react-query'
 import {
   DollarSign, ChevronDown, ChevronUp,
   Loader2, AlertCircle, FileText,
   TrendingDown, TrendingUp, Calendar,
-  BookOpen,
+  BookOpen, Printer, BarChart2,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -30,7 +30,8 @@ import { cn }            from '@/lib/utils'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface SlipSummary {
-  id:               string
+  /** Matches EmployeePayslipView.slip_id from the API read model */
+  slip_id:          string
   month:            string
   gross_pay:        number
   lop_amount:       number
@@ -110,42 +111,14 @@ function getCalcHint(
   }
 }
 
-// ── Event type display helpers ─────────────────────────────────────────────────
-
-const EVENT_LABEL: Record<string, string> = {
-  leave_deducted:        'Leave Deducted',
-  payable_days_changed:  'Payable Days Changed',
-  lop_applied:           'LOP Applied',
-  correction_approved:   'Correction Approved',
-  attendance_recomputed: 'Attendance Recomputed',
-  ot_added:              'Overtime Added',
-  policy_changed:        'Policy Changed',
-  retro_adjustment:      'Retro Adjustment',
-  payroll_computed:      'Payroll Computed',
-  payroll_finalized:     'Payroll Finalized',
-  anomaly_resolved:      'Anomaly Resolved',
-  manual_note:           'HR Note',
-}
-
-const EVENT_BADGE: Record<string, 'destructive' | 'warning' | 'success' | 'secondary' | 'outline'> = {
-  leave_deducted:        'warning',
-  payable_days_changed:  'warning',
-  lop_applied:           'destructive',
-  correction_approved:   'success',
-  attendance_recomputed: 'secondary',
-  ot_added:              'success',
-  policy_changed:        'outline',
-  retro_adjustment:      'warning',
-  payroll_computed:      'secondary',
-  payroll_finalized:     'success',
-  anomaly_resolved:      'success',
-  manual_note:           'outline',
-}
+// ── Event type display helpers (sourced from shared constants) ────────────────
+// Adding a new event type? Update apps/web/src/lib/payroll-constants.ts only.
+import { EVENT_LABEL, EVENT_BADGE } from '@/lib/payroll-constants'
 
 // ── SalaryChangesSection ───────────────────────────────────────────────────────
 
 function SalaryChangesSection({ employeeId, month }: { employeeId: string; month: string }) {
-  const { data, isLoading } = useQuery<{ data: LedgerEntry[] }>({
+  const { data, isLoading, isError, refetch: refetchLedger } = useQuery<{ data: LedgerEntry[] }>({
     queryKey: ['my-salary-ledger', employeeId, month],
     queryFn:  () => api.get(`/payroll/ledger/${employeeId}?month=${month}`),
     staleTime: 300_000,
@@ -166,6 +139,20 @@ function SalaryChangesSection({ employeeId, month }: { employeeId: string; month
       {isLoading ? (
         <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading changes…
+        </div>
+      ) : isError ? (
+        <div className="flex items-center justify-between px-3 py-3 text-xs">
+          <span className="flex items-center gap-1.5 text-destructive">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Failed to load salary change history.
+          </span>
+          <button
+            type="button"
+            onClick={() => refetchLedger()}
+            className="text-primary text-[10px] underline underline-offset-2 hover:opacity-70 transition-opacity"
+          >
+            Retry
+          </button>
         </div>
       ) : entries.length === 0 ? (
         <div className="px-3 py-3 text-xs text-muted-foreground">
@@ -356,7 +343,7 @@ function SlipDetailCard({ slipId, employeeId, month }: { slipId: string; employe
                 <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                 <p className="text-xs font-semibold text-muted-foreground">{title}</p>
               </div>
-              <div className="rounded-md border border-border overflow-hidden">
+              <div className="rounded-md border border-border overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/40">
                     <tr>
@@ -409,6 +396,14 @@ function SlipDetailCard({ slipId, employeeId, month }: { slipId: string; employe
 
 function SlipCard({ slip, prevSlip, employeeId }: { slip: SlipSummary; prevSlip?: SlipSummary; employeeId: string }) {
   const [expanded, setExpanded] = useState(false)
+
+  function handlePrint() {
+    // Expand the detail first so it's visible on print, then trigger print dialog.
+    // The user can save as PDF from the browser's print dialog.
+    if (!expanded) setExpanded(true)
+    // Small delay so React re-renders the expanded detail before print dialog opens
+    setTimeout(() => window.print(), 150)
+  }
 
   // MoM net pay diff
   const momDiff = prevSlip != null ? slip.net_pay - prevSlip.net_pay : null
@@ -465,21 +460,73 @@ function SlipCard({ slip, prevSlip, employeeId }: { slip: SlipSummary; prevSlip?
       </button>
 
       {/* Compact summary row */}
-      <div className="flex items-center gap-4 px-4 pb-3 text-xs text-muted-foreground border-t border-border/40">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 pb-3 text-xs text-muted-foreground border-t border-border/40">
         <span>Gross: <span className="font-medium text-foreground">{fmtCurrency(slip.gross_pay)}</span></span>
         <span>Deductions: <span className="font-medium text-destructive">{fmtCurrency(slip.total_deductions)}</span></span>
         {slip.overtime_hours > 0 && (
           <span>OT: <span className="font-medium text-foreground">{slip.overtime_hours}h</span></span>
         )}
         <Badge variant="success" className="rounded-full text-[10px] ml-auto capitalize">{slip.status}</Badge>
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); handlePrint() }}
+          className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+          title="Print / Save as PDF"
+        >
+          <Printer className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Print</span>
+        </button>
       </div>
 
       {/* Expanded detail */}
       {expanded && (
         <div className="px-4 pb-4 border-t border-border/60">
-          <SlipDetailCard slipId={slip.id} employeeId={employeeId} month={slip.month} />
+          <SlipDetailCard slipId={slip.slip_id} employeeId={employeeId} month={slip.month} />
         </div>
       )}
+    </div>
+  )
+}
+
+// ── YTD Summary ────────────────────────────────────────────────────────────────
+
+function YTDSummary({ slips }: { slips: SlipSummary[] }) {
+  // Current financial year (India: Apr to Mar)
+  const now    = new Date()
+  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+  const fyStart = `${fyYear}-04`
+  const fyEnd   = `${fyYear + 1}-03`
+
+  const fySlips = slips.filter(s => s.month >= fyStart && s.month <= fyEnd)
+  if (fySlips.length === 0) return null
+
+  const ytdGross      = fySlips.reduce((s, r) => s + r.gross_pay, 0)
+  const ytdNet        = fySlips.reduce((s, r) => s + r.net_pay, 0)
+  const ytdDeductions = fySlips.reduce((s, r) => s + r.total_deductions, 0)
+  const ytdLop        = fySlips.reduce((s, r) => s + r.lop_amount, 0)
+  const ytdOt         = fySlips.reduce((s, r) => s + r.overtime_hours, 0)
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <BarChart2 className="h-4 w-4 text-muted-foreground" />
+        <p className="text-sm font-semibold">Year-to-Date Summary</p>
+        <span className="text-xs text-muted-foreground ml-1">FY {fyYear}–{fyYear + 1} · {fySlips.length} months</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+        {[
+          { label: 'YTD Gross',      value: fmtCurrency(ytdGross),      color: '' },
+          { label: 'YTD Net',        value: fmtCurrency(ytdNet),         color: 'text-success' },
+          { label: 'YTD Deductions', value: fmtCurrency(ytdDeductions),  color: 'text-destructive' },
+          { label: 'YTD LOP',        value: fmtCurrency(ytdLop),         color: ytdLop > 0 ? 'text-warning' : 'text-muted-foreground' },
+          { label: 'YTD OT Hours',   value: `${ytdOt.toFixed(1)}h`,      color: '' },
+        ].map(k => (
+          <div key={k.label} className="p-2.5 rounded-lg bg-muted/40">
+            <p className="text-muted-foreground mb-0.5">{k.label}</p>
+            <p className={cn('font-bold tabular-nums', k.color)}>{k.value}</p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -490,7 +537,7 @@ export function MyPayslips() {
   const { profile } = useAuthStore()
   const employeeId  = profile?.employee_id ?? ''
 
-  const { data, isLoading, isError, refetch } = useQuery<{ data: SlipSummary[] }>({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery<{ data: SlipSummary[] }>({
     queryKey: ['my-payslips'],
     queryFn:  () => api.get('/payroll/my-slips'),
     staleTime: 120_000,
@@ -505,20 +552,31 @@ export function MyPayslips() {
     <PageContainer>
       <PageHeader
         title="My Pay Slips"
-        subtitle="Your finalized monthly pay slips"
+        subtitle="Your finalized monthly pay slips and year-to-date summary"
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => refetch()}
-          >
-            {isLoading
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <DollarSign className="h-3.5 w-3.5" />
-            }
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 sm:h-8 text-xs gap-1.5"
+              onClick={() => window.print()}
+            >
+              <Printer className="h-3.5 w-3.5" />Print / PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 sm:h-8 text-xs gap-1.5"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              {isFetching
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <DollarSign className="h-3.5 w-3.5" />
+              }
+              Refresh
+            </Button>
+          </div>
         }
       />
 
@@ -546,6 +604,9 @@ export function MyPayslips() {
         </div>
       )}
 
+      {/* YTD Summary */}
+      {slips.length > 0 && <YTDSummary slips={slips} />}
+
       {/* Slips list */}
       <SectionCard
         title="Pay Slip History"
@@ -569,7 +630,7 @@ export function MyPayslips() {
           <div className="space-y-3">
             {slips.map((slip, idx) => (
               <SlipCard
-                key={slip.id}
+                key={slip.slip_id}
                 slip={slip}
                 prevSlip={slips[idx + 1]}
                 employeeId={employeeId}

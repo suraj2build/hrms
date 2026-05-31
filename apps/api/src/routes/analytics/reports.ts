@@ -43,7 +43,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name, joining_date, status, created_at,
-        job_history!inner (
+        job_history!job_history_employee_id_fkey (
           department_id, employment_type, is_current,
           departments ( name )
         )
@@ -178,7 +178,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name,
-        job_history!inner ( department_id, is_current, departments ( name ) )
+        job_history!job_history_employee_id_fkey ( department_id, is_current, departments ( name ) )
       `)
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)
@@ -308,7 +308,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name,
-        job_history!inner ( department_id, employment_type, is_current, departments ( name ) )
+        job_history!job_history_employee_id_fkey ( department_id, employment_type, is_current, departments ( name ) )
       `)
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)
@@ -431,7 +431,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name,
-        job_history!inner ( department_id, employment_type, is_current, departments ( name ) )
+        job_history!job_history_employee_id_fkey ( department_id, employment_type, is_current, departments ( name ) )
       `)
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)

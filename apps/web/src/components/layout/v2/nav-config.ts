@@ -57,6 +57,7 @@ import {
   CheckSquare,
   CalendarClock,
   AlarmClock,
+  FileUp,
   // Leave
   CalendarHeart,
   CalendarX,
@@ -90,6 +91,7 @@ import {
   Bell,
   Smartphone,
   Command,
+  Lock,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -126,7 +128,7 @@ export const DOMAINS: Domain[] = [
 
   // ── 0. Home ───────────────────────────────────────────────────────────────────
   //
-  // Primary admin landing zone. Control Center + legacy Dashboard.
+  // Primary admin landing zone. Control Center + Executive Intelligence + Settings.
   //
   {
     id:           'home',
@@ -136,13 +138,22 @@ export const DOMAINS: Domain[] = [
     matchPrefixes: [
       '/admin/control-center',
       '/admin/dashboard',     // kept so redirect still activates this domain
+      '/admin/executive',     // Executive Intelligence Center
+      '/admin/settings',      // Company / Global Settings
     ],
     defaultRoute: '/admin/control-center',
     groups: [
       {
         label: 'Overview',
         items: [
-          { id: 'control-center', label: 'Control Center', route: '/admin/control-center', exact: true, icon: Command },
+          { id: 'control-center',   label: 'Control Center',         route: '/admin/control-center', exact: true, icon: Command   },
+          { id: 'executive-center', label: 'Executive Intelligence', route: '/admin/executive',                   icon: BarChart3 },
+        ],
+      },
+      {
+        label: 'Configuration',
+        items: [
+          { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', icon: Settings },
         ],
       },
     ],
@@ -166,15 +177,17 @@ export const DOMAINS: Domain[] = [
     icon:         Users,
     matchPrefixes: [
       '/admin/employees',
-      '/admin/onboarding',   // keep Workforce sidebar visible on Onboarding page
+      '/admin/onboarding',
+      '/admin/letters',
     ],
     defaultRoute: '/admin/employees',
     groups: [
       {
         label: 'Employees',
         items: [
-          { id: 'employees',  label: 'Employee Directory', route: '/admin/employees',   exact: true, icon: Users     },
-          { id: 'onboarding', label: 'Onboarding',         route: '/admin/onboarding',  exact: true, icon: Briefcase },
+          { id: 'employees',  label: 'Employee Directory', route: '/admin/employees',  exact: true, icon: Users     },
+          { id: 'onboarding', label: 'Onboarding',         route: '/admin/onboarding', exact: true, icon: Briefcase },
+          { id: 'letters',    label: 'Letters',            route: '/admin/letters',                 icon: ScrollText },
         ],
       },
     ],
@@ -198,6 +211,7 @@ export const DOMAINS: Domain[] = [
     matchPrefixes: [
       '/admin/attendance',       // catches /admin/attendance/* except Setup-overridden paths
       '/admin/employee-shifts',  // operational shift assignment view
+      '/admin/roster',           // roster intelligence lives under Attendance > Scheduling
     ],
     defaultRoute: '/admin/attendance/upload-workspace',
     groups: [
@@ -207,6 +221,7 @@ export const DOMAINS: Domain[] = [
           { id: 'att-center',     label: 'Ops Center',    route: '/admin/attendance/center',           icon: Activity      },
           { id: 'att-upload',     label: 'Punch Intake',  route: '/admin/attendance/upload-workspace', icon: Upload        },
           { id: 'muster',         label: 'Muster Roll',   route: '/admin/attendance/muster',           icon: BookOpen      },
+          { id: 'muster-upload',  label: 'Muster Upload', route: '/admin/attendance/muster-upload',    icon: FileUp        },
           { id: 'anomalies',      label: 'Anomalies',     route: '/admin/attendance/anomalies',        icon: AlertTriangle },
           { id: 'regularisation', label: 'Approvals',     route: '/admin/attendance/regularisation',   icon: CheckSquare   },
         ],
@@ -214,7 +229,8 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Scheduling',
         items: [
-          { id: 'emp-shifts',    label: 'Shift Overrides',   route: '/admin/employee-shifts',  icon: AlarmClock    },
+          { id: 'emp-shifts',    label: 'Shift Overrides',    route: '/admin/employee-shifts',       icon: AlarmClock },
+          { id: 'roster-intel',  label: 'Roster Intelligence', route: '/admin/roster/intelligence',  icon: Brain      },
         ],
       },
       {
@@ -253,12 +269,16 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Operations',
         items: [
-          { id: 'leave-approvals', label: 'Leave Approvals', route: '/admin/leave/approvals',   icon: CheckSquare },
-          { id: 'leave-balances',  label: 'Leave Balances',  route: '/admin/leave/balances',    icon: BarChart2   },
-          { id: 'leave-txns',      label: 'Transactions',    route: '/admin/leave/transactions', icon: ListChecks  },
-          { id: 'comp-off',        label: 'Comp Off',        route: '/admin/comp-off',          icon: RefreshCw   },
-          { id: 'overtime',        label: 'Overtime',        route: '/admin/overtime',           icon: Timer       },
-          { id: 'leave-jobs',      label: 'Engine Status',   route: '/admin/leave-jobs',        icon: Activity    },
+          { id: 'leave-approvals',  label: 'Leave Approvals',    route: '/admin/leave/approvals',        icon: CheckSquare   },
+          { id: 'leave-balances',   label: 'Leave Balances',     route: '/admin/leave/balances',         icon: BarChart2     },
+          { id: 'leave-txns',       label: 'Transactions',       route: '/admin/leave/transactions',     icon: ListChecks    },
+          { id: 'comp-off',         label: 'Comp Off',           route: '/admin/comp-off',               icon: RefreshCw     },
+          { id: 'overtime',         label: 'Overtime',           route: '/admin/overtime',               icon: Timer         },
+          { id: 'leave-jobs',       label: 'Engine Status',      route: '/admin/leave-jobs',             icon: Activity      },
+          { id: 'leave-ledger',     label: 'Accrual Ledger',     route: '/admin/leave/ledger',           icon: BookOpen      },
+          { id: 'leave-accrual',    label: 'Accrual Engine',     route: '/admin/leave/accrual',          icon: RefreshCw     },
+          { id: 'collision-log',    label: 'Collision Log',      route: '/admin/leave/collision-log',    icon: AlertTriangle },
+          { id: 'optional-hols',    label: 'Optional Holidays',  route: '/admin/leave/optional-holidays', icon: CalendarDays },
         ],
       },
     ],
@@ -289,16 +309,29 @@ export const DOMAINS: Domain[] = [
     shortLabel:   'Pay',
     icon:         DollarSign,
     matchPrefixes: [
-      '/admin/payroll',          // catches all /admin/payroll/* not overridden below
+      '/admin/payroll',            // catches all /admin/payroll/* not overridden below
+      '/admin/payroll/run-console',
     ],
     defaultRoute: '/admin/payroll/center',
     groups: [
       {
         label: 'Execution',
         items: [
-          { id: 'ops-center',   label: 'Operations Center', route: '/admin/payroll/center',  icon: Zap,        exact: true },
-          { id: 'payroll-runs', label: 'Payroll Runs',      route: '/admin/payroll',         icon: PlayCircle, exact: true },
-          { id: 'comp-revisions',label: 'Comp Revisions',   route: '/admin/payroll/revisions', icon: GitMerge },
+          { id: 'ops-center',       label: 'Operations Center', route: '/admin/payroll/center',       icon: Zap,        exact: true },
+          { id: 'run-console',      label: 'Run Console',       route: '/admin/payroll/run-console',  icon: Activity    },
+          { id: 'payroll-runs',     label: 'Payroll Runs',      route: '/admin/payroll',              icon: PlayCircle, exact: true },
+          { id: 'comp-revisions',   label: 'Comp Revisions',    route: '/admin/payroll/revisions',    icon: GitMerge    },
+          { id: 'payroll-forecast', label: 'Forecast',          route: '/admin/payroll/forecast',     icon: TrendingUp  },
+          { id: 'payroll-variance', label: 'Variance',          route: '/admin/payroll/variance',     icon: BarChart3   },
+        ],
+      },
+      {
+        label: 'Processing',
+        items: [
+          { id: 'payroll-governance', label: 'Governance',  route: '/admin/payroll/governance',  icon: ShieldCheck },
+          { id: 'payroll-payout',     label: 'Payout',      route: '/admin/payroll/payout',      icon: CreditCard  },
+          { id: 'payroll-approvals',  label: 'Approvals',   route: '/admin/payroll/approvals',   icon: CheckSquare },
+          { id: 'payroll-accounting', label: 'Accounting',  route: '/admin/payroll/accounting',  icon: BookOpen    },
         ],
       },
       {
@@ -309,6 +342,13 @@ export const DOMAINS: Domain[] = [
           { id: 'variable-pay',   label: 'Variable Pay',    route: '/admin/payroll/variable-pay',   icon: TrendingUp },
           { id: 'loans',          label: 'Loan Management', route: '/admin/payroll/loans',          icon: Landmark   },
           { id: 'arrears',        label: 'Arrear Engine',   route: '/admin/payroll/arrears',        icon: RotateCcw  },
+        ],
+      },
+      {
+        label: 'Analytics & Audit',
+        items: [
+          { id: 'payroll-forensics',   label: 'Forensics',     route: '/admin/payroll/forensics',   icon: AlertTriangle },
+          { id: 'payroll-investigate', label: 'Investigation', route: '/admin/payroll/investigate', icon: Activity      },
         ],
       },
     ],
@@ -336,10 +376,11 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Statutory Filings',
         items: [
-          { id: 'pf',  label: 'PF / EPF',    route: '/admin/payroll/statutory/epf',  icon: Landmark },
-          { id: 'esi', label: 'ESI',          route: '/admin/payroll/statutory/esi',  icon: Landmark },
-          { id: 'pt',  label: 'Prof. Tax',    route: '/admin/payroll/statutory/ptax', icon: Landmark },
-          { id: 'tds', label: 'TDS',          route: '/admin/payroll/statutory/tds',  icon: Landmark },
+          { id: 'pf',        label: 'PF / EPF',             route: '/admin/payroll/statutory/epf',              icon: Landmark   },
+          { id: 'esi',       label: 'ESI',                  route: '/admin/payroll/statutory/esi',              icon: Landmark   },
+          { id: 'pt',        label: 'Prof. Tax',            route: '/admin/payroll/statutory/ptax',             icon: Landmark   },
+          { id: 'tds',       label: 'TDS',                  route: '/admin/payroll/statutory/tds',              icon: Landmark   },
+          { id: 'stat-recon',label: 'Statutory Recon',      route: '/admin/payroll/statutory-reconciliation',   icon: ScrollText },
         ],
       },
       {
@@ -446,12 +487,17 @@ export const DOMAINS: Domain[] = [
       // Advanced Intelligence
       '/admin/attendance/intelligence-center',
       '/admin/attendance/health-index',
+      '/admin/analytics/workforce',
+      '/admin/intelligence',
+      '/admin/operational-health',
       // Platform Orchestration
       '/admin/system/orchestration',
       '/admin/system/observability',
       '/admin/system/automations',
       '/admin/system/incidents',
       '/admin/system/webhooks',
+      '/admin/system/integrations',
+      '/admin/enterprise',
     ],
     defaultRoute: '/admin/workforce/optimization',
     groups: [
@@ -474,18 +520,23 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Advanced Intelligence',
         items: [
-          { id: 'session-intelligence', label: 'Session Intelligence',   route: '/admin/attendance/intelligence-center',      icon: Activity     },
-          { id: 'health-index',         label: 'Health Index',           route: '/admin/attendance/health-index',             icon: Zap          },
+          { id: 'session-intelligence',  label: 'Session Intelligence',   route: '/admin/attendance/intelligence-center', icon: Activity  },
+          { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap       },
+          { id: 'workforce-analytics',   label: 'Workforce Analytics',    route: '/admin/analytics/workforce',            icon: BarChart2 },
+          { id: 'workforce-intel',       label: 'Workforce Intelligence', route: '/admin/intelligence',                   icon: Brain     },
+          { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],
       },
       {
         label: 'Platform Orchestration',
         items: [
-          { id: 'orchestration',  label: 'Orchestration Console',  route: '/admin/system/orchestration',  icon: GitBranch  },
-          { id: 'observability',  label: 'Observability Console',  route: '/admin/system/observability',  icon: Radio      },
-          { id: 'automations',    label: 'Automations',            route: '/admin/system/automations',    icon: Zap        },
-          { id: 'incidents',      label: 'Incident Manager',       route: '/admin/system/incidents',      icon: ShieldCheck },
-          { id: 'webhooks',       label: 'Webhooks',               route: '/admin/system/webhooks',       icon: Activity   },
+          { id: 'enterprise-control-center', label: 'Enterprise Control Center', route: '/admin/enterprise',               icon: Command    },
+          { id: 'orchestration',             label: 'Orchestration Console',     route: '/admin/system/orchestration',     icon: GitBranch  },
+          { id: 'observability',             label: 'Observability Console',     route: '/admin/system/observability',     icon: Radio      },
+          { id: 'integration-registry',      label: 'Integration Registry',      route: '/admin/system/integrations',      icon: Zap        },
+          { id: 'automations',               label: 'Automations',               route: '/admin/system/automations',       icon: Settings2  },
+          { id: 'incidents',                 label: 'Incident Manager',          route: '/admin/system/incidents',         icon: ShieldCheck },
+          { id: 'webhooks',                  label: 'Webhooks',                  route: '/admin/system/webhooks',          icon: Activity   },
         ],
       },
     ],
@@ -541,6 +592,7 @@ export const DOMAINS: Domain[] = [
       '/admin/leave-types',
       '/admin/leave-policy',
       '/admin/leave/governance',
+      '/admin/leave/policy-engine',
       '/admin/holidays',
       // Payroll config overrides (longer than /admin/payroll)
       '/admin/payroll/salary-components',
@@ -548,12 +600,14 @@ export const DOMAINS: Domain[] = [
       '/admin/payroll/simulation',
       '/admin/payroll-readiness',
       // System
-      '/admin/settings',
       '/admin/import',
-      '/admin/system/integrations',
       '/admin/notifications/templates',
+      '/admin/approvals/workflows',
+      // Settings sub-pages — longer than Home's /admin/settings (16) → Setup wins
+      '/admin/settings/roles',   // 21 chars
+      '/admin/settings/users',   // 21 chars
     ],
-    defaultRoute: '/admin/settings',
+    defaultRoute: '/admin/organization',
     groups: [
 
       // ── Organization ────────────────────────────────────────────────────────
@@ -573,13 +627,11 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Workforce Rules',
         items: [
-          { id: 'shifts',            label: 'Shifts',             route: '/admin/shift-master',                   icon: AlarmClock   },
-          { id: 'rosters',           label: 'Roster Policies',    route: '/admin/masters/rosters',                icon: CalendarClock },
-          { id: 'rotation-policies', label: 'Rotation Policies',  route: '/admin/masters/rotation-policies',      icon: CalendarClock },
-          { id: 'holidays',          label: 'Holiday Calendar',   route: '/admin/holidays',                       icon: CalendarDays  },
-          { id: 'att-policy',        label: 'Attendance Policy',  route: '/admin/attendance/policy',              icon: ShieldCheck   },
-          { id: 'att-groups',        label: 'Attendance Groups',  route: '/admin/attendance/groups',              icon: Users         },
-          { id: 'punch-devices',     label: 'Punch Devices',      route: '/admin/masters/punch-devices',          icon: Smartphone    },
+          { id: 'shifts',            label: 'Shifts',             route: '/admin/shift-master',              icon: AlarmClock    },
+          { id: 'rosters',           label: 'Roster Policies',    route: '/admin/masters/rosters',           icon: CalendarClock },
+          { id: 'rotation-policies', label: 'Rotation Policies',  route: '/admin/masters/rotation-policies', icon: CalendarClock },
+          { id: 'holidays',          label: 'Holiday Calendar',   route: '/admin/holidays',                  icon: CalendarDays  },
+          { id: 'att-policy',        label: 'Attendance Policy',  route: '/admin/attendance/policy',         icon: ShieldCheck   },
         ],
       },
 
@@ -587,9 +639,10 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Leave Configuration',
         items: [
-          { id: 'leave-types',      label: 'Leave Types',      route: '/admin/leave-types',        icon: ListChecks    },
-          { id: 'leave-policies',   label: 'Leave Policies',   route: '/admin/leave-policy',       icon: Settings2     },
-          { id: 'leave-governance', label: 'Leave Governance', route: '/admin/leave/governance',   icon: CalendarHeart },
+          { id: 'leave-types',         label: 'Leave Types',       route: '/admin/leave-types',          icon: ListChecks    },
+          { id: 'leave-policies',      label: 'Leave Policies',    route: '/admin/leave-policy',         icon: Settings2     },
+          { id: 'leave-governance',    label: 'Leave Governance',  route: '/admin/leave/governance',     icon: CalendarHeart },
+          { id: 'leave-policy-engine', label: 'Policy Engine',     route: '/admin/leave/policy-engine',  icon: Settings2     },
         ],
       },
 
@@ -597,15 +650,13 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Payroll Rules',
         items: [
-          { id: 'salary-comps',    label: 'Salary Components',   route: '/admin/payroll/salary-components',       icon: Layers     },
-          { id: 'payroll-grps',    label: 'Payroll Groups',      route: '/admin/masters/payroll-groups',          icon: DollarSign },
-          { id: 'salary-structs',  label: 'Salary Structures',   route: '/admin/masters/salary-structures',       icon: GitMerge   },
-          { id: 'comp-master',     label: 'Compensation Master', route: '/admin/payroll/compensation',            icon: Layers     },
-          { id: 'stat-groups',     label: 'Statutory Mappings',  route: '/admin/masters/statutory-groups',        icon: Landmark   },
-          { id: 'pay-cycles',      label: 'Pay Cycles',          route: '/admin/attendance/periods',              icon: CalendarClock },
-          { id: 'ot-policies',     label: 'OT Policies',         route: '/admin/masters/ot-policies',             icon: Timer      },
-          { id: 'payroll-cal',     label: 'Payroll Calendar',    route: '/admin/payroll-readiness',               icon: CalendarDays },
-          { id: 'simulation',      label: 'Simulation',          route: '/admin/payroll/simulation',              icon: FlaskConical },
+          { id: 'salary-comps',    label: 'Salary Components',   route: '/admin/payroll/salary-components',  icon: Layers        },
+          { id: 'payroll-grps',    label: 'Payroll Groups',      route: '/admin/masters/payroll-groups',    icon: DollarSign    },
+          { id: 'comp-master',     label: 'Salary Structures',   route: '/admin/payroll/compensation',      icon: GitMerge      },
+          { id: 'stat-groups',     label: 'Statutory Mappings',  route: '/admin/masters/statutory-groups',  icon: Landmark      },
+          { id: 'pay-cycles',      label: 'Pay Cycles',          route: '/admin/attendance/periods',        icon: CalendarClock },
+          { id: 'payroll-cal',     label: 'Payroll Calendar',    route: '/admin/payroll-readiness',         icon: CalendarDays  },
+          { id: 'simulation',      label: 'Simulation',          route: '/admin/payroll/simulation',        icon: FlaskConical  },
         ],
       },
 
@@ -613,10 +664,11 @@ export const DOMAINS: Domain[] = [
       {
         label: 'System',
         items: [
-          { id: 'settings',         label: 'Global Settings',        route: '/admin/settings',                     icon: Settings },
-          { id: 'upload',           label: 'Upload Masters',         route: '/admin/import',                       icon: Upload   },
-          { id: 'integrations',     label: 'Integrations',           route: '/admin/system/integrations',          icon: Radio    },
-          { id: 'notif-templates',  label: 'Notification Templates', route: '/admin/notifications/templates',      icon: Bell     },
+          { id: 'roles-permissions', label: 'Roles & Permissions',   route: '/admin/settings/roles',          icon: Lock       },
+          { id: 'users-mgmt',        label: 'Users',                  route: '/admin/settings/users',          icon: Users      },
+          { id: 'approval-workflows',label: 'Approval Workflows',    route: '/admin/approvals/workflows',     icon: GitMerge   },
+          { id: 'upload',            label: 'Upload Masters',         route: '/admin/import',                  icon: Upload     },
+          { id: 'notif-templates',   label: 'Notification Templates', route: '/admin/notifications/templates', icon: Bell       },
         ],
       },
 

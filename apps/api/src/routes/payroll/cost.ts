@@ -114,7 +114,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
         employee_id, gross_pay, net_pay, ot_cost, lop_deduction,
         employees!inner(
           id, first_name, last_name,
-          job_history!inner(department_id, is_current, departments(id, name))
+          job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name))
         )
       `)
       .eq('payroll_run_id', run.id)

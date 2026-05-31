@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bell, ExternalLink } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Bell, ExternalLink, CheckCheck, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -46,23 +47,45 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+// Per-filter contextual empty copy
+const FILTER_EMPTY: Record<FilterTab, { heading: string; sub: string }> = {
+  all:             { heading: 'Inbox is clear',          sub: 'No notifications or action items right now.' },
+  urgent:          { heading: 'No urgent items',         sub: 'All items are within normal priority range.' },
+  action_required: { heading: 'Nothing needs action',   sub: 'No items currently require your response.' },
+  unread:          { heading: "You're up to date",       sub: 'All notifications have been read.' },
+}
+
 export function OperationalInbox() {
-  const qc = useQueryClient()
+  const qc       = useQueryClient()
+  const navigate = useNavigate()
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const { data: items = [], isLoading } = useQuery<InboxItem[]>({
-    queryKey: ['notifications', 'inbox'],
-    queryFn: () => api.get('/notifications/inbox').then((r: any) => r.data),
+    queryKey:        ['notifications', 'inbox'],
+    queryFn:         () => api.get('/notifications/inbox').then((r: any) => r.data),
+    // Poll every 60 s so approval notifications appear without manual refresh.
+    // staleTime === refetchInterval: prevents a mount-refetch firing every navigation
+    // while the cached value is still within the 60 s polling window.
+    staleTime:       60_000,   // ← was 30_000 (misaligned — caused mount-refetch on every nav)
+    refetchInterval: 60_000,
   })
 
   const markRead = useMutation({
     mutationFn: (id: string) => api.put(`/notifications/inbox/${id}/read`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
-      toast.success('Marked as read')
     },
     onError: (e: Error) => toast.error('Failed to mark as read', { description: e.message }),
+  })
+
+  const markAllRead = useMutation({
+    mutationFn: () => api.put('/notifications/inbox/read-all', {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
+      toast.success('All notifications marked as read')
+    },
+    onError: (e: Error) => toast.error('Failed to mark all as read', { description: e.message }),
   })
 
   const unreadCount = useMemo(() => items.filter(i => !i.is_read).length, [items])
@@ -95,11 +118,48 @@ export function OperationalInbox() {
     { key: 'unread', label: 'Unread', count: unreadCount },
   ]
 
+  // Navigate action URLs internally if same-origin, externally otherwise
+  function handleActionUrl(url: string) {
+    try {
+      const parsed = new URL(url, window.location.origin)
+      if (parsed.origin === window.location.origin) {
+        navigate(parsed.pathname + parsed.search)
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  // Capitalise first letter of priority label
+  function fmtPriority(p: string) {
+    return p.charAt(0).toUpperCase() + p.slice(1)
+  }
+
   return (
     <PageContainer>
       <PageHeader
+        breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Operational Inbox' }]}
         title="Operational Inbox"
-        subtitle="Your notifications and action items"
+        subtitle="Notifications and action items routed to you"
+        actions={
+          unreadCount > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => markAllRead.mutate()}
+              disabled={markAllRead.isPending}
+            >
+              {markAllRead.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <CheckCheck className="h-3.5 w-3.5" />
+              }
+              Mark All Read
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* Filter Tabs */}
@@ -120,7 +180,9 @@ export function OperationalInbox() {
               <span
                 className={cn(
                   'rounded-full px-1.5 py-0.5 text-xs font-semibold',
-                  tab.key === 'unread' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
+                  tab.key === 'unread'
+                    ? 'bg-primary text-primary-foreground'   // was text-white — use token
+                    : 'bg-muted text-muted-foreground'
                 )}
               >
                 {tab.count}
@@ -130,38 +192,86 @@ export function OperationalInbox() {
         ))}
       </div>
 
-      {isLoading ? (
-        <p className="text-muted-foreground text-sm py-8">Loading inbox…</p>
-      ) : items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Bell className="h-10 w-10 text-muted-foreground" />
-          <p className="text-muted-foreground text-sm">Your inbox is empty</p>
+      {/* Loading skeleton */}
+      {isLoading && (
+        <div className="flex gap-4 h-[calc(100vh-280px)] min-h-[400px]">
+          <div className="w-full lg:w-1/3 border border-border rounded-lg overflow-hidden divide-y divide-border">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="px-4 py-3 space-y-1.5 animate-pulse">
+                <div className="flex gap-2">
+                  <div className="h-4 w-12 bg-muted rounded-full" />
+                  <div className="h-4 w-8 bg-muted rounded-full ml-auto" />
+                </div>
+                <div className="h-3.5 w-3/4 bg-muted rounded" />
+                <div className="h-3 w-full bg-muted rounded" />
+              </div>
+            ))}
+          </div>
+          <div className="hidden lg:block lg:w-2/3 border border-border rounded-lg bg-muted/10" />
         </div>
-      ) : (
+      )}
+
+      {/* Global empty — no items at all */}
+      {!isLoading && items.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+          <Bell className="h-8 w-8 opacity-30" />
+          <p className="text-sm font-medium text-foreground">Inbox is clear</p>
+          <p className="text-xs">No notifications or action items are pending.</p>
+          <div className="flex items-center gap-3 mt-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/admin/attendance/corrections')}>
+              Corrections
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/approvals/inbox')}>
+              Approval Inbox
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Main layout — list + detail */}
+      {!isLoading && items.length > 0 && (
         <div className="flex gap-4 h-[calc(100vh-280px)] min-h-[400px]">
           {/* Left Panel — Item List */}
           <div className="w-full lg:w-1/3 flex flex-col border border-border rounded-lg overflow-hidden">
             {filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center flex-1 gap-2 p-6">
-                <Bell className="h-8 w-8 text-muted-foreground" />
-                <p className="text-muted-foreground text-sm">No items for this filter</p>
+              <div className="flex flex-col items-center justify-center flex-1 gap-2 p-6 text-center">
+                <Bell className="h-7 w-7 text-muted-foreground opacity-30" />
+                <p className="text-sm font-medium text-foreground">
+                  {FILTER_EMPTY[activeFilter].heading}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {FILTER_EMPTY[activeFilter].sub}
+                </p>
+                {activeFilter !== 'all' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs mt-1"
+                    onClick={() => setActiveFilter('all')}
+                  >
+                    Show all items
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="overflow-y-auto flex-1 divide-y divide-border">
                 {filtered.map(item => (
-                  <button
+                  <div
                     key={item.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleSelect(item)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') handleSelect(item) }}
                     className={cn(
-                      'w-full text-left px-4 py-3 transition-colors hover:bg-muted/40',
-                      selectedId === item.id && 'bg-sidebar-accent',
+                      'w-full text-left px-4 py-3 transition-colors hover:bg-muted/40 cursor-pointer',
+                      selectedId === item.id && 'bg-muted/50',
                       !item.is_read && 'border-l-2 border-primary'
                     )}
                   >
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge variant={priorityVariant(item.priority) as any} className="text-xs px-1.5 py-0">
-                          {item.priority}
+                          {fmtPriority(item.priority)}
                         </Badge>
                         {item.action_required && (
                           <Badge variant="outline" className="text-xs px-1.5 py-0 text-warning border-warning">
@@ -180,7 +290,18 @@ export function OperationalInbox() {
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
                       {item.body.slice(0, 80)}{item.body.length > 80 ? '…' : ''}
                     </p>
-                  </button>
+                    {item.action_required && item.action_url && (
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); handleActionUrl(item.action_url!) }}
+                          className="inline-flex items-center h-6 px-2 rounded text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                        >
+                          Take Action
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -189,9 +310,13 @@ export function OperationalInbox() {
           {/* Right Panel — Detail */}
           <div className="hidden lg:flex lg:w-2/3 flex-col border border-border rounded-lg overflow-hidden">
             {!selected ? (
-              <div className="flex flex-col items-center justify-center flex-1 gap-3">
-                <Bell className="h-10 w-10 text-muted-foreground" />
-                <p className="text-muted-foreground text-sm">Select an item to view details</p>
+              <div className="flex flex-col items-center justify-center flex-1 gap-2 text-center px-8">
+                <Bell className="h-8 w-8 text-muted-foreground opacity-30" />
+                <p className="text-sm font-medium text-foreground">Select an item</p>
+                <p className="text-xs text-muted-foreground">
+                  Click any notification on the left to read it and take action.
+                  Items with an <span className="text-warning font-medium">Action</span> badge require a response.
+                </p>
               </div>
             ) : (
               <div className="flex flex-col flex-1 overflow-y-auto p-6">
@@ -200,9 +325,9 @@ export function OperationalInbox() {
                   <h2 className="text-base font-semibold text-foreground leading-snug">{selected.title}</h2>
                   <div className="flex gap-2 shrink-0">
                     <Badge variant={priorityVariant(selected.priority) as any}>
-                      {selected.priority}
+                      {fmtPriority(selected.priority)}
                     </Badge>
-                    <Badge variant="secondary">{selected.item_type}</Badge>
+                    <Badge variant="secondary">{selected.item_type.replace(/_/g, ' ')}</Badge>
                     {selected.action_required && (
                       <Badge variant="outline" className="text-warning border-warning">Action Required</Badge>
                     )}
@@ -217,7 +342,7 @@ export function OperationalInbox() {
                 {/* Meta */}
                 <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground mb-6">
                   <div>
-                    <span className="font-medium">Created</span>
+                    <span className="font-medium">Received</span>
                     <br />
                     {new Date(selected.created_at).toLocaleString()}
                   </div>
@@ -235,10 +360,13 @@ export function OperationalInbox() {
                   {selected.action_url && (
                     <Button
                       size="sm"
-                      onClick={() => window.open(selected.action_url!, '_blank')}
+                      onClick={() => handleActionUrl(selected.action_url!)}
                     >
-                      <ExternalLink className="h-3.5 w-3.5 mr-1" />
-                      Open Action
+                      {selected.action_url.startsWith('http') && !selected.action_url.startsWith(window.location.origin)
+                        ? <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                        : null
+                      }
+                      Go to Action
                     </Button>
                   )}
                   {!selected.is_read && (
@@ -248,6 +376,7 @@ export function OperationalInbox() {
                       onClick={() => markRead.mutate(selected.id)}
                       disabled={markRead.isPending}
                     >
+                      {markRead.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
                       Mark Read
                     </Button>
                   )}

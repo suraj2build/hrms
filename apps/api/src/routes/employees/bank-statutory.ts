@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   bank_name:      z.string().optional(),
@@ -28,10 +29,12 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  // Bank account, PAN, Aadhaar, UAN, PF/ESI are highly sensitive PII/financial data.
+  // Only HR admins may read or write these records.
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // GET /employees/:id/bank-statutory
-  fastify.get('/employees/:id/bank-statutory', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/bank-statutory', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { data, error } = await fastify.supabase
@@ -46,7 +49,7 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
   })
 
   // PUT /employees/:id/bank-statutory  (upsert)
-  fastify.put('/employees/:id/bank-statutory', auth, async (req: any, reply) => {
+  fastify.put('/employees/:id/bank-statutory', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.partial().safeParse(req.body)

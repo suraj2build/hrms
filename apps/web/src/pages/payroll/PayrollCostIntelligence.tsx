@@ -20,7 +20,7 @@ import {
 import {
   TrendingUp, TrendingDown, AlertTriangle, ShieldAlert,
   RefreshCw, DollarSign, Users, Zap, BarChart2,
-  ChevronUp, ChevronDown, Minus,
+  ChevronUp, ChevronDown, Minus, Loader2,
 } from 'lucide-react'
 
 import { PageContainer }    from '@/components/layout/PageContainer'
@@ -354,7 +354,10 @@ export function PayrollCostIntelligence() {
         }
       >
         {deptsQ.isLoading && (
-          <div className="text-xs text-muted-foreground animate-pulse py-6 text-center">Loading…</div>
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading…</span>
+          </div>
         )}
         {!deptsQ.isLoading && depts.length === 0 && (
           <p className="text-xs text-muted-foreground py-6 text-center">

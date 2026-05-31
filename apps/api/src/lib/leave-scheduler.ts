@@ -30,6 +30,8 @@ import {
   carryForwardJob,
 } from './leave-jobs.js'
 import { runMonthlyAccrual, processCarryForward } from './accrual-engine.js'
+import { runEventGrantsForTenant }                from './leave-event-engine.js'
+import { runLeaveReconciliation }                  from './leave-reconciliation.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -51,9 +53,46 @@ const ran = {
   carryForward: '',
   /** 'YYYY-MM-DD' of the last day CO expiry ran. */
   coExpiry: '',
+  /** 'YYYY-MM-DD' of the last day event grants ran. */
+  eventGrants: '',
+  /** 'YYYY-MM-DD' of the last day nightly reconciliation ran. */
+  reconciliation: '',
 }
 
+/** Total ticks executed since process start. Used in heartbeat metadata. */
+let tickCount = 0
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+/**
+ * Upsert a heartbeat row for the leave-scheduler.
+ * Called on every tick — allows operators to detect stale/crashed schedulers
+ * by querying scheduler_heartbeats WHERE last_heartbeat_at < now() - 2h.
+ */
+async function writeHeartbeat(
+  supabase:   SupabaseClient,
+  status:     'ok' | 'degraded' | 'error',
+  metadata?:  Record<string, unknown>,
+  lastError?: string,
+): Promise<void> {
+  await supabase
+    .from('scheduler_heartbeats')
+    .upsert(
+      {
+        scheduler_name:    'leave-scheduler',
+        tenant_id:         null,                 // global scheduler — not tenant-scoped
+        last_heartbeat_at: new Date().toISOString(),
+        status,
+        tick_count:        tickCount,
+        last_error:        lastError ?? null,
+        metadata:          metadata  ?? {},
+      },
+      { onConflict: 'scheduler_name,tenant_id' },
+    )
+    .then(({ error }) => {
+      if (error) console.warn('[leave-scheduler] heartbeat write failed:', error.message)
+    })
+}
 
 async function fetchAllTenantIds(supabase: SupabaseClient): Promise<string[]> {
   const { data, error } = await supabase.from('tenants').select('id')
@@ -65,28 +104,80 @@ async function fetchAllTenantIds(supabase: SupabaseClient): Promise<string[]> {
 }
 
 /**
- * Check leave_job_log to see if a particular job already ran in the
- * given period key (e.g. 'YYYY-MM' for monthly accrual).
+ * Check leave_job_log to see if a particular job already ran for a given
+ * set of params. Accepts a params object so callers can match on multiple
+ * fields simultaneously — critical for monthly accrual which must check
+ * BOTH year AND month to avoid treating a prior year's January log as the
+ * current year's completed run (year-boundary restart bug).
+ *
+ * Param values must match the types stored by startJobLog (numbers as numbers,
+ * strings as strings) — Postgres JSONB containment is type-strict.
+ *
  * Used on startup to restore the `ran` state after a process restart.
  */
 async function hasJobRunForKey(
   supabase: SupabaseClient,
   jobType:  string,
-  paramKey: string,
-  paramVal: string,
+  params:   Record<string, unknown>,
 ): Promise<boolean> {
   const { count } = await supabase
     .from('leave_job_log')
     .select('id', { count: 'exact', head: true })
     .eq('job_type', jobType)
     .eq('status', 'completed')
-    .contains('params', { [paramKey]: paramVal })
+    .contains('params', params)
   return (count ?? 0) > 0
+}
+
+// ── Upload session orphan sweep ────────────────────────────────────────────────
+
+/**
+ * Mark upload sessions that are stuck in a non-terminal state as `orphaned`.
+ *
+ * A session is stale when it has been in `pending`, `uploading`, or `processing`
+ * for longer than STALE_THRESHOLD_MS without transitioning to `completed` or
+ * `failed`.  This happens when:
+ *   - The browser tab was closed mid-upload
+ *   - A client crash prevented the /complete or /fail call
+ *   - A network failure left the session without a completion signal
+ *
+ * This sweep is non-destructive: storage files are NOT deleted.  Operators can
+ * verify storage contents and manually re-link if needed.  The `error_message`
+ * field records why the session was orphaned for observability.
+ *
+ * The update is cross-tenant (no tenant_id filter) — the scheduler is global.
+ * Tenant isolation is preserved at the DB level by tenant_id on each row.
+ *
+ * Idempotent: running multiple times has no additional effect because orphaned
+ * sessions are not in the source status set.
+ */
+const STALE_THRESHOLD_MS = 30 * 60 * 1000   // 30 minutes
+
+async function expireStaleUploadSessions(supabase: SupabaseClient): Promise<void> {
+  const staleCutoff = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString()
+
+  const { error, count } = await supabase
+    .from('upload_sessions')
+    .update({
+      status:              'orphaned',
+      error_message:       'Session automatically orphaned: no completion signal received within 30 minutes. Storage file may still exist — verify and re-link if needed.',
+      processing_ended_at: new Date().toISOString(),
+    }, { count: 'exact' })
+    .in('status', ['pending', 'uploading', 'processing'])
+    .lt('created_at', staleCutoff)
+
+  if (error) {
+    console.warn('[leave-scheduler] upload session orphan sweep failed:', error.message)
+  } else if ((count ?? 0) > 0) {
+    console.log(`[leave-scheduler] orphaned ${count} stale upload session(s) (created_at < ${staleCutoff})`)
+  }
 }
 
 // ── Main tick ──────────────────────────────────────────────────────────────────
 
 async function tick(supabase: SupabaseClient): Promise<void> {
+  tickCount++
+
   const now       = new Date()
   const year      = now.getUTCFullYear()
   const monthIdx  = now.getUTCMonth()       // 0-indexed
@@ -95,6 +186,16 @@ async function tick(supabase: SupabaseClient): Promise<void> {
   const dayKey    = now.toISOString().slice(0, 10)
   const monthKey  = `${year}-${String(monthNum).padStart(2, '0')}`
   const yearKey   = String(year)
+
+  // Write a heartbeat immediately so liveness is updated even if jobs are skipped.
+  await writeHeartbeat(supabase, 'ok', { tick: tickCount, day: dayKey })
+
+  // ── 0. Upload session orphan sweep ──────────────────────────────────────────
+  // Runs every tick (hourly). Marks sessions stuck in non-terminal states for
+  // >30 minutes as orphaned. Non-destructive — storage files are not deleted.
+  await expireStaleUploadSessions(supabase).catch(
+    (e: Error) => console.warn('[leave-scheduler] upload orphan sweep error:', e.message),
+  )
 
   let tenants: string[] | null = null
   const getTenants = async () => {
@@ -116,12 +217,12 @@ async function tick(supabase: SupabaseClient): Promise<void> {
   // Runs on Jan 1 (calendar year start) or Apr 1 (financial year start).
   // Only runs once per year — use yearKey to gate.
   if ((isCalYearStart || isFYStart) && ran.yearlyAccrual !== yearKey) {
-    const leaveYear = isCalYearStart ? year : year - 1  // FY Apr 1 2026 → leave year 2026? No — FY Apr 2025 → year 2025
-    // For FY: Apr 1 2025 means FY 2025 starts. For Cal: Jan 1 2025 means year 2025.
-    const creditYear = isFYStart ? year : year
-    console.log(`[leave-scheduler] Yearly accrual due for year ${creditYear}`)
+    // Cal year-start Jan 1 YYYY → credit year = YYYY
+    // FY-start Apr 1 YYYY → FY started Apr 2024 means FY 2024; credit year = YYYY - 1
+    const leaveYear = isCalYearStart ? year : year - 1
+    console.log(`[leave-scheduler] Yearly accrual due for year ${leaveYear}`)
     for (const tenantId of await getTenants()) {
-      await yearlyAccrualJob(supabase, tenantId, creditYear, null, dayKey)
+      await yearlyAccrualJob(supabase, tenantId, leaveYear, null, dayKey)
         .then(r => console.log(`[leave-scheduler] yearly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
         .catch((e: Error) => console.error(`[leave-scheduler] yearly_accrual error tenant=${tenantId}`, e.message))
     }
@@ -178,6 +279,43 @@ async function tick(supabase: SupabaseClient): Promise<void> {
     }
     ran.coExpiry = dayKey
   }
+
+  // ── 5. Event-triggered leave grants ─────────────────────────────────────────
+  // Runs once per day. Detects employees with a birthday/anniversary today and
+  // credits event-grant days per their effective leave policy.
+  // Idempotency is guaranteed by the unique constraint in leave_event_grants.
+  if (ran.eventGrants !== dayKey) {
+    for (const tenantId of await getTenants()) {
+      await runEventGrantsForTenant(supabase, tenantId, now)
+        .then(r => {
+          if (r.granted > 0 || r.expired > 0) {
+            console.log(`[leave-scheduler] event_grants tenant=${tenantId} granted=${r.granted} skipped=${r.skipped} expired=${r.expired} errors=${r.errors}`)
+          }
+        })
+        .catch((e: Error) => console.error(`[leave-scheduler] event_grants error tenant=${tenantId}`, e.message))
+    }
+    ran.eventGrants = dayKey
+  }
+
+  // ── 6. Nightly reconciliation ────────────────────────────────────────────────
+  // Runs once per day. Validates ledger integrity: balance drift, missing accruals,
+  // duplicate grants, orphan entries. Writes a leave_reconciliation_reports row.
+  // Non-blocking — reconciliation errors never prevent other jobs from running.
+  if (ran.reconciliation !== dayKey) {
+    const reconcYear = now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1
+    for (const tenantId of await getTenants()) {
+      await runLeaveReconciliation(supabase, tenantId, reconcYear, null, 'scheduler')
+        .then(r => {
+          if (r.issues_found > 0) {
+            console.warn(`[leave-scheduler] reconciliation tenant=${tenantId} issues=${r.issues_found} severity=${r.severity}`)
+          } else {
+            console.log(`[leave-scheduler] reconciliation tenant=${tenantId} clean`)
+          }
+        })
+        .catch((e: Error) => console.error(`[leave-scheduler] reconciliation error tenant=${tenantId}`, e.message))
+    }
+    ran.reconciliation = dayKey
+  }
 }
 
 // ── Startup: restore ran state from DB ────────────────────────────────────────
@@ -191,16 +329,20 @@ async function restoreState(supabase: SupabaseClient): Promise<void> {
   const yearKey  = String(year)
 
   try {
-    const [hasYearly, hasMonthly, hasCF, hasExpiry] = await Promise.all([
-      hasJobRunForKey(supabase, 'yearly_accrual',   'leave_year', yearKey),
-      hasJobRunForKey(supabase, 'monthly_accrual',  'month',      monthNum.toString()),
-      hasJobRunForKey(supabase, 'carry_forward',    'from_year',  (year - 1).toString()),
-      hasJobRunForKey(supabase, 'co_expiry',         'as_of',      dayKey),
+    const [hasYearly, hasMonthly, hasCF, hasExpiry, hasEventGrants, hasRecon] = await Promise.all([
+      hasJobRunForKey(supabase, 'yearly_accrual',  { leave_year: year }),
+      hasJobRunForKey(supabase, 'monthly_accrual', { year, month: monthNum }),
+      hasJobRunForKey(supabase, 'carry_forward',   { from_year: year - 1 }),
+      hasJobRunForKey(supabase, 'co_expiry',        { as_of: dayKey }),
+      hasJobRunForKey(supabase, 'event_grants',     { as_of: dayKey }),
+      hasJobRunForKey(supabase, 'reconciliation',   { as_of: dayKey }),
     ])
-    if (hasYearly)  ran.yearlyAccrual  = yearKey
-    if (hasMonthly) ran.monthlyAccrual = monthKey
-    if (hasCF)      ran.carryForward   = yearKey
-    if (hasExpiry)  ran.coExpiry       = dayKey
+    if (hasYearly)     ran.yearlyAccrual  = yearKey
+    if (hasMonthly)    ran.monthlyAccrual = monthKey
+    if (hasCF)         ran.carryForward   = yearKey
+    if (hasExpiry)     ran.coExpiry       = dayKey
+    if (hasEventGrants) ran.eventGrants   = dayKey
+    if (hasRecon)      ran.reconciliation = dayKey
     console.log('[leave-scheduler] State restored:', ran)
   } catch (e: unknown) {
     console.warn('[leave-scheduler] Could not restore state from DB:', (e as Error).message)
@@ -218,7 +360,12 @@ export function registerLeaveScheduler(supabase: SupabaseClient): void {
   restoreState(supabase)
     .then(() => tick(supabase))        // initial tick
     .then(() => {
-      setInterval(() => tick(supabase).catch(console.error), TICK_MS)
+      setInterval(() => {
+        tick(supabase).catch((err: Error) => {
+          console.error('[leave-scheduler] tick error:', err.message)
+          writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
+        })
+      }, TICK_MS)
       console.log(`📅 Leave scheduler active — ticking every ${TICK_MS / 60_000} min`)
     })
     .catch(console.error)

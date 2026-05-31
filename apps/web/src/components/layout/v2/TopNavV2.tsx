@@ -1,33 +1,26 @@
 /**
- * TopNavV2 — Horizontal top navigation bar for AdminShell V2.
+ * TopNavV2 — Enterprise HRMS top navigation bar.
  *
  * Layout (left → right):
- *   [Logo] [Domain Tabs with hover dropdowns] ──── [CommandPalette] [NotificationBell] [ThemeToggle] [UserMenu]
+ *   [Logo + "HRMS"] [separator] [Domain tabs: Workforce · Attendance · Leave ·
+ *   Payroll · Compliance · Operations · Reports · Setup]
+ *   ────────────────────────────────────────────────────────────
+ *   [Search ⌘K] [Tenant name] [Role badge] [Notifications] [Theme] [User ↓]
  *
- * Hover behaviour:
- *   · Mouse enters tab label → 120ms delay → show grouped dropdown
- *   · Mouse leaves both tab + dropdown → 180ms delay → hide dropdown
- *   · Click → navigate to domain.defaultRoute, hide dropdown
- *
- * Active state: domain tab is highlighted when pathname matches its prefixes.
+ * Domain tabs drive both the top active indicator and the contextual sidebar.
  */
 
-import { useState, useRef, useCallback } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Building2, LogOut, ChevronDown } from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { Search, Sun, Moon, LogOut, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { DOMAINS, getDomainForPath, type Domain } from './nav-config'
-import { CommandPaletteTrigger } from '@/components/operational/CommandPalette'
-import { ThemeToggle } from '@/components/theme-toggle'
-import { RoleSwitcher } from '@/components/layout/RoleSwitcher'
-import { NotificationBell } from '@/components/notifications'
-import { useAuthStore } from '@/stores/authStore'
-import { useBasePath } from '@/lib/routing'
-import { supabase } from '@/lib/supabase/client'
-import { getInitials } from '@/lib/utils'
-import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { DOMAINS, getDomainForPath } from './nav-config'
+import { NotificationCenter } from '@/components/operational/NotificationCenter'
+import { NotificationBell }   from '@/components/notifications'
+import { useAuthStore }        from '@/stores/authStore'
+import { getInitials }         from '@/lib/utils'
+import { supabase }            from '@/lib/supabase/client'
+import { toast }               from 'sonner'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,122 +29,35 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useBasePath } from '@/lib/routing'
 
-// ── Domain Dropdown ───────────────────────────────────────────────────────────
+// ── Simple theme persistence ──────────────────────────────────────────────────
 
-interface DomainDropdownProps {
-  domain: Domain
-  onNavigate: () => void
-}
-
-function DomainDropdown({ domain, onNavigate }: DomainDropdownProps) {
-  const location = useLocation()
-
-  return (
-    <div className="absolute top-full left-0 mt-1 z-50 w-56 rounded-xl border border-border bg-popover shadow-lg shadow-black/10 overflow-hidden animate-in fade-in-0 zoom-in-95 duration-100">
-      {domain.groups.map((group, gi) => (
-        <div key={group.label} className={cn('py-1', gi > 0 && 'border-t border-border/50')}>
-          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 select-none">
-            {group.label}
-          </p>
-          {group.items.map(item => {
-            const isActive = item.exact
-              ? location.pathname === item.route
-              : location.pathname === item.route || location.pathname.startsWith(item.route + '/')
-
-            return (
-              <Link
-                key={item.id}
-                to={item.route}
-                onClick={onNavigate}
-                className={cn(
-                  'flex items-center gap-2.5 mx-1 px-2.5 py-1.5 rounded-lg text-[13px] transition-colors',
-                  isActive
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-foreground/75 hover:bg-accent hover:text-foreground',
-                )}
-              >
-                <item.icon className={cn('h-3.5 w-3.5 flex-shrink-0', isActive ? 'text-primary' : 'text-muted-foreground')} />
-                <span className="truncate">{item.label}</span>
-              </Link>
-            )
-          })}
-        </div>
-      ))}
-    </div>
+function useThemeToggle() {
+  const [dark, setDark] = useState(() =>
+    document.documentElement.classList.contains('dark'),
   )
-}
-
-// ── Domain Tab ────────────────────────────────────────────────────────────────
-
-interface DomainTabProps {
-  domain: Domain
-  isActive: boolean
-}
-
-function DomainTab({ domain, isActive }: DomainTabProps) {
-  const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
-  const openTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const scheduleOpen = useCallback(() => {
-    if (closeTimer.current) clearTimeout(closeTimer.current)
-    openTimer.current = setTimeout(() => setOpen(true), 120)
-  }, [])
-
-  const scheduleClose = useCallback(() => {
-    if (openTimer.current) clearTimeout(openTimer.current)
-    closeTimer.current = setTimeout(() => setOpen(false), 180)
-  }, [])
-
-  const handleClick = () => {
-    setOpen(false)
-    if (openTimer.current)  clearTimeout(openTimer.current)
-    if (closeTimer.current) clearTimeout(closeTimer.current)
-    navigate(domain.defaultRoute)
+  function toggle() {
+    const next = !dark
+    setDark(next)
+    document.documentElement.classList.toggle('dark', next)
+    try { localStorage.setItem('theme', next ? 'dark' : 'light') } catch { /* ignore */ }
   }
-
-  return (
-    <div
-      className="relative"
-      onMouseEnter={scheduleOpen}
-      onMouseLeave={scheduleClose}
-    >
-      <button
-        type="button"
-        onClick={handleClick}
-        className={cn(
-          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors select-none',
-          isActive
-            ? 'bg-primary text-primary-foreground'
-            : 'text-foreground/70 hover:text-foreground hover:bg-accent',
-        )}
-      >
-        <domain.icon className={cn('h-3.5 w-3.5 flex-shrink-0', isActive ? 'text-primary-foreground' : 'text-muted-foreground')} />
-        <span>{domain.shortLabel ?? domain.label}</span>
-        <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180', isActive ? 'text-primary-foreground/70' : 'text-muted-foreground')} />
-      </button>
-
-      {open && (
-        <div
-          onMouseEnter={() => { if (closeTimer.current) clearTimeout(closeTimer.current) }}
-          onMouseLeave={scheduleClose}
-        >
-          <DomainDropdown domain={domain} onNavigate={() => setOpen(false)} />
-        </div>
-      )}
-    </div>
-  )
+  return { dark, toggle }
 }
 
 // ── TopNavV2 ──────────────────────────────────────────────────────────────────
 
-export function TopNavV2() {
-  const location = useLocation()
-  const navigate = useNavigate()
+export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
+  const location   = useLocation()
+  const navigate   = useNavigate()
+  const basePath   = useBasePath()
   const { profile, tenant, clear } = useAuthStore()
-  const basePath = useBasePath()
+  const [notifOpen, setNotifOpen]  = useState(false)
+  const { dark, toggle: toggleTheme } = useThemeToggle()
+
+  function openSearch() { onSearchOpen?.() }
+
   const activeDomain = getDomainForPath(location.pathname)
 
   async function handleSignOut() {
@@ -162,74 +68,174 @@ export function TopNavV2() {
   }
 
   return (
-    <header className="h-14 bg-card border-b border-border shadow-[0_1px_3px_rgba(15,23,42,0.06)] flex items-center gap-2 px-4 flex-shrink-0 z-40">
+    <header className="sticky top-0 z-40 w-full h-[52px] border-b border-border bg-card backdrop-blur-md flex items-stretch px-0 flex-shrink-0 shadow-sm shadow-border/30 overflow-hidden">
 
-      {/* ── Logo ────────────────────────────────────────────────────── */}
-      <Link
-        to="/admin/dashboard"
-        className="flex items-center gap-2 flex-shrink-0 mr-2"
+      {/* ── Brand ──────────────────────────────────────────────── */}
+      <button
+        type="button"
+        onClick={() => navigate('/admin/control-center')}
+        className="flex items-center gap-2 shrink-0 px-4 group border-r border-border/60 bg-card hover:bg-muted/40 transition-colors"
       >
-        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-          <Building2 className="h-3.5 w-3.5 text-primary-foreground" />
+        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center font-black text-primary-foreground text-sm shadow-sm">
+          H
         </div>
-        <span className="text-sm font-bold text-foreground hidden lg:block">HRMS</span>
-      </Link>
+        <span className="font-display font-bold text-[13px] text-foreground hidden md:block group-hover:text-primary transition-colors tracking-tight">
+          HRMS
+        </span>
+      </button>
 
-      {/* Divider */}
-      <div className="w-px h-5 bg-border flex-shrink-0 mr-1 hidden sm:block" />
-
-      {/* ── Domain Tabs ─────────────────────────────────────────────── */}
-      <nav className="flex items-center gap-0.5 flex-1 overflow-x-auto no-scrollbar">
-        {DOMAINS.map(domain => (
-          <DomainTab
-            key={domain.id}
-            domain={domain}
-            isActive={activeDomain?.id === domain.id}
-          />
-        ))}
+      {/* ── Domain tabs — left-aligned compact angled shapes ───── */}
+      <nav
+        className="flex items-stretch shrink-0 overflow-x-auto"
+        style={{ scrollbarWidth: 'none' }}
+        aria-label="Domain navigation"
+      >
+        {DOMAINS.map(domain => {
+          const isActive = activeDomain?.id === domain.id
+          const Icon = domain.icon
+          return (
+            <button
+              key={domain.id}
+              type="button"
+              onClick={() => navigate(domain.defaultRoute)}
+              title={domain.label}
+              className={cn(
+                'relative flex items-center -mr-2.5 group select-none',
+                'px-5 first:pl-4',
+                isActive ? 'z-10' : 'z-0 hover:z-[5]',
+              )}
+            >
+              {/* ── Angled tab background (skewed, not the content) ── */}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'absolute inset-0 transition-colors duration-150',
+                  '[transform:skewX(-13deg)]',
+                  isActive
+                    ? 'bg-primary'
+                    : 'bg-muted/50 group-hover:bg-muted',
+                )}
+              />
+              {/* ── Right-edge shadow line to separate tabs ── */}
+              {!isActive && (
+                <span
+                  aria-hidden="true"
+                  className="absolute right-2 inset-y-[20%] w-px bg-border/60 [transform:skewX(-13deg)]"
+                />
+              )}
+              {/* ── Label — NOT skewed ── */}
+              <span className={cn(
+                'relative z-10 flex items-center gap-1.5 text-[11.5px] font-semibold whitespace-nowrap',
+                isActive
+                  ? 'text-primary-foreground'
+                  : 'text-muted-foreground group-hover:text-foreground',
+              )}>
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden lg:inline">{domain.label}</span>
+                <span className="lg:hidden">{domain.shortLabel ?? domain.label.slice(0, 4)}</span>
+              </span>
+            </button>
+          )
+        })}
       </nav>
 
-      {/* ── Right utilities ─────────────────────────────────────────── */}
-      <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+      {/* ── Flexible spacer ────────────────────────────────────── */}
+      <div className="flex-1" />
 
-        {/* Command Palette */}
-        <CommandPaletteTrigger className="flex-shrink-0" />
+      {/* ── Right actions ──────────────────────────────────────── */}
+      <div className="flex items-center gap-1.5 shrink-0 px-3 border-l border-border/60">
+
+        {/* Search bar — full pill on md+, icon-only on small screens */}
+        <button
+          type="button"
+          onClick={openSearch}
+          className="hidden md:flex items-center gap-2.5 lg:w-64 xl:w-80 w-48 pl-3 pr-2.5 py-1.5 rounded-lg border border-border bg-muted/40 hover:bg-muted/70 hover:border-border/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:bg-background transition-all text-muted-foreground group"
+          title="Search (⌘K)"
+        >
+          <Search className="h-3.5 w-3.5 shrink-0 group-hover:text-foreground transition-colors" />
+          <span className="flex-1 text-left text-[11.5px] font-medium truncate group-hover:text-foreground/70 transition-colors">
+            Search employees, pages, payroll…
+          </span>
+          <kbd className="shrink-0 hidden lg:inline-flex items-center gap-0.5 text-[10px] font-mono bg-background/80 border border-border/60 rounded px-1.5 py-0.5 text-muted-foreground/50">
+            ⌘K
+          </kbd>
+        </button>
+
+        {/* Icon-only on small screens */}
+        <button
+          type="button"
+          onClick={openSearch}
+          className="md:hidden p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          title="Search (⌘K)"
+        >
+          <Search className="h-4 w-4" />
+        </button>
 
         {/* Tenant name */}
-        {tenant && (
-          <span className="text-xs text-muted-foreground hidden xl:block px-1">
+        {tenant?.name && (
+          <span className="text-[11px] text-muted-foreground font-medium hidden xl:block max-w-[120px] truncate border-l border-border pl-2">
             {tenant.name}
           </span>
         )}
 
-        {/* Role switcher */}
-        <RoleSwitcher />
+        {/* Role badge */}
+        {profile?.role && (
+          <span className="text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5 font-semibold uppercase tracking-wide hidden sm:block border border-primary/20">
+            {profile.role === 'super_admin' ? 'Admin' :
+             profile.role === 'hr_admin'    ? 'HR'    :
+             profile.role === 'manager'     ? 'Mgr'   : profile.role}
+          </span>
+        )}
 
         {/* Notifications */}
-        <NotificationBell />
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setNotifOpen(true)}
+          onKeyDown={e => e.key === 'Enter' && setNotifOpen(true)}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors cursor-pointer flex items-center justify-center relative"
+          title="Notifications"
+        >
+          <NotificationBell />
+        </div>
+        <NotificationCenter open={notifOpen} onClose={() => setNotifOpen(false)} />
 
-        {/* Theme */}
-        <ThemeToggle />
+        {/* Theme toggle */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {dark
+            ? <Moon className="h-4 w-4" />
+            : <Sun  className="h-4 w-4" />
+          }
+        </button>
 
-        {/* User menu */}
+        {/* User dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="flex items-center gap-1.5 h-9 px-2">
-              <Avatar className="h-6 w-6">
-                <AvatarImage src={profile?.avatar_url ?? undefined} />
-                <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
-                  {getInitials(profile?.full_name ?? 'U')}
-                </AvatarFallback>
-              </Avatar>
-              <span className="text-[13px] hidden md:block">{profile?.full_name ?? 'User'}</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </Button>
+            <button
+              type="button"
+              className="flex items-center gap-2 cursor-pointer group"
+            >
+              <div className="w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-[11px] shrink-0">
+                {getInitials(profile?.full_name ?? 'U')}
+              </div>
+              <div className="hidden sm:flex flex-col text-left">
+                <span className="text-[11px] font-semibold text-foreground leading-tight">
+                  {profile?.full_name ?? 'Admin'}
+                </span>
+              </div>
+              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>
               <p className="text-sm font-medium">{profile?.full_name}</p>
               <p className="text-xs text-muted-foreground capitalize">
-                {profile?.role?.replace('_', ' ')}
+                {profile?.role?.replace(/_/g, ' ')}
               </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

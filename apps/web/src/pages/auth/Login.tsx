@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -6,10 +6,12 @@ import { z } from 'zod'
 import { Loader2, Building2, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase/client'
+import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { FormField } from '@/components/forms'
+import type { UserRole } from '@/types'
 
 const loginSchema = z.object({
   email:    z.string().email('Enter a valid email'),
@@ -18,14 +20,51 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>
 
+const ADMIN_ROLES: UserRole[] = ['super_admin', 'hr_admin', 'manager']
+
 export function Login() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword]   = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  // True while we are waiting for AuthProvider to load the profile after sign-in.
+  const [awaitingProfile, setAwaitingProfile] = useState(false)
+
+  const { profile, isLoading } = useAuthStore()
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   })
+
+  // ── Already-authenticated redirect ─────────────────────────────────────────
+  // If the user lands on /login while already signed in (e.g. browser back),
+  // send them straight to the right portal once the profile is loaded.
+  useEffect(() => {
+    if (!isLoading && profile) {
+      const dest = ADMIN_ROLES.includes(profile.role) ? '/admin/dashboard' : '/ess/dashboard'
+      navigate(dest, { replace: true })
+    }
+  }, [profile, isLoading, navigate])
+
+  // ── Post-sign-in redirect ───────────────────────────────────────────────────
+  // We set awaitingProfile = true when credentials are accepted. Once
+  // AuthProvider finishes loading /me and sets the profile, we navigate.
+  // This keeps the Login form visible (no blank-screen jump to /) while the
+  // profile is being fetched, and lets us detect failure cleanly.
+  useEffect(() => {
+    if (!awaitingProfile) return
+    // isLoading went from true → false: AuthProvider finished the /me call.
+    if (!isLoading) {
+      if (profile) {
+        const dest = ADMIN_ROLES.includes(profile.role) ? '/admin/dashboard' : '/ess/dashboard'
+        navigate(dest, { replace: true })
+      } else {
+        // AuthProvider cleared the profile — /me failed (profile missing, API
+        // down, etc.). The error toast is shown by AuthProvider; just reset
+        // our waiting flag so the form is usable again.
+        setAwaitingProfile(false)
+      }
+    }
+  }, [awaitingProfile, isLoading, profile, navigate])
 
   async function onSubmit(values: LoginForm) {
     const { error } = await supabase.auth.signInWithPassword({
@@ -33,7 +72,10 @@ export function Login() {
       password: values.password,
     })
     if (error) { toast.error(error.message); return }
-    navigate('/')
+    // Credentials accepted. Stay on this page — AuthProvider will now call
+    // /me and populate the profile. The useEffect above will navigate once
+    // isLoading goes false.
+    setAwaitingProfile(true)
   }
 
   async function signInWithGoogle() {
@@ -137,9 +179,9 @@ export function Login() {
                 </div>
               </FormField>
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Sign in
+              <Button type="submit" className="w-full" disabled={isSubmitting || awaitingProfile}>
+                {(isSubmitting || awaitingProfile) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {awaitingProfile ? 'Signing in…' : 'Sign in'}
               </Button>
             </form>
           </CardContent>

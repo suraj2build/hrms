@@ -51,7 +51,7 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
   // /me — returns current user profile + tenant
   fastify.get('/me', auth, async (req, reply) => {
     const [profileRes, tenantRes] = await Promise.all([
-      fastify.supabase.from('profiles').select('*').eq('id', req.userId).single(),
+      fastify.supabase.from('profiles').select('*').eq('id', req.userId).eq('tenant_id', req.tenantId).single(),
       fastify.supabase.from('tenants').select('*').eq('id', req.tenantId).single(),
     ])
 

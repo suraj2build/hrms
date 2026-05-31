@@ -18,16 +18,17 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
+import { DateInput }      from '@/components/ui/date-input'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -74,8 +75,14 @@ const RECOVERY_BADGE: Record<string, 'warning' | 'success' | 'secondary'> = {
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
-const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+const fmtDate = (d: string | null) => {
+  if (!d) return '—'
+  const s = d
+  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
+}
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -144,10 +151,9 @@ function ApproveDialog({
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-foreground">Disbursement Date</label>
-            <Input
-              type="date"
+            <DateInput
               value={disbursementDate}
-              onChange={e => setDisbursementDate(e.target.value)}
+              onChange={setDisbursementDate}
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
@@ -229,7 +235,6 @@ export function AdvanceSalary() {
   const isAdmin       = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc            = useQueryClient()
 
-  const [activeTab, setActiveTab]           = useState<'requests' | 'recovery'>('requests')
   const [approveTarget, setApproveTarget]   = useState<AdvanceRequest | null>(null)
   const [rejectTarget, setRejectTarget]     = useState<AdvanceRequest | null>(null)
   const [advanceId, setAdvanceId]           = useState('')
@@ -258,11 +263,6 @@ export function AdvanceSalary() {
     onError: (e: Error) => toast.error('Failed to disburse advance', { description: e.message }),
   })
 
-  const tabs = [
-    { key: 'requests', label: 'Requests' },
-    { key: 'recovery', label: 'Recovery Schedule' },
-  ] as const
-
   return (
     <PageContainer>
       <PageHeader
@@ -275,175 +275,155 @@ export function AdvanceSalary() {
         }
       />
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border mb-6">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs defaultValue="requests">
+        <TabsList className="mb-4">
+          <TabsTrigger value="requests">Requests</TabsTrigger>
+          <TabsTrigger value="recovery">Recovery Schedule</TabsTrigger>
+        </TabsList>
 
-      {/* ── Requests Tab ── */}
-      {activeTab === 'requests' && (
-        <SectionCard title="Advance Requests">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : advances.length === 0 ? (
-            <p className="text-center text-muted-foreground py-12">No advance requests found.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left py-3 px-4 font-medium">Employee</th>
-                    <th className="text-right py-3 px-4 font-medium">Requested</th>
-                    <th className="text-right py-3 px-4 font-medium">Approved</th>
-                    <th className="text-right py-3 px-4 font-medium">Months</th>
-                    <th className="text-left py-3 px-4 font-medium">Purpose</th>
-                    <th className="text-left py-3 px-4 font-medium">Status</th>
-                    <th className="text-left py-3 px-4 font-medium">Created</th>
-                    {isAdmin && <th className="text-left py-3 px-4 font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {advances.map(adv => (
-                    <tr key={adv.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-foreground">
-                          {adv.employee_name ?? adv.employee_id}
-                        </div>
-                        {adv.employee_code && (
-                          <div className="text-xs text-muted-foreground">{adv.employee_code}</div>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-right text-foreground">{fmt(adv.requested_amount)}</td>
-                      <td className="py-3 px-4 text-right text-foreground">
-                        {adv.approved_amount != null ? fmt(adv.approved_amount) : '—'}
-                      </td>
-                      <td className="py-3 px-4 text-right text-foreground">{adv.recovery_months}</td>
-                      <td className="py-3 px-4 text-muted-foreground max-w-[160px] truncate">
-                        {adv.purpose ?? '—'}
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge variant={STATUS_BADGE[adv.status] ?? 'secondary'}>
-                          {adv.status.charAt(0).toUpperCase() + adv.status.slice(1)}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4 text-muted-foreground">{fmtDate(adv.created_at)}</td>
-                      {isAdmin && (
+        {/* ── Requests Tab ── */}
+        <TabsContent value="requests">
+          <SectionCard title="Advance Requests">
+            {isLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading…</span>
+              </div>
+            ) : advances.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <DollarSign className="h-10 w-10 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No advance requests found.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Employee</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Requested</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Approved</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Months</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Purpose</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Status</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Created</th>
+                      {isAdmin && <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {advances.map(adv => (
+                      <tr key={adv.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-2">
-                            {adv.status === 'pending' && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setApproveTarget(adv)}
-                                >
-                                  <CheckCircle2 className="mr-1 h-3 w-3" /> Approve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setRejectTarget(adv)}
-                                >
-                                  <XCircle className="mr-1 h-3 w-3" /> Reject
-                                </Button>
-                              </>
-                            )}
-                            {adv.status === 'approved' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={disburseMutation.isPending}
-                                onClick={() => disburseMutation.mutate(adv.id)}
-                              >
-                                <DollarSign className="mr-1 h-3 w-3" /> Mark Disbursed
-                              </Button>
-                            )}
+                          <div className="font-medium text-foreground">
+                            {adv.employee_name ?? adv.employee_id}
                           </div>
+                          {adv.employee_code && (
+                            <div className="text-xs text-muted-foreground">{adv.employee_code}</div>
+                          )}
                         </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      )}
+                        <td className="py-3 px-4 text-right text-foreground">{fmt(adv.requested_amount)}</td>
+                        <td className="py-3 px-4 text-right text-foreground">
+                          {adv.approved_amount != null ? fmt(adv.approved_amount) : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-right text-foreground">{adv.recovery_months}</td>
+                        <td className="py-3 px-4 text-muted-foreground max-w-[160px] truncate">
+                          {adv.purpose ?? '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant={STATUS_BADGE[adv.status] ?? 'secondary'}>
+                            {adv.status.charAt(0).toUpperCase() + adv.status.slice(1)}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">{fmtDate(adv.created_at)}</td>
+                        {isAdmin && (
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              {adv.status === 'pending' && (
+                                <>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setApproveTarget(adv)}>
+                                    <CheckCircle2 className="h-3 w-3" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-destructive hover:text-destructive" onClick={() => setRejectTarget(adv)}>
+                                    <XCircle className="h-3 w-3" /> Reject
+                                  </Button>
+                                </>
+                              )}
+                              {adv.status === 'approved' && (
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={disburseMutation.isPending} onClick={() => disburseMutation.mutate(adv.id)}>
+                                  <DollarSign className="h-3 w-3" /> Mark Disbursed
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
 
-      {/* ── Recovery Schedule Tab ── */}
-      {activeTab === 'recovery' && (
-        <SectionCard title="Recovery Schedule">
-          <div className="flex items-center gap-3 mb-6">
-            <Input
-              className="max-w-xs"
-              placeholder="Enter Advance ID (UUID)"
-              value={advanceId}
-              onChange={e => setAdvanceId(e.target.value)}
-            />
-            <Button
-              variant="outline"
-              onClick={() => setLoadedAdvanceId(advanceId.trim())}
-              disabled={!advanceId.trim()}
-            >
-              <Search className="mr-2 h-4 w-4" /> Load
-            </Button>
-          </div>
+        {/* ── Recovery Schedule Tab ── */}
+        <TabsContent value="recovery">
+          <SectionCard title="Recovery Schedule">
+            <div className="flex items-center gap-3 mb-6">
+              <Input
+                className="max-w-xs"
+                placeholder="Enter Advance ID (UUID)"
+                value={advanceId}
+                onChange={e => setAdvanceId(e.target.value)}
+              />
+              <Button variant="outline" onClick={() => setLoadedAdvanceId(advanceId.trim())} disabled={!advanceId.trim()}>
+                <Search className="mr-2 h-4 w-4" /> Load
+              </Button>
+            </div>
 
-          {!loadedAdvanceId ? (
-            <p className="text-muted-foreground text-sm">Enter an Advance ID above and click Load.</p>
-          ) : schedLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : schedule.length === 0 ? (
-            <p className="text-muted-foreground py-6">No recovery records found for this advance.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left py-3 px-4 font-medium">Month</th>
-                    <th className="text-right py-3 px-4 font-medium">Scheduled</th>
-                    <th className="text-right py-3 px-4 font-medium">Recovered</th>
-                    <th className="text-left py-3 px-4 font-medium">Status</th>
-                    <th className="text-left py-3 px-4 font-medium">Recovered At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedule.map(row => (
-                    <tr key={row.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                      <td className="py-3 px-4 text-foreground">{row.recovery_month}</td>
-                      <td className="py-3 px-4 text-right text-foreground">{fmt(row.scheduled_amount)}</td>
-                      <td className="py-3 px-4 text-right text-foreground">{fmt(row.recovered_amount)}</td>
-                      <td className="py-3 px-4">
-                        <Badge variant={RECOVERY_BADGE[row.status] ?? 'secondary'}>
-                          {row.status.charAt(0).toUpperCase() + row.status.slice(1)}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4 text-muted-foreground">{fmtDate(row.recovered_at)}</td>
+            {!loadedAdvanceId ? (
+              <p className="text-sm text-muted-foreground">Enter an Advance ID above and click Load.</p>
+            ) : schedLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading…</span>
+              </div>
+            ) : schedule.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <Search className="h-10 w-10 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No recovery records found for this advance.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Month</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Scheduled</th>
+                      <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Recovered</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Status</th>
+                      <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-4 py-2.5">Recovered At</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      )}
+                  </thead>
+                  <tbody>
+                    {schedule.map(row => (
+                      <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                        <td className="py-3 px-4 text-foreground">{row.recovery_month}</td>
+                        <td className="py-3 px-4 text-right text-foreground">{fmt(row.scheduled_amount)}</td>
+                        <td className="py-3 px-4 text-right text-foreground">{fmt(row.recovered_amount)}</td>
+                        <td className="py-3 px-4">
+                          <Badge variant={RECOVERY_BADGE[row.status] ?? 'secondary'}>
+                            {row.status.charAt(0).toUpperCase() + row.status.slice(1)}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">{fmtDate(row.recovered_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+      </Tabs>
 
       {/* Dialogs */}
       <ApproveDialog

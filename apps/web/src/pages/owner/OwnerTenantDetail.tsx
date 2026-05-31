@@ -1,0 +1,602 @@
+import { useState, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ownerApi }      from '@/lib/api/ownerApi'
+import { useOwnerStore } from '@/stores/ownerStore'
+import { toast }         from 'sonner'
+import {
+  ArrowLeft, Award, Edit2, Save, X,
+  UserPlus, Eye, EyeOff, RefreshCw, KeyRound,
+  ShieldCheck, UserX, UserCheck, Copy, Check,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input }  from '@/components/ui/input'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+
+interface TenantDetail {
+  id: string; name: string; slug: string; plan: string; status: string
+  trial_ends_at: string | null; license_issued_at: string | null
+  license_expires_at: string | null; billing_email: string | null
+  per_employee_rate: number; notes: string | null; country: string
+  created_at: string
+  billing_snapshots: BillingRow[]
+  api_keys: ApiKeyRow[]
+}
+interface BillingRow  { id: string; snapshot_month: string; employee_count: number; per_employee_rate: number; amount_due: number; plan: string }
+interface ApiKeyRow   { id: string; name: string; key_prefix: string; scopes: string[]; is_active: boolean; last_used_at: string | null }
+// profiles.id = auth user UUID (no separate user_id column)
+interface TenantAdmin { id: string; full_name: string; email: string | null; role: string; is_active: boolean; created_at: string }
+
+const STATUS_COLOR: Record<string, string> = {
+  active:    'text-emerald-400', trial: 'text-amber-400',
+  suspended: 'text-red-400',    expired: 'text-orange-400', cancelled: 'text-slate-500',
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return '—'
+  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
+}
+function fmtCurrency(n: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+}
+
+function generatePassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
+  let pwd = ''
+  for (let i = 0; i < 12; i++) pwd += chars[Math.floor(Math.random() * chars.length)]
+  return pwd
+}
+
+export function OwnerTenantDetail() {
+  const { id }           = useParams<{ id: string }>()
+  const navigate         = useNavigate()
+  const qc               = useQueryClient()
+  const { isOwner }      = useOwnerStore()
+  const [editing, setEditing]       = useState(false)
+  const [editForm, setEditForm]     = useState<any>({})
+  const [licenseMonths, setLicenseMonths] = useState('12')
+
+  // Admin provisioning state
+  const [addAdminOpen, setAddAdminOpen]   = useState(false)
+  const [adminForm, setAdminForm]         = useState({ name: '', email: '', password: '', role: 'super_admin' })
+  const [showAdminPwd, setShowAdminPwd]   = useState(false)
+  // Reset password state — stores the result { email, temp_password } to display once
+  const [resetResult, setResetResult]     = useState<{ email: string; temp_password: string } | null>(null)
+  const [copiedPwd, setCopiedPwd]         = useState(false)
+
+  const { data, isLoading } = useQuery<{ data: TenantDetail }>({
+    queryKey: ['owner-tenant', id],
+    queryFn:  () => ownerApi.get(`/owner/tenants/${id}`),
+  })
+  const t = data?.data
+
+  // Tenant admins query
+  const { data: adminsData, refetch: refetchAdmins } = useQuery<{ data: TenantAdmin[] }>({
+    queryKey: ['owner-tenant-admins', id],
+    queryFn:  () => ownerApi.get(`/owner/tenants/${id}/admins`),
+    enabled:  !!id,
+  })
+  const admins = adminsData?.data ?? []
+
+  const addAdminMut = useMutation({
+    mutationFn: () => ownerApi.post(`/owner/tenants/${id}/admins`, {
+      name:     adminForm.name,
+      email:    adminForm.email,
+      password: adminForm.password || generatePassword(),
+      role:     adminForm.role,
+    }),
+    onSuccess: () => {
+      toast.success('Admin account created')
+      setAddAdminOpen(false)
+      setAdminForm({ name: '', email: '', password: '', role: 'super_admin' })
+      setShowAdminPwd(false)
+      refetchAdmins()
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const toggleAdminMut = useMutation({
+    mutationFn: ({ adminId, is_active }: { adminId: string; is_active: boolean }) =>
+      ownerApi.patch(`/owner/tenants/${id}/admins/${adminId}`, { is_active }),
+    onSuccess: () => { toast.success('Updated'); refetchAdmins() },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const resetPasswordMut = useMutation({
+    mutationFn: (adminId: string) =>
+      ownerApi.post<{ data: { email: string; temp_password: string } }>(`/owner/tenants/${id}/admins/${adminId}/reset-password`, {}),
+    onSuccess: (res: any) => {
+      setResetResult(res.data)
+      setCopiedPwd(false)
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const copyPassword = useCallback((pwd: string) => {
+    navigator.clipboard.writeText(pwd).then(() => {
+      setCopiedPwd(true)
+      setTimeout(() => setCopiedPwd(false), 2000)
+    })
+  }, [])
+
+  function startEdit() {
+    if (!t) return
+    setEditForm({
+      plan:               t.plan,
+      per_employee_rate:  String(t.per_employee_rate),
+      billing_email:      t.billing_email ?? '',
+      notes:              t.notes ?? '',
+    })
+    setEditing(true)
+  }
+
+  const updateMut = useMutation({
+    mutationFn: () => ownerApi.patch(`/owner/tenants/${id}`, {
+      ...editForm, per_employee_rate: Number(editForm.per_employee_rate) || 0,
+    }),
+    onSuccess: () => { toast.success('Tenant updated'); setEditing(false); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  function statusAction(action: 'activate' | 'suspend' | 'cancel') {
+    ownerApi.post(`/owner/tenants/${id}/${action}`)
+      .then(() => { toast.success(`Tenant ${action}d`); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) })
+      .catch((e: any) => toast.error(e.message))
+  }
+
+  function issueLicense() {
+    ownerApi.post(`/owner/tenants/${id}/license`, { months: Number(licenseMonths) })
+      .then(() => { toast.success('License issued'); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }); qc.invalidateQueries({ queryKey: ['owner-tenants'] }) })
+      .catch((e: any) => toast.error(e.message))
+  }
+
+  if (isLoading) return (
+    <div className="p-6 space-y-4">
+      {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-10 bg-slate-800 rounded-lg animate-pulse" />)}
+    </div>
+  )
+  if (!t) return <div className="p-6 text-slate-500">Tenant not found</div>
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto space-y-6">
+      {/* Back */}
+      <button onClick={() => navigate('/owner/tenants')} className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+        <ArrowLeft className="h-4 w-4" /> Back to Tenants
+      </button>
+
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-white">{t.name}</h1>
+          <div className="flex items-center gap-3 mt-1">
+            <span className="text-sm text-slate-500">{t.slug}</span>
+            <span className={`text-xs font-semibold uppercase ${STATUS_COLOR[t.status]}`}>{t.status}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full border ${
+              t.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300 bg-purple-500/10' : 'border-slate-700 text-slate-400'
+            }`}>{t.plan}</span>
+          </div>
+        </div>
+        {isOwner() && (
+          <div className="flex gap-2">
+            {!editing && (
+              <Button onClick={startEdit} variant="outline" size="sm" className="border-slate-700 text-slate-300 gap-1">
+                <Edit2 className="h-3.5 w-3.5" /> Edit
+              </Button>
+            )}
+            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs">Activate</Button>}
+            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" variant="outline" className="border-red-500/40 text-red-400 text-xs">Suspend</Button>}
+            {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" variant="ghost"   className="text-slate-600 hover:text-slate-400 text-xs">Cancel</Button>}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Details card */}
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white">Details</h2>
+            {editing && (
+              <div className="flex gap-1.5">
+                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-indigo-600 hover:bg-indigo-500 text-white h-7 text-xs gap-1">
+                  <Save className="h-3 w-3" /> Save
+                </Button>
+                <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-slate-400 h-7 text-xs gap-1">
+                  <X className="h-3 w-3" /> Cancel
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {editing ? (
+            <div className="space-y-3">
+              {[
+                { key: 'billing_email',      label: 'Billing Email', type: 'email' },
+                { key: 'per_employee_rate',  label: 'Per-Employee Rate (₹)', type: 'number' },
+                { key: 'notes',             label: 'Notes', type: 'text' },
+              ].map(({ key, label, type }) => (
+                <div key={key} className="space-y-1">
+                  <label className="text-xs text-slate-400">{label}</label>
+                  <Input
+                    type={type}
+                    value={editForm[key] ?? ''}
+                    onChange={e => setEditForm((f: any) => ({ ...f, [key]: e.target.value }))}
+                    className="bg-slate-800 border-slate-700 text-white h-8 text-sm"
+                  />
+                </div>
+              ))}
+              <div className="space-y-1">
+                <label className="text-xs text-slate-400">Plan</label>
+                <select
+                  value={editForm.plan}
+                  onChange={e => setEditForm((f: any) => ({ ...f, plan: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white"
+                >
+                  <option value="standard">Standard</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              </div>
+            </div>
+          ) : (
+            <dl className="space-y-2.5 text-sm">
+              {[
+                { label: 'Country',         value: t.country },
+                { label: 'Billing Email',   value: t.billing_email ?? '—' },
+                { label: 'Rate / employee', value: t.per_employee_rate > 0 ? fmtCurrency(t.per_employee_rate) : '—' },
+                { label: 'Created',         value: fmtDate(t.created_at) },
+                { label: 'Trial Ends',      value: fmtDate(t.trial_ends_at) },
+                { label: 'License Issued',  value: fmtDate(t.license_issued_at) },
+                { label: 'License Expires', value: fmtDate(t.license_expires_at) },
+                { label: 'Notes',           value: t.notes ?? '—' },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex gap-2">
+                  <dt className="w-32 flex-shrink-0 text-slate-500">{label}</dt>
+                  <dd className="text-slate-200 break-all">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+
+        {/* License management */}
+        {isOwner() && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Award className="h-4 w-4 text-indigo-400" /> License Management
+            </h2>
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400">Issue license for</label>
+              <div className="flex gap-2">
+                <select
+                  value={licenseMonths}
+                  onChange={e => setLicenseMonths(e.target.value)}
+                  className="bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-white flex-1"
+                >
+                  {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
+                </select>
+                <Button onClick={issueLicense} className="bg-indigo-600 hover:bg-indigo-500 text-white">
+                  Issue License
+                </Button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Sets status to <span className="text-emerald-400">active</span> and records license_issued_at / license_expires_at.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Billing snapshots */}
+      {t.billing_snapshots.length > 0 && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-800">
+            <h2 className="text-sm font-semibold text-white">Billing History</h2>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900/50">
+              <tr>
+                {['Month', 'Employees', 'Rate / emp', 'Amount Due', 'Plan'].map(h => (
+                  <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {t.billing_snapshots.map(b => (
+                <tr key={b.id} className="hover:bg-slate-800/30">
+                  <td className="px-4 py-2.5 text-slate-300 font-mono text-[12px]">{b.snapshot_month}</td>
+                  <td className="px-4 py-2.5 text-slate-300">{b.employee_count}</td>
+                  <td className="px-4 py-2.5 text-slate-300">{fmtCurrency(b.per_employee_rate)}</td>
+                  <td className="px-4 py-2.5 text-emerald-300 font-semibold">{fmtCurrency(b.amount_due)}</td>
+                  <td className="px-4 py-2.5 text-slate-500 text-[11px]">{b.plan}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* API keys */}
+      {t.api_keys.length > 0 && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-800">
+            <h2 className="text-sm font-semibold text-white">API Keys</h2>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900/50">
+              <tr>
+                {['Name', 'Key Prefix', 'Scopes', 'Last Used', 'Status'].map(h => (
+                  <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {t.api_keys.map(k => (
+                <tr key={k.id} className="hover:bg-slate-800/30">
+                  <td className="px-4 py-2.5 text-slate-300">{k.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-slate-400">{k.key_prefix}…</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {k.scopes.map(s => (
+                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">{s}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-[12px] text-slate-500">{fmtDate(k.last_used_at)}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-emerald-400' : 'text-slate-600'}`}>
+                      {k.is_active ? 'Active' : 'Revoked'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Tenant Admins ──────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-indigo-400" />
+            <h2 className="text-sm font-semibold text-white">Tenant Admin Accounts</h2>
+            <span className="text-[11px] text-slate-500">({admins.length})</span>
+          </div>
+          {isOwner() && (
+            <Button
+              size="sm"
+              onClick={() => setAddAdminOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white h-7 text-xs gap-1"
+            >
+              <UserPlus className="h-3 w-3" /> Add Admin
+            </Button>
+          )}
+        </div>
+
+        {admins.length === 0 ? (
+          <div className="px-4 py-8 text-center text-slate-500 text-sm">
+            <ShieldCheck className="h-8 w-8 text-slate-700 mx-auto mb-2" />
+            <p>No admin accounts yet.</p>
+            <p className="text-xs mt-1">Click "Add Admin" to provision the first login for this tenant.</p>
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900/50">
+              <tr>
+                {['Name', 'Email', 'Role', 'Created', 'Status', ''].map(h => (
+                  <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {admins.map(a => {
+                const displayName = a.full_name || a.email || 'Unknown'
+                const roleLabel: Record<string, string> = {
+                  super_admin: 'Admin', hr_admin: 'HR Admin', manager: 'Manager',
+                }
+                return (
+                <tr key={a.id} className="hover:bg-slate-800/30">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="h-6 w-6 rounded-full bg-indigo-900 flex items-center justify-center flex-shrink-0">
+                        <span className="text-[10px] font-bold text-indigo-300">{displayName.charAt(0).toUpperCase()}</span>
+                      </div>
+                      <span className="text-[13px] text-slate-200 font-medium">{displayName}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-[12px] text-slate-400">{a.email ?? '—'}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
+                      a.role === 'super_admin'
+                        ? 'border-indigo-500/40 text-indigo-300 bg-indigo-500/10'
+                        : a.role === 'hr_admin'
+                        ? 'border-sky-500/40 text-sky-300 bg-sky-500/10'
+                        : 'border-slate-700 text-slate-400 bg-slate-800'
+                    }`}>
+                      {roleLabel[a.role] ?? a.role}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-[12px] text-slate-500">
+                    {fmtDate(a.created_at)}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[11px] font-medium ${a.is_active ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {a.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  {isOwner() && (
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => resetPasswordMut.mutate(a.id)}
+                          disabled={resetPasswordMut.isPending}
+                          className="h-6 px-2 text-[10px] text-slate-500 hover:text-amber-300 hover:bg-amber-500/10 gap-1"
+                          title="Reset password"
+                        >
+                          <KeyRound className="h-3 w-3" /> Reset
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => toggleAdminMut.mutate({ adminId: a.id, is_active: !a.is_active })}
+                          disabled={toggleAdminMut.isPending}
+                          className={`h-6 px-2 text-[10px] gap-1 ${
+                            a.is_active
+                              ? 'text-slate-500 hover:text-red-400 hover:bg-red-500/10'
+                              : 'text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10'
+                          }`}
+                        >
+                          {a.is_active ? <UserX className="h-3 w-3" /> : <UserCheck className="h-3 w-3" />}
+                          {a.is_active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ── Add Admin Dialog ──────────────────────────────────────────────────── */}
+      <Dialog open={addAdminOpen} onOpenChange={open => { setAddAdminOpen(open); if (!open) { setAdminForm({ name: '', email: '', password: '', role: 'super_admin' }); setShowAdminPwd(false) } }}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-indigo-400" />
+              Add Tenant Admin
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-xs text-slate-500">
+              Creates a Supabase auth account + HRMS profile. The admin can log in immediately with these credentials.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Full Name *</label>
+              <Input
+                placeholder="John Smith"
+                value={adminForm.name}
+                onChange={e => setAdminForm(f => ({ ...f, name: e.target.value }))}
+                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Email *</label>
+              <Input
+                type="email"
+                placeholder="admin@company.com"
+                value={adminForm.email}
+                onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
+                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Temporary Password *</label>
+              <div className="flex gap-1.5">
+                <div className="relative flex-1">
+                  <Input
+                    type={showAdminPwd ? 'text' : 'password'}
+                    placeholder="Min 8 characters"
+                    value={adminForm.password}
+                    onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))}
+                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm pr-8"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPwd(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    {showAdminPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setAdminForm(f => ({ ...f, password: generatePassword() })); setShowAdminPwd(true) }}
+                  className="h-8 border-slate-700 text-slate-400 hover:text-white gap-1 px-2"
+                >
+                  <RefreshCw className="h-3 w-3" /> Generate
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">Role</label>
+              <select
+                value={adminForm.role}
+                onChange={e => setAdminForm(f => ({ ...f, role: e.target.value }))}
+                className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white"
+              >
+                <option value="super_admin">Admin (full access)</option>
+                <option value="hr_admin">HR Admin</option>
+                <option value="manager">Manager</option>
+              </select>
+            </div>
+
+            {adminForm.password && showAdminPwd && (
+              <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs">
+                <span className="text-amber-400 font-semibold">Save before submitting: </span>
+                <code className="text-amber-200 font-mono select-all">{adminForm.password}</code>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAddAdminOpen(false)} className="text-slate-400">Cancel</Button>
+            <Button
+              onClick={() => addAdminMut.mutate()}
+              disabled={!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim() || addAdminMut.isPending}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+            >
+              {addAdminMut.isPending ? 'Creating…' : 'Create Admin'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Password Result Dialog ─────────────────────────────────────── */}
+      <Dialog open={!!resetResult} onOpenChange={open => { if (!open) setResetResult(null) }}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-amber-400" />
+              Password Reset
+            </DialogTitle>
+          </DialogHeader>
+          {resetResult && (
+            <div className="space-y-3 py-1">
+              <p className="text-xs text-slate-400">New temporary password for <span className="text-white">{resetResult.email}</span>:</p>
+              <div className="flex items-center gap-2 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2">
+                <code className="flex-1 font-mono text-sm text-amber-200 select-all">{resetResult.temp_password}</code>
+                <button
+                  onClick={() => copyPassword(resetResult.temp_password)}
+                  className="text-slate-500 hover:text-slate-200 transition-colors"
+                >
+                  {copiedPwd ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-500">⚠ Share this with the admin now — it won't be shown again.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setResetResult(null)} className="bg-slate-700 hover:bg-slate-600 text-white">
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+    </div>
+  )
+}

@@ -1,13 +1,22 @@
 /**
- * EmployeeShifts — /employee-shifts
+ * Shift Overrides — /employee-shifts
  *
- * Assign standing (default) shifts to employees.
+ * Exception-only shift assignments for temporary, emergency, or special-case
+ * workforce coverage.  This is NOT the primary scheduling mechanism.
+ *
+ * Primary shift scheduling flows through:
+ *   Roster Policy → Rotation Policy → Shift Master
+ *
+ * Use this page ONLY for:
+ *   · Temporary reassignments (e.g. employee covering a different shift for a week)
+ *   · Emergency coverage adjustments
+ *   · Special operational exceptions
+ *   · Employees who need a standing override different from the Rotation Policy resolution
  *
  * Layout:
- *   Left panel  (lg:col-span-2) — searchable, location-filtered table of all active employees
- *                                  showing each person's current shift as a badge.
- *                                  Clicking a row pre-fills the right form.
- *   Right panel (lg:col-span-1) — "Assign Shift" form + Shift History panel.
+ *   Left panel  (lg:col-span-2) — searchable, location-filtered table showing all
+ *                                  employees and their current active Shift Override (if any).
+ *   Right panel (lg:col-span-1) — "Apply Override" form + Override History.
  *
  * API:
  *   GET  /masters/employee-shifts               → { data: EmployeeRow[] }
@@ -21,7 +30,7 @@ import { useState, useMemo }                             from 'react'
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query'
 import { toast }                                         from 'sonner'
 import {
-  Users, Clock, Search, AlertCircle,
+  Users, Clock, Search, AlertCircle, Info,
   ShieldAlert, CheckCircle2, X, History,
 }                                                        from 'lucide-react'
 
@@ -31,6 +40,7 @@ import { SectionCard }                                   from '@/components/layo
 import { FormField, FormActions }                        from '@/components/forms/FormField'
 import { Button }                                        from '@/components/ui/button'
 import { Input }                                         from '@/components/ui/input'
+import { DateInput }                                     from '@/components/ui/date-input'
 import { Badge }                                         from '@/components/ui/badge'
 import { api }                                           from '@/lib/api/client'
 import { useAuthStore }                                  from '@/stores/authStore'
@@ -137,7 +147,6 @@ export function EmployeeShifts() {
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  // Unique work locations from current employee data
   const locations: WorkLocation[] = Array.from(
     new Map(
       employees
@@ -155,14 +164,14 @@ export function EmployeeShifts() {
       qc.invalidateQueries({ queryKey: ['employee-shifts'] })
       qc.invalidateQueries({ queryKey: ['employee-shift-history', form.employee_id] })
       setSuccess(true)
-      toast.success('Shift assigned')
+      toast.success('Shift override applied')
       setTimeout(() => {
         setSuccess(false)
         setForm(EMPTY_FORM)
         setErrors({})
       }, 2000)
     },
-    onError: (e: Error) => toast.error('Failed to assign shift', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to apply override', { description: e.message }),
   })
 
   const clearMutation = useMutation({
@@ -171,9 +180,9 @@ export function EmployeeShifts() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employee-shifts'] })
       if (historyEmpId) qc.invalidateQueries({ queryKey: ['employee-shift-history', historyEmpId] })
-      toast.success('Shift assignment cleared')
+      toast.success('Shift override removed')
     },
-    onError: (e: Error) => toast.error('Failed to clear shift', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to remove override', { description: e.message }),
   })
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -189,7 +198,7 @@ export function EmployeeShifts() {
     setErrors({})
     setSuccess(false)
     assignMutation.reset()
-    document.getElementById('assign-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    document.getElementById('override-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
   function clearSelection() {
@@ -231,7 +240,7 @@ export function EmployeeShifts() {
     return matchSearch && matchLocation
   })
 
-  // ── Column definitions (inside component to close over state) ─────────────────
+  // ── Column definitions ─────────────────────────────────────────────────────────
 
   const columns = useMemo<DataTableColumn<EmployeeRow>[]>(() => [
     {
@@ -264,15 +273,15 @@ export function EmployeeShifts() {
       ),
     },
     {
-      id:       'current_shift',
-      header:   'Current Shift',
-      minWidth: '140px',
+      id:       'active_override',
+      header:   'Active Override',
+      minWidth: '160px',
       cell: (row) => (
         row.shift ? (
           <div className="space-y-0.5">
             <div className="flex items-center gap-1.5">
-              <Badge variant="default" className="text-[10px]">
-                {row.shift.code || row.shift.name}
+              <Badge variant="secondary" className="text-[10px] border border-orange-200 bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
+                Override
               </Badge>
               <span className="text-xs text-muted-foreground">{row.shift.name}</span>
             </div>
@@ -281,7 +290,7 @@ export function EmployeeShifts() {
             </div>
           </div>
         ) : (
-          <span className="text-xs text-muted-foreground/60 italic">Unassigned</span>
+          <span className="text-xs text-muted-foreground/60 italic">No override — policy applies</span>
         )
       ),
     },
@@ -304,11 +313,11 @@ export function EmployeeShifts() {
             size="icon"
             variant="ghost"
             className="h-6 w-6 text-muted-foreground hover:text-destructive"
-            title="Remove standing shift"
+            title="Remove override"
             disabled={clearMutation.isPending}
             onClick={e => {
               e.stopPropagation()
-              if (window.confirm(`Remove standing shift from ${row.name}?`)) {
+              if (window.confirm(`Remove shift override from ${row.name}?`)) {
                 clearMutation.mutate(row.assignment_id!)
                 if (form.employee_id === row.employee_id) clearSelection()
               }
@@ -326,7 +335,6 @@ export function EmployeeShifts() {
 
   const toolbarLeft = (
     <>
-      {/* Search */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
         <Input
@@ -336,8 +344,6 @@ export function EmployeeShifts() {
           onChange={e => setSearch(e.target.value)}
         />
       </div>
-
-      {/* Location filter */}
       {locations.length > 0 && (
         <select
           value={locationFilter}
@@ -358,16 +364,26 @@ export function EmployeeShifts() {
   return (
     <PageContainer>
       <PageHeader
-        breadcrumb={[{ label: 'Shift & Roster', href: '/admin/shift-master' }, { label: 'Employee Shifts' }]}
-        title="Employee Shifts"
-        subtitle="Assign default standing shifts to employees"
+        breadcrumb={[{ label: 'Workforce Governance', href: '/admin/masters/rosters' }, { label: 'Shift Overrides' }]}
+        title="Shift Overrides"
+        subtitle="Exception-only overrides — for temporary, emergency, or special-case assignments"
       />
+
+      {/* Governance context banner */}
+      <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs dark:border-blue-800 dark:bg-blue-950/30">
+        <Info className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
+        <span className="text-blue-700 dark:text-blue-300">
+          <strong>Primary scheduling</strong> is governed by Roster Policy + Rotation Policy.
+          Use this page only for temporary overrides or special cases.
+          Most employees should have <em>no override</em> here — they inherit from their site's governance policies.
+        </span>
+      </div>
 
       {!isAdmin && (
         <SectionCard>
           <div className="flex items-center gap-3 text-sm text-muted-foreground py-2">
             <ShieldAlert className="h-5 w-5 text-warning flex-shrink-0" />
-            <span>You have read-only access. HR admin access is required to assign shifts.</span>
+            <span>You have read-only access. HR admin access is required to apply overrides.</span>
           </div>
         </SectionCard>
       )}
@@ -404,12 +420,12 @@ export function EmployeeShifts() {
           </SectionCard>
         </div>
 
-        {/* ── Right: Assignment form + shift history ───────────────────────── */}
-        <div id="assign-panel" className="space-y-4">
+        {/* ── Right: Override form + history ───────────────────────────────── */}
+        <div id="override-panel" className="space-y-4">
           <SectionCard
-            title="Assign Shift"
+            title="Apply Override"
             icon={<Clock className="h-4 w-4 text-muted-foreground" />}
-            description={isAdmin ? 'Select an employee from the table, then choose a shift.' : undefined}
+            description={isAdmin ? 'Select an employee from the table, then choose a shift to override with.' : undefined}
           >
             {periodLocked && (
               <PeriodLockBanner state={periodState} month={currentMonth} className="mb-4" />
@@ -454,10 +470,11 @@ export function EmployeeShifts() {
 
                 {/* Shift select */}
                 <FormField
-                  label="Shift"
+                  label="Override Shift"
                   htmlFor="es-shift"
                   required
                   error={errors.shift_id}
+                  description="This shift will take priority over the Rotation Policy for this employee"
                 >
                   <select
                     id="es-shift"
@@ -471,7 +488,7 @@ export function EmployeeShifts() {
                       !form.shift_id && 'text-muted-foreground',
                     )}
                   >
-                    <option value="">— Select shift —</option>
+                    <option value="">— Select shift to override with —</option>
                     {shifts.map(s => (
                       <option key={s.id} value={s.id}>
                         {s.name}
@@ -489,13 +506,12 @@ export function EmployeeShifts() {
                   htmlFor="es-date"
                   required
                   error={errors.effective_from}
-                  description="Shift applies from this date onward"
+                  description="Override applies from this date onward until removed"
                 >
-                  <Input
+                  <DateInput
                     id="es-date"
-                    type="date"
                     value={form.effective_from}
-                    onChange={e => setForm(f => ({ ...f, effective_from: e.target.value }))}
+                    onChange={v => setForm(f => ({ ...f, effective_from: v }))}
                   />
                 </FormField>
 
@@ -503,7 +519,7 @@ export function EmployeeShifts() {
                 {success && (
                   <div className="flex items-center gap-2 text-xs text-success p-2 rounded-md bg-success/10 border border-success/20">
                     <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                    Shift assigned successfully!
+                    Override applied successfully!
                   </div>
                 )}
 
@@ -511,7 +527,7 @@ export function EmployeeShifts() {
                 {assignMutation.isError && !success && (
                   <p className="flex items-center gap-1.5 text-xs text-destructive">
                     <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                    {(assignMutation.error as Error)?.message ?? 'Failed to assign shift'}
+                    {(assignMutation.error as Error)?.message ?? 'Failed to apply override'}
                   </p>
                 )}
 
@@ -527,11 +543,10 @@ export function EmployeeShifts() {
                     onClick={handleAssign}
                     disabled={assignMutation.isPending || success || periodLocked}
                   >
-                    {assignMutation.isPending ? 'Assigning…' : 'Assign Shift'}
+                    {assignMutation.isPending ? 'Applying…' : 'Apply Override'}
                   </Button>
                 </FormActions>
 
-                {/* Tip */}
                 {shifts.length === 0 && (
                   <p className="text-xs text-muted-foreground mt-1">
                     No active shifts found. Create shifts in{' '}
@@ -545,10 +560,10 @@ export function EmployeeShifts() {
             )}
           </SectionCard>
 
-          {/* ── Shift history panel ──────────────────────────────────────── */}
+          {/* ── Override history panel ──────────────────────────────────── */}
           {historyEmpId && (
             <SectionCard
-              title="Shift History"
+              title="Override History"
               icon={<History className="h-4 w-4 text-muted-foreground" />}
             >
               {histLoading ? (
@@ -557,7 +572,7 @@ export function EmployeeShifts() {
                 </div>
               ) : (histData?.data ?? []).length === 0 ? (
                 <div className="text-xs text-muted-foreground py-3 text-center">
-                  No assignment history for this employee.
+                  No override history for this employee.
                 </div>
               ) : (
                 <div className="space-y-0.5">
@@ -579,7 +594,7 @@ export function EmployeeShifts() {
                         <div className="text-muted-foreground tabular-nums">{row.effective_from}</div>
                         {row.is_current && (
                           <Badge variant="success" className="text-[9px] mt-0.5 rounded-full">
-                            Current
+                            Active
                           </Badge>
                         )}
                       </div>

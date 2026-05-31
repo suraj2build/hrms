@@ -1,9 +1,21 @@
 /**
- * Employee Shift Assignment Routes
+ * Shift Override Routes — /masters/employee-shifts
  *
- * GET    /masters/employee-shifts         — all active employees with current standing shift
- * POST   /masters/employee-shifts/assign  — assign a shift to an employee (auto-closes previous)
- * DELETE /masters/employee-shifts/:id    — remove a specific assignment record
+ * Exception-only shift assignments (migration 154: "Shift Overrides").
+ *
+ * Primary shift scheduling flows through:
+ *   Roster Policy → Rotation Policy → Shift Master
+ *
+ * These routes are used ONLY for:
+ *   · Temporary or emergency shift reassignments
+ *   · Special-case standing exceptions that override rotation policy resolution
+ *   · Employees who need a different shift than their site's governance policies provide
+ *
+ * Routes:
+ *   GET    /masters/employee-shifts         — all active employees with current override (if any)
+ *   POST   /masters/employee-shifts/assign  — apply override to an employee (auto-closes previous)
+ *   GET    /masters/employee-shifts/:id/history — override history for one employee
+ *   DELETE /masters/employee-shifts/:id    — remove a specific override record
  *
  * The employee_shifts table has an auto-close trigger (fn_close_previous_employee_shift):
  * inserting a new row with is_current=true automatically sets is_current=false on the prior row.

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   card_number:   z.string().min(1, 'Card number is required'),
@@ -16,7 +17,8 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function accessCardsRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/access-cards', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -49,7 +51,7 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/employees/:id/access-cards/:cardId', auth, async (req: any, reply) => {
+  fastify.put('/employees/:id/access-cards/:cardId', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })

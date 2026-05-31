@@ -1,0 +1,37 @@
+// ============================================================
+// FILE 7 — index.ts PATCH
+// Apply these additions to apps/api/src/index.ts
+// ============================================================
+
+// ADD these imports after the existing payrollStatutoryTdsRoute import line
+// (currently around line 164):
+
+import tdsComponentsRoute    from './routes/payroll/statutory/tds-components.js'
+import tdsPlansRoute         from './routes/payroll/statutory/tds-plans.js'
+import itStatementRoute      from './routes/payroll/statutory/it-statement.js'
+import ytdStatementRoute     from './routes/payroll/statutory/ytd-statement.js'
+import taxGovernanceRoute    from './routes/payroll/statutory/tax-governance.js'
+
+
+// ADD these registrations immediately after the payrollStatutoryTdsRoute
+// registration block (currently around line 412):
+
+  await fastify.register(tdsComponentsRoute,  { prefix: '/payroll/statutory/tds' })   // GET/POST /payroll/statutory/tds/components/*
+  await fastify.register(tdsPlansRoute,       { prefix: '/payroll/statutory/tds' })   // GET/POST/PUT/DELETE /payroll/statutory/tds/plans/my/*
+  await fastify.register(itStatementRoute,    { prefix: '/payroll/statutory/tds' })   // GET /payroll/statutory/tds/it-statement/my|/:employeeId
+  await fastify.register(ytdStatementRoute,   { prefix: '/payroll/statutory/tds' })   // GET /payroll/statutory/tds/ytd/my|/:employeeId
+  await fastify.register(taxGovernanceRoute,  { prefix: '/payroll/statutory/tds' })   // GET/PUT /payroll/statutory/tds/governance + /compliance + /components/tenant + /components/:id/override
+
+
+// ============================================================
+// ROUTE REGISTRATION ORDER NOTE
+// ============================================================
+// The route files themselves register static sub-paths before dynamic ones,
+// so no special ordering is required at the index.ts level beyond what is
+// shown above. However, if you register any future route that uses the path
+//   /payroll/statutory/tds/components/:id
+// make sure tdsComponentsRoute is registered BEFORE taxGovernanceRoute to
+// avoid Fastify treating 'tenant' and 'override' as a :id capture.
+// Both files already handle this internally with their own static-before-dynamic
+// registration order.
+// ============================================================

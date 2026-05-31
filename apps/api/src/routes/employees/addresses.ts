@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   address_type:          z.enum(['current','permanent','correspondence']),
@@ -19,7 +20,8 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function addressesRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/addresses', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -52,7 +54,7 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/employees/:id/addresses/:addressId', auth, async (req: any, reply) => {
+  fastify.delete('/employees/:id/addresses/:addressId', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('employee_addresses')
       .delete()

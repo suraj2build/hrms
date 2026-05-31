@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   contract_type: z.enum(['appointment','renewal','amendment','nda','other']),
@@ -17,7 +18,8 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function contractsRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/contracts', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -32,7 +34,8 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/employees/:id/contracts', auth, async (req: any, reply) => {
+  // HR admin only — employees do not manage their own contracts
+  fastify.post('/employees/:id/contracts', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.safeParse(req.body)
@@ -46,7 +49,7 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/employees/:id/contracts/:contractId', auth, async (req: any, reply) => {
+  fastify.put('/employees/:id/contracts/:contractId', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -62,7 +65,9 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/employees/:id/contracts/:contractId', auth, async (req: any, reply) => {
+  fastify.delete('/employees/:id/contracts/:contractId', hrAdminAuth, async (req: any, reply) => {
+    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { error } = await fastify.supabase
       .from('employee_contracts')
       .delete()

@@ -46,6 +46,8 @@ const OPTIONAL_MODULES = [
   'event-bus-automation',
   'sla-scanner',
   'intelligence-scanner',
+  'durable-queue',
+  'webhook-service',
 ] as const
 
 type OptionalModule = typeof OPTIONAL_MODULES[number]

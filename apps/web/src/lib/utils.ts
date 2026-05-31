@@ -5,13 +5,57 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// ── Shared date helpers ────────────────────────────────────────────────────────
+// All public display dates use DD-MMM-YYYY (e.g. 01-Jan-2024).
+// Use UTC accessors for YYYY-MM-DD string inputs to avoid timezone off-by-one.
+
+const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+function _d(s: string | Date): Date {
+  if (s instanceof Date) return s
+  // Plain date strings (YYYY-MM-DD): anchor to noon UTC so no tz shift
+  return new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+}
+
+/** 01-Jan-2024 */
+export function fmtDate(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  const dt = _d(d)
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${_M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
+}
+
+/** 01-Jan  (no year — for tight spaces) */
+export function fmtDateShort(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  const dt = _d(d)
+  if (isNaN(dt.getTime())) return '—'
+  return `${String(dt.getUTCDate()).padStart(2,'0')}-${_M[dt.getUTCMonth()]}`
+}
+
+/** Jan-2024  (month + year, e.g. payroll periods) */
+export function fmtMonthYear(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  // Accept 'YYYY-MM' or 'YYYY-MM-DD'
+  const s = typeof d === 'string' ? d : d.toISOString().slice(0,7)
+  const dt = new Date(s.slice(0,7) + '-01T12:00:00Z')
+  if (isNaN(dt.getTime())) return '—'
+  return `${_M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
+}
+
+/** 01-Jan-2024 10:30  (local wall-clock time + date) */
+export function fmtDateTime(d: string | Date | null | undefined): string {
+  if (!d) return '—'
+  const dt = typeof d === 'string' ? new Date(d) : d
+  if (isNaN(dt.getTime())) return '—'
+  const hr = String(dt.getHours()).padStart(2,'0')
+  const mn = String(dt.getMinutes()).padStart(2,'0')
+  return `${String(dt.getDate()).padStart(2,'0')}-${_M[dt.getMonth()]}-${dt.getFullYear()} ${hr}:${mn}`
+}
+
+/** @deprecated use fmtDate */
 export function formatDate(date: string | Date | null | undefined): string {
-  if (!date) return '—'
-  return new Date(date).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
+  return fmtDate(date)
 }
 
 export function formatCurrency(amount: number): string {
