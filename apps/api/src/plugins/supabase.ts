@@ -1,8 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import fp from 'fastify-plugin'
 import type { FastifyPluginAsync } from 'fastify'
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const ws = require('ws')
+import ws from 'ws'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -20,7 +19,8 @@ const supabasePlugin: FastifyPluginAsync = async (fastify) => {
 
   const client = createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
-    realtime: { transport: ws },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    realtime: { transport: ws as any },
   })
 
   fastify.decorate('supabase', client)
