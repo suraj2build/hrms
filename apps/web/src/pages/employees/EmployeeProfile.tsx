@@ -1012,11 +1012,11 @@ export function EmployeeProfile() {
   // ── Master data for assignment dialogs (lazy — loads only when dialog opens) ─
   const { data: deptListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-departments'], queryFn: () => api.get('/masters/departments'),
-    enabled: assignTarget === 'department' || addJobOpen || orgDlgOpen, staleTime: 300_000,
+    enabled: !!id, staleTime: 300_000,
   })
   const { data: desigListData } = useQuery<{ data: { id: string; name: string }[] }>({
     queryKey: ['masters-designations'], queryFn: () => api.get('/masters/designations'),
-    enabled: assignTarget === 'designation' || addJobOpen, staleTime: 300_000,
+    enabled: !!id, staleTime: 300_000,
   })
   const { data: gradeListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-grades'], queryFn: () => api.get('/masters/grades'),
@@ -1024,11 +1024,11 @@ export function EmployeeProfile() {
   })
   const { data: ccListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-cost-centers'], queryFn: () => api.get('/masters/cost-centers'),
-    enabled: assignTarget === 'cost_center' || addJobOpen || orgDlgOpen, staleTime: 300_000,
+    enabled: !!id, staleTime: 300_000,
   })
   const { data: wlListData } = useQuery<{ data: { id: string; name: string; city: string }[] }>({
     queryKey: ['masters-work-locations'], queryFn: () => api.get('/masters/work-locations'),
-    enabled: assignTarget === 'work_location' || addJobOpen || orgDlgOpen, staleTime: 300_000,
+    enabled: !!id, staleTime: 300_000,
   })
   const { data: shiftListData } = useQuery<{ data: { id: string; name: string; code: string; start_time: string; end_time: string }[] }>({
     queryKey: ['masters-shifts'], queryFn: () => api.get('/masters/shifts'),
