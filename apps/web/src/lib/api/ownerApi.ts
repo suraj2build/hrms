@@ -4,13 +4,23 @@
  * Same shape as the tenant `api` client but reads the Bearer token from
  * useOwnerStore instead of useAuthStore.
  */
-import { useOwnerStore } from '@/stores/ownerStore'
-import { ApiError }      from '@/lib/api/client'
+import { ownerSupabase } from '@/lib/supabase/ownerClient'
+import { useOwnerStore }  from '@/stores/ownerStore'
+import { ApiError }       from '@/lib/api/client'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 
-function getOwnerHeaders(hasBody: boolean): HeadersInit {
-  const token = useOwnerStore.getState().accessToken
+async function getOwnerHeaders(hasBody: boolean): Promise<HeadersInit> {
+  // Pull the token LIVE from the isolated owner session (auto-refreshed by
+  // supabase-js). Fall back to the store snapshot only if the session call
+  // hasn't resolved yet.
+  let token: string | null = null
+  try {
+    const { data } = await ownerSupabase.auth.getSession()
+    token = data.session?.access_token ?? null
+  } catch { /* ignore — fall through to store */ }
+  if (!token) token = useOwnerStore.getState().accessToken
+
   return {
     // Only send Content-Type when there is a body — Fastify returns 400
     // for Content-Type: application/json with an empty body.
@@ -21,7 +31,7 @@ function getOwnerHeaders(hasBody: boolean): HeadersInit {
 
 async function ownerRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const hasBody = options.body !== undefined
-  const headers  = getOwnerHeaders(hasBody)
+  const headers  = await getOwnerHeaders(hasBody)
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers: { ...headers, ...options.headers },

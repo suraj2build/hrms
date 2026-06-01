@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Loader2, Eye, EyeOff, Shield } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase }       from '@/lib/supabase/client'
+import { ownerSupabase }  from '@/lib/supabase/ownerClient'
 import { ownerApi }       from '@/lib/api/ownerApi'
 import { useOwnerStore }  from '@/stores/ownerStore'
 import { Button }         from '@/components/ui/button'
@@ -30,7 +30,7 @@ export function OwnerLogin() {
 
   async function onSubmit(values: Form) {
     // 1. Sign in with Supabase
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await ownerSupabase.auth.signInWithPassword({
       email: values.email, password: values.password,
     })
     if (error) { toast.error(error.message); return }
@@ -50,7 +50,7 @@ export function OwnerLogin() {
     } catch {
       // Not a platform admin — clear token and sign out
       setAccessToken(null)
-      await supabase.auth.signOut()
+      await ownerSupabase.auth.signOut()
       toast.error('This account does not have owner panel access.')
     }
   }

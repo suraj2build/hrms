@@ -4,7 +4,7 @@ import {
   Shield, LayoutDashboard, Building2, FileText, Key,
   CreditCard, Users, LogOut, ExternalLink,
 } from 'lucide-react'
-import { supabase }       from '@/lib/supabase/client'
+import { ownerSupabase }  from '@/lib/supabase/ownerClient'
 import { useOwnerStore }  from '@/stores/ownerStore'
 import { ownerApi }       from '@/lib/api/ownerApi'
 import { useQuery }       from '@tanstack/react-query'
@@ -32,13 +32,13 @@ export function OwnerLayout() {
 
   // Sync Supabase session token on mount
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    ownerSupabase.auth.getSession().then(({ data }) => {
       const token = data.session?.access_token
       if (token) setAccessToken(token)
       setTokenReady(true)   // signal even if no session (will redirect below)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = ownerSupabase.auth.onAuthStateChange((_event, session) => {
       setAccessToken(session?.access_token ?? null)
       if (!session) {
         clear()
@@ -64,7 +64,7 @@ export function OwnerLayout() {
   const pendingCount = dashData?.data?.requests?.pending ?? 0
 
   async function handleLogout() {
-    await supabase.auth.signOut()
+    await ownerSupabase.auth.signOut()
     clear()
     navigate('/owner/login', { replace: true })
   }
