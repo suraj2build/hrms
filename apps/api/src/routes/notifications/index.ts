@@ -26,7 +26,12 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch notifications' })
+    // Graceful degradation: if the notifications table is missing/misconfigured
+    // (e.g. migrations not yet run on this DB), return an empty feed instead of 500.
+    if (error) {
+      fastify.log.warn({ event: 'notifications.fetch_failed', err: error.message })
+      return reply.send({ data: [], unread_count: 0, pagination: { offset, limit, returned: 0 } })
+    }
     return reply.send({
       data:         data ?? [],
       unread_count: (data ?? []).filter(n => !n.is_read).length,
@@ -43,7 +48,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .eq('recipient_id', req.userId)
       .eq('is_read', false)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch count' })
+    if (error) {
+      fastify.log.warn({ event: 'notifications.count_failed', err: error.message })
+      return reply.send({ unread_count: 0 })
+    }
     return reply.send({ unread_count: count ?? 0 })
   })
 
