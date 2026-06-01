@@ -51,7 +51,8 @@ import familyRoutes            from './routes/employees/family.js'
 import nominationsRoutes       from './routes/employees/nominations.js'
 import emergencyContactsRoutes from './routes/employees/emergency-contacts.js'
 import addressesRoutes         from './routes/employees/addresses.js'
-import separationRoutes        from './routes/employees/separation.js'
+import separationRoutes         from './routes/employees/separation.js'
+import separationWorkflowRoutes from './routes/employees/separation-workflow.js'
 import accessCardsRoutes       from './routes/employees/access-cards.js'
 import jobHistoryRoutes        from './routes/employees/job-history.js'
 import compensationRoutes      from './routes/employees/compensation.js'
@@ -148,6 +149,7 @@ import importRoutes                        from './routes/import/index.js'
 import onboardingSessionRoutes             from './routes/onboarding/sessions.js'
 import onboardingDraftRoutes               from './routes/onboarding/drafts.js'
 import onboardingDashboardRoute            from './routes/onboarding/dashboard.js'
+import onboardingChecklistRoutes           from './routes/onboarding/checklist.js'
 
 // Routes — Upload session lifecycle management
 import uploadSessionRoutes                 from './routes/uploads/index.js'
@@ -413,9 +415,10 @@ async function start() {
   await fastify.register(importRoutes, { prefix: '/import' })
 
   // ── AI-Assisted Employee Onboarding ──────────────────────────
-  await fastify.register(onboardingSessionRoutes,  { prefix: '/onboarding' })  // sessions + documents + extract
-  await fastify.register(onboardingDraftRoutes,    { prefix: '/onboarding' })  // draft review + validate + approve
-  await fastify.register(onboardingDashboardRoute, { prefix: '/onboarding' })  // dashboard stats
+  await fastify.register(onboardingSessionRoutes,    { prefix: '/onboarding' })  // sessions + documents + extract
+  await fastify.register(onboardingDraftRoutes,      { prefix: '/onboarding' })  // draft review + validate + approve
+  await fastify.register(onboardingDashboardRoute,   { prefix: '/onboarding' })  // dashboard stats
+  await fastify.register(onboardingChecklistRoutes,  { prefix: '/onboarding' })  // onboarding checklist
 
   // ── Notifications ─────────────────────────────────────────────
   await fastify.register(notificationsRoutes, { prefix: '/notifications' })
@@ -432,6 +435,7 @@ async function start() {
   await fastify.register(emergencyContactsRoutes)
   await fastify.register(addressesRoutes)
   await fastify.register(separationRoutes)
+  await fastify.register(separationWorkflowRoutes)
   await fastify.register(accessCardsRoutes)
   await fastify.register(jobHistoryRoutes)
   await fastify.register(compensationRoutes)

@@ -59,6 +59,8 @@ const Reports           = lazy(() => import('@/pages/reports/Reports').then(m =>
 const ImportWorkspace      = lazy(() => import('@/pages/import/ImportWorkspace').then(m => ({ default: m.ImportWorkspace })))
 const OnboardingDashboard  = lazy(() => import('@/pages/onboarding/OnboardingDashboard').then(m => ({ default: m.OnboardingDashboard })))
 const HRReviewWorkspace    = lazy(() => import('@/pages/onboarding/HRReviewWorkspace').then(m => ({ default: m.HRReviewWorkspace })))
+const OnboardingModule     = lazy(() => import('@/pages/onboarding/OnboardingModule').then(m => ({ default: m.OnboardingModule })))
+const SeparationWorkflow   = lazy(() => import('@/pages/employees/SeparationWorkflow').then(m => ({ default: m.SeparationWorkflow })))
 
 const MusterRoll             = lazy(() => import('@/pages/attendance/MusterRoll').then(m => ({ default: m.MusterRoll })))
 const AttendanceAudit        = lazy(() => import('@/pages/attendance/AttendanceAudit').then(m => ({ default: m.AttendanceAudit })))
@@ -497,6 +499,8 @@ export default function App() {
                 <Route path="/admin/import"                       element={<ImportWorkspace />} />
                 <Route path="/admin/onboarding"                   element={<OnboardingDashboard />} />
                 <Route path="/admin/onboarding/:sessionId/review" element={<HRReviewWorkspace />} />
+                <Route path="/admin/onboarding/module"            element={<OnboardingModule />} />
+                <Route path="/admin/employees/separation"         element={<SeparationWorkflow />} />
 
                 {/* Attendance */}
                 <Route path="/admin/attendance"                   element={<Attendance />} />

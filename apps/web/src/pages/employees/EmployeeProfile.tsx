@@ -2586,33 +2586,80 @@ export function EmployeeProfile() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-semibold">Separation</CardTitle>
-                  {isAdmin && (
-                    separationData?.data
-                      ? <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => openSepDialog(true)}>
-                          <Edit2 className="h-3.5 w-3.5" />Edit
-                        </Button>
-                      : <Button size="sm" variant="outline" className="h-7 gap-1 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-                          onClick={() => openSepDialog(false)}>
-                          <LogOut className="h-3.5 w-3.5" />Initiate Separation
-                        </Button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {separationData?.data && isAdmin && (
+                      <Link
+                        to={`/admin/employees/separation?employee=${id}`}
+                        className="inline-flex items-center gap-1 h-7 px-2 text-xs text-muted-foreground border border-border rounded-md hover:text-foreground hover:border-primary/50 transition-colors"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />View Clearance Status
+                      </Link>
+                    )}
+                    {isAdmin && (
+                      separationData?.data
+                        ? <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => openSepDialog(true)}>
+                            <Edit2 className="h-3.5 w-3.5" />Edit
+                          </Button>
+                        : <Button size="sm" variant="outline" className="h-7 gap-1 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                            onClick={() => openSepDialog(false)}>
+                            <LogOut className="h-3.5 w-3.5" />Initiate Separation
+                          </Button>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
                 {!separationData?.data
                   ? <EmptySection icon={LogOut} title="No separation record" subtitle={isAdmin ? 'Click Initiate Separation to begin offboarding.' : 'Employee is currently active.'} />
-                  : <Grid2>
-                      <KV label="Type"             value={separationData.data.separation_type?.replace(/_/g, ' ')} />
-                      <KV label="Initiated By"     value={separationData.data.initiated_by} />
-                      <KV label="Notice Date"      value={fmtDate(separationData.data.notice_date)} />
-                      <KV label="Last Working Day" value={fmtDate(separationData.data.last_working_date)} />
-                      <KV label="Exit Reason"      value={separationData.data.exit_reason} />
-                      {separationData.data.remarks && <KV label="Remarks" value={separationData.data.remarks} />}
-                      <div className="flex gap-2 flex-wrap sm:col-span-2">
-                        <Badge variant={separationData.data.exit_interview_done ? 'success' : 'secondary'} className="rounded-full text-[10px]">{separationData.data.exit_interview_done ? '✓' : '✗'} Exit Interview</Badge>
-                        <Badge variant={separationData.data.clearance_done ? 'success' : 'secondary'} className="rounded-full text-[10px]">{separationData.data.clearance_done ? '✓' : '✗'} Clearance</Badge>
-                      </div>
-                    </Grid2>}
+                  : <div className="space-y-4">
+                      <Grid2>
+                        <KV label="Type"             value={separationData.data.separation_type?.replace(/_/g, ' ')} />
+                        <KV label="Initiated By"     value={separationData.data.initiated_by} />
+                        <KV label="Notice Date"      value={fmtDate(separationData.data.notice_date)} />
+                        <KV label="Last Working Day" value={fmtDate(separationData.data.last_working_date)} />
+                        <KV label="Exit Reason"      value={separationData.data.exit_reason} />
+                        {separationData.data.remarks && <KV label="Remarks" value={separationData.data.remarks} />}
+                        <div className="flex gap-2 flex-wrap sm:col-span-2">
+                          <Badge variant={separationData.data.exit_interview_done ? 'success' : 'secondary'} className="rounded-full text-[10px]">{separationData.data.exit_interview_done ? '✓' : '✗'} Exit Interview</Badge>
+                          <Badge variant={separationData.data.clearance_done ? 'success' : 'secondary'} className="rounded-full text-[10px]">{separationData.data.clearance_done ? '✓' : '✗'} Clearance</Badge>
+                        </div>
+                      </Grid2>
+                      {/* Inline clearance progress */}
+                      {separationData.data.clearances && Array.isArray(separationData.data.clearances) && (
+                        <div className="rounded-lg border border-border p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium text-muted-foreground">Clearance Progress</span>
+                            <span className="text-foreground font-semibold">
+                              {separationData.data.clearances.filter((c: any) => c.status === 'cleared').length}/5 departments cleared
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={cn(
+                                'h-full rounded-full transition-all',
+                                separationData.data.clearances.filter((c: any) => c.status === 'cleared').length === 5 ? 'bg-success' : 'bg-primary',
+                              )}
+                              style={{ width: `${(separationData.data.clearances.filter((c: any) => c.status === 'cleared').length / 5) * 100}%` }}
+                            />
+                          </div>
+                          <div className="flex gap-1 flex-wrap">
+                            {(separationData.data.clearances as any[]).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).map((cl: any) => (
+                              <span
+                                key={cl.id ?? cl.department}
+                                className={cn(
+                                  'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
+                                  cl.status === 'cleared'  && 'bg-success/10 text-success',
+                                  cl.status === 'rejected' && 'bg-destructive/10 text-destructive',
+                                  cl.status === 'pending'  && 'bg-muted/50 text-muted-foreground',
+                                )}
+                              >
+                                {cl.department}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>}
               </CardContent>
             </Card>
           )}

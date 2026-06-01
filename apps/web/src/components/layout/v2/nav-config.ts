@@ -92,6 +92,8 @@ import {
   Smartphone,
   Command,
   Lock,
+  GraduationCap,
+  LogOut,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -179,15 +181,19 @@ export const DOMAINS: Domain[] = [
       '/admin/employees',
       '/admin/onboarding',
       '/admin/letters',
+      '/admin/onboarding/module',
+      '/admin/employees/separation',
     ],
     defaultRoute: '/admin/employees',
     groups: [
       {
         label: 'Employees',
         items: [
-          { id: 'employees',  label: 'Employee Directory', route: '/admin/employees',  exact: true, icon: Users     },
-          { id: 'onboarding', label: 'Onboarding',         route: '/admin/onboarding', exact: true, icon: Briefcase },
-          { id: 'letters',    label: 'Letters',            route: '/admin/letters',                 icon: ScrollText },
+          { id: 'employees',          label: 'Employee Directory', route: '/admin/employees',          exact: true, icon: Users         },
+          { id: 'onboarding',         label: 'Onboarding',         route: '/admin/onboarding',         exact: true, icon: Briefcase     },
+          { id: 'onboarding-module',  label: 'Onboarding',         route: '/admin/onboarding/module',              icon: GraduationCap },
+          { id: 'separation-workflow',label: 'Separation',         route: '/admin/employees/separation',           icon: LogOut        },
+          { id: 'letters',            label: 'Letters',            route: '/admin/letters',                        icon: ScrollText    },
         ],
       },
     ],
