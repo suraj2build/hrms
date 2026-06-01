@@ -20,8 +20,28 @@ export default function DemoForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setStatus('loading')
-    await new Promise(r => setTimeout(r, 1400))
-    setStatus('done')
+    try {
+      const res = await fetch('/api/demo-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name:    form.name,
+          email:   form.email,
+          company: form.company,
+          size:    form.size,
+          phone:   form.phone,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Request failed')
+      }
+      setStatus('done')
+    } catch (err) {
+      console.error('Demo request error:', err)
+      setStatus('idle')
+      alert('Something went wrong. Please try again or email us directly.')
+    }
   }
 
   return (
