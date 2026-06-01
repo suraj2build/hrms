@@ -456,13 +456,15 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     if (!userId) return reply.code(500).send({ error: 'AUTH_ERROR', message: 'Auth user creation returned no ID' })
 
-    // Create profiles row — profiles.id IS the auth user id
-    // email is NOT stored in profiles (lives in auth.users) — no migration needed
+    // Create profiles row — profiles.id IS the auth user id.
+    // email IS stored here (profiles.email is NOT NULL in this DB) and used by
+    // the owner panel to list/dedupe tenant admins without N+1 auth lookups.
     const { data: profile, error: profileErr } = await fastify.supabase
       .from('profiles')
       .insert({
         id:        userId,       // profiles.id = auth.users.id
         tenant_id: tenantId,
+        email,                   // required — profiles.email is NOT NULL
         full_name: fullName,
         role,
         is_active: true,
