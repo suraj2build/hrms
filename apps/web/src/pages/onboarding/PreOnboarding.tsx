@@ -357,6 +357,21 @@ export function PreOnboarding() {
 
   const invitations: PreJoinee[] = listData?.data ?? []
 
+  // ── Master data for dropdowns ──────────────────────────────────────────────
+  const { data: deptResp } = useQuery<{ data: { id: string; name: string }[] }>({
+    queryKey: ['masters-departments'],
+    queryFn: () => api.get('/masters/departments'),
+    staleTime: 300_000,
+  })
+  const departments = deptResp?.data ?? []
+
+  const { data: desigResp } = useQuery<{ data: { id: string; name: string }[] }>({
+    queryKey: ['masters-designations'],
+    queryFn: () => api.get('/masters/designations'),
+    staleTime: 300_000,
+  })
+  const designations = desigResp?.data ?? []
+
   const stats = {
     total: statsData?.total ?? invitations.length,
     pending: statsData?.pending ?? invitations.filter(i => i.status === 'pending').length,
@@ -651,21 +666,41 @@ export function PreOnboarding() {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="designation">Designation</Label>
-                  <Input
-                    id="designation"
+                  <Select
                     value={form.designation}
-                    onChange={e => setForm(f => ({ ...f, designation: e.target.value }))}
-                    placeholder="Software Engineer"
-                  />
+                    onValueChange={v => setForm(f => ({ ...f, designation: v }))}
+                  >
+                    <SelectTrigger id="designation">
+                      <SelectValue placeholder="Select designation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {designations.length === 0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">No designations — add in Setup</div>
+                      )}
+                      {designations.map(d => (
+                        <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="department">Department</Label>
-                  <Input
-                    id="department"
+                  <Select
                     value={form.department}
-                    onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
-                    placeholder="Engineering"
-                  />
+                    onValueChange={v => setForm(f => ({ ...f, department: v }))}
+                  >
+                    <SelectTrigger id="department">
+                      <SelectValue placeholder="Select department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.length === 0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">No departments — add in Setup</div>
+                      )}
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <DialogFooter className="pt-2">
