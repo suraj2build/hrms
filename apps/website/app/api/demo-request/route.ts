@@ -15,18 +15,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Insert into signup_requests — visible in Owner Portal
+    // Insert into tenant_signup_requests — visible in Owner Portal → Requests tab
     const { error } = await supabase
-      .from('signup_requests')
+      .from('tenant_signup_requests')
       .insert({
-        contact_name:    name,
-        contact_email:   email,
-        company_name:    company,
-        phone:           phone   || null,
-        employee_count:  size    || null,
-        notes:           message || null,
-        status:          'pending',
-        source:          'website_demo_form',
+        contact_name:  name,
+        contact_email: email,
+        company_name:  company,
+        size_range:    size    || null,
+        message:       [phone ? `Phone: ${phone}` : '', message || ''].filter(Boolean).join('\n') || null,
+        status:        'pending',
+        country:       'IN',
       })
 
     if (error) {
