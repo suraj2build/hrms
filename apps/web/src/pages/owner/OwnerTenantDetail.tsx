@@ -7,7 +7,7 @@ import { toast }         from 'sonner'
 import {
   ArrowLeft, Award, Edit2, Save, X,
   UserPlus, Eye, EyeOff, RefreshCw, KeyRound,
-  ShieldCheck, UserX, UserCheck, Copy, Check,
+  ShieldCheck, UserX, UserCheck, Copy, Check, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -155,6 +155,18 @@ export function OwnerTenantDetail() {
       .catch((e: any) => toast.error(e.message))
   }
 
+  function deleteTenant() {
+    const name = t?.name ?? 'this tenant'
+    if (!window.confirm(`Permanently DELETE "${name}" and ALL its data (employees, payroll, attendance, logins)?\n\nThis cannot be undone.`)) return
+    ownerApi.delete(`/owner/tenants/${id}`)
+      .then((res: any) => {
+        toast.success(res?.message ?? 'Tenant deleted')
+        qc.invalidateQueries({ queryKey: ['owner-tenants'] })
+        navigate('/owner/tenants')
+      })
+      .catch((e: any) => toast.error(e.message))
+  }
+
   if (isLoading) return (
     <div className="p-6 space-y-4">
       {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-10 bg-slate-800 rounded-lg animate-pulse" />)}
@@ -191,6 +203,9 @@ export function OwnerTenantDetail() {
             {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs">Activate</Button>}
             {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" variant="outline" className="border-red-500/40 text-red-400 text-xs">Suspend</Button>}
             {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" variant="ghost"   className="text-slate-600 hover:text-slate-400 text-xs">Cancel</Button>}
+            <Button onClick={deleteTenant} size="sm" variant="outline" className="border-red-600/50 text-red-400 hover:bg-red-600/10 text-xs gap-1">
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
           </div>
         )}
       </div>

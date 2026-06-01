@@ -335,6 +335,42 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
+  // DELETE /owner/tenants/:id — HARD delete tenant + all its data (owner-only).
+  // CASCADE FKs remove employees, profiles, attendance, payroll, etc.
+  // Also best-effort deletes the tenant's auth.users so their emails are freed.
+  fastify.delete('/owner/tenants/:id', ownerOnlyAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    // Verify tenant exists
+    const { data: tenant } = await fastify.supabase
+      .from('tenants').select('id, name').eq('id', id).single()
+    if (!tenant) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Tenant not found' })
+
+    // Collect this tenant's profile user-ids so we can free their auth accounts
+    const { data: profileRows } = await fastify.supabase
+      .from('profiles').select('id').eq('tenant_id', id)
+    const userIds = (profileRows ?? []).map((p: any) => p.id)
+
+    // Delete the tenant — ON DELETE CASCADE removes all dependent tenant rows
+    const { error: delErr } = await fastify.supabase
+      .from('tenants').delete().eq('id', id)
+    if (delErr) return reply.code(500).send({ error: 'DB_ERROR', message: delErr.message })
+
+    // Best-effort: delete the freed auth users (don't fail the request if this errors)
+    let authDeleted = 0
+    for (const uid of userIds) {
+      try {
+        await (fastify.supabase.auth as any).admin.deleteUser(uid)
+        authDeleted++
+      } catch { /* ignore — auth user may be shared or already gone */ }
+    }
+
+    return reply.send({
+      data: { id, deleted: true },
+      message: `Tenant "${tenant.name}" deleted. ${authDeleted} login account(s) removed.`,
+    })
+  })
+
   // ══════════════════════════════════════════════════════════════════════════════
   //  TENANT ADMIN MANAGEMENT
   //  Owner can create, list, reset-password, activate/deactivate tenant admins.
