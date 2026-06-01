@@ -356,23 +356,31 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
               setProfile(data.profile)
               setTenant(data.tenant)
             } catch (err: unknown) {
-              // /me failed — profile not found, API unreachable, or CORS error.
-              // Clear auth state so the user is not stuck on the loading spinner.
-              setAccessToken(null)
-              setProfile(null)
-              setTenant(null)
-              // Surface the failure — without this toast the user sees a blank
-              // screen followed by a silent redirect back to /login.
               const msg = err instanceof Error ? err.message : 'Could not load your profile.'
-              toast.error('Sign-in failed', {
-                description: msg.includes('404') || msg.includes('not found')
-                  ? 'Your account profile was not found. Contact your administrator.'
-                  : `Unable to reach the server. Please try again. (${msg})`,
-              })
+              const is404 = msg.includes('404')
+              const isNetworkError = msg.includes('fetch') || msg.includes('network') || msg.includes('ECONNREFUSED') || msg.includes('502') || msg.includes('503') || msg.includes('500')
+
+              if (isNetworkError) {
+                // API is temporarily down (restart/deploy) — do NOT sign out.
+                // Keep the session alive and show a retry-friendly message.
+                toast.error('Server temporarily unavailable', {
+                  description: 'The server is restarting. Please refresh in a few seconds.',
+                  action: { label: 'Retry', onClick: () => window.location.reload() },
+                })
+                // Don't clear auth state — user can retry
+              } else {
+                // Genuine profile-not-found or auth error — clear session
+                setAccessToken(null)
+                setProfile(null)
+                setTenant(null)
+                toast.error('Sign-in failed', {
+                  description: is404
+                    ? 'Your account profile was not found. Contact your administrator.'
+                    : `Unable to sign in. Please try again. (${msg})`,
+                })
+              }
             } finally {
               setLoading(false)
-              // Mark bootstrap complete — shells switch from full-screen spinner
-              // to real content. This flag never goes back to true.
               setBootstrapping(false)
             }
           } else {
