@@ -3,134 +3,120 @@ import { Brain, AlertTriangle, TrendingUp, Eye, Zap, ChevronRight } from 'lucide
 const capabilities = [
   {
     icon: AlertTriangle,
-    title: 'Anomaly Detection',
-    desc: 'AI scans every punch record, payroll computation, and leave request — flagging outliers before they become problems.',
-    metric: '94%', metricLabel: 'Detection accuracy',
+    title: 'Attrition Risk Scoring',
+    description: 'Machine learning models analyse 40+ signals — absenteeism, performance dips, salary gaps — to flag flight-risk employees 90 days in advance.',
   },
   {
     icon: TrendingUp,
-    title: 'Predictive Payroll',
-    desc: 'Forecast payroll costs 3 months ahead. Simulate salary revisions, headcount changes, and statutory impact instantly.',
-    metric: '3x',  metricLabel: 'Faster payroll closure',
+    title: 'Payroll Anomaly Detection',
+    description: 'Automatically surface unusual salary spikes, duplicate entries, or missed components before the payroll run is authorised.',
   },
   {
     icon: Eye,
-    title: 'Workforce Risk Intelligence',
-    desc: 'Real-time risk scores per employee — absenteeism risk, attrition signals, compliance exposure, and attendance confidence.',
-    metric: '360°', metricLabel: 'Employee visibility',
+    title: 'Attendance Pattern Analysis',
+    description: 'Identify habitual late-comers, buddy-punching patterns, and leave abuse through statistical outlier detection.',
   },
   {
-    icon: Brain,
-    title: 'Executive Intelligence Center',
-    desc: 'CEO and CHRO-level dashboards that surface what matters — cost trends, headcount movement, and org health scores.',
-    metric: '∞',   metricLabel: 'Insights, always fresh',
+    icon: Zap,
+    title: 'Natural Language HR Queries',
+    description: 'Ask "Who in Engineering took more than 5 leaves last quarter?" and get an instant answer — no dashboards, no SQL.',
   },
 ]
 
 export default function Intelligence() {
   return (
-    <section id="intelligence" className="relative py-32 overflow-hidden">
-
-      {/* Background */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-violet-800/10 blur-[100px]" />
-      </div>
-
+    <section id="intelligence" className="py-24 bg-[#F8F9FB]">
       <div className="max-w-7xl mx-auto px-6">
         <div className="grid lg:grid-cols-2 gap-16 items-center">
 
           {/* Left — copy */}
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-600/10 border border-violet-600/20 text-xs font-semibold text-violet-400 mb-6">
-              <Brain className="w-3 h-3" /> AI-Powered Intelligence
-            </div>
-
-            <h2 className="font-display text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-              Your HR platform<br />
-              that <span className="gradient-text">thinks ahead.</span>
+            <p className="eyebrow mb-4">AI & Intelligence</p>
+            <h2 className="font-display text-4xl md:text-5xl font-bold text-[#1A1A2E] leading-tight tracking-tight mb-6">
+              Your HRMS now<br />
+              <span className="gradient-text">thinks for you.</span>
             </h2>
-
-            <p className="text-violet-200/50 text-lg leading-relaxed mb-8">
-              Emvora&apos;s intelligence layer doesn&apos;t just store data — it understands patterns, detects risks, and surfaces insights that traditional HRMS systems can&apos;t see.
+            <p className="text-slate-500 text-lg leading-relaxed mb-10">
+              Emvora Intelligence is not a bolt-on chatbot. It&apos;s a proactive AI layer embedded across payroll, attendance, and workforce — surfacing insights before you even know to ask.
             </p>
 
-            <div className="space-y-4">
-              {capabilities.map(c => (
-                <div key={c.title} className="flex gap-4 group">
-                  <div className="w-10 h-10 rounded-xl bg-violet-900/50 border border-violet-700/30 flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:bg-violet-800/50 transition-colors">
-                    <c.icon className="w-5 h-5 text-violet-400" />
+            <div className="space-y-5">
+              {capabilities.map((c) => (
+                <div key={c.title} className="flex gap-4 items-start">
+                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-100 shadow-sm flex items-center justify-center flex-shrink-0">
+                    <c.icon className="w-5 h-5 text-violet-600" />
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-1">
-                      <h3 className="font-display font-semibold text-white text-sm">{c.title}</h3>
-                      <span className="text-xs font-bold text-violet-400 font-display">{c.metric}</span>
-                      <span className="text-[10px] text-violet-400/40">{c.metricLabel}</span>
-                    </div>
-                    <p className="text-xs text-violet-200/40 leading-relaxed">{c.desc}</p>
+                  <div>
+                    <h3 className="font-semibold text-[#1A1A2E] mb-1">{c.title}</h3>
+                    <p className="text-sm text-slate-500 leading-relaxed">{c.description}</p>
                   </div>
                 </div>
               ))}
             </div>
 
-            <a href="#demo" className="inline-flex items-center gap-2 mt-8 text-sm font-semibold text-violet-400 hover:text-violet-300 transition-colors group">
-              See Intelligence in action
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            <a
+              href="#demo"
+              className="inline-flex items-center gap-2 mt-10 text-sm font-semibold text-violet-700 hover:text-violet-600 transition-colors"
+            >
+              See Intelligence in action <ChevronRight className="w-4 h-4" />
             </a>
           </div>
 
           {/* Right — visual */}
           <div className="relative">
-            <div className="absolute inset-0 bg-violet-600/10 blur-[60px] rounded-3xl" />
-            <div className="relative glass rounded-3xl p-6 border border-violet-500/20">
+            <div className="absolute -inset-6 bg-violet-50 rounded-3xl" />
+            <div className="relative bg-white rounded-2xl border border-slate-100 shadow-lg p-6 space-y-4">
 
-              {/* Intelligence feed */}
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-violet-400" />
-                  <span className="text-xs font-semibold text-violet-300">Intelligence Feed</span>
+              {/* Header */}
+              <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-violet-700 flex items-center justify-center">
+                  <Brain className="w-4 h-4 text-white" />
                 </div>
-                <span className="text-[10px] text-violet-400/40 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  Live
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                {[
-                  { type: 'risk',    color: 'amber',  icon: '⚠️', title: 'High Absenteeism Risk', desc: '14 employees in Operations show >3 unplanned absences this month', time: '2 min ago' },
-                  { type: 'insight', color: 'violet', icon: '🧠', title: 'Payroll Variance Detected', desc: 'Q1 payroll ₹2.3L above forecast — 8 new joiners not in plan', time: '18 min ago' },
-                  { type: 'action',  color: 'green',  icon: '✅', title: 'Compliance Check Passed', desc: 'March EPF/ESI computation complete — 0 discrepancies found', time: '1 hr ago' },
-                  { type: 'alert',   color: 'red',    icon: '🔴', title: 'Attendance Anomaly', desc: '3 punch records with geo-spoofing detected in Branch B', time: '3 hr ago' },
-                  { type: 'insight', color: 'blue',   icon: '📊', title: 'Roster Optimisation', desc: 'Shift coverage gap on Sat-Sun — AI suggests rotating 4 employees', time: '5 hr ago' },
-                ].map((item, i) => (
-                  <div key={i} className={`flex gap-3 p-3 rounded-xl bg-violet-900/20 border border-violet-800/20 hover:border-violet-700/30 transition-colors`}>
-                    <span className="text-base mt-0.5">{item.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-white truncate">{item.title}</p>
-                        <span className="text-[10px] text-violet-400/30 flex-shrink-0">{item.time}</span>
-                      </div>
-                      <p className="text-[11px] text-violet-300/40 mt-0.5 leading-snug">{item.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Bottom score */}
-              <div className="mt-5 p-4 rounded-2xl bg-gradient-to-r from-violet-900/40 to-violet-800/20 border border-violet-700/20 flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] text-violet-400/50 uppercase tracking-wider font-semibold">Org Health Index</p>
-                  <p className="font-display text-2xl font-bold text-white mt-0.5">87 <span className="text-sm font-normal text-green-400">↑ +3</span></p>
+                  <p className="text-sm font-bold text-[#1A1A2E]">Emvora Intelligence</p>
+                  <p className="text-xs text-slate-400">Live insights · Updated 2 min ago</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-violet-400/50">Powered by Emvora AI</p>
-                  <div className="flex gap-1 mt-1 justify-end">
-                    {[85,88,82,90,87].map((v,i) => (
-                      <div key={i} className="w-1.5 rounded-full bg-violet-500/60"
-                        style={{ height: `${(v/100)*24}px`, opacity: i === 4 ? 1 : 0.4 + i * 0.1 }} />
-                    ))}
+                <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              </div>
+
+              {/* Insight cards */}
+              {[
+                {
+                  badge: 'Attrition Risk',
+                  badgeColor: 'bg-red-50 text-red-600 border-red-100',
+                  text: '7 employees in Engineering scored high attrition risk this month. Salary benchmarking is 18% below market.',
+                  action: 'View report',
+                },
+                {
+                  badge: 'Payroll Anomaly',
+                  badgeColor: 'bg-amber-50 text-amber-600 border-amber-100',
+                  text: 'Overtime payout for Mumbai branch is ₹2.4L higher than 3-month average. Review before approval.',
+                  action: 'Investigate',
+                },
+                {
+                  badge: 'Attendance Insight',
+                  badgeColor: 'bg-violet-50 text-violet-700 border-violet-100',
+                  text: 'Monday absenteeism in Delhi office has increased 34% over last 6 weeks. Likely work-from-home preference.',
+                  action: 'See trends',
+                },
+              ].map((item) => (
+                <div key={item.badge} className="bg-[#F8F9FB] rounded-xl p-4 border border-slate-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${item.badgeColor}`}>
+                      {item.badge}
+                    </span>
                   </div>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-2">{item.text}</p>
+                  <button className="text-xs font-semibold text-violet-700 hover:text-violet-600">
+                    {item.action} →
+                  </button>
                 </div>
+              ))}
+
+              {/* NLQ bar */}
+              <div className="bg-violet-50 rounded-xl px-4 py-3 flex items-center gap-3 border border-violet-100">
+                <Brain className="w-4 h-4 text-violet-500 flex-shrink-0" />
+                <p className="text-sm text-slate-400 italic">Ask anything: "Who has pending appraisals in Sales?"</p>
               </div>
             </div>
           </div>

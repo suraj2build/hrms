@@ -1,82 +1,108 @@
 import { Shield, CheckCircle, FileCheck, Landmark, Receipt, CreditCard } from 'lucide-react'
 
 const compliances = [
-  { code: 'EPF',  name: 'Employee Provident Fund',   desc: 'Auto-compute PF contributions, admin charges, EDLI. ECR file generation. Wage ceiling management.',          icon: Landmark,  status: 'Auto-filed' },
-  { code: 'ESI',  name: 'Employee State Insurance',   desc: 'ESI eligibility tracking, contribution cycles, half-yearly returns, and challan generation.',                  icon: Shield,    status: 'Auto-filed' },
-  { code: 'PTAX', name: 'Professional Tax',           desc: 'State-wise slab management for all 18 PT states. Monthly auto-deduction and remittance schedules.',            icon: Receipt,   status: 'State-aware' },
-  { code: 'TDS',  name: 'Tax Deducted at Source',     desc: 'Section 192 TDS computation, Form 16 generation, tax regime elections (Old vs New), and HRA declarations.',   icon: FileCheck, status: 'Form 16 Ready' },
-  { code: 'IT',   name: 'Income Tax Planning',        desc: 'Employee-facing IT planner, investment declarations (80C/80D), HRA exemption, and YTD tax statements.',        icon: CreditCard,status: 'Self-Service' },
-  { code: 'LWF',  name: 'Labour Welfare Fund',        desc: 'State-specific LWF deductions with contribution schedules and annual reconciliation.',                          icon: CheckCircle,status: 'Coming Soon' },
+  {
+    code: 'EPF',
+    name: 'Employee Provident Fund',
+    desc: 'Auto-compute PF contributions, admin charges, EDLI. ECR file generation and direct EPFO portal sync. Wage ceiling management across pay grades.',
+    icon: Landmark,
+    status: 'Auto-filed',
+  },
+  {
+    code: 'ESI',
+    name: 'Employee State Insurance',
+    desc: 'ESI eligibility tracking by wage threshold, contribution cycles, half-yearly returns, IP registration, and challan generation.',
+    icon: Shield,
+    status: 'Auto-filed',
+  },
+  {
+    code: 'PTAX',
+    name: 'Professional Tax',
+    desc: 'State-wise professional tax slabs pre-loaded. Auto-deduction, monthly/annual challan, and state-specific returns across 28 states.',
+    icon: Receipt,
+    status: 'Auto-filed',
+  },
+  {
+    code: 'TDS',
+    name: 'Tax Deducted at Source',
+    desc: 'Income tax projection under old and new regime, Form 16 generation, 24Q quarterly returns, and integration with TRACES portal.',
+    icon: CreditCard,
+    status: 'Auto-filed',
+  },
+  {
+    code: 'LWF',
+    name: 'Labour Welfare Fund',
+    desc: 'State-specific LWF deductions, contribution registers, and annual filing — fully automated with zero manual intervention.',
+    icon: FileCheck,
+    status: 'Auto-filed',
+  },
+  {
+    code: 'Gratuity',
+    name: 'Gratuity Provisioning',
+    desc: 'Actuarial gratuity liability calculation, AS 15 provisions, funding reports, and payment processing on separation.',
+    icon: CheckCircle,
+    status: 'Auto-calculated',
+  },
 ]
 
 export default function Compliance() {
   return (
-    <section id="compliance" className="relative py-32 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-amber-950/5 to-transparent pointer-events-none" />
-
+    <section id="compliance" className="py-24 bg-white">
       <div className="max-w-7xl mx-auto px-6">
 
         {/* Header */}
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-600/10 border border-amber-600/20 text-xs font-semibold text-amber-400 mb-4">
-            <Shield className="w-3 h-3" /> India-First Compliance
-          </div>
-          <h2 className="font-display text-4xl md:text-5xl font-bold text-white mb-4">
-            100% statutory compliant.<br />
-            <span className="gradient-text-gold">Zero manual effort.</span>
+        <div className="text-center mb-14">
+          <p className="eyebrow mb-3">India-First Compliance</p>
+          <h2 className="font-display text-4xl md:text-5xl font-bold text-[#1A1A2E] tracking-tight">
+            100% statutory compliance.<br />
+            <span className="gradient-text">Zero penalties. Ever.</span>
           </h2>
-          <p className="text-violet-200/50 text-lg max-w-2xl mx-auto">
-            Built specifically for Indian labour laws. Every regulation — EPF, ESI, PTAX, TDS — handled automatically, with audit trails and filing-ready reports.
+          <p className="mt-4 text-slate-500 max-w-xl mx-auto text-lg">
+            Emvora is built ground-up for Indian labour law. Every statutory obligation is automated, every deadline is tracked, every challan is filed on time.
           </p>
         </div>
 
-        {/* Compliance grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5 mb-16">
-          {compliances.map(c => (
-            <div key={c.code}
-              className="relative glass rounded-2xl p-5 border border-violet-700/20 hover:border-amber-600/20 transition-all duration-300 glow-card group">
+        {/* Compliance cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-12">
+          {compliances.map((c) => (
+            <div
+              key={c.code}
+              className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-250 p-6"
+            >
               <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-900/30 border border-amber-700/20 flex items-center justify-center">
-                    <c.icon className="w-5 h-5 text-amber-400" />
-                  </div>
-                  <div>
-                    <span className="font-display font-bold text-base text-white">{c.code}</span>
-                    <p className="text-[10px] text-violet-300/40">{c.name}</p>
-                  </div>
+                <div className="w-11 h-11 rounded-xl bg-violet-50 flex items-center justify-center">
+                  <c.icon className="w-5 h-5 text-violet-600" />
                 </div>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                  c.status === 'Coming Soon'
-                    ? 'bg-violet-900/40 text-violet-400/50 border border-violet-700/20'
-                    : 'bg-green-900/30 text-green-400 border border-green-700/20'
-                }`}>
+                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
                   {c.status}
                 </span>
               </div>
-              <p className="text-xs text-violet-200/40 leading-relaxed">{c.desc}</p>
+              <div className="mb-1">
+                <span className="text-xs font-black text-violet-700 tracking-widest uppercase">{c.code}</span>
+              </div>
+              <h3 className="font-display font-bold text-[#1A1A2E] mb-2">{c.name}</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">{c.desc}</p>
             </div>
           ))}
         </div>
 
-        {/* Trust banner */}
-        <div className="relative overflow-hidden rounded-3xl glass border border-amber-600/20 p-8 md:p-12 text-center">
-          <div className="absolute inset-0 bg-gradient-to-br from-amber-950/30 via-violet-950/20 to-transparent pointer-events-none" />
-          <div className="relative">
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <CheckCircle className="w-6 h-6 text-amber-400" />
-              <h3 className="font-display text-2xl font-bold text-white">Built by payroll experts, for payroll experts</h3>
+        {/* Trust bar */}
+        <div className="bg-[#F8F9FB] rounded-2xl border border-slate-100 p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-violet-700 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-white" />
             </div>
-            <p className="text-violet-200/50 max-w-2xl mx-auto mb-6 text-sm leading-relaxed">
-              Emvora&apos;s compliance engine is built in partnership with statutory filing experts and updated with every government notification — so you&apos;re never caught off-guard.
-            </p>
-            <div className="flex flex-wrap justify-center gap-4">
-              {['Ministry of Labour compliant','EPFO registered','ESIC portal integration','Income Tax portal ready','State PT rules — 18 states'].map(t => (
-                <span key={t} className="flex items-center gap-1.5 text-xs text-amber-300/70">
-                  <CheckCircle className="w-3 h-3 text-amber-400" /> {t}
-                </span>
-              ))}
+            <div>
+              <p className="font-bold text-[#1A1A2E]">Compliance guarantee</p>
+              <p className="text-sm text-slate-500">If you get penalised due to a bug in Emvora, we cover it. No questions asked.</p>
             </div>
           </div>
+          <a
+            href="#demo"
+            className="flex-shrink-0 px-6 py-2.5 rounded-full bg-violet-700 text-white text-sm font-semibold hover:bg-violet-600 transition-colors duration-200 shadow-md shadow-violet-200"
+          >
+            Request Compliance Demo
+          </a>
         </div>
       </div>
     </section>

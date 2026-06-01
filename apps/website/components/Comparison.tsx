@@ -5,97 +5,92 @@ const N = 'no'
 const P = 'partial'
 
 const rows = [
-  { feature: 'Unified HR + Payroll + Attendance',       emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'AI-powered workforce intelligence',        emvora: Y, legacy: N, spreadsheet: N },
-  { feature: 'India statutory (EPF/ESI/PTAX/TDS)',       emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Real-time anomaly detection',              emvora: Y, legacy: N, spreadsheet: N },
-  { feature: 'Predictive payroll forecasting',           emvora: Y, legacy: N, spreadsheet: N },
-  { feature: 'Employee Self-Service (ESS) Portal',       emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Roster & shift intelligence',              emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Full payroll explainability',              emvora: Y, legacy: N, spreadsheet: N },
-  { feature: 'Approval workflow engine',                 emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Leave accrual & collision engine',         emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Executive intelligence dashboards',        emvora: Y, legacy: N, spreadsheet: N },
-  { feature: 'Document generation & e-sign',            emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Mobile-first experience',                  emvora: Y, legacy: P, spreadsheet: N },
-  { feature: 'Setup time',                               emvora: 'Days', legacy: 'Months', spreadsheet: 'Never' },
+  { feature: 'India-first statutory compliance (EPF/ESI/PTAX/TDS)', emvora: Y, greythr: Y, keka: Y, darwinbox: Y },
+  { feature: 'AI-powered attrition & anomaly detection',             emvora: Y, greythr: N, keka: P, darwinbox: P },
+  { feature: 'Natural language HR query (NLQ)',                       emvora: Y, greythr: N, keka: N, darwinbox: N },
+  { feature: 'Multi-entity payroll from single console',              emvora: Y, greythr: P, keka: P, darwinbox: Y },
+  { feature: 'Geo-fence + biometric attendance',                     emvora: Y, greythr: Y, keka: Y, darwinbox: Y },
+  { feature: 'WhatsApp-native employee self-service',                 emvora: Y, greythr: N, keka: N, darwinbox: N },
+  { feature: 'Built-in recruitment (ATS)',                            emvora: Y, greythr: N, keka: Y, darwinbox: Y },
+  { feature: 'Compliance guarantee / indemnity',                      emvora: Y, greythr: N, keka: N, darwinbox: N },
+  { feature: 'Transparent per-employee pricing',                      emvora: Y, greythr: Y, keka: Y, darwinbox: N },
+  { feature: 'Implementation in < 7 days',                            emvora: Y, greythr: P, keka: P, darwinbox: N },
 ]
 
-function Cell({ val }: { val: string }) {
-  if (val === Y) return <CheckCircle className="w-5 h-5 text-green-400 mx-auto" />
-  if (val === N) return <XCircle    className="w-5 h-5 text-red-400/60 mx-auto" />
-  if (val === P) return <Minus      className="w-5 h-5 text-amber-400/70 mx-auto" />
-  return <span className="text-xs text-violet-300/70 font-semibold">{val}</span>
+function Icon({ v }: { v: string }) {
+  if (v === Y) return <CheckCircle className="w-5 h-5 text-emerald-500 mx-auto" />
+  if (v === N) return <XCircle    className="w-5 h-5 text-red-300 mx-auto"     />
+  return            <Minus       className="w-5 h-5 text-slate-300 mx-auto"    />
 }
+
+const cols = [
+  { key: 'emvora',    label: 'Emvora',    highlight: true  },
+  { key: 'greythr',   label: 'greytHR',   highlight: false },
+  { key: 'keka',      label: 'Keka',      highlight: false },
+  { key: 'darwinbox', label: 'Darwinbox', highlight: false },
+]
 
 export default function Comparison() {
   return (
-    <section id="compare" className="relative py-32 overflow-hidden">
-      <div className="max-w-5xl mx-auto px-6">
+    <section id="compare" className="py-24 bg-white">
+      <div className="max-w-7xl mx-auto px-6">
 
         {/* Header */}
         <div className="text-center mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-600/10 border border-violet-600/20 text-xs font-semibold text-violet-400 mb-4">
-            Why Emvora
-          </div>
-          <h2 className="font-display text-4xl md:text-5xl font-bold text-white mb-4">
-            Not just better. <span className="gradient-text">Fundamentally different.</span>
+          <p className="eyebrow mb-3">Comparison</p>
+          <h2 className="font-display text-4xl md:text-5xl font-bold text-[#1A1A2E] tracking-tight">
+            Why teams choose Emvora
           </h2>
-          <p className="text-violet-200/50 text-lg max-w-xl mx-auto">
-            See how Emvora compares to legacy HRMS systems and spreadsheet-based management.
+          <p className="mt-4 text-slate-500 max-w-xl mx-auto text-lg">
+            See how Emvora stacks up against the most popular HRMS platforms in India.
           </p>
         </div>
 
         {/* Table */}
-        <div className="glass rounded-3xl overflow-hidden border border-violet-700/30">
-          {/* Header row */}
-          <div className="grid grid-cols-4 gap-0 border-b border-violet-700/30">
-            <div className="p-5 text-xs font-semibold text-violet-400/50 uppercase tracking-wider">Feature</div>
-            {[
-              { label: 'Emvora',        sub: 'Workforce Intelligence', highlight: true  },
-              { label: 'Legacy HRMS',   sub: 'Traditional systems',    highlight: false },
-              { label: 'Spreadsheets',  sub: 'Manual management',      highlight: false },
-            ].map(col => (
-              <div key={col.label}
-                className={`p-5 text-center ${col.highlight ? 'bg-violet-800/30 border-x border-violet-600/20' : ''}`}>
-                <p className={`font-display font-bold text-sm ${col.highlight ? 'text-violet-300' : 'text-violet-400/50'}`}>{col.label}</p>
-                <p className="text-[10px] text-violet-400/30 mt-0.5">{col.sub}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Data rows */}
-          {rows.map((row, i) => (
-            <div key={row.feature}
-              className={`grid grid-cols-4 border-b border-violet-800/20 last:border-0 hover:bg-violet-900/10 transition-colors ${
-                i % 2 === 0 ? '' : 'bg-violet-950/20'
-              }`}>
-              <div className="p-4 text-xs text-violet-200/60 flex items-center">{row.feature}</div>
-              <div className={`p-4 flex items-center justify-center bg-violet-800/10 border-x border-violet-600/10`}>
-                <Cell val={row.emvora} />
-              </div>
-              <div className="p-4 flex items-center justify-center">
-                <Cell val={row.legacy} />
-              </div>
-              <div className="p-4 flex items-center justify-center">
-                <Cell val={row.spreadsheet} />
-              </div>
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-2xl border border-slate-100 shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-[#F8F9FB]">
+                <th className="text-left px-6 py-4 font-semibold text-slate-500 w-1/2">Feature</th>
+                {cols.map(c => (
+                  <th
+                    key={c.key}
+                    className={`px-4 py-4 text-center font-bold ${
+                      c.highlight ? 'text-violet-700' : 'text-slate-500'
+                    }`}
+                  >
+                    {c.highlight && (
+                      <span className="block text-[10px] font-bold text-violet-500 uppercase tracking-wider mb-0.5">Our Pick</span>
+                    )}
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => (
+                <tr
+                  key={r.feature}
+                  className={`border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}
+                >
+                  <td className="px-6 py-4 text-[#334155] font-medium">{r.feature}</td>
+                  {cols.map(c => (
+                    <td
+                      key={c.key}
+                      className={`px-4 py-4 text-center ${c.highlight ? 'bg-violet-50/50' : ''}`}
+                    >
+                      <Icon v={(r as Record<string, string>)[c.key]} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center justify-center gap-6 mt-5">
-          {[
-            { icon: <CheckCircle className="w-3.5 h-3.5 text-green-400" />, label: 'Full support' },
-            { icon: <Minus       className="w-3.5 h-3.5 text-amber-400/70" />, label: 'Partial / add-on' },
-            { icon: <XCircle     className="w-3.5 h-3.5 text-red-400/60" />, label: 'Not available' },
-          ].map(l => (
-            <div key={l.label} className="flex items-center gap-1.5 text-xs text-violet-400/40">
-              {l.icon} {l.label}
-            </div>
-          ))}
-        </div>
+        <p className="text-center text-xs text-slate-300 mt-4">
+          Based on publicly available information and user reviews. Last updated June 2025.
+        </p>
       </div>
     </section>
   )
