@@ -50,6 +50,7 @@ import {
   Brain,
   // Workforce
   Briefcase,
+  UserPlus,
   // Attendance
   Upload,
   BookOpen,
@@ -182,6 +183,7 @@ export const DOMAINS: Domain[] = [
       '/admin/onboarding',
       '/admin/letters',
       '/admin/onboarding/module',
+      '/admin/onboarding/pre-joinee',
       '/admin/employees/separation',
     ],
     defaultRoute: '/admin/employees',
@@ -191,6 +193,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'employees',          label: 'Employee Directory', route: '/admin/employees',          exact: true, icon: Users         },
           { id: 'onboarding-module',  label: 'Onboarding',         route: '/admin/onboarding/module',              icon: GraduationCap },
+          { id: 'pre-onboarding',     label: 'Pre-Onboarding',     route: '/admin/onboarding/pre-joinee',          icon: UserPlus      },
           { id: 'ai-onboarding',      label: 'AI Doc Onboarding',  route: '/admin/onboarding',         exact: true, icon: Briefcase     },
           { id: 'separation-workflow',label: 'Separation',         route: '/admin/employees/separation',           icon: LogOut        },
           { id: 'letters',            label: 'Letters',            route: '/admin/letters',                        icon: ScrollText    },

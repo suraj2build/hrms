@@ -60,6 +60,8 @@ const ImportWorkspace      = lazy(() => import('@/pages/import/ImportWorkspace')
 const OnboardingDashboard  = lazy(() => import('@/pages/onboarding/OnboardingDashboard').then(m => ({ default: m.OnboardingDashboard })))
 const HRReviewWorkspace    = lazy(() => import('@/pages/onboarding/HRReviewWorkspace').then(m => ({ default: m.HRReviewWorkspace })))
 const OnboardingModule     = lazy(() => import('@/pages/onboarding/OnboardingModule').then(m => ({ default: m.OnboardingModule })))
+const PreOnboarding        = lazy(() => import('@/pages/onboarding/PreOnboarding').then(m => ({ default: m.PreOnboarding })))
+const PreJoinPortal        = lazy(() => import('@/pages/onboarding/PreJoinPortal').then(m => ({ default: m.PreJoinPortal })))
 const SeparationWorkflow   = lazy(() => import('@/pages/employees/SeparationWorkflow').then(m => ({ default: m.SeparationWorkflow })))
 
 const MusterRoll             = lazy(() => import('@/pages/attendance/MusterRoll').then(m => ({ default: m.MusterRoll })))
@@ -464,6 +466,7 @@ export default function App() {
               <Route path="/login"         element={<Login />} />
               <Route path="/signup"        element={<Signup />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
+              <Route path="/pre-join/:token" element={<PreJoinPortal />} />
 
               {/* ── Admin portal: /admin/* ─────────────────────────────────── */}
               <Route element={<AdminShellV2 />}>
@@ -508,6 +511,7 @@ export default function App() {
                 <Route path="/admin/onboarding"                   element={<OnboardingDashboard />} />
                 <Route path="/admin/onboarding/:sessionId/review" element={<HRReviewWorkspace />} />
                 <Route path="/admin/onboarding/module"            element={<OnboardingModule />} />
+                <Route path="/admin/onboarding/pre-joinee"        element={<PreOnboarding />} />
                 <Route path="/admin/employees/separation"         element={<SeparationWorkflow />} />
 
                 {/* Attendance */}
