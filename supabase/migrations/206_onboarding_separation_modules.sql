@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS separation_clearances (
   id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id      UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   separation_id  UUID        NOT NULL REFERENCES employee_separation(id) ON DELETE CASCADE,
+  employee_id    UUID        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   department     TEXT        NOT NULL
                    CHECK (department IN ('it','finance','manager','admin','hr')),
   status         TEXT        NOT NULL DEFAULT 'pending'
@@ -150,6 +151,8 @@ CREATE TABLE IF NOT EXISTS separation_clearances (
   cleared_by     UUID        REFERENCES profiles(id) ON DELETE SET NULL,
   cleared_at     TIMESTAMPTZ,
   remarks        TEXT,
+  updated_by     UUID        REFERENCES profiles(id) ON DELETE SET NULL,
+  updated_at     TIMESTAMPTZ,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, separation_id, department)
 );

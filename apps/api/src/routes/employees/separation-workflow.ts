@@ -109,7 +109,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     const { data, error } = await fastify.supabase
-      .from('employee_separation_clearances')
+      .from('separation_clearances')
       .select('*')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -134,7 +134,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     // Check if clearances already exist
     const { data: existing } = await fastify.supabase
-      .from('employee_separation_clearances')
+      .from('separation_clearances')
       .select('id')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -153,7 +153,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     }))
 
     const { data, error } = await fastify.supabase
-      .from('employee_separation_clearances')
+      .from('separation_clearances')
       .insert(rows)
       .select()
 
@@ -162,7 +162,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
-      tableName:   'employee_separation_clearances',
+      tableName:   'separation_clearances',
       recordId:    separation.id,
       action:      'INSERT',
       performedBy: req.userId,
@@ -184,7 +184,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
     const { data: updated, error } = await fastify.supabase
-      .from('employee_separation_clearances')
+      .from('separation_clearances')
       .update({
         status:       parsed.data.status,
         remarks:      parsed.data.remarks ?? null,
@@ -204,7 +204,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     // Check if all 5 clearances are now 'cleared'
     const { data: allClearances, error: fetchErr } = await fastify.supabase
-      .from('employee_separation_clearances')
+      .from('separation_clearances')
       .select('status')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -225,7 +225,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
-      tableName:   'employee_separation_clearances',
+      tableName:   'separation_clearances',
       recordId:    req.params.clearanceId,
       action:      'UPDATE',
       performedBy: req.userId,
@@ -243,7 +243,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     const { data, error } = await fastify.supabase
-      .from('employee_separation_ff')
+      .from('separation_ff_summary')
       .select('*')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -279,7 +279,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     // Upsert: create or replace existing F&F
     const { data: existing } = await fastify.supabase
-      .from('employee_separation_ff')
+      .from('separation_ff_summary')
       .select('id')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -290,7 +290,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     if (existing) {
       const { data, error } = await fastify.supabase
-        .from('employee_separation_ff')
+        .from('separation_ff_summary')
         .update({
           ...parsed.data,
           net_payable,
@@ -307,7 +307,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       statusCode = 200
     } else {
       const { data, error } = await fastify.supabase
-        .from('employee_separation_ff')
+        .from('separation_ff_summary')
         .insert({
           ...parsed.data,
           net_payable,
@@ -326,7 +326,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
-      tableName:   'employee_separation_ff',
+      tableName:   'separation_ff_summary',
       recordId:    result.id,
       action:      existing ? 'UPDATE' : 'INSERT',
       performedBy: req.userId,
@@ -344,7 +344,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     const { data: ff, error: fetchErr } = await fastify.supabase
-      .from('employee_separation_ff')
+      .from('separation_ff_summary')
       .select('id, status')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -358,7 +358,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot approve: current status is '${ff.status}'` })
 
     const { data, error } = await fastify.supabase
-      .from('employee_separation_ff')
+      .from('separation_ff_summary')
       .update({
         status:      'approved',
         approved_by: req.userId,
@@ -376,7 +376,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
-      tableName:   'employee_separation_ff',
+      tableName:   'separation_ff_summary',
       recordId:    ff.id,
       action:      'UPDATE',
       performedBy: req.userId,
@@ -394,7 +394,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     const { data: ff, error: fetchErr } = await fastify.supabase
-      .from('employee_separation_ff')
+      .from('separation_ff_summary')
       .select('id, status')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
@@ -408,7 +408,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot mark as paid: F&F must be approved first (current: '${ff.status}')` })
 
     const { data, error } = await fastify.supabase
-      .from('employee_separation_ff')
+      .from('separation_ff_summary')
       .update({
         status:     'paid',
         paid_by:    req.userId,
@@ -426,7 +426,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
-      tableName:   'employee_separation_ff',
+      tableName:   'separation_ff_summary',
       recordId:    ff.id,
       action:      'UPDATE',
       performedBy: req.userId,

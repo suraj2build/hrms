@@ -35,9 +35,9 @@ interface ClearanceDept {
 
 interface FnF {
   id: string
-  last_month_payroll: number | null
-  leave_encashment: number | null
-  gratuity: number | null
+  last_payroll_amount: number | null
+  leave_encashment_amount: number | null
+  gratuity_amount: number | null
   other_additions: number | null
   notice_period_deduction: number | null
   other_deductions: number | null
@@ -111,7 +111,7 @@ function buildMockRows(): SeparationRow[] {
       employee_name: 'Arjun Sharma', department: 'Engineering',
       separation_type: 'resignation', last_working_date: '2025-06-15',
       clearances: makeClears('sep-1'),
-      fnf: { id: 'fnf-1', last_month_payroll: 85000, leave_encashment: 12000, gratuity: 34000, other_additions: 0, notice_period_deduction: 0, other_deductions: 2000, net_payable: 129000, status: 'draft' },
+      fnf: { id: 'fnf-1', last_payroll_amount: 85000, leave_encashment_amount: 12000, gratuity_amount: 34000, other_additions: 0, notice_period_deduction: 0, other_deductions: 2000, net_payable: 129000, status: 'draft' },
       status: 'active',
     },
     {
@@ -119,7 +119,7 @@ function buildMockRows(): SeparationRow[] {
       employee_name: 'Priya Menon', department: 'HR',
       separation_type: 'end_of_contract', last_working_date: '2025-05-31',
       clearances: CLEARANCE_DEPTS.map((dept, i) => ({ id: `sep-2-${dept}`, department: dept, status: 'cleared' as const, cleared_by: 'Admin', cleared_at: '2025-05-20', remarks: null, sequence: i + 1 })),
-      fnf: { id: 'fnf-2', last_month_payroll: 60000, leave_encashment: 8000, gratuity: 18000, other_additions: 5000, notice_period_deduction: 0, other_deductions: 0, net_payable: 91000, status: 'approved' },
+      fnf: { id: 'fnf-2', last_payroll_amount: 60000, leave_encashment_amount: 8000, gratuity_amount: 18000, other_additions: 5000, notice_period_deduction: 0, other_deductions: 0, net_payable: 91000, status: 'approved' },
       status: 'active',
     },
     {
@@ -127,7 +127,7 @@ function buildMockRows(): SeparationRow[] {
       employee_name: 'Rahul Iyer', department: 'Finance',
       separation_type: 'termination', last_working_date: '2025-04-30',
       clearances: CLEARANCE_DEPTS.map((dept, i) => ({ id: `sep-3-${dept}`, department: dept, status: 'cleared' as const, cleared_by: 'Admin', cleared_at: '2025-04-28', remarks: null, sequence: i + 1 })),
-      fnf: { id: 'fnf-3', last_month_payroll: 72000, leave_encashment: 0, gratuity: 0, other_additions: 0, notice_period_deduction: 72000, other_deductions: 5000, net_payable: -5000, status: 'paid' },
+      fnf: { id: 'fnf-3', last_payroll_amount: 72000, leave_encashment_amount: 0, gratuity_amount: 0, other_additions: 0, notice_period_deduction: 72000, other_deductions: 5000, net_payable: -5000, status: 'paid' },
       status: 'completed',
     },
   ]
@@ -163,7 +163,7 @@ function ClearancePanel({ row, onClose }: { row: SeparationRow; onClose: () => v
 
   const markMutation = useMutation({
     mutationFn: ({ deptId, action, remarks }: { deptId: string; action: 'cleared' | 'rejected'; remarks?: string }) =>
-      api.patch(`/separations/${row.id}/clearances/${deptId}`, { status: action, remarks }),
+      api.patch(`/employees/${row.employee_id}/separation-clearances/${deptId}`, { status: action, remarks }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separations'] })
       toast.success('Clearance status updated')
@@ -252,7 +252,7 @@ function FnFSection({ row }: { row: SeparationRow }) {
   const [editOpen, setEditOpen] = useState(false)
 
   const emptyFnF = {
-    last_month_payroll: 0, leave_encashment: 0, gratuity: 0,
+    last_payroll_amount: 0, leave_encashment_amount: 0, gratuity_amount: 0,
     other_additions: 0, notice_period_deduction: 0, other_deductions: 0,
   }
   const [form, setForm] = useState(emptyFnF)
@@ -260,9 +260,9 @@ function FnFSection({ row }: { row: SeparationRow }) {
   function openEdit() {
     const f = row.fnf
     setForm({
-      last_month_payroll:     f?.last_month_payroll     ?? 0,
-      leave_encashment:       f?.leave_encashment       ?? 0,
-      gratuity:               f?.gratuity               ?? 0,
+      last_payroll_amount:     f?.last_payroll_amount     ?? 0,
+      leave_encashment_amount:       f?.leave_encashment_amount       ?? 0,
+      gratuity_amount:               f?.gratuity_amount               ?? 0,
       other_additions:        f?.other_additions        ?? 0,
       notice_period_deduction: f?.notice_period_deduction ?? 0,
       other_deductions:       f?.other_deductions       ?? 0,
@@ -271,11 +271,11 @@ function FnFSection({ row }: { row: SeparationRow }) {
   }
 
   const computedNet =
-    (form.last_month_payroll + form.leave_encashment + form.gratuity + form.other_additions)
+    (form.last_payroll_amount + form.leave_encashment_amount + form.gratuity_amount + form.other_additions)
     - (form.notice_period_deduction + form.other_deductions)
 
   const saveMutation = useMutation({
-    mutationFn: () => api.post(`/separations/${row.id}/fnf`, form),
+    mutationFn: () => api.post(`/employees/${row.employee_id}/separation-ff`, form),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separations'] })
       toast.success('F&F settlement saved')
@@ -285,13 +285,13 @@ function FnFSection({ row }: { row: SeparationRow }) {
   })
 
   const approveMutation = useMutation({
-    mutationFn: () => api.patch(`/separations/${row.id}/fnf/approve`, {}),
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/approve`, {}),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['separations'] }); toast.success('F&F approved') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
   const paidMutation = useMutation({
-    mutationFn: () => api.patch(`/separations/${row.id}/fnf/mark-paid`, {}),
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/mark-paid`, {}),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['separations'] }); toast.success('F&F marked as paid') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
@@ -316,9 +316,9 @@ function FnFSection({ row }: { row: SeparationRow }) {
       {f ? (
         <div className="rounded-lg border border-border overflow-hidden">
           <div className="divide-y divide-border">
-            <FnFLine label="Last Month Payroll"      value={fmtMoney(f.last_month_payroll)} />
-            <FnFLine label="Leave Encashment"        value={fmtMoney(f.leave_encashment)} />
-            <FnFLine label="Gratuity"                value={fmtMoney(f.gratuity)} />
+            <FnFLine label="Last Month Payroll"      value={fmtMoney(f.last_payroll_amount)} />
+            <FnFLine label="Leave Encashment"        value={fmtMoney(f.leave_encashment_amount)} />
+            <FnFLine label="Gratuity"                value={fmtMoney(f.gratuity_amount)} />
             <FnFLine label="(+) Other Additions"     value={fmtMoney(f.other_additions)} positive />
             <FnFLine label="(-) Notice Period Deduction" value={fmtMoney(f.notice_period_deduction)} negative />
             <FnFLine label="(-) Other Deductions"    value={fmtMoney(f.other_deductions)} negative />
@@ -364,9 +364,9 @@ function FnFSection({ row }: { row: SeparationRow }) {
           <DialogHeader><DialogTitle>Edit F&amp;F Settlement</DialogTitle></DialogHeader>
           <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
             {([
-              ['last_month_payroll',      'Last Month Payroll'],
-              ['leave_encashment',        'Leave Encashment'],
-              ['gratuity',                'Gratuity'],
+              ['last_payroll_amount',      'Last Month Payroll'],
+              ['leave_encashment_amount',        'Leave Encashment'],
+              ['gratuity_amount',                'Gratuity'],
               ['other_additions',         'Other Additions'],
               ['notice_period_deduction', 'Notice Period Deduction'],
               ['other_deductions',        'Other Deductions'],
