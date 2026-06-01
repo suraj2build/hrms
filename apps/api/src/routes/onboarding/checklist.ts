@@ -63,7 +63,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         is_active,
         created_at,
         updated_at,
-        onboarding_checklist_template_items (
+        onboarding_checklist_items (
           id,
           title,
           description,
@@ -71,6 +71,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           sort_order,
           category,
           assigned_to_role,
+          due_day_offset,
           created_at
         )
       `)

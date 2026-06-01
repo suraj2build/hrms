@@ -181,11 +181,12 @@ interface TemplateRowProps {
 function TemplateRow({ template, onAddItem, onDeleteItem }: TemplateRowProps) {
   const [expanded, setExpanded] = useState(false)
 
-  const { data: items, isLoading } = useQuery<ChecklistItem[]>({
+  const { data: itemsResp, isLoading } = useQuery<{ data: ChecklistItem[] }>({
     queryKey: ['onboarding-template-items', template.id],
-    queryFn: () => api.get<ChecklistItem[]>(`/onboarding/templates/${template.id}/items`),
+    queryFn: () => api.get(`/onboarding/templates/${template.id}/items`),
     enabled: expanded,
   })
+  const items = itemsResp?.data ?? []
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -305,10 +306,11 @@ function ChecklistTemplatesTab() {
   const [itemDueDay, setItemDueDay] = useState(1)
   const [itemMandatory, setItemMandatory] = useState(true)
 
-  const { data: templates, isLoading } = useQuery<ChecklistTemplate[]>({
+  const { data: templatesResp, isLoading } = useQuery<{ data: ChecklistTemplate[] }>({
     queryKey: ['onboarding-templates'],
-    queryFn: () => api.get<ChecklistTemplate[]>('/onboarding/templates'),
+    queryFn: () => api.get('/onboarding/templates'),
   })
+  const templates = templatesResp?.data ?? []
 
   const createTemplate = useMutation({
     mutationFn: (body: { name: string; description: string }) =>
@@ -556,11 +558,12 @@ function EmployeeTasksDrawer({ checklist, open, onClose }: EmployeeTasksDrawerPr
   const qc = useQueryClient()
   const [notes, setNotes] = useState<Record<string, string>>({})
 
-  const { data: tasks, isLoading } = useQuery<EmployeeTask[]>({
+  const { data: tasksResp, isLoading } = useQuery<{ data: EmployeeTask[] }>({
     queryKey: ['employee-checklist-tasks', checklist?.id],
-    queryFn: () => api.get<EmployeeTask[]>(`/onboarding/checklists/${checklist!.id}/tasks`),
+    queryFn: () => api.get(`/onboarding/checklists/${checklist!.id}/tasks`),
     enabled: !!checklist && open,
   })
+  const tasks = tasksResp?.data ?? []
 
   const updateTask = useMutation({
     mutationFn: ({ taskId, status, note }: { taskId: string; status: string; note?: string }) =>
@@ -716,20 +719,23 @@ function EmployeeOnboardingTab() {
   const [assignTemplateId, setAssignTemplateId] = useState('')
   const [viewChecklist, setViewChecklist] = useState<EmployeeChecklist | null>(null)
 
-  const { data: checklists, isLoading } = useQuery<EmployeeChecklist[]>({
+  const { data: checklistsResp, isLoading } = useQuery<{ data: EmployeeChecklist[] }>({
     queryKey: ['employee-checklists'],
-    queryFn: () => api.get<EmployeeChecklist[]>('/onboarding/checklists'),
+    queryFn: () => api.get('/onboarding/checklists'),
   })
+  const checklists = checklistsResp?.data ?? []
 
-  const { data: employees } = useQuery<EmployeeBasic[]>({
+  const { data: employeesResp } = useQuery<{ data: EmployeeBasic[] }>({
     queryKey: ['employees-basic'],
-    queryFn: () => api.get<EmployeeBasic[]>('/employees?fields=id,full_name,employee_code,departments'),
+    queryFn: () => api.get('/employees'),
   })
+  const employees = employeesResp?.data ?? []
 
-  const { data: templates } = useQuery<ChecklistTemplate[]>({
+  const { data: templatesResp2 } = useQuery<{ data: ChecklistTemplate[] }>({
     queryKey: ['onboarding-templates'],
-    queryFn: () => api.get<ChecklistTemplate[]>('/onboarding/templates'),
+    queryFn: () => api.get('/onboarding/templates'),
   })
+  const templates = templatesResp2?.data ?? []
 
   const assignChecklist = useMutation({
     mutationFn: (body: { employee_id: string; template_id: string }) =>
