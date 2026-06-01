@@ -1011,15 +1011,15 @@ export function EmployeeProfile() {
 
   // ── Master data for assignment dialogs (lazy — loads only when dialog opens) ─
   const { data: deptListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
-    queryKey: ['masters-departments'], queryFn: () => api.get('/masters/departments'),
+    queryKey: ['departments'], queryFn: () => api.get('/departments'),
     enabled: !!id, staleTime: 300_000,
   })
   const { data: desigListData } = useQuery<{ data: { id: string; name: string }[] }>({
-    queryKey: ['masters-designations'], queryFn: () => api.get('/masters/designations'),
+    queryKey: ['designations'], queryFn: () => api.get('/designations'),
     enabled: !!id, staleTime: 300_000,
   })
   const { data: gradeListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
-    queryKey: ['masters-grades'], queryFn: () => api.get('/masters/grades'),
+    queryKey: ['grades'], queryFn: () => api.get('/grades'),
     enabled: assignTarget === 'grade', staleTime: 300_000,
   })
   const { data: ccListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({

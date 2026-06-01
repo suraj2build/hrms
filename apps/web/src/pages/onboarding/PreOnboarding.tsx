@@ -359,15 +359,15 @@ export function PreOnboarding() {
 
   // ── Master data for dropdowns ──────────────────────────────────────────────
   const { data: deptResp } = useQuery<{ data: { id: string; name: string }[] }>({
-    queryKey: ['masters-departments'],
-    queryFn: () => api.get('/masters/departments'),
+    queryKey: ['departments'],
+    queryFn: () => api.get('/departments'),
     staleTime: 300_000,
   })
   const departments = deptResp?.data ?? []
 
   const { data: desigResp } = useQuery<{ data: { id: string; name: string }[] }>({
-    queryKey: ['masters-designations'],
-    queryFn: () => api.get('/masters/designations'),
+    queryKey: ['designations'],
+    queryFn: () => api.get('/designations'),
     staleTime: 300_000,
   })
   const designations = desigResp?.data ?? []
