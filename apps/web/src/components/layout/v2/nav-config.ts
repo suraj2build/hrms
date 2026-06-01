@@ -190,8 +190,8 @@ export const DOMAINS: Domain[] = [
         label: 'Employees',
         items: [
           { id: 'employees',          label: 'Employee Directory', route: '/admin/employees',          exact: true, icon: Users         },
-          { id: 'onboarding',         label: 'Onboarding',         route: '/admin/onboarding',         exact: true, icon: Briefcase     },
           { id: 'onboarding-module',  label: 'Onboarding',         route: '/admin/onboarding/module',              icon: GraduationCap },
+          { id: 'ai-onboarding',      label: 'AI Doc Onboarding',  route: '/admin/onboarding',         exact: true, icon: Briefcase     },
           { id: 'separation-workflow',label: 'Separation',         route: '/admin/employees/separation',           icon: LogOut        },
           { id: 'letters',            label: 'Letters',            route: '/admin/letters',                        icon: ScrollText    },
         ],

@@ -48,6 +48,58 @@ async function getSeparationRecord(fastify: any, employeeId: string, tenantId: s
 
 export default async function separationWorkflowRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
+
+  // ── GET /separations — list all separations with clearances + F&F for tenant ──
+  fastify.get('/separations', auth, async (req: any, reply) => {
+    const { data: seps, error } = await fastify.supabase
+      .from('employee_separation')
+      .select(`
+        id, separation_type, initiated_by, notice_date,
+        last_working_date, exit_reason, clearance_done,
+        exit_interview_done, remarks, created_at,
+        employees!inner (
+          id, first_name, last_name, employee_code,
+          departments ( name )
+        )
+      `)
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    // Attach clearances + F&F for each separation
+    const result = await Promise.all((seps ?? []).map(async (sep: any) => {
+      const { data: clearances } = await fastify.supabase
+        .from('separation_clearances')
+        .select('id, department, status, cleared_by, cleared_at, remarks')
+        .eq('separation_id', sep.id)
+        .eq('tenant_id', req.tenantId)
+        .order('created_at')
+
+      const { data: ff } = await fastify.supabase
+        .from('separation_ff_summary')
+        .select('*')
+        .eq('separation_id', sep.id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+
+      return {
+        id:               sep.id,
+        employee_id:      sep.employees?.id,
+        employee_name:    `${sep.employees?.first_name} ${sep.employees?.last_name}`,
+        employee_code:    sep.employees?.employee_code,
+        department:       sep.employees?.departments?.name ?? null,
+        separation_type:  sep.separation_type,
+        last_working_date: sep.last_working_date,
+        clearance_done:   sep.clearance_done,
+        status:           sep.clearance_done ? 'completed' : 'in_progress',
+        clearances:       clearances ?? [],
+        fnf:              ff ?? null,
+      }
+    }))
+
+    return reply.send({ data: result })
+  })
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /employees/:id/separation-clearances ──────────────────────────────

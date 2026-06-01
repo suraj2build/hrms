@@ -418,14 +418,7 @@ export function SeparationWorkflow() {
 
   const { data, isLoading } = useQuery<{ data: SeparationRow[] }>({
     queryKey: ['separations'],
-    queryFn: async () => {
-      try {
-        return await api.get('/separations')
-      } catch {
-        // Fallback to mock data when endpoint not yet available
-        return { data: buildMockRows() }
-      }
-    },
+    queryFn: () => api.get('/separations'),
     staleTime: 30_000,
   })
 

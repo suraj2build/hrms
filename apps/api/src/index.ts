@@ -150,6 +150,7 @@ import onboardingSessionRoutes             from './routes/onboarding/sessions.js
 import onboardingDraftRoutes               from './routes/onboarding/drafts.js'
 import onboardingDashboardRoute            from './routes/onboarding/dashboard.js'
 import onboardingChecklistRoutes           from './routes/onboarding/checklist.js'
+import seedOnboardingTemplatesRoutes       from './routes/onboarding/seed-templates.js'
 
 // Routes — Upload session lifecycle management
 import uploadSessionRoutes                 from './routes/uploads/index.js'
@@ -418,7 +419,8 @@ async function start() {
   await fastify.register(onboardingSessionRoutes,    { prefix: '/onboarding' })  // sessions + documents + extract
   await fastify.register(onboardingDraftRoutes,      { prefix: '/onboarding' })  // draft review + validate + approve
   await fastify.register(onboardingDashboardRoute,   { prefix: '/onboarding' })  // dashboard stats
-  await fastify.register(onboardingChecklistRoutes,  { prefix: '/onboarding' })  // onboarding checklist
+  await fastify.register(onboardingChecklistRoutes,       { prefix: '/onboarding' })  // onboarding checklist
+  await fastify.register(seedOnboardingTemplatesRoutes,   { prefix: '/onboarding' })  // seed default templates
 
   // ── Notifications ─────────────────────────────────────────────
   await fastify.register(notificationsRoutes, { prefix: '/notifications' })

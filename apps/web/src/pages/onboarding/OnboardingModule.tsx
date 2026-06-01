@@ -312,6 +312,15 @@ function ChecklistTemplatesTab() {
   })
   const templates = templatesResp?.data ?? []
 
+  const seedTemplates = useMutation({
+    mutationFn: () => api.post('/onboarding/seed-default-templates', {}),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['onboarding-templates'] })
+      toast.success(res?.message ?? 'Default templates seeded')
+    },
+    onError: () => toast.error('Failed to seed templates'),
+  })
+
   const createTemplate = useMutation({
     mutationFn: (body: { name: string; description: string }) =>
       api.post('/onboarding/templates', body),
@@ -402,9 +411,20 @@ function ChecklistTemplatesTab() {
           Loading templates…
         </div>
       ) : !templates?.length ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+        <div className="flex flex-col items-center justify-center py-16 gap-4 text-muted-foreground">
           <ClipboardList className="w-10 h-10 opacity-30" />
-          <p className="text-sm">No checklist templates yet. Create one to get started.</p>
+          <p className="text-sm">No checklist templates yet.</p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            disabled={seedTemplates.isPending}
+            onClick={() => seedTemplates.mutate()}
+          >
+            <Plus className="w-4 h-4" />
+            {seedTemplates.isPending ? 'Seeding…' : 'Load Default Templates (3)'}
+          </Button>
+          <p className="text-xs text-muted-foreground/60">Loads Standard, IT Staff, and Field Staff templates</p>
         </div>
       ) : (
         <div className="space-y-2">

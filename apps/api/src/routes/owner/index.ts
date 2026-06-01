@@ -428,14 +428,32 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       user_metadata: { full_name: fullName, tenant_id: tenantId, provisioned_by: 'owner_panel' },
     })
 
+    let userId: string | null = authData?.user?.id ?? null
+
     if (authErr) {
       if (authErr.message?.includes('already been registered') || authErr.status === 422) {
-        return reply.code(409).send({ error: 'AUTH_DUPLICATE', message: 'This email already has a Supabase auth account. Use a different email or reset their password.' })
+        // Auth user already exists — look up their ID and link to this tenant instead
+        try {
+          const { data: existingList } = await (fastify.supabase.auth as any).admin.listUsers({ perPage: 1000 })
+          const existingUser = existingList?.users?.find((u: any) => u.email === email)
+          if (!existingUser) {
+            return reply.code(409).send({ error: 'AUTH_DUPLICATE', message: 'This email already exists but could not be found. Try resetting their password.' })
+          }
+          userId = existingUser.id
+          // Check not already linked to THIS tenant
+          const { data: existingProfile } = await fastify.supabase
+            .from('profiles').select('id').eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
+          if (existingProfile) {
+            return reply.code(409).send({ error: 'DUPLICATE', message: 'This email is already an admin for this tenant.' })
+          }
+        } catch {
+          return reply.code(409).send({ error: 'AUTH_DUPLICATE', message: 'This email already has an auth account. Use a different email or reset their password.' })
+        }
+      } else {
+        return reply.code(500).send({ error: 'AUTH_ERROR', message: authErr.message })
       }
-      return reply.code(500).send({ error: 'AUTH_ERROR', message: authErr.message })
     }
 
-    const userId = authData?.user?.id
     if (!userId) return reply.code(500).send({ error: 'AUTH_ERROR', message: 'Auth user creation returned no ID' })
 
     // Create profiles row — profiles.id IS the auth user id
