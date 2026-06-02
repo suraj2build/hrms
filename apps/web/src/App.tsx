@@ -249,6 +249,7 @@ const EmploymentCategories = lazy(() => import('@/pages/masters/EmploymentCatego
 const StatutoryGroups      = lazy(() => import('@/pages/masters/StatutoryGroups').then(m => ({ default: m.StatutoryGroups })))
 const AssetCategories      = lazy(() => import('@/pages/masters/AssetCategories').then(m => ({ default: m.AssetCategories })))
 const AssetMaster          = lazy(() => import('@/pages/assets/AssetMaster').then(m => ({ default: m.AssetMaster })))
+const AdminComingSoon      = lazy(() => import('@/pages/admin/AdminComingSoon').then(m => ({ default: m.AdminComingSoon })))
 
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
@@ -669,6 +670,7 @@ export default function App() {
                 <Route path="/admin/masters/statutory-groups"        element={<StatutoryGroups />} />
                 <Route path="/admin/masters/asset-categories"        element={<AssetCategories />} />
                 <Route path="/admin/assets"                          element={<AssetMaster />} />
+                <Route path="/admin/recruitment"                     element={<AdminComingSoon />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />

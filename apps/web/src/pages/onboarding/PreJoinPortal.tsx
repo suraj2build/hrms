@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
+import { uploadToSignedUrl } from "@/lib/supabase-storage";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -862,16 +863,12 @@ export function PreJoinPortal() {
       });
       if (!urlRes.ok) throw new Error("Could not start upload");
       const { data: urlData } = await urlRes.json();
-      const signedUrl: string = urlData.signed_url;
       const path: string = urlData.path;
+      const uploadToken: string = urlData.token;
 
-      // 2. PUT the file directly to storage
-      const putRes = await fetch(signedUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      });
-      if (!putRes.ok) throw new Error("Upload failed");
+      // 2. Upload the file directly to storage via the official signed-URL helper
+      //    (robust across CORS / Content-Type vs a raw PUT)
+      await uploadToSignedUrl(path, uploadToken, file);
 
       // 3. Register the document
       const regRes = await fetch(`${API_BASE}/onboarding/pre-join/${token}/documents`, {

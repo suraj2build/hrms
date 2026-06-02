@@ -8,3 +8,6 @@ coverage/
 .vscode/ 
 .idea/ 
 .DS_Store 
+
+apps/website.rar
+apps/website.zip

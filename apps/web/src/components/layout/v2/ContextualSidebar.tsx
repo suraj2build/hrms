@@ -137,6 +137,11 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
                 {!collapsed && (
                   <span className="flex-1 truncate">{item.label}</span>
                 )}
+                {!collapsed && item.badge && (
+                  <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             )
           })}

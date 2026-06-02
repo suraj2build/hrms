@@ -2346,10 +2346,12 @@ export function EmployeeProfile() {
                         <button
                           onClick={() => {
                             setOrgForm({
-                              site_id:        orgCtx?.site?.id   ?? '',
-                              roster_id:      orgCtx?.roster?.id ?? '',
-                              effective_from: new Date().toISOString().slice(0, 10),
-                              reason:         '',
+                              site_id:          orgCtx?.site?.id          ?? '',
+                              roster_id:        orgCtx?.roster?.id        ?? '',
+                              work_location_id: job?.work_locations?.id   ?? '',
+                              cost_center_id:   job?.cost_center?.id       ?? '',
+                              effective_from:   new Date().toISOString().slice(0, 10),
+                              reason:           '',
                             })
                             setOrgDlgOpen(true)
                           }}

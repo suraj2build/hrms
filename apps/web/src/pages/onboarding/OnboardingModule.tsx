@@ -940,7 +940,6 @@ export function OnboardingModule() {
       <PageHeader
         title="Onboarding"
         subtitle="Manage onboarding checklist templates and track employee onboarding progress."
-        icon={<ClipboardList className="w-5 h-5" />}
       />
 
       <Tabs defaultValue="templates" className="mt-6">

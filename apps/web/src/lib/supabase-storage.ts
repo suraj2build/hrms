@@ -69,6 +69,33 @@ export async function uploadCompanyLogo(
 }
 
 /**
+ * Upload a file to a pre-issued signed upload URL (public / unauthenticated flows).
+ *
+ * Used by the public pre-onboarding portal: the API issues a signed upload token
+ * (server-side, service role) and the browser uploads the binary directly to
+ * storage via the official supabase-js helper. This avoids the fragile raw-PUT
+ * approach (Content-Type / CORS / relative-URL pitfalls) and works without any
+ * authenticated session.
+ *
+ * @param path   storage path returned by the API (createSignedUploadUrl)
+ * @param token  upload token returned by the API
+ * @param file   the file to upload
+ */
+export async function uploadToSignedUrl(
+  path:  string,
+  token: string,
+  file:  File,
+): Promise<void> {
+  const { error } = await storageClient.storage
+    .from(BUCKET)
+    .uploadToSignedUrl(path, token, file, {
+      contentType: file.type || 'application/octet-stream',
+    })
+
+  if (error) throw new Error(`Upload failed: ${error.message}`)
+}
+
+/**
  * Generate a short-lived signed URL for a stored file.
  * Default expiry: 1 hour (3600 s).
  */
