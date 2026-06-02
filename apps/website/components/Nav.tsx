@@ -53,7 +53,7 @@ export default function Nav() {
         <div className="hidden md:flex items-center gap-3">
           <a
             href="#demo"
-            className="text-sm font-semibold px-5 py-2.5 rounded-full bg-violet-700 text-white hover:bg-violet-600 transition-colors duration-200 shadow-md shadow-violet-200"
+            className="text-sm font-semibold px-5 py-2.5 rounded-full bg-gradient-to-r from-[#10B981] via-[#0D9488] to-[#2563EB] text-white hover:brightness-110 transition-colors duration-200 shadow-md shadow-violet-200"
           >
             Request Demo
           </a>
@@ -81,7 +81,7 @@ export default function Nav() {
           <a
             href="#demo"
             onClick={() => setOpen(false)}
-            className="block text-center text-sm font-semibold px-5 py-2.5 rounded-full bg-violet-700 text-white mt-3"
+            className="block text-center text-sm font-semibold px-5 py-2.5 rounded-full bg-gradient-to-r from-[#10B981] via-[#0D9488] to-[#2563EB] text-white mt-3"
           >
             Request Demo
           </a>

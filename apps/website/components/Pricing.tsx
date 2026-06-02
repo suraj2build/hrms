@@ -125,7 +125,7 @@ export default function Pricing() {
                 className={`flex items-center justify-center gap-2 px-6 py-3.5 rounded-full text-sm font-bold transition-all duration-200 ${
                   p.highlight
                     ? 'bg-white text-violet-700 hover:bg-violet-50 shadow-md'
-                    : 'bg-violet-700 text-white hover:bg-violet-600 shadow-md shadow-violet-200'
+                    : 'bg-gradient-to-r from-[#10B981] via-[#0D9488] to-[#2563EB] text-white hover:brightness-110 shadow-md shadow-violet-200'
                 }`}
               >
                 {p.cta}
