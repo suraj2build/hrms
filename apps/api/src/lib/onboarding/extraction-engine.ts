@@ -308,29 +308,63 @@ export async function extractFromDocument(
   const normalizedType = documentType.toLowerCase().replace(/[\s-]/g, '_')
   const fields = DOCUMENT_FIELDS[normalizedType] ?? DOCUMENT_FIELDS['other']
 
-  // AI_PROVIDER env var controls which backend is used.
-  // Fallback chain: if primary fails and AUTO_FALLBACK=true, try next.
-  const provider = (process.env.AI_PROVIDER ?? 'anthropic').toLowerCase()
+  // Provider implementations + their required API key.
+  const PROVIDERS: Record<string, { hasKey: () => boolean; run: () => Promise<ExtractionResult> }> = {
+    anthropic: {
+      hasKey: () => !!process.env.ANTHROPIC_API_KEY,
+      run: () => extractWithAnthropic(documentType, documentText, mimeType, imageBase64, fields),
+    },
+    gemini: {
+      hasKey: () => !!process.env.GEMINI_API_KEY,
+      run: () => extractWithGemini(documentType, documentText, mimeType, imageBase64, fields),
+    },
+    openai: {
+      hasKey: () => !!process.env.OPENAI_API_KEY,
+      run: () => extractWithOpenAI(documentType, documentText, mimeType, imageBase64, fields),
+    },
+  }
 
-  try {
-    if (provider === 'gemini') {
-      return await extractWithGemini(documentType, documentText, mimeType, imageBase64, fields)
-    }
-    if (provider === 'openai') {
-      return await extractWithOpenAI(documentType, documentText, mimeType, imageBase64, fields)
-    }
-    // default: anthropic
-    return await extractWithAnthropic(documentType, documentText, mimeType, imageBase64, fields)
-  } catch (err: unknown) {
-    const raw = err instanceof Error ? err.message : String(err)
-    const message = humaniseError(raw)
+  // AI_PROVIDER chooses the PRIMARY backend; the others are automatic fallbacks
+  // (so a rate-limited / quota-exhausted free-tier key — e.g. Gemini 429 — does
+  // not break extraction when another provider key is configured).
+  const primary = (process.env.AI_PROVIDER ?? 'anthropic').toLowerCase()
+  const order = [primary, 'anthropic', 'openai', 'gemini']
+    .filter((p, i, arr) => arr.indexOf(p) === i && PROVIDERS[p])
+    .filter((p) => PROVIDERS[p].hasKey())
+
+  if (order.length === 0) {
     return {
-      fields: [],
-      document_summary: '',
-      overall_confidence: 0,
-      extraction_version: EXTRACTION_VERSION,
-      provider,
-      error: message,
+      fields: [], document_summary: '', overall_confidence: 0,
+      extraction_version: EXTRACTION_VERSION, provider: primary,
+      error: 'No AI provider API key configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY)',
     }
+  }
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const isRateLimit = (m: string) => /429|rate.?limit|quota|too many requests|resource.?exhausted/i.test(m)
+
+  let lastError = ''
+  for (let i = 0; i < order.length; i++) {
+    const provider = order[i]
+    // One in-place retry on a transient rate-limit before falling through.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await PROVIDERS[provider].run()
+      } catch (err: unknown) {
+        const raw = err instanceof Error ? err.message : String(err)
+        lastError = raw
+        if (attempt === 0 && isRateLimit(raw)) {
+          await sleep(6000)
+          continue // retry same provider once
+        }
+        break // move to next provider
+      }
+    }
+  }
+
+  return {
+    fields: [], document_summary: '', overall_confidence: 0,
+    extraction_version: EXTRACTION_VERSION, provider: order[0],
+    error: humaniseError(lastError),
   }
 }
