@@ -217,7 +217,7 @@ export function OwnerTenantDetail() {
             <h2 className="text-sm font-semibold text-white">Details</h2>
             {editing && (
               <div className="flex gap-1.5">
-                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-indigo-600 hover:bg-indigo-500 text-white h-7 text-xs gap-1">
+                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-[#0D9488] hover:bg-[#0F766E] text-white h-7 text-xs gap-1">
                   <Save className="h-3 w-3" /> Save
                 </Button>
                 <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-slate-400 h-7 text-xs gap-1">
@@ -281,7 +281,7 @@ export function OwnerTenantDetail() {
         {isOwner() && (
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Award className="h-4 w-4 text-indigo-400" /> License Management
+              <Award className="h-4 w-4 text-[#0D9488]" /> License Management
             </h2>
             <div className="space-y-2">
               <label className="text-xs text-slate-400">Issue license for</label>
@@ -293,7 +293,7 @@ export function OwnerTenantDetail() {
                 >
                   {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
-                <Button onClick={issueLicense} className="bg-indigo-600 hover:bg-indigo-500 text-white">
+                <Button onClick={issueLicense} className="bg-[#0D9488] hover:bg-[#0F766E] text-white">
                   Issue License
                 </Button>
               </div>
@@ -377,7 +377,7 @@ export function OwnerTenantDetail() {
       <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-indigo-400" />
+            <ShieldCheck className="h-4 w-4 text-[#0D9488]" />
             <h2 className="text-sm font-semibold text-white">Tenant Admin Accounts</h2>
             <span className="text-[11px] text-slate-500">({admins.length})</span>
           </div>
@@ -385,7 +385,7 @@ export function OwnerTenantDetail() {
             <Button
               size="sm"
               onClick={() => setAddAdminOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white h-7 text-xs gap-1"
+              className="bg-[#0D9488] hover:bg-[#0F766E] text-white h-7 text-xs gap-1"
             >
               <UserPlus className="h-3 w-3" /> Add Admin
             </Button>
@@ -417,8 +417,8 @@ export function OwnerTenantDetail() {
                 <tr key={a.id} className="hover:bg-slate-800/30">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-full bg-indigo-900 flex items-center justify-center flex-shrink-0">
-                        <span className="text-[10px] font-bold text-indigo-300">{displayName.charAt(0).toUpperCase()}</span>
+                      <div className="h-6 w-6 rounded-full bg-[#0F766E] flex items-center justify-center flex-shrink-0">
+                        <span className="text-[10px] font-bold text-[#5EEAD4]">{displayName.charAt(0).toUpperCase()}</span>
                       </div>
                       <span className="text-[13px] text-slate-200 font-medium">{displayName}</span>
                     </div>
@@ -427,7 +427,7 @@ export function OwnerTenantDetail() {
                   <td className="px-4 py-2.5">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
                       a.role === 'super_admin'
-                        ? 'border-indigo-500/40 text-indigo-300 bg-indigo-500/10'
+                        ? 'border-[#0D9488]/40 text-[#5EEAD4] bg-[#0D9488]/10'
                         : a.role === 'hr_admin'
                         ? 'border-sky-500/40 text-sky-300 bg-sky-500/10'
                         : 'border-slate-700 text-slate-400 bg-slate-800'
@@ -486,13 +486,13 @@ export function OwnerTenantDetail() {
         <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="h-4 w-4 text-indigo-400" />
+              <UserPlus className="h-4 w-4 text-[#0D9488]" />
               Add Tenant Admin
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-xs text-slate-500">
-              Creates a Supabase auth account + HRMS profile. The admin can log in immediately with these credentials.
+              Creates a Supabase auth account + Emvora profile. The admin can log in immediately with these credentials.
             </p>
 
             <div className="space-y-1.5">
@@ -572,7 +572,7 @@ export function OwnerTenantDetail() {
             <Button
               onClick={() => addAdminMut.mutate()}
               disabled={!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim() || addAdminMut.isPending}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
             >
               {addAdminMut.isPending ? 'Creating…' : 'Create Admin'}
             </Button>

@@ -10,17 +10,17 @@ const config: Config = {
     extend: {
       colors: {
         violet: {
-          950: '#1a0f33',
-          900: '#2F1F57',
-          800: '#3d2870',
-          700: '#4e348a',
-          600: '#6044a8',
-          500: '#7c5ec4',
-          400: '#9b82d4',
-          300: '#bba8e2',
-          200: '#d9cfef',
-          100: '#f0ecfa',
-          50:  '#f8f6fd',
+          950: '#042f2e',
+          900: '#134e4a',
+          800: '#115e59',
+          700: '#0f766e',
+          600: '#0d9488',
+          500: '#14b8a6',
+          400: '#2dd4bf',
+          300: '#5eead4',
+          200: '#99f6e4',
+          100: '#ccfbf1',
+          50:  '#f0fdfa',
         },
       },
       fontFamily: {
@@ -29,7 +29,7 @@ const config: Config = {
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-        'hero-glow': 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(79,52,138,0.4) 0%, transparent 70%)',
+        'hero-glow': 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(13,148,136,0.4) 0%, transparent 70%)',
       },
       animation: {
         'fade-in-up':   'fadeInUp 0.6s ease-out forwards',

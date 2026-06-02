@@ -14,6 +14,7 @@ import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Sun, Moon, LogOut, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { LogoMark } from '@/components/brand/Logo'
 import { DOMAINS, getDomainForPath } from './nav-config'
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
@@ -66,11 +67,9 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         onClick={() => navigate('/admin/control-center')}
         className="flex items-center gap-2 shrink-0 px-4 group border-r border-border/60 bg-card hover:bg-muted/40 transition-colors"
       >
-        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center font-black text-primary-foreground text-sm shadow-sm">
-          H
-        </div>
+        <LogoMark size={28} />
         <span className="font-display font-bold text-[13px] text-foreground hidden md:block group-hover:text-primary transition-colors tracking-tight">
-          HRMS
+          Emvora
         </span>
       </button>
 

@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Building2, Check, ChevronRight } from 'lucide-react'
+import { Loader2, Check, ChevronRight } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase/client'
 import { api } from '@/lib/api/client'
@@ -90,10 +91,10 @@ export function Signup() {
       <div className="w-full max-w-md space-y-6">
         {/* Branding */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary mb-4">
-            <Building2 className="h-6 w-6 text-primary-foreground" />
+          <div className="inline-flex items-center justify-center mb-4">
+            <LogoMark size={48} />
           </div>
-          <h1 className="text-2xl font-bold">Set up your HRMS</h1>
+          <h1 className="text-2xl font-bold">Set up your Emvora workspace</h1>
           <p className="text-sm text-muted-foreground mt-1">Get started in 2 minutes</p>
         </div>
 
@@ -170,7 +171,7 @@ export function Signup() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Tell us about your company</CardTitle>
-              <CardDescription>This helps us configure HRMS for your needs.</CardDescription>
+              <CardDescription>This helps us configure Emvora for your needs.</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={form2.handleSubmit(onStep2Submit)} className="space-y-4">
@@ -233,7 +234,7 @@ export function Signup() {
               <div>
                 <h3 className="text-lg font-semibold">You're all set!</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Your HRMS is ready. Check your email to verify your account, then sign in.
+                  Your Emvora workspace is ready. Check your email to verify your account, then sign in.
                 </p>
               </div>
               <Button className="w-full" onClick={() => navigate('/login')}>

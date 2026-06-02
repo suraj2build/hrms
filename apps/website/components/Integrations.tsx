@@ -7,7 +7,7 @@ const integrations = [
   { name: 'Tally',     category: 'Accounting',    bg: '#1A56DB', text: 'white',  abbr: 'TL' },
   { name: 'Razorpay',  category: 'Payments',      bg: '#2D81F7', text: 'white',  abbr: 'RP' },
   { name: 'DigiLocker', category: 'Government',   bg: '#F97316', text: 'white',  abbr: 'DL' },
-  { name: 'EPFO',      category: 'Statutory',     bg: '#2F1F57', text: 'white',  abbr: 'EF' },
+  { name: 'EPFO',      category: 'Statutory',     bg: '#0D9488', text: 'white',  abbr: 'EF' },
   { name: 'TRACES',    category: 'Statutory',     bg: '#059669', text: 'white',  abbr: 'TR' },
   { name: 'Darwinbox', category: 'HRMS',          bg: '#7C3AED', text: 'white',  abbr: 'DB' },
   { name: 'Naukri',    category: 'Recruitment',   bg: '#EF4444', text: 'white',  abbr: 'NK' },

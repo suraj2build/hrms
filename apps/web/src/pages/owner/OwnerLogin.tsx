@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Eye, EyeOff, Shield } from 'lucide-react'
+import { Loader2, Eye, EyeOff } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 import { toast } from 'sonner'
 import { ownerSupabase }  from '@/lib/supabase/ownerClient'
 import { ownerApi }       from '@/lib/api/ownerApi'
@@ -60,8 +61,8 @@ export function OwnerLogin() {
       <div className="w-full max-w-sm space-y-6">
         {/* Branding */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600 mb-4">
-            <Shield className="h-6 w-6 text-white" />
+          <div className="inline-flex items-center justify-center mb-4">
+            <LogoMark size={48} />
           </div>
           <h1 className="text-2xl font-bold text-white">Platform Owner</h1>
           <p className="text-sm text-slate-400 mt-1">Sign in to the owner control panel</p>
@@ -103,7 +104,7 @@ export function OwnerLogin() {
 
               <Button
                 type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white"
+                className="w-full bg-[#0D9488] hover:bg-[#0F766E] text-white"
                 disabled={isSubmitting}
               >
                 {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

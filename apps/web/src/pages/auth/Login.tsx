@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Building2, Eye, EyeOff } from 'lucide-react'
+import { Loader2, Eye, EyeOff } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -92,11 +93,11 @@ export function Login() {
       <div className="w-full max-w-md space-y-6">
         {/* Branding */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary mb-4">
-            <Building2 className="h-6 w-6 text-primary-foreground" />
+          <div className="inline-flex items-center justify-center mb-4">
+            <LogoMark size={48} />
           </div>
           <h1 className="text-2xl font-bold">Welcome back</h1>
-          <p className="text-sm text-muted-foreground mt-1">Sign in to your HRMS account</p>
+          <p className="text-sm text-muted-foreground mt-1">Sign in to your Emvora account</p>
         </div>
 
         <Card>
@@ -188,7 +189,7 @@ export function Login() {
 
           <CardFooter className="justify-center">
             <p className="text-sm text-muted-foreground">
-              New to HRMS?{' '}
+              New to Emvora?{' '}
               <Link to="/signup" className="text-primary hover:underline font-medium">
                 Create your company
               </Link>

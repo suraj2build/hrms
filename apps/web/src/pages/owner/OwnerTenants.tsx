@@ -162,7 +162,7 @@ export function OwnerTenants() {
         {isOwner() && (
           <Button
             onClick={() => setCreateOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white gap-1.5"
+            className="bg-[#0D9488] hover:bg-[#0F766E] text-white gap-1.5"
           >
             <Plus className="h-4 w-4" /> New Tenant
           </Button>
@@ -185,7 +185,7 @@ export function OwnerTenants() {
             key={s}
             onClick={() => setStatusFilt(s)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              statusFilt === s ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              statusFilt === s ? 'bg-[#0D9488] text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -437,7 +437,7 @@ export function OwnerTenants() {
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.name.trim() || createMut.isPending}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
             >
               {createMut.isPending ? 'Creating…' : 'Create Tenant'}
             </Button>

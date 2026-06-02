@@ -62,7 +62,7 @@ export function OwnerAdmins() {
           <p className="text-sm text-slate-500">{admins.length} admin{admins.length !== 1 ? 's' : ''}</p>
         </div>
         {isOwner() && (
-          <Button onClick={() => setInviteOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-1.5">
+          <Button onClick={() => setInviteOpen(true)} className="bg-[#0D9488] hover:bg-[#0F766E] text-white gap-1.5">
             <Plus className="h-4 w-4" /> Invite Admin
           </Button>
         )}
@@ -78,9 +78,9 @@ export function OwnerAdmins() {
           }`}>
             {/* Avatar */}
             <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-              a.role === 'owner' ? 'bg-indigo-900' : 'bg-slate-800'
+              a.role === 'owner' ? 'bg-[#0F766E]' : 'bg-slate-800'
             }`}>
-              <span className="text-sm font-bold text-indigo-300">{a.name.charAt(0).toUpperCase()}</span>
+              <span className="text-sm font-bold text-[#5EEAD4]">{a.name.charAt(0).toUpperCase()}</span>
             </div>
 
             {/* Info */}
@@ -88,7 +88,7 @@ export function OwnerAdmins() {
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-white text-[14px] truncate">{a.name}</p>
                 {a.id === me?.id && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-300">you</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#0D9488]/20 border border-[#0D9488]/30 text-[#5EEAD4]">you</span>
                 )}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 ${
                   a.role === 'owner'
@@ -160,7 +160,7 @@ export function OwnerAdmins() {
             <Button
               onClick={() => inviteMut.mutate()}
               disabled={!form.name.trim() || !form.email.trim() || inviteMut.isPending}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
             >
               {inviteMut.isPending ? 'Sending…' : 'Send Invitation'}
             </Button>

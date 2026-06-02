@@ -16,7 +16,7 @@ export default function Hero() {
       <div
         className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] pointer-events-none"
         style={{
-          background: 'radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,94,196,0.08) 0%, transparent 70%)',
+          background: 'radial-gradient(ellipse 60% 50% at 50% 0%, rgba(13,148,136,0.08) 0%, transparent 70%)',
         }}
       />
 
@@ -156,7 +156,7 @@ export default function Hero() {
                           className="flex-1 rounded-t-sm"
                           style={{
                             height: `${h}%`,
-                            background: i === 5 ? '#7C5EC4' : '#E8E0F7',
+                            background: i === 5 ? '#0D9488' : '#CCFBF1',
                           }}
                         />
                       ))}
@@ -175,7 +175,7 @@ export default function Hero() {
                       <div className="relative w-16 h-16">
                         <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                           <circle cx="18" cy="18" r="14" fill="none" stroke="#F1F5F9" strokeWidth="4" />
-                          <circle cx="18" cy="18" r="14" fill="none" stroke="#7C5EC4" strokeWidth="4"
+                          <circle cx="18" cy="18" r="14" fill="none" stroke="#0D9488" strokeWidth="4"
                             strokeDasharray="83 17" strokeLinecap="round" />
                         </svg>
                         <div className="absolute inset-0 flex items-center justify-center">
@@ -184,7 +184,7 @@ export default function Hero() {
                       </div>
                     </div>
                     <div className="space-y-1">
-                      {[['Present', '83%', '#7C5EC4'], ['Leave', '9%', '#F59E0B'], ['Absent', '8%', '#F87171']].map(([l, v, c]) => (
+                      {[['Present', '83%', '#0D9488'], ['Leave', '9%', '#F59E0B'], ['Absent', '8%', '#F87171']].map(([l, v, c]) => (
                         <div key={l as string} className="flex justify-between text-[9px]">
                           <span className="text-slate-400">{l as string}</span>
                           <span className="font-semibold text-[#1A1A2E]">{v as string}</span>

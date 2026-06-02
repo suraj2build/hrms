@@ -47,7 +47,7 @@ function StatCard({
   color?: 'indigo' | 'green' | 'amber' | 'red' | 'slate'
 }) {
   const colorMap = {
-    indigo: 'bg-indigo-600/20 text-indigo-400',
+    indigo: 'bg-[#0D9488]/20 text-[#0D9488]',
     green:  'bg-emerald-600/20 text-emerald-400',
     amber:  'bg-amber-600/20 text-amber-400',
     red:    'bg-red-600/20 text-red-400',
@@ -160,7 +160,7 @@ export function OwnerDashboard() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Go to <a href="/owner/requests" className="text-indigo-400 hover:underline">Requests</a> to approve or reject.
+                Go to <a href="/owner/requests" className="text-[#0D9488] hover:underline">Requests</a> to approve or reject.
               </p>
             </section>
           )}
@@ -172,7 +172,7 @@ export function OwnerDashboard() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tenant Running Status</h2>
-            <Link to="/owner/tenants" className="text-[11px] text-indigo-400 hover:underline flex items-center gap-0.5">
+            <Link to="/owner/tenants" className="text-[11px] text-[#0D9488] hover:underline flex items-center gap-0.5">
               View all <ChevronRight className="h-3 w-3" />
             </Link>
           </div>
@@ -205,7 +205,7 @@ export function OwnerDashboard() {
                       <td className="px-4 py-3">
                         <Link
                           to={`/owner/tenants/${t.id}`}
-                          className="font-medium text-white text-[13px] hover:text-indigo-300 transition-colors"
+                          className="font-medium text-white text-[13px] hover:text-[#5EEAD4] transition-colors"
                           onClick={e => e.stopPropagation()}
                         >
                           {t.name}

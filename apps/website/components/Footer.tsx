@@ -45,7 +45,7 @@ export default function Footer() {
           {/* Brand col */}
           <div className="col-span-2">
             <a href="#" className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-violet-800 flex items-center justify-center shadow-md">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#10B981] via-[#0D9488] to-[#2563EB] flex items-center justify-center shadow-md">
                 <Zap className="w-4 h-4 text-white" />
               </div>
               <span className="font-display font-bold text-lg text-[#1A1A2E] tracking-tight">emvora</span>

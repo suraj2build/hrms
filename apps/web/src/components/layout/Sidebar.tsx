@@ -516,7 +516,7 @@ export function Sidebar() {
               <Building2 className="h-3.5 w-3.5 text-primary-foreground" />
             </div>
             <div>
-              <p className="text-[12px] font-bold text-foreground leading-none tracking-tight">HRMS</p>
+              <p className="text-[12px] font-bold text-foreground leading-none tracking-tight">Emvora</p>
               <p className="text-[10px] text-muted-foreground/60 mt-0.5 leading-none">HR Platform</p>
             </div>
           </div>

@@ -85,7 +85,7 @@ export function OwnerApiKeys() {
           <h1 className="text-xl font-bold text-white">API Keys</h1>
           <p className="text-sm text-slate-500">{keys.filter(k => k.is_active).length} active keys</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-1.5">
+        <Button onClick={() => setCreateOpen(true)} className="bg-[#0D9488] hover:bg-[#0F766E] text-white gap-1.5">
           <Plus className="h-4 w-4" /> Generate Key
         </Button>
       </div>
@@ -202,7 +202,7 @@ export function OwnerApiKeys() {
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.tenant_id || !form.name || form.scopes.length === 0 || createMut.isPending}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
             >
               {createMut.isPending ? 'Generating…' : 'Generate Key'}
             </Button>
@@ -240,7 +240,7 @@ export function OwnerApiKeys() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setNewKey(null); setShowKey(false) }} className="bg-indigo-600 hover:bg-indigo-500 text-white">
+            <Button onClick={() => { setNewKey(null); setShowKey(false) }} className="bg-[#0D9488] hover:bg-[#0F766E] text-white">
               I've saved it
             </Button>
           </DialogFooter>

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
-  Shield, LayoutDashboard, Building2, FileText, Key,
+  LayoutDashboard, Building2, FileText, Key,
   CreditCard, Users, LogOut, ExternalLink,
 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
 import { ownerSupabase }  from '@/lib/supabase/ownerClient'
 import { useOwnerStore }  from '@/stores/ownerStore'
 import { ownerApi }       from '@/lib/api/ownerApi'
@@ -73,7 +74,7 @@ export function OwnerLayout() {
   if (!admin) return null
   if (!tokenReady) return (
     <div className="flex h-screen items-center justify-center bg-slate-950">
-      <div className="h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+      <div className="h-5 w-5 rounded-full border-2 border-[#0D9488] border-t-transparent animate-spin" />
     </div>
   )
 
@@ -83,9 +84,7 @@ export function OwnerLayout() {
       <aside className="w-56 flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900">
         {/* Logo */}
         <div className="h-14 flex items-center gap-2.5 px-4 border-b border-slate-800">
-          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
-            <Shield className="h-3.5 w-3.5 text-white" />
-          </div>
+          <LogoMark size={28} />
           <div className="min-w-0">
             <p className="text-[13px] font-semibold truncate">Owner Panel</p>
             <p className="text-[10px] text-slate-500 truncate">Platform Control</p>
@@ -102,7 +101,7 @@ export function OwnerLayout() {
                 cn(
                   'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors',
                   isActive
-                    ? 'bg-indigo-600/20 text-indigo-300 font-medium'
+                    ? 'bg-[#0D9488]/20 text-[#5EEAD4] font-medium'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800',
                 )
               }
@@ -124,18 +123,18 @@ export function OwnerLayout() {
             href="/login"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-indigo-300 hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-[#5EEAD4] hover:bg-slate-800 transition-colors"
           >
             <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
-            <span>Open HRMS App</span>
+            <span>Open Emvora App</span>
           </a>
         </div>
 
         {/* Bottom: admin info + logout */}
         <div className="border-t border-slate-800 p-3 space-y-1">
           <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
-            <div className="h-7 w-7 rounded-full bg-indigo-900 flex items-center justify-center flex-shrink-0">
-              <span className="text-[11px] font-bold text-indigo-300">
+            <div className="h-7 w-7 rounded-full bg-[#0F766E] flex items-center justify-center flex-shrink-0">
+              <span className="text-[11px] font-bold text-[#5EEAD4]">
                 {admin.name.charAt(0).toUpperCase()}
               </span>
             </div>

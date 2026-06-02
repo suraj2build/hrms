@@ -5,8 +5,8 @@
 @tailwind utilities;
 
 :root {
-  --violet-brand: #2F1F57;
-  --violet-accent: #7C5EC4;
+  --violet-brand: #0D9488;
+  --violet-accent: #14b8a6;
   --bg-base: #F8F9FB;
   --bg-card: #ffffff;
   --text-heading: #1A1A2E;
@@ -29,9 +29,9 @@ body {
   font-family: 'Sora', sans-serif;
 }
 
-/* Gradient text — violet brand */
+/* Gradient text — brand gradient */
 .gradient-text {
-  background: linear-gradient(135deg, #7C5EC4 0%, #2F1F57 100%);
+  background: linear-gradient(135deg, #10B981 0%, #0D9488 45%, #2563EB 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -45,7 +45,7 @@ body {
   transition: box-shadow 0.25s ease, transform 0.25s ease;
 }
 .light-card:hover {
-  box-shadow: 0 8px 30px rgba(47, 31, 87, 0.08);
+  box-shadow: 0 8px 30px rgba(13, 148, 136, 0.08);
   transform: translateY(-3px);
 }
 
@@ -55,7 +55,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #7C5EC4;
+  color: #0D9488;
 }
 
 /* Scroll animation */
@@ -72,8 +72,8 @@ body {
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #F1F5F9; }
-::-webkit-scrollbar-thumb { background: #C4B5FD; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #7C5EC4; }
+::-webkit-scrollbar-thumb { background: #5eead4; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #0D9488; }
 
 /* Float animation for hero mockup */
 @keyframes float {

@@ -83,7 +83,7 @@ export function OwnerRequests() {
             key={s}
             onClick={() => setStatusFilt(s)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              statusFilt === s ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              statusFilt === s ? 'bg-[#0D9488] text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}

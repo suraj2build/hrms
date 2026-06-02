@@ -51,7 +51,7 @@ export default function DemoForm() {
           <div className="grid md:grid-cols-2">
 
             {/* Left — copy */}
-            <div className="bg-gradient-to-br from-violet-700 to-[#2F1F57] p-10 md:p-12 flex flex-col justify-between">
+            <div className="bg-gradient-to-br from-[#10B981] via-[#0D9488] to-[#2563EB] p-10 md:p-12 flex flex-col justify-between">
               <div>
                 <p className="text-violet-300 text-xs font-bold uppercase tracking-widest mb-4">Request a Demo</p>
                 <h2 className="font-display text-3xl md:text-4xl font-extrabold text-white leading-tight mb-5">

@@ -212,7 +212,7 @@ export function EmployeeSidebar() {
         </div>
         {!sidebarCollapsed && (
           <div className="leading-tight">
-            <p className="text-sm font-bold text-sidebar-foreground">HRMS</p>
+            <p className="text-sm font-bold text-sidebar-foreground">Emvora</p>
             <p className="text-[10px] text-sidebar-foreground/65">Employee Portal</p>
           </div>
         )}
