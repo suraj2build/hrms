@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -227,7 +227,7 @@ function NewOnboardingDialog({ open, onOpenChange, onCreated }: NewOnboardingDia
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export function OnboardingDashboard() {
+export function OnboardingDashboard({ embedded = false }: { embedded?: boolean } = {}) {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
@@ -275,31 +275,38 @@ export function OnboardingDashboard() {
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
+  const actions = (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          qc.invalidateQueries({ queryKey: ['onboarding-sessions'] })
+          qc.invalidateQueries({ queryKey: ['onboarding-dashboard'] })
+        }}
+      >
+        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+        Refresh
+      </Button>
+      <Button size="sm" onClick={() => setNewDialogOpen(true)}>
+        <Plus className="h-4 w-4 mr-1.5" />
+        New Onboarding
+      </Button>
+    </div>
+  )
+
+  const Wrapper = embedded ? Fragment : PageContainer
   return (
-    <PageContainer>
-      <PageHeader
-        title="Employee Onboarding"
-        subtitle="AI-assisted document-driven onboarding"
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                qc.invalidateQueries({ queryKey: ['onboarding-sessions'] })
-                qc.invalidateQueries({ queryKey: ['onboarding-dashboard'] })
-              }}
-            >
-              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-              Refresh
-            </Button>
-            <Button size="sm" onClick={() => setNewDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-1.5" />
-              New Onboarding
-            </Button>
-          </div>
-        }
-      />
+    <Wrapper>
+      {embedded ? (
+        <div className="flex justify-end mb-4">{actions}</div>
+      ) : (
+        <PageHeader
+          title="Employee Onboarding"
+          subtitle="AI-assisted document-driven onboarding"
+          actions={actions}
+        />
+      )}
 
       {/* ── Stat Cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -578,6 +585,6 @@ export function OnboardingDashboard() {
         onOpenChange={setNewDialogOpen}
         onCreated={(id) => navigate(`/admin/onboarding/${id}/review`)}
       />
-    </PageContainer>
+    </Wrapper>
   )
 }

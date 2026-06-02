@@ -10,7 +10,7 @@
  *  - Side drawer for reviewing submitted forms with Approve / Reject
  */
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Copy, Check, Eye, UserCheck, UserX, Trash2, Link,
@@ -327,7 +327,7 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, r
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-export function PreOnboarding() {
+export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient()
   const { copied, copy } = useCopyText()
 
@@ -382,7 +382,8 @@ export function PreOnboarding() {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const inviteMutation = useMutation({
-    mutationFn: (payload: InviteForm) => api.post('/onboarding/pre-joinee', payload),
+    mutationFn: (payload: InviteForm) =>
+      api.post<{ data?: { invite_url?: string; invite_token?: string; email_sent?: boolean } }>('/onboarding/pre-joinee', payload),
     onSuccess: (data: { data?: { invite_url?: string; invite_token?: string; email_sent?: boolean } }) => {
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
@@ -462,18 +463,28 @@ export function PreOnboarding() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  const Wrapper = embedded ? Fragment : PageContainer
   return (
-    <PageContainer>
-      <PageHeader
-        title="Pre-Onboarding"
-        subtitle="Invite candidates to fill their details before Day 1"
-        actions={
+    <Wrapper>
+      {embedded ? (
+        <div className="flex justify-end mb-4">
           <Button onClick={() => setInviteOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Invite Candidate
           </Button>
-        }
-      />
+        </div>
+      ) : (
+        <PageHeader
+          title="Pre-Onboarding"
+          subtitle="Invite candidates to fill their details before Day 1"
+          actions={
+            <Button onClick={() => setInviteOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Invite Candidate
+            </Button>
+          }
+        />
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -752,7 +763,7 @@ export function PreOnboarding() {
         approving={approveMutation.isPending}
         rejecting={rejectMutation.isPending}
       />
-    </PageContainer>
+    </Wrapper>
   )
 }
 
