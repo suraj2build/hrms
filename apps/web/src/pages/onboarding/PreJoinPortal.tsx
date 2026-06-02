@@ -660,6 +660,9 @@ function validateStep(step: number, form: FormData): string | null {
 // Main page
 // ---------------------------------------------------------------------------
 
+// API base — same origin/proxy in dev, full Railway URL in production.
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
+
 export function PreJoinPortal() {
   const { token } = useParams<{ token: string }>();
 
@@ -676,7 +679,7 @@ export function PreJoinPortal() {
       setPageState("expired");
       return;
     }
-    fetch(`/api/onboarding/pre-join/${token}`)
+    fetch(`${API_BASE}/onboarding/pre-join/${token}`)
       .then(async (res) => {
         if (res.status === 404 || res.status === 410) {
           setPageState("expired");
@@ -735,7 +738,7 @@ export function PreJoinPortal() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/onboarding/pre-join/${token}/submit`, {
+      const res = await fetch(`${API_BASE}/onboarding/pre-join/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
