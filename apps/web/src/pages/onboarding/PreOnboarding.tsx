@@ -395,7 +395,9 @@ export function PreOnboarding() {
           : 'Invitation created — share the link below (email not sent)',
       )
     },
-    onError: () => toast.error('Failed to send invitation'),
+    onError: (e: any) => toast.error('Failed to create invitation', {
+      description: e?.message ?? e?.body?.message ?? 'Unknown error',
+    }),
   })
 
   const approveMutation = useMutation({
