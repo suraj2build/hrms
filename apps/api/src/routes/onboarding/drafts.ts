@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { crossCheckIdentity } from '../../lib/onboarding/identity-check.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -322,6 +323,23 @@ export default async function draftRoutes(fastify: FastifyInstance) {
     }
     if (!draft.designation_id) {
       validationWarnings.push('Designation not set — required before creating employee record')
+    }
+
+    // ── Cross-document identity verification (Aadhaar = anchor) ───────────
+    // Ensure every uploaded document belongs to the same person: names and DOB
+    // must match the Aadhaar (base proof). Mismatches block approval.
+    {
+      const { data: docFields } = await fastify.supabase
+        .from('draft_employee_fields')
+        .select('field_name, extracted_value, source_document_type')
+        .eq('draft_id', id)
+        .eq('tenant_id', req.tenantId)
+
+      if (docFields && docFields.length > 0) {
+        const { errors: idErrors, warnings: idWarnings } = crossCheckIdentity(docFields)
+        validationErrors.push(...idErrors)
+        validationWarnings.push(...idWarnings)
+      }
     }
 
     const hasErrors = validationErrors.length > 0
