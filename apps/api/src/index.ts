@@ -255,10 +255,25 @@ const fastify = Fastify({
 async function start() {
   // Security
   await fastify.register(helmet, { global: true })
+  // CORS — allow the configured web URL(s), any *.vercel.app deploy, and
+  // localhost in dev. Uses a function so a stray WEB_URL='*' can't break it
+  // and preview/branch deploys still work. Auth is Bearer-token based.
+  const allowedExact = new Set(
+    (process.env.WEB_URL ?? '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s && s !== '*'),
+  )
   await fastify.register(cors, {
-    origin: process.env.NODE_ENV === 'production'
-      ? [process.env.WEB_URL ?? 'https://app.hrms.in']
-      : ['http://localhost:2000'],
+    origin: (origin, cb) => {
+      // Non-browser / same-origin / curl (no Origin header) → allow
+      if (!origin) return cb(null, true)
+      const ok =
+        allowedExact.has(origin) ||
+        /\.vercel\.app$/.test(new URL(origin).hostname) ||
+        /^https?:\/\/localhost(:\d+)?$/.test(origin)
+      cb(null, ok)
+    },
     credentials: true,
   })
   await fastify.register(rateLimit, {
