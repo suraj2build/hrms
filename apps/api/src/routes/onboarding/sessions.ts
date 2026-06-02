@@ -320,9 +320,11 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
     if (parsed.data.document_ids && parsed.data.document_ids.length > 0) {
       docsQuery = docsQuery.in('id', parsed.data.document_ids)
-    } else {
-      docsQuery = docsQuery.eq('extraction_status', 'pending')
     }
+    // Otherwise process EVERY document in the session. Re-extraction is a full
+    // refresh: it must (a) re-process documents stuck in 'processing' from an
+    // interrupted run, and (b) include every document so the cross-document
+    // merge is complete (the merge rebuilds the draft from this run's results).
 
     const { data: documents, error: docsError } = await docsQuery
 
@@ -387,14 +389,16 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           fastify.log.info({ docId: doc.id, base64Len: imageBase64.length }, 'extract: base64 encoded for Claude')
         }
 
-        // 4. Extract with Claude
+        // 4. Extract with Claude (bounded — a single hung model call must not
+        //    stall the whole run and leave later documents in 'processing').
         fastify.log.info({ docId: doc.id }, 'extract: calling Claude')
-        const extractionResult = await extractFromDocument(
-          doc.document_type,
-          parseResult.text,
-          mimeType,
-          imageBase64,
-        )
+        const EXTRACT_TIMEOUT_MS = 120_000
+        const extractionResult = await Promise.race([
+          extractFromDocument(doc.document_type, parseResult.text, mimeType, imageBase64),
+          new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error(`Extraction timed out after ${EXTRACT_TIMEOUT_MS / 1000}s`)), EXTRACT_TIMEOUT_MS),
+          ),
+        ])
         fastify.log.info({
           docId: doc.id,
           fieldsCount: extractionResult.fields.length,
