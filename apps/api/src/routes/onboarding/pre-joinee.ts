@@ -112,6 +112,22 @@ function resolveSubmission(body: SubmissionBody) {
   }
 }
 
+const DOC_TYPES = ['cv', 'pan', 'aadhaar', 'cheque', 'photo'] as const
+const MANDATORY_DOCS = ['cv', 'pan', 'aadhaar', 'cheque'] as const
+
+const uploadUrlSchema = z.object({
+  document_type: z.enum(DOC_TYPES),
+  file_name:     z.string().min(1, 'file_name is required'),
+})
+
+const registerDocSchema = z.object({
+  document_type: z.enum(DOC_TYPES),
+  file_name:     z.string().min(1, 'file_name is required'),
+  storage_path:  z.string().min(1, 'storage_path is required'),
+  mime_type:     z.string().optional(),
+  file_size:     z.number().int().nonnegative().optional(),
+})
+
 type CreateInvitationBody = z.infer<typeof createInvitationSchema>
 type RejectBody           = z.infer<typeof rejectSchema>
 type SubmissionBody       = z.infer<typeof submissionSchema>
@@ -157,6 +173,44 @@ function mapSubmissionRow(row: any) {
 
 export default async function preJoineeRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+
+  // Look up an invitation by token. Returns the invitation row, or sends an
+  // appropriate error reply and returns null. Mirrors the GET token validation.
+  async function resolveInvitationByToken(
+    token: string,
+    reply: any,
+  ): Promise<{ id: string; tenant_id: string; status: string; expires_at: string | null } | null> {
+    const { data: invitation, error } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .select('id, tenant_id, status, expires_at')
+      .eq('token', token)
+      .maybeSingle()
+
+    if (error) {
+      fastify.log.error({ event: 'pre_joinee.token.resolve', token, err: error })
+      reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return null
+    }
+    if (!invitation) {
+      reply.code(404).send({ error: 'NOT_FOUND', message: 'Invitation not found' })
+      return null
+    }
+
+    const expired = invitation.expires_at ? new Date(invitation.expires_at) < new Date() : false
+    if (expired) {
+      reply.code(410).send({ error: 'GONE', message: 'This invitation link has expired' })
+      return null
+    }
+    if (invitation.status !== 'pending') {
+      reply.code(410).send({
+        error: 'GONE',
+        message: `This invitation has already been ${invitation.status}`,
+      })
+      return null
+    }
+
+    return invitation
+  }
 
   // ── 0. GET /onboarding/pre-joinee/stats — status counts for the tenant ─────
   // Registered before the list/other GETs to keep route matching unambiguous.
@@ -661,6 +715,76 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── 7a. POST /onboarding/pre-join/:token/upload-url — signed upload URL ─────
+
+  fastify.post('/onboarding/pre-join/:token/upload-url', async (req: any, reply) => {
+    const { token } = req.params as { token: string }
+
+    const parsed = uploadUrlSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+
+    const invitation = await resolveInvitationByToken(token, reply)
+    if (!invitation) return // reply already sent
+
+    const { document_type, file_name } = parsed.data
+    const ext = file_name.includes('.') ? file_name.split('.').pop()!.toLowerCase() : 'bin'
+    const path = `pre-onboarding/${invitation.tenant_id}/${invitation.id}/${document_type}-${Date.now()}.${ext}`
+
+    const { data, error } = await fastify.supabase.storage
+      .from('employee-files')
+      .createSignedUploadUrl(path)
+
+    if (error || !data) {
+      fastify.log.error({ event: 'pre_joinee.upload_url', invitation_id: invitation.id, err: error })
+      return reply.code(500).send({ error: 'STORAGE_ERROR', message: error?.message ?? 'Failed to create upload URL' })
+    }
+
+    return reply.send({
+      data: { signed_url: data.signedUrl, token: data.token, path },
+    })
+  })
+
+  // ── 7b. POST /onboarding/pre-join/:token/documents — register uploaded doc ──
+
+  fastify.post('/onboarding/pre-join/:token/documents', async (req: any, reply) => {
+    const { token } = req.params as { token: string }
+
+    const parsed = registerDocSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+
+    const invitation = await resolveInvitationByToken(token, reply)
+    if (!invitation) return // reply already sent
+
+    const { document_type, file_name, storage_path, mime_type, file_size } = parsed.data
+
+    const { error } = await fastify.supabase
+      .from('pre_joinee_documents')
+      .upsert(
+        {
+          tenant_id:     invitation.tenant_id,
+          invitation_id: invitation.id,
+          document_type,
+          file_name,
+          storage_path,
+          mime_type:     mime_type ?? null,
+          file_size:     file_size ?? null,
+          uploaded_at:   new Date().toISOString(),
+        },
+        { onConflict: 'invitation_id,document_type' },
+      )
+
+    if (error) {
+      fastify.log.error({ event: 'pre_joinee.documents.upsert', invitation_id: invitation.id, err: error })
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
+
+    return reply.send({ data: { document_type, storage_path } })
+  })
+
   // ── 8. POST /onboarding/pre-join/:token/submit — candidate submits details ─
 
   fastify.post('/onboarding/pre-join/:token/submit', async (req: any, reply) => {
@@ -712,6 +836,27 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     }
 
     const tenantId: string = invitation.tenant_id
+
+    // Guard: all 4 mandatory documents must be uploaded before submission.
+    const { data: docs, error: docsErr } = await fastify.supabase
+      .from('pre_joinee_documents')
+      .select('document_type')
+      .eq('invitation_id', invitation.id)
+
+    if (docsErr) {
+      fastify.log.error({ event: 'pre_joinee.submit.docs_check', invitation_id: invitation.id, err: docsErr })
+      return reply.code(500).send({ error: 'DB_ERROR', message: docsErr.message })
+    }
+
+    const have = new Set((docs ?? []).map((d: any) => d.document_type))
+    const missing = MANDATORY_DOCS.filter((t) => !have.has(t))
+    if (missing.length > 0) {
+      return reply.code(400).send({
+        error: 'DOCUMENTS_REQUIRED',
+        message: 'Please upload all required documents (CV, PAN, Aadhaar, Cancelled Cheque)',
+        missing,
+      })
+    }
 
     // Upsert submission
     const { error: subErr } = await fastify.supabase

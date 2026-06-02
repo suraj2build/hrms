@@ -574,8 +574,13 @@ const STEPS = [
   { label: "Personal" },
   { label: "Address" },
   { label: "Bank & Tax" },
+  { label: "Documents" },
   { label: "Review" },
 ];
+
+// Step indices (single source of truth for navigation logic).
+const STEP_DOCUMENTS = 3;
+const STEP_REVIEW = 4;
 
 function ProgressBar({ current }: { current: number }) {
   return (
@@ -627,6 +632,127 @@ function ProgressBar({ current }: { current: number }) {
 }
 
 // ---------------------------------------------------------------------------
+// Documents step
+// ---------------------------------------------------------------------------
+
+type DocType = "cv" | "pan" | "aadhaar" | "cheque" | "photo";
+type UploadStatus = "idle" | "uploading" | "done" | "error";
+
+interface DocSlotDef {
+  type: DocType;
+  label: string;
+  hint: string;
+  accept: string;
+  required: boolean;
+}
+
+const DOC_SLOTS: DocSlotDef[] = [
+  { type: "cv", label: "CV / Resume", hint: "PDF or image", accept: ".pdf,image/*", required: true },
+  { type: "pan", label: "PAN Card", hint: "PDF or image", accept: ".pdf,image/*", required: true },
+  { type: "aadhaar", label: "Aadhaar Card", hint: "PDF or image", accept: ".pdf,image/*", required: true },
+  { type: "cheque", label: "Cancelled Cheque", hint: "PDF or image", accept: ".pdf,image/*", required: true },
+  { type: "photo", label: "Passport Photo", hint: "Image only (optional)", accept: "image/*", required: false },
+];
+
+const MANDATORY_DOC_TYPES: DocType[] = ["cv", "pan", "aadhaar", "cheque"];
+
+interface DocSlotState {
+  status: UploadStatus;
+  fileName?: string;
+  error?: string;
+}
+
+function DocSlot({
+  def,
+  state,
+  onSelect,
+}: {
+  def: DocSlotDef;
+  state: DocSlotState;
+  onSelect: (file: File) => void;
+}) {
+  const { status, fileName, error } = state;
+  return (
+    <div className="rounded-xl border border-gray-200 p-4 flex items-center gap-4">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-800">{def.label}</span>
+          {def.required && <span className="text-red-500">*</span>}
+        </div>
+        {status === "done" && fileName ? (
+          <p className="text-xs text-green-600 mt-0.5 truncate flex items-center gap-1">
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            {fileName}
+          </p>
+        ) : status === "error" ? (
+          <p className="text-xs text-red-500 mt-0.5 truncate">{error ?? "Upload failed"}</p>
+        ) : (
+          <p className="text-xs text-gray-400 mt-0.5">{def.hint}</p>
+        )}
+      </div>
+
+      <div className="shrink-0">
+        {status === "uploading" ? (
+          <div className="flex items-center gap-2 text-xs text-violet-600">
+            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Uploading
+          </div>
+        ) : (
+          <label
+            className={[
+              "cursor-pointer rounded-lg px-3 py-2 text-xs font-semibold transition inline-block",
+              status === "done"
+                ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                : status === "error"
+                ? "bg-red-50 text-red-600 hover:bg-red-100"
+                : "bg-violet-600 text-white hover:bg-violet-700",
+            ].join(" ")}
+          >
+            {status === "done" ? "Replace" : status === "error" ? "Retry" : "Upload"}
+            <input
+              type="file"
+              accept={def.accept}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onSelect(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DocumentsStep({
+  slots,
+  onSelect,
+}: {
+  slots: Record<DocType, DocSlotState>;
+  onSelect: (type: DocType, file: File) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {DOC_SLOTS.map((def) => (
+        <DocSlot
+          key={def.type}
+          def={def}
+          state={slots[def.type]}
+          onSelect={(file) => onSelect(def.type, file)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
@@ -650,7 +776,7 @@ function validateStep(step: number, form: FormData): string | null {
     if (!form.pan_number.trim() || form.pan_number.length !== 10)
       return "Valid 10-character PAN number is required.";
   }
-  if (step === 3) {
+  if (step === STEP_REVIEW) {
     if (!form.declaration) return "Please confirm the declaration before submitting.";
   }
   return null;
@@ -672,6 +798,19 @@ export function PreJoinPortal() {
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [docSlots, setDocSlots] = useState<Record<DocType, DocSlotState>>({
+    cv: { status: "idle" },
+    pan: { status: "idle" },
+    aadhaar: { status: "idle" },
+    cheque: { status: "idle" },
+    photo: { status: "idle" },
+  });
+
+  const uploadedDocs = new Set<DocType>(
+    (Object.keys(docSlots) as DocType[]).filter((t) => docSlots[t].status === "done"),
+  );
+  const allMandatoryUploaded = MANDATORY_DOC_TYPES.every((t) => uploadedDocs.has(t));
 
   // ---- Fetch token info on mount ----
   useEffect(() => {
@@ -710,11 +849,62 @@ export function PreJoinPortal() {
     setError(null);
   }
 
+  // ---- Document upload (signed URL flow) ----
+  async function handleDocUpload(type: DocType, file: File) {
+    setError(null);
+    setDocSlots((prev) => ({ ...prev, [type]: { status: "uploading", fileName: file.name } }));
+    try {
+      // 1. Request a signed upload URL
+      const urlRes = await fetch(`${API_BASE}/onboarding/pre-join/${token}/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_type: type, file_name: file.name }),
+      });
+      if (!urlRes.ok) throw new Error("Could not start upload");
+      const { data: urlData } = await urlRes.json();
+      const signedUrl: string = urlData.signed_url;
+      const path: string = urlData.path;
+
+      // 2. PUT the file directly to storage
+      const putRes = await fetch(signedUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+      });
+      if (!putRes.ok) throw new Error("Upload failed");
+
+      // 3. Register the document
+      const regRes = await fetch(`${API_BASE}/onboarding/pre-join/${token}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_type: type,
+          file_name: file.name,
+          storage_path: path,
+          mime_type: file.type,
+          file_size: file.size,
+        }),
+      });
+      if (!regRes.ok) throw new Error("Could not save document");
+
+      setDocSlots((prev) => ({ ...prev, [type]: { status: "done", fileName: file.name } }));
+    } catch (e) {
+      setDocSlots((prev) => ({
+        ...prev,
+        [type]: { status: "error", fileName: file.name, error: e instanceof Error ? e.message : "Upload failed" },
+      }));
+    }
+  }
+
   // ---- Navigation ----
   function handleNext() {
     const err = validateStep(currentStep, form);
     if (err) {
       setError(err);
+      return;
+    }
+    if (currentStep === STEP_DOCUMENTS && !allMandatoryUploaded) {
+      setError("All 4 required documents must be uploaded to continue.");
       return;
     }
     setError(null);
@@ -730,9 +920,13 @@ export function PreJoinPortal() {
 
   // ---- Submit ----
   async function handleSubmit() {
-    const err = validateStep(3, form);
+    const err = validateStep(STEP_REVIEW, form);
     if (err) {
       setError(err);
+      return;
+    }
+    if (!allMandatoryUploaded) {
+      setError("All 4 required documents must be uploaded before submitting.");
       return;
     }
     setSubmitting(true);
@@ -830,13 +1024,15 @@ export function PreJoinPortal() {
             {currentStep === 0 && "Personal Information"}
             {currentStep === 1 && "Address & Emergency Contact"}
             {currentStep === 2 && "Bank & Compliance Details"}
-            {currentStep === 3 && "Review & Submit"}
+            {currentStep === 3 && "Documents"}
+            {currentStep === 4 && "Review & Submit"}
           </h2>
           <p className="text-sm text-gray-500 mb-6">
             {currentStep === 0 && "Tell us a bit about yourself."}
             {currentStep === 1 && "Your current address and someone we can contact in emergencies."}
             {currentStep === 2 && "Needed for salary processing and statutory compliance."}
-            {currentStep === 3 && "Please review all your details before submitting."}
+            {currentStep === 3 && "Upload the required documents below."}
+            {currentStep === 4 && "Please review all your details before submitting."}
           </p>
 
           {/* Step content */}
@@ -844,6 +1040,19 @@ export function PreJoinPortal() {
           {currentStep === 1 && <Step2 form={form} onChange={handleChange} />}
           {currentStep === 2 && <Step3 form={form} onChange={handleChange} />}
           {currentStep === 3 && (
+            <>
+              <DocumentsStep slots={docSlots} onSelect={handleDocUpload} />
+              <p
+                className={[
+                  "text-xs mt-4",
+                  allMandatoryUploaded ? "text-green-600" : "text-gray-500",
+                ].join(" ")}
+              >
+                All 4 required documents must be uploaded to continue.
+              </p>
+            </>
+          )}
+          {currentStep === 4 && (
             <Step4
               form={form}
               onDeclarationChange={(v) =>
@@ -885,7 +1094,13 @@ export function PreJoinPortal() {
               <button
                 type="button"
                 onClick={handleNext}
-                className="ml-auto flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 active:bg-violet-800 transition"
+                disabled={currentStep === STEP_DOCUMENTS && !allMandatoryUploaded}
+                className={[
+                  "ml-auto flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition",
+                  currentStep === STEP_DOCUMENTS && !allMandatoryUploaded
+                    ? "bg-violet-300 cursor-not-allowed"
+                    : "bg-violet-600 hover:bg-violet-700 active:bg-violet-800",
+                ].join(" ")}
               >
                 Continue
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -896,10 +1111,10 @@ export function PreJoinPortal() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || !form.declaration}
+                disabled={submitting || !form.declaration || !allMandatoryUploaded}
                 className={[
                   "ml-auto flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition",
-                  submitting || !form.declaration
+                  submitting || !form.declaration || !allMandatoryUploaded
                     ? "bg-violet-300 cursor-not-allowed"
                     : "bg-violet-600 hover:bg-violet-700 active:bg-violet-800",
                 ].join(" ")}
