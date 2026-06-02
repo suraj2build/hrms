@@ -631,6 +631,7 @@ export const DOMAINS: Domain[] = [
           { id: 'cost-centers', label: 'Cost Centers',        route: '/admin/masters/cost-centers',            icon: Scale     },
           { id: 'grades',       label: 'Grades & Pay Bands',  route: '/admin/masters/grades',                  icon: TrendingUp },
           { id: 'emp-types',    label: 'Employment Types',    route: '/admin/masters/employment-categories',   icon: Users     },
+          { id: 'asset-cats',   label: 'Asset Categories',    route: '/admin/masters/asset-categories',        icon: Package   },
         ],
       },
 
