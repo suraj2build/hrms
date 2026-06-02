@@ -101,11 +101,25 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
     if (from)           q = q.gte('created_at', from)
     if (to)             q = q.lte('created_at', to)
 
-    const { data, error, count } = await q
+    let { data, error, count } = await q
 
+    // Resilience: the embedded FK join (profiles!event_log_actor_id_fkey) or
+    // optional columns may be absent on a drifted DB. Retry with a minimal
+    // select before giving up, then degrade to an empty feed (never 500 the
+    // Control Center over a non-critical audit widget).
     if (error) {
-      req.log.error({ err: error }, 'event_log list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch event log' })
+      const retry = await fastify.supabase
+        .from('event_log')
+        .select('id, event_type, status, correlation_id, actor_id, payload, created_at', { count: 'exact' })
+        .eq('tenant_id', req.tenantId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1)
+      if (retry.error) {
+        req.log.warn({ err: retry.error }, 'event_log query failed — returning empty feed')
+        return reply.send({ data: [], total: 0, limit, offset })
+      }
+      data  = retry.data as any
+      count = retry.count
     }
 
     const rows = (data ?? []).map((r: any) => ({
