@@ -416,6 +416,14 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
  */
 function LegacyAdminRedirect() {
   const { pathname, search } = useLocation()
+
+  // Guard against infinite /admin/admin/... loops and never hijack public or
+  // role-scoped paths. If the path is already under /admin (or a known public
+  // / scoped prefix), don't re-prepend — send to the role landing instead.
+  const PROTECTED_PREFIXES = ['/admin', '/ess', '/manager', '/owner', '/pre-join', '/login', '/signup', '/auth']
+  if (PROTECTED_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/'))) {
+    return <RoleRedirect />
+  }
   return <Navigate to={`/admin${pathname}${search}`} replace />
 }
 
