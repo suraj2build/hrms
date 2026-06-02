@@ -344,6 +344,15 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
     for (const doc of documents) {
       fastify.log.info({ docId: doc.id, docType: doc.document_type, storagePath: doc.storage_path }, 'extract: processing document')
+      // Mark this document as in-progress so the UI can show live progress
+      // (committed immediately — the review screen polls and reflects it).
+      {
+        const { error: procErr } = await fastify.supabase
+          .from('onboarding_documents')
+          .update({ extraction_status: 'processing', extraction_error: null })
+          .eq('id', doc.id)
+        if (procErr) fastify.log.error({ procErr, docId: doc.id }, 'extract: failed to mark document processing')
+      }
       try {
         // 1. Download file from Supabase Storage
         const { data: fileData, error: downloadError } = await fastify.supabase.storage
@@ -506,16 +515,23 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
         const cols: Record<string, unknown> = {}
 
-        // Handle full_name → first_name + last_name split
+        // Handle full_name → first_name + last_name split.
+        // full_name is resolved by document-authority priority (Aadhaar/PAN/
+        // passport first), so it is the legal name and WINS over a resume's
+        // first_name/last_name. Resume first/last is used only as a fallback
+        // when no authoritative full_name is present.
         const fullName = fields['full_name']?.value
+        const haveFullName = !!fullName
         if (fullName) {
           const parts = fullName.trim().split(/\s+/)
-          if (!fields['first_name']?.value) cols['first_name'] = parts[0] ?? fullName
-          if (!fields['last_name']?.value && parts.length > 1) cols['last_name'] = parts.slice(1).join(' ')
+          cols['first_name'] = parts[0] ?? fullName
+          if (parts.length > 1) cols['last_name'] = parts.slice(1).join(' ')
         }
 
         for (const [rawName, fieldData] of Object.entries(fields)) {
           if (!fieldData.value || rawName === 'full_name') continue
+          // Don't let resume first/last overwrite the authoritative full_name split
+          if (haveFullName && (rawName === 'first_name' || rawName === 'last_name')) continue
 
           const colName = FIELD_MAP[rawName] !== undefined ? FIELD_MAP[rawName] : rawName
 
@@ -602,17 +618,13 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
       // ── Insert draft_employee_fields (needs draft_id — do after profile created) ──
       if (draftProfileId) {
-        // Delete stale AI-extracted fields for this draft (re-extraction overwrites them)
-        await fastify.supabase
-          .from('draft_employee_fields')
-          .delete()
-          .eq('draft_id', draftProfileId)
-          .eq('tenant_id', req.tenantId)
-          .eq('is_hr_override', false)
-
+        // Build the new extracted rows first, and track which field_names the
+        // documents produced a REAL (non-null) value for.
         const fieldRows: object[] = []
+        const extractedNames = new Set<string>()
         for (const doc of extractionResults) {
           for (const f of doc.fields) {
+            if (f.value !== null && f.value !== '') extractedNames.add(f.field_name)
             fieldRows.push({
               tenant_id:            req.tenantId,
               draft_id:             draftProfileId,
@@ -626,6 +638,28 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
               is_hr_override:       false,
             })
           }
+        }
+
+        // 1. Clear prior AI-extracted (non-override) rows — they're being refreshed.
+        await fastify.supabase
+          .from('draft_employee_fields')
+          .delete()
+          .eq('draft_id', draftProfileId)
+          .eq('tenant_id', req.tenantId)
+          .eq('is_hr_override', false)
+
+        // 2. DOCUMENT WINS over manual entry: for any field the documents now
+        //    provide a value for, also remove the HR-manual override so the
+        //    extracted value takes over. Manual entries for fields NOT present
+        //    in any document are preserved (re-extraction only fills/updates).
+        if (extractedNames.size > 0) {
+          await fastify.supabase
+            .from('draft_employee_fields')
+            .delete()
+            .eq('draft_id', draftProfileId)
+            .eq('tenant_id', req.tenantId)
+            .eq('is_hr_override', true)
+            .in('field_name', Array.from(extractedNames))
         }
 
         if (fieldRows.length > 0) {

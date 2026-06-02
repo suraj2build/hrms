@@ -701,10 +701,38 @@ export function HRReviewWorkspace() {
 
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [editingField, setEditingField] = useState<string | null>(null)
+
+  // ── Document viewer (preview the actual uploaded file) ──
+  const [viewer, setViewer] = useState<{ open: boolean; loading: boolean; url: string | null; name: string; mime: string }>(
+    { open: false, loading: false, url: null, name: '', mime: '' },
+  )
+
+  async function openDocumentViewer(doc: OnboardingDocument) {
+    setViewer({ open: true, loading: true, url: null, name: doc.file_name, mime: '' })
+    try {
+      const { data, error } = await supabase.storage
+        .from('employee-files')
+        .createSignedUrl(doc.storage_path, 3600)
+      if (error || !data?.signedUrl) throw new Error(error?.message ?? 'Could not load document')
+      const ext = (doc.file_name.split('.').pop() ?? '').toLowerCase()
+      const mime = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)
+        ? 'image'
+        : ext === 'pdf'
+        ? 'pdf'
+        : 'other'
+      setViewer({ open: true, loading: false, url: data.signedUrl, name: doc.file_name, mime })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not load document')
+      setViewer({ open: false, loading: false, url: null, name: '', mime: '' })
+    }
+  }
+
   const [activeTab, setActiveTab] = useState<'extracted' | 'validation'>('extracted')
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null)
+  // Drives live polling + the progress banner while extraction is running
+  const [isExtracting, setIsExtracting] = useState(false)
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -713,6 +741,9 @@ export function HRReviewWorkspace() {
     queryFn: () => api.get(`/onboarding/sessions/${sessionId}`),
     enabled: !!sessionId,
     staleTime: 30_000,
+    // While an extraction is running, poll so per-document status updates
+    // (pending → processing → extracted/failed) appear live in the UI.
+    refetchInterval: isExtracting ? 1200 : false,
   })
 
   const session = sessionData?.data
@@ -764,6 +795,8 @@ export function HRReviewWorkspace() {
     mutationFn: () => api.post<{ data: { documents_extracted: number; draft_profile_id: string | null; doc_errors?: Array<{ docId: string; step: string; reason: string }> } }>(
       `/onboarding/sessions/${sessionId}/extract`, {}
     ),
+    onMutate: () => setIsExtracting(true),
+    onSettled: () => setIsExtracting(false),
     onSuccess: async (resp) => {
       const count = resp?.data?.documents_extracted ?? 0
       const profileId = resp?.data?.draft_profile_id
@@ -936,6 +969,35 @@ export function HRReviewWorkspace() {
               </p>
             </div>
 
+            {/* Live extraction progress */}
+            {isExtracting && documents.length > 0 && (() => {
+              const done = documents.filter((d) =>
+                ['extracted', 'completed', 'failed'].includes(d.extraction_status)).length
+              const processingDoc = documents.find((d) => d.extraction_status === 'processing')
+              const pct = Math.round((done / documents.length) * 100)
+              return (
+                <div className="mx-3 mb-2 rounded-md border border-primary/20 bg-primary/5 p-2.5 space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                    <span className="text-[11px] font-medium text-foreground">
+                      Extracting… {done} of {documents.length}
+                    </span>
+                  </div>
+                  {processingDoc && (
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      Processing: {processingDoc.document_type.replace(/_/g, ' ')} — {processingDoc.file_name}
+                    </p>
+                  )}
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] transition-all duration-300"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })()}
+
             <div className="px-2 space-y-0.5">
               {documents.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6 px-4">
@@ -956,8 +1018,18 @@ export function HRReviewWorkspace() {
                       <span className="text-base leading-none">
                         {DOC_TYPE_ICON[doc.document_type] ?? '📎'}
                       </span>
-                      <span className="text-xs font-medium text-foreground truncate">
+                      <span className="text-xs font-medium text-foreground truncate flex-1">
                         {doc.document_type.replace(/_/g, ' ')}
+                      </span>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title="View document"
+                        onClick={(e) => { e.stopPropagation(); void openDocumentViewer(doc) }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void openDocumentViewer(doc) } }}
+                        className="flex-shrink-0 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
                       </span>
                     </div>
                     <p className="text-[10px] text-muted-foreground truncate mb-1">
@@ -1231,6 +1303,16 @@ export function HRReviewWorkspace() {
                     <ConfidenceBadge score={selectedDoc.confidence_score ?? null} />
                   </div>
 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-2"
+                    onClick={() => openDocumentViewer(selectedDoc)}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    View Document
+                  </Button>
+
                   {/* Fields from this doc */}
                   {selectedDoc.extracted_fields && selectedDoc.extracted_fields.length > 0 ? (
                     <div className="space-y-1 pt-1 border-t border-border">
@@ -1407,6 +1489,44 @@ export function HRReviewWorkspace() {
           }}
         />
       )}
+
+      {/* ── Document Viewer ──────────────────────────────────────────────────── */}
+      <Dialog
+        open={viewer.open}
+        onOpenChange={(o) => setViewer((v) => ({ ...v, open: o }))}
+      >
+        <DialogContent className="max-w-4xl w-[calc(100%-2rem)] h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-4 py-3 border-b border-border">
+            <DialogTitle className="text-sm flex items-center gap-2 min-w-0">
+              <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+              <span className="truncate">{viewer.name || 'Document'}</span>
+            </DialogTitle>
+            <DialogDescription className="sr-only">Document preview</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 bg-muted/30 overflow-auto flex items-center justify-center">
+            {viewer.loading ? (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            ) : !viewer.url ? (
+              <p className="text-sm text-muted-foreground">Could not load document.</p>
+            ) : viewer.mime === 'image' ? (
+              <img src={viewer.url} alt={viewer.name} className="max-w-full max-h-full object-contain" />
+            ) : (
+              <iframe src={viewer.url} title={viewer.name} className="w-full h-full border-0" />
+            )}
+          </div>
+
+          <DialogFooter className="px-4 py-3 border-t border-border">
+            {viewer.url && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={viewer.url} target="_blank" rel="noopener noreferrer">
+                  Open in new tab
+                </a>
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

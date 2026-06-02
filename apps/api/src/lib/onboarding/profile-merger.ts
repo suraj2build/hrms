@@ -27,6 +27,65 @@ export interface MergedProfile {
 
 const CRITICAL_FIELDS = ['first_name', 'last_name', 'email', 'pan_number', 'joining_date']
 
+/**
+ * Field → authoritative document-type priority.
+ *
+ * For each field we trust the document that legally/structurally OWNS that
+ * datum, NOT whichever OCR happened to report the highest confidence. Confidence
+ * is only used as a tie-breaker WITHIN the same authority tier (or when none of
+ * the source documents appear in the priority list).
+ *
+ * Document-type keys are normalised (lowercase, spaces/hyphens → underscore) to
+ * match `extraction-engine.ts` DOCUMENT_FIELDS keys.
+ */
+const FIELD_SOURCE_PRIORITY: Record<string, string[]> = {
+  // ── Legal identity — government IDs are authoritative ──
+  full_name:           ['aadhaar', 'pan', 'passport', 'driving_license', 'offer_letter', 'resume'],
+  first_name:          ['aadhaar', 'pan', 'passport', 'resume'],
+  last_name:           ['aadhaar', 'pan', 'passport', 'resume'],
+  father_name:         ['pan', 'aadhaar'],
+  dob:                 ['aadhaar', 'pan', 'passport', 'driving_license', 'pf_uan_document'],
+  gender:              ['aadhaar', 'passport'],
+  nationality:         ['passport', 'aadhaar'],
+
+  // ── Contact — the candidate's current details live on the resume ──
+  email:               ['resume', 'offer_letter', 'other'],
+  phone:               ['resume', 'offer_letter', 'aadhaar', 'other'],
+
+  // ── Address — Aadhaar is the authoritative proof of address ──
+  address_line1:       ['aadhaar', 'passport', 'driving_license'],
+  address_city:        ['aadhaar', 'driving_license', 'resume'],
+  address_state:       ['aadhaar', 'driving_license'],
+  address_pincode:     ['aadhaar'],
+
+  // ── Statutory identifiers ──
+  pan_number:          ['pan', 'salary_slip'],
+  passport_number:     ['passport'],
+  uan_number:          ['pf_uan_document', 'salary_slip'],
+  pf_number:           ['pf_uan_document', 'salary_slip'],
+  esi_number:          ['esi_document', 'salary_slip'],
+
+  // ── Bank / payroll — cancelled cheque / bank proof is authoritative ──
+  account_holder_name: ['bank_proof'],
+  bank_name:           ['bank_proof', 'salary_slip'],
+  account_number:      ['bank_proof'],
+  ifsc_code:           ['bank_proof'],
+  branch_name:         ['bank_proof'],
+  account_type:        ['bank_proof'],
+
+  // ── Employment — offer / compensation letters ──
+  joining_date:        ['offer_letter'],
+  employment_type:     ['offer_letter'],
+  designation:         ['offer_letter', 'experience_letter'],
+  department:          ['offer_letter'],
+  ctc_annual:          ['offer_letter', 'compensation_letter'],
+  ctc_monthly:         ['compensation_letter', 'offer_letter'],
+}
+
+function normalizeDocType(dt: string): string {
+  return (dt ?? '').toLowerCase().replace(/[\s-]/g, '_')
+}
+
 export function mergeExtractions(input: MergeInput): MergedProfile {
   // Collect all field occurrences across documents
   const fieldMap: Record<
@@ -64,10 +123,26 @@ export function mergeExtractions(input: MergeInput): MergedProfile {
       (o) => o.value !== null && o.value !== '',
     )
 
-    // Pick highest confidence as primary
-    const sorted = [...occurrences].sort(
-      (a, b) => b.confidence_score - a.confidence_score,
-    )
+    // Pick the primary value by DOCUMENT AUTHORITY for this field, falling back
+    // to confidence only as a tie-breaker. This prevents a high-confidence but
+    // wrong OCR value (e.g. a misread name on an ID) from overriding the value
+    // from the document that actually owns the field.
+    const priority = FIELD_SOURCE_PRIORITY[fieldName]
+    const rankOf = (docType: string): number => {
+      if (!priority) return Number.MAX_SAFE_INTEGER
+      const idx = priority.indexOf(normalizeDocType(docType))
+      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx
+    }
+
+    // Prefer real values over nulls; among real values use authority then
+    // confidence; if every occurrence is null, keep the first (null) entry.
+    const candidates = nonNullOccurrences.length > 0 ? nonNullOccurrences : occurrences
+    const sorted = [...candidates].sort((a, b) => {
+      const ra = rankOf(a.source_document_type)
+      const rb = rankOf(b.source_document_type)
+      if (ra !== rb) return ra - rb
+      return b.confidence_score - a.confidence_score
+    })
     const primary = sorted[0]
 
     // Detect conflicts — two non-null values from different sources that differ
