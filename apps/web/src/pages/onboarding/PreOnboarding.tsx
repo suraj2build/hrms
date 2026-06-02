@@ -347,12 +347,12 @@ export function PreOnboarding() {
 
   const { data: statsData } = useQuery<StatsResponse>({
     queryKey: ['pre-joinee-stats'],
-    queryFn: () => api.get('/onboarding/pre-joinee/stats').then(r => r.data),
+    queryFn: () => api.get('/onboarding/pre-joinee/stats'),
   })
 
   const { data: listData, isLoading } = useQuery<PreJoineeListResponse>({
     queryKey: ['pre-joinee-list'],
-    queryFn: () => api.get('/onboarding/pre-joinee').then(r => r.data),
+    queryFn: () => api.get('/onboarding/pre-joinee'),
   })
 
   const invitations: PreJoinee[] = listData?.data ?? []
@@ -382,7 +382,7 @@ export function PreOnboarding() {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const inviteMutation = useMutation({
-    mutationFn: (payload: InviteForm) => api.post('/onboarding/pre-joinee', payload).then(r => r.data),
+    mutationFn: (payload: InviteForm) => api.post('/onboarding/pre-joinee', payload),
     onSuccess: (data: { data?: { invite_url?: string; invite_token?: string; email_sent?: boolean } }) => {
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
@@ -401,7 +401,7 @@ export function PreOnboarding() {
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/onboarding/pre-joinee/${id}/approve`).then(r => r.data),
+    mutationFn: (id: string) => api.post(`/onboarding/pre-joinee/${id}/approve`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
@@ -413,7 +413,7 @@ export function PreOnboarding() {
 
   const rejectMutation = useMutation({
     mutationFn: ({ id, notes }: { id: string; notes: string }) =>
-      api.post(`/onboarding/pre-joinee/${id}/reject`, { notes }).then(r => r.data),
+      api.post(`/onboarding/pre-joinee/${id}/reject`, { notes }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
@@ -424,7 +424,7 @@ export function PreOnboarding() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/onboarding/pre-joinee/${id}`).then(r => r.data),
+    mutationFn: (id: string) => api.delete(`/onboarding/pre-joinee/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
