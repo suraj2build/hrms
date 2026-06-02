@@ -56,6 +56,28 @@ interface SeparationRow {
   clearances: ClearanceDept[]
   fnf: FnF | null
   status: 'active' | 'completed'
+  lifecycle_stage?: string
+  approval_status?: string
+  relieved_at?: string | null
+  archived_at?: string | null
+}
+
+// ── Lifecycle stages ────────────────────────────────────────────────────────
+
+const LIFECYCLE_STAGES: { key: string; label: string }[] = [
+  { key: 'initiated',     label: 'Resignation' },
+  { key: 'notice_period', label: 'Notice Period' },
+  { key: 'clearance',     label: 'Clearance' },
+  { key: 'fnf',           label: 'F&F' },
+  { key: 'relieving',     label: 'Relieving' },
+  { key: 'archived',      label: 'Archived' },
+]
+
+function stageIndex(stage?: string) {
+  // 'relieved' maps onto the 'relieving' slot for stepper display.
+  const s = stage === 'relieved' ? 'relieving' : (stage ?? 'initiated')
+  const i = LIFECYCLE_STAGES.findIndex(x => x.key === s)
+  return i === -1 ? 0 : i
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,6 +129,139 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
           style={{ width: `${pct}%` }}
         />
       </div>
+    </div>
+  )
+}
+
+// ── Lifecycle Stepper ─────────────────────────────────────────────────────────
+
+const BRAND_GRADIENT = 'bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF]'
+
+function LifecycleStepper({ row }: { row: SeparationRow }) {
+  const current = stageIndex(row.lifecycle_stage)
+  return (
+    <div className="rounded-lg border border-border p-3 sm:p-4">
+      <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto pb-1">
+        {LIFECYCLE_STAGES.map((stage, i) => {
+          const done = i <= current
+          return (
+            <div key={stage.key} className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+              <div className="flex flex-col items-center gap-1 min-w-[52px]">
+                <div className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold transition-colors',
+                  done ? cn(BRAND_GRADIENT, 'text-white') : 'bg-muted text-muted-foreground',
+                )}>
+                  {i + 1}
+                </div>
+                <span className={cn(
+                  'text-[10px] text-center leading-tight whitespace-nowrap',
+                  done ? 'font-medium text-foreground' : 'text-muted-foreground',
+                )}>
+                  {stage.label}
+                </span>
+              </div>
+              {i < LIFECYCLE_STAGES.length - 1 && (
+                <div className={cn('h-0.5 w-4 sm:w-8 rounded-full', i < current ? BRAND_GRADIENT : 'bg-muted')} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Lifecycle Actions ─────────────────────────────────────────────────────────
+
+function LifecycleActions({ row }: { row: SeparationRow }) {
+  const qc = useQueryClient()
+  const stage = row.lifecycle_stage ?? 'initiated'
+  const approval = row.approval_status ?? 'pending'
+  const clearanceDone = clearanceCount(row.clearances) === CLEARANCE_DEPTS.length
+  const fnfPaid = row.fnf?.status === 'paid'
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['separations'] })
+
+  const approveMut = useMutation({
+    mutationFn: (decision: 'approved' | 'rejected') =>
+      api.patch(`/employees/${row.employee_id}/separation/approve`, { decision }),
+    onSuccess: (_d, decision) => { invalidate(); toast.success(decision === 'approved' ? 'Separation approved' : 'Separation rejected') },
+    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+  })
+
+  const advanceMut = useMutation({
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation/advance`, {}),
+    onSuccess: () => { invalidate(); toast.success('Stage advanced') },
+    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+  })
+
+  const relieveMut = useMutation({
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation/relieve`, {}),
+    onSuccess: () => { invalidate(); toast.success('Employee relieved') },
+    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+  })
+
+  const archiveMut = useMutation({
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation/archive`, {}),
+    onSuccess: () => { invalidate(); toast.success('Separation archived') },
+    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+  })
+
+  const isAdvanceStage = ['notice_period', 'clearance', 'fnf', 'relieving'].includes(stage)
+  const canAdvance = isAdvanceStage && stage !== 'relieving'
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {stage === 'initiated' && approval === 'pending' && (
+        <>
+          <Button size="sm" className={cn('h-8 text-xs text-white', BRAND_GRADIENT)}
+            disabled={approveMut.isPending}
+            onClick={() => approveMut.mutate('approved')}>
+            {approveMut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+            Approve Separation
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+            disabled={approveMut.isPending}
+            onClick={() => approveMut.mutate('rejected')}>
+            Reject
+          </Button>
+        </>
+      )}
+
+      {stage === 'initiated' && approval === 'rejected' && (
+        <span className="text-xs text-destructive">Separation request was rejected.</span>
+      )}
+
+      {canAdvance && (
+        <Button size="sm" variant="outline" className="h-8 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10"
+          disabled={advanceMut.isPending}
+          onClick={() => advanceMut.mutate()}>
+          {advanceMut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+          Advance Stage
+        </Button>
+      )}
+
+      {clearanceDone && fnfPaid && stage !== 'relieved' && stage !== 'archived' && (
+        <Button size="sm" className={cn('h-8 text-xs text-white', BRAND_GRADIENT)}
+          disabled={relieveMut.isPending}
+          onClick={() => relieveMut.mutate()}>
+          {relieveMut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+          Relieve Employee
+        </Button>
+      )}
+
+      {stage === 'relieved' && (
+        <Button size="sm" variant="outline" className="h-8 text-xs gap-1"
+          disabled={archiveMut.isPending}
+          onClick={() => archiveMut.mutate()}>
+          {archiveMut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+          Archive
+        </Button>
+      )}
+
+      {stage === 'archived' && (
+        <span className="text-xs text-muted-foreground">Separation archived — lifecycle complete.</span>
+      )}
     </div>
   )
 }
@@ -542,6 +697,20 @@ export function SeparationWorkflow() {
                   <p className="text-xs font-medium capitalize">{selected.fnf?.status ?? 'Not set'}</p>
                 </Card>
               </div>
+
+              {/* Lifecycle stepper + stage actions */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <LogOut className="h-4 w-4 text-muted-foreground" />
+                    Separation Lifecycle
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <LifecycleStepper row={selected} />
+                  <LifecycleActions row={selected} />
+                </CardContent>
+              </Card>
 
               {/* Clearance section */}
               <Card>

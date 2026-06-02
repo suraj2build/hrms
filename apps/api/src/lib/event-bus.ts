@@ -438,6 +438,40 @@ export interface HrmsEventMap {
     explanation:       string
   }
 
+  // ── Separation Lifecycle Events ───────────────────────────────────────────
+
+  /** Separation request approved by HR — moves to notice period */
+  'separation.approved': {
+    tenantId:     string
+    employeeId:   string
+    separationId: string
+    approvedBy:   string
+  }
+
+  /** Separation lifecycle stage advanced */
+  'separation.stage.changed': {
+    tenantId:     string
+    employeeId:   string
+    separationId: string
+    fromStage:    string
+    toStage:      string
+  }
+
+  /** Employee relieved — clearance + F&F complete */
+  'separation.relieved': {
+    tenantId:        string
+    employeeId:      string
+    separationId:    string
+    lastWorkingDate: string | null
+  }
+
+  /** Separation record archived */
+  'separation.archived': {
+    tenantId:     string
+    employeeId:   string
+    separationId: string
+  }
+
   /** Policy conflict detected during attendance processing */
   'policy.conflict.detected': {
     tenantId:          string

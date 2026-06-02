@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { eventBus } from '../../lib/event-bus.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,29 @@ async function getSeparationRecord(fastify: any, employeeId: string, tenantId: s
   return data
 }
 
+// Full separation row — for lifecycle transitions.
+async function getSeparation(fastify: any, employeeId: string, tenantId: string) {
+  const { data } = await fastify.supabase
+    .from('employee_separation')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  return data
+}
+
+// Gated forward sequence for the lifecycle pointer.
+const STAGE_SEQUENCE = ['notice_period', 'clearance', 'fnf', 'relieving'] as const
+
+const approveSchema = z.object({
+  decision: z.enum(['approved', 'rejected']),
+  remarks:  z.string().optional(),
+})
+
+const advanceSchema = z.object({
+  to: z.enum(['notice_period', 'clearance', 'fnf', 'relieving']).optional(),
+})
+
 // ─── Route Plugin ─────────────────────────────────────────────────────────────
 
 export default async function separationWorkflowRoutes(fastify: FastifyInstance) {
@@ -57,6 +81,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         id, separation_type, initiated_by, notice_date,
         last_working_date, exit_reason, clearance_done,
         exit_interview_done, remarks, created_at,
+        lifecycle_stage, approval_status, relieved_at, archived_at,
         employees!inner (
           id, first_name, last_name, employee_code,
           departments ( name )
@@ -93,6 +118,10 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         last_working_date: sep.last_working_date,
         clearance_done:   sep.clearance_done,
         status:           sep.clearance_done ? 'completed' : 'in_progress',
+        lifecycle_stage:  sep.lifecycle_stage ?? 'initiated',
+        approval_status:  sep.approval_status ?? 'pending',
+        relieved_at:      sep.relieved_at ?? null,
+        archived_at:      sep.archived_at ?? null,
         clearances:       clearances ?? [],
         fnf:              ff ?? null,
       }
@@ -432,6 +461,233 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       performedBy: req.userId,
       onBehalfOf:  req.params.id,
       newData:     { status: 'paid' },
+    })
+
+    return reply.send({ data })
+  })
+
+  // ── PATCH /employees/:id/separation/approve ───────────────────────────────
+
+  fastify.patch('/employees/:id/separation/approve', hrAdminAuth, async (req: any, reply) => {
+    const employee = await verifyEmployee(fastify, req.params.id, req.tenantId)
+    if (!employee)
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const sep = await getSeparation(fastify, req.params.id, req.tenantId)
+    if (!sep)
+      return reply.code(404).send({ error: 'NO_SEPARATION', message: 'No separation record found' })
+
+    const parsed = approveSchema.safeParse(req.body)
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const now = new Date().toISOString()
+
+    if (parsed.data.decision === 'rejected') {
+      const { data, error } = await fastify.supabase
+        .from('employee_separation')
+        .update({ approval_status: 'rejected', remarks: parsed.data.remarks ?? sep.remarks ?? null, updated_at: now })
+        .eq('id', sep.id)
+        .eq('tenant_id', req.tenantId)
+        .select()
+        .single()
+      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+      await logAction(fastify.supabase, {
+        tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
+        action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+        newData: { approval_status: 'rejected' },
+      })
+      return reply.send({ data })
+    }
+
+    // approved
+    const { data, error } = await fastify.supabase
+      .from('employee_separation')
+      .update({
+        approval_status: 'approved',
+        approved_by:     req.userId,
+        approved_at:     now,
+        lifecycle_stage: 'notice_period',
+        updated_at:      now,
+      })
+      .eq('id', sep.id)
+      .eq('tenant_id', req.tenantId)
+      .select()
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    await fastify.supabase
+      .from('employees')
+      .update({ status: 'on_notice' })
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
+      action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+      newData: { approval_status: 'approved', lifecycle_stage: 'notice_period' },
+    })
+
+    eventBus.emit({
+      type: 'separation.approved', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id, approvedBy: req.userId },
+    })
+    eventBus.emit({
+      type: 'separation.stage.changed', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id, fromStage: 'initiated', toStage: 'notice_period' },
+    })
+
+    return reply.send({ data })
+  })
+
+  // ── PATCH /employees/:id/separation/advance ───────────────────────────────
+
+  fastify.patch('/employees/:id/separation/advance', hrAdminAuth, async (req: any, reply) => {
+    const employee = await verifyEmployee(fastify, req.params.id, req.tenantId)
+    if (!employee)
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const sep = await getSeparation(fastify, req.params.id, req.tenantId)
+    if (!sep)
+      return reply.code(404).send({ error: 'NO_SEPARATION', message: 'No separation record found' })
+
+    const parsed = advanceSchema.safeParse(req.body ?? {})
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const fromStage = sep.lifecycle_stage as string
+    const idx = STAGE_SEQUENCE.indexOf(fromStage as any)
+    if (idx === -1 || idx >= STAGE_SEQUENCE.length - 1)
+      return reply.code(409).send({ error: 'INVALID_STAGE', message: `Cannot advance from stage '${fromStage}'` })
+
+    const nextStage = STAGE_SEQUENCE[idx + 1]
+    if (parsed.data.to && parsed.data.to !== nextStage)
+      return reply.code(409).send({ error: 'INVALID_TARGET', message: `Next valid stage is '${nextStage}', not '${parsed.data.to}'` })
+
+    const { data, error } = await fastify.supabase
+      .from('employee_separation')
+      .update({ lifecycle_stage: nextStage, updated_at: new Date().toISOString() })
+      .eq('id', sep.id)
+      .eq('tenant_id', req.tenantId)
+      .select()
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
+      action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+      newData: { lifecycle_stage: nextStage },
+    })
+
+    eventBus.emit({
+      type: 'separation.stage.changed', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id, fromStage, toStage: nextStage },
+    })
+
+    return reply.send({ data })
+  })
+
+  // ── PATCH /employees/:id/separation/relieve ───────────────────────────────
+
+  fastify.patch('/employees/:id/separation/relieve', hrAdminAuth, async (req: any, reply) => {
+    const employee = await verifyEmployee(fastify, req.params.id, req.tenantId)
+    if (!employee)
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const sep = await getSeparation(fastify, req.params.id, req.tenantId)
+    if (!sep)
+      return reply.code(404).send({ error: 'NO_SEPARATION', message: 'No separation record found' })
+
+    if (!sep.clearance_done)
+      return reply.code(409).send({ error: 'CLEARANCE_PENDING', message: 'Cannot relieve: clearance is not complete' })
+
+    const { data: ff } = await fastify.supabase
+      .from('separation_ff_summary')
+      .select('status')
+      .eq('separation_id', sep.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!ff || ff.status !== 'paid')
+      return reply.code(409).send({ error: 'FNF_NOT_PAID', message: 'Cannot relieve: F&F settlement must be marked as paid' })
+
+    const fromStage = sep.lifecycle_stage as string
+    const now = new Date().toISOString()
+    const lastWorkingDate = sep.last_working_date ?? now.slice(0, 10)
+
+    const { data, error } = await fastify.supabase
+      .from('employee_separation')
+      .update({
+        lifecycle_stage:   'relieved',
+        relieved_at:       now,
+        last_working_date: lastWorkingDate,
+        updated_at:        now,
+      })
+      .eq('id', sep.id)
+      .eq('tenant_id', req.tenantId)
+      .select()
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    await fastify.supabase
+      .from('employees')
+      .update({ status: 'separated' })
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
+      action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+      newData: { lifecycle_stage: 'relieved', relieved_at: now },
+    })
+
+    eventBus.emit({
+      type: 'separation.relieved', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id, lastWorkingDate },
+    })
+    eventBus.emit({
+      type: 'separation.stage.changed', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id, fromStage, toStage: 'relieved' },
+    })
+
+    return reply.send({ data })
+  })
+
+  // ── PATCH /employees/:id/separation/archive ───────────────────────────────
+
+  fastify.patch('/employees/:id/separation/archive', hrAdminAuth, async (req: any, reply) => {
+    const employee = await verifyEmployee(fastify, req.params.id, req.tenantId)
+    if (!employee)
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const sep = await getSeparation(fastify, req.params.id, req.tenantId)
+    if (!sep)
+      return reply.code(404).send({ error: 'NO_SEPARATION', message: 'No separation record found' })
+
+    if (sep.lifecycle_stage !== 'relieved')
+      return reply.code(409).send({ error: 'NOT_RELIEVED', message: 'Cannot archive: employee must be relieved first' })
+
+    const now = new Date().toISOString()
+
+    const { data, error } = await fastify.supabase
+      .from('employee_separation')
+      .update({ lifecycle_stage: 'archived', archived_at: now, archived_by: req.userId, updated_at: now })
+      .eq('id', sep.id)
+      .eq('tenant_id', req.tenantId)
+      .select()
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
+      action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+      newData: { lifecycle_stage: 'archived', archived_at: now },
+    })
+
+    eventBus.emit({
+      type: 'separation.archived', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id },
     })
 
     return reply.send({ data })
