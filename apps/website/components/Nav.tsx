@@ -30,7 +30,7 @@ export default function Nav() {
 
         {/* Logo */}
         <a href="#" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#10B981] via-[#0D9488] to-[#2563EB] flex items-center justify-center shadow-md">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#047857] via-[#0F766E] to-[#1E40AF] flex items-center justify-center shadow-md">
             <Zap className="w-4 h-4 text-white" />
           </div>
           <span className="font-display font-bold text-lg text-[#1A1A2E] tracking-tight">emvora</span>
@@ -53,7 +53,7 @@ export default function Nav() {
         <div className="hidden md:flex items-center gap-3">
           <a
             href="#demo"
-            className="text-sm font-semibold px-5 py-2.5 rounded-full bg-gradient-to-r from-[#10B981] via-[#0D9488] to-[#2563EB] text-white hover:brightness-110 transition-colors duration-200 shadow-md shadow-violet-200"
+            className="text-sm font-semibold px-5 py-2.5 rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white hover:brightness-110 transition-colors duration-200 shadow-md shadow-violet-200"
           >
             Request Demo
           </a>
@@ -81,7 +81,7 @@ export default function Nav() {
           <a
             href="#demo"
             onClick={() => setOpen(false)}
-            className="block text-center text-sm font-semibold px-5 py-2.5 rounded-full bg-gradient-to-r from-[#10B981] via-[#0D9488] to-[#2563EB] text-white mt-3"
+            className="block text-center text-sm font-semibold px-5 py-2.5 rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white mt-3"
           >
             Request Demo
           </a>

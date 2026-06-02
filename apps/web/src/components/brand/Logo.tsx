@@ -5,7 +5,7 @@
  *   <Logo variant="mark" />   → just the gradient tile mark
  *   <Logo size={40} />        → custom mark size (px)
  *
- * Brand gradient: green #10B981 → teal #0D9488 → blue #2563EB
+ * Brand gradient: dark green #047857 → dark teal #0F766E → dark blue #1E40AF
  * The mark is three ascending bars = growth + workforce intelligence.
  */
 import { cn } from '@/lib/utils'
@@ -30,9 +30,9 @@ export function LogoMark({ size = 32, className }: { size?: number; className?: 
     >
       <defs>
         <linearGradient id="emvora-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop offset="0"   stopColor="#10B981" />
-          <stop offset="0.5" stopColor="#0D9488" />
-          <stop offset="1"   stopColor="#2563EB" />
+          <stop offset="0"   stopColor="#047857" />
+          <stop offset="0.5" stopColor="#0F766E" />
+          <stop offset="1"   stopColor="#1E40AF" />
         </linearGradient>
       </defs>
       <rect width="32" height="32" rx="8" fill="url(#emvora-grad)" />

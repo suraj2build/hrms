@@ -49,7 +49,7 @@ export default function Hero() {
         >
           <a
             href="#demo"
-            className="group flex items-center gap-2 px-8 py-3.5 rounded-full bg-gradient-to-r from-[#10B981] via-[#0D9488] to-[#2563EB] text-white font-semibold text-sm hover:brightness-110 transition-all duration-200 shadow-lg shadow-violet-200"
+            className="group flex items-center gap-2 px-8 py-3.5 rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white font-semibold text-sm hover:brightness-110 transition-all duration-200 shadow-lg shadow-violet-200"
           >
             Request a Demo
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
