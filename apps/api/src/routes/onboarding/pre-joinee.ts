@@ -246,25 +246,60 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     const body: CreateInvitationBody = parsed.data
     const token = randomUUID()
     const expiresAt = tokenExpiresAt()
+    const email = body.email.trim().toLowerCase()
 
-    const { data, error } = await fastify.supabase
+    const row = {
+      tenant_id:    tenantId,
+      first_name:   body.first_name,
+      last_name:    body.last_name,
+      email,
+      phone:        body.phone ?? null,
+      designation:  body.designation ?? null,
+      department:   body.department ?? null,
+      joining_date: body.joining_date,
+      token,
+      status:       'pending',
+      expires_at:   expiresAt,
+      created_by:   req.userId ?? null,
+    }
+
+    // Re-invite handling: an invite for this email already exists in this tenant
+    // (UNIQUE(tenant_id,email)). Look it up — if it's still pending/expired/rejected,
+    // refresh it (new token, reset to pending) instead of failing with a 500.
+    const { data: existing } = await fastify.supabase
       .from('pre_joinee_invitations')
-      .insert({
-        tenant_id:    tenantId,
-        first_name:   body.first_name,
-        last_name:    body.last_name,
-        email:        body.email,
-        phone:        body.phone ?? null,
-        designation:  body.designation ?? null,
-        department:   body.department ?? null,
-        joining_date: body.joining_date,
-        token,
-        status:       'pending',
-        expires_at:   expiresAt,
-        created_by:   req.userId ?? null,
-      })
-      .select()
-      .single()
+      .select('id, status')
+      .eq('tenant_id', tenantId)
+      .eq('email', email)
+      .maybeSingle()
+
+    let data: any = null
+    let error: any = null
+
+    if (existing) {
+      if (existing.status === 'approved') {
+        return reply.code(409).send({
+          error: 'ALREADY_APPROVED',
+          message: 'This candidate has already been approved and onboarded.',
+        })
+      }
+      // Refresh the existing invite
+      const upd = await fastify.supabase
+        .from('pre_joinee_invitations')
+        .update({ ...row, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+        .eq('tenant_id', tenantId)
+        .select()
+        .single()
+      data = upd.data; error = upd.error
+    } else {
+      const ins = await fastify.supabase
+        .from('pre_joinee_invitations')
+        .insert(row)
+        .select()
+        .single()
+      data = ins.data; error = ins.error
+    }
 
     if (error) {
       fastify.log.error({ event: 'pre_joinee.create', tenant_id: tenantId, err: error })
