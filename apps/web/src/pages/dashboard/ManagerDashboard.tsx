@@ -387,7 +387,7 @@ function KPIStrip({ summary, pendingLeave, pendingReg }: {
   ]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10 }}>
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ gap: 10 }}>
       {tiles.map(t => {
         const Icon = t.icon
         return (
@@ -739,7 +739,7 @@ function TeamHeatmap({
 
       <div style={{ padding: '12px 20px 0', overflowX: 'auto' }}>
         {/* Date header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '88px repeat(14, 1fr)', gap: '0 3px', marginBottom: 6 }}>
+        <div className="min-w-[640px]" style={{ display: 'grid', gridTemplateColumns: '88px repeat(14, 1fr)', gap: '0 3px', marginBottom: 6 }}>
           <div />
           {dates.map(d => {
             const dt = new Date(d + 'T12:00:00Z')
@@ -762,7 +762,7 @@ function TeamHeatmap({
           {teamMembers.slice(0, 12).map(member => {
             const memberMap = teamAttendance.get(member.employee_id) ?? new Map<string, string>()
             return (
-              <div key={member.employee_id} style={{ display: 'grid', gridTemplateColumns: '88px repeat(14, 1fr)', gap: '0 3px', alignItems: 'center' }}>
+              <div key={member.employee_id} className="min-w-[640px]" style={{ display: 'grid', gridTemplateColumns: '88px repeat(14, 1fr)', gap: '0 3px', alignItems: 'center' }}>
                 {/* Name */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 6 }}>
                   <div style={{
@@ -1255,7 +1255,7 @@ export function ManagerDashboardPage() {
         <KPIStrip summary={summary} pendingLeave={leaveRequests.length} pendingReg={regularisations.length} />
 
         {/* Two-column body */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 310px', gap: 14, alignItems: 'start' }}>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_310px]" style={{ gap: 14, alignItems: 'start' }}>
 
           {/* Main column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

@@ -352,7 +352,7 @@ function LeaveRequestsTable({
                   </td>
 
                   {/* Reason */}
-                  <td className="py-2 px-3 max-w-[180px]">
+                  <td className="py-2 px-3 max-w-[100px] sm:max-w-[150px] lg:max-w-[200px]">
                     {row.reason ? (
                       <button
                         className="text-left text-xs text-foreground line-clamp-2 hover:line-clamp-none"
@@ -592,7 +592,7 @@ function RegularisationTable({
                   </td>
 
                   {/* Reason — Q7: expandable on hover/click (mirrors LeaveRequestsTable) */}
-                  <td className="py-2 px-3 max-w-[180px]">
+                  <td className="py-2 px-3 max-w-[100px] sm:max-w-[150px] lg:max-w-[200px]">
                     {row.reason ? (
                       <button
                         className="text-left text-xs text-foreground line-clamp-2 hover:line-clamp-none"

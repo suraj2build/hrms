@@ -116,7 +116,7 @@ export function EssShell() {
         {/* Inner Suspense — catches lazy-route chunk loading so the ESS shell
             chrome (Topbar, EmployeeSidebar) stays mounted while pages load. */}
         <AnomalyLoginAlert />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <EventToast />
           <Suspense fallback={<ShellPageLoader />}>
             <Outlet />

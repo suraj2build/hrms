@@ -270,7 +270,7 @@ export function MyLeaveRequests() {
 
         {/* Table */}
         {!isLoading && !isError && requests.length > 0 && (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/20">
@@ -321,7 +321,7 @@ export function MyLeaveRequests() {
                       </td>
 
                       {/* Reason */}
-                      <td className="px-4 py-3 max-w-[200px]">
+                      <td className="px-4 py-3 max-w-[80px] sm:max-w-[120px] lg:max-w-[200px]">
                         <p className="text-xs text-foreground truncate" title={req.reason ?? ''}>
                           {req.reason ?? <span className="text-muted-foreground">—</span>}
                         </p>

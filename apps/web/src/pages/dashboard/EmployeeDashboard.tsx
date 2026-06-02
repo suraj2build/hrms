@@ -500,7 +500,7 @@ function CompStructure({
 
       <div style={{ padding: '12px 16px' }}>
         {/* CTC summary */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 8, marginBottom: 14 }}>
           {[
             { k: 'Annual CTC',   v: fmtINR(comp?.ctc_annual),  accent: true },
             { k: 'Monthly CTC',  v: fmtINR(comp?.ctc_monthly)               },
@@ -870,7 +870,7 @@ function QuickActionsBar({ navigate, basePath }: { navigate: (to: string) => voi
   const QA_ITEMS = buildQaItems(basePath)
   return (
     <section style={{ ...CARD, overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${QA_ITEMS.length},1fr)` }}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
         {QA_ITEMS.map((qa, i) => {
           const QIcon = qa.icon
           const t     = TONE[qa.tone]
@@ -1017,7 +1017,7 @@ export function EmployeeDashboard() {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ padding: '16px 24px 20px', background: '#f6f7fb', minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-5" style={{ background: '#f6f7fb', minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* 1. Profile bar */}
       <ProfileBar emp={emp} />
 
@@ -1029,7 +1029,7 @@ export function EmployeeDashboard() {
       </div>
 
       {/* 3. Two-column body */}
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 12, alignItems: 'start' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr]" style={{ gap: 12, alignItems: 'start' }}>
         {/* Left: Compensation + My Requests */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <CompStructure comp={comp} latestSlip={slips[0] ?? null} navigate={nav} />
