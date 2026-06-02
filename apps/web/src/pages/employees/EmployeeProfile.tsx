@@ -22,7 +22,7 @@ import {
   MapPin, LayoutGrid, CalendarClock, GraduationCap,
   AlertTriangle, CheckCircle2, Banknote, TrendingUp,
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy,
-  ChevronDown, Info, RefreshCw,
+  ChevronDown, Info, RefreshCw, Package,
 } from 'lucide-react'
 import {
   SeverityBadge,
@@ -671,6 +671,10 @@ export function EmployeeProfile() {
   })
   const { data: accessCardsData } = useQuery<{ data: any[] }>({
     queryKey: ['access-cards', id], queryFn: () => api.get(`/employees/${id}/access-cards`),
+    enabled: !!id && visited.has('assets'), staleTime: 30_000,
+  })
+  const { data: empAssetsData } = useQuery<{ data: { assigned: any[]; history: any[] } }>({
+    queryKey: ['emp-assets', id], queryFn: () => api.get(`/employees/${id}/assets`),
     enabled: !!id && visited.has('assets'), staleTime: 30_000,
   })
 
@@ -4085,6 +4089,40 @@ export function EmployeeProfile() {
                       </Card>
                     )
                   })}
+
+              {/* Assigned company assets (read-only) */}
+              <div className="pt-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Assigned Assets</p>
+                {!(empAssetsData?.data?.assigned?.length)
+                  ? <Card><CardContent className="pt-6"><EmptySection icon={Package} title="No assets assigned" /></CardContent></Card>
+                  : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/30">
+                            {['Asset Code', 'Name', 'Status', 'Assigned'].map(h => (
+                              <th key={h} className="text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {empAssetsData!.data.assigned.map((a: any) => {
+                            const lastAssigned = (empAssetsData?.data?.history ?? [])
+                              .find((h: any) => h.asset_id === a.id && h.action === 'assigned')
+                            return (
+                              <tr key={a.id} className="border-b border-border/50">
+                                <td className="px-3 py-2"><Badge variant="outline" className="rounded-full text-xs font-mono">{a.asset_code}</Badge></td>
+                                <td className="px-3 py-2 font-medium">{a.name}</td>
+                                <td className="px-3 py-2"><Badge variant="secondary" className="rounded-full text-xs capitalize">{a.status}</Badge></td>
+                                <td className="px-3 py-2 text-xs text-muted-foreground">{lastAssigned ? fmtDate(lastAssigned.action_date) : '—'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+              </div>
             </div>
           )}
 

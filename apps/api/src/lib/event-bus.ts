@@ -472,6 +472,24 @@ export interface HrmsEventMap {
     separationId: string
   }
 
+  // ── Asset Management Events ───────────────────────────────────────────────
+
+  /** Asset assigned to an employee */
+  'asset.assigned': {
+    tenantId:   string
+    assetId:    string
+    employeeId: string
+    assetCode:  string
+  }
+
+  /** Asset returned by an employee (or marked damaged/lost on return) */
+  'asset.returned': {
+    tenantId:   string
+    assetId:    string
+    employeeId: string
+    condition:  string
+  }
+
   /** Policy conflict detected during attendance processing */
   'policy.conflict.detected': {
     tenantId:          string

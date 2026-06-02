@@ -212,6 +212,37 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
+    // ── Asset Management integration ────────────────────────────────────────
+    // The IT clearance cannot be marked 'cleared' while the employee still holds
+    // assigned company assets. Other departments are unaffected.
+    if (parsed.data.status === 'cleared') {
+      const { data: clearanceRow } = await fastify.supabase
+        .from('separation_clearances')
+        .select('department')
+        .eq('id', req.params.clearanceId)
+        .eq('employee_id', req.params.id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+
+      if (clearanceRow?.department === 'it') {
+        const { count } = await fastify.supabase
+          .from('assets')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .eq('assigned_to', req.params.id)
+          .eq('status', 'assigned')
+
+        const outstanding = count ?? 0
+        if (outstanding > 0) {
+          return reply.code(409).send({
+            error:   'ASSETS_OUTSTANDING',
+            message: `Employee has ${outstanding} asset(s) not yet returned. Recover assets before IT clearance.`,
+            count:   outstanding,
+          })
+        }
+      }
+    }
+
     const { data: updated, error } = await fastify.supabase
       .from('separation_clearances')
       .update({

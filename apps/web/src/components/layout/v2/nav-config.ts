@@ -51,6 +51,7 @@ import {
   // Workforce
   Briefcase,
   UserPlus,
+  Package,
   // Attendance
   Upload,
   BookOpen,
@@ -185,6 +186,7 @@ export const DOMAINS: Domain[] = [
       '/admin/onboarding/module',
       '/admin/onboarding/pre-joinee',
       '/admin/employees/separation',
+      '/admin/assets',
     ],
     defaultRoute: '/admin/employees',
     groups: [
@@ -195,6 +197,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding',         label: 'Onboarding',         route: '/admin/onboarding',         exact: true, icon: UserPlus      },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',         icon: GraduationCap },
           { id: 'separation-workflow',label: 'Separation',         route: '/admin/employees/separation',           icon: LogOut        },
+          { id: 'assets',             label: 'Assets',             route: '/admin/assets',                         icon: Package       },
           { id: 'letters',            label: 'Letters',            route: '/admin/letters',                        icon: ScrollText    },
         ],
       },
