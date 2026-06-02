@@ -129,7 +129,7 @@ export function crossCheckIdentity(rows: DocFieldRow[]): IdentityCheckResult {
     if (!d) return undefined
     return d.name
       ?? d.holder
-      ?? [d.firstName, d.lastName].filter(Boolean).join(' ').trim() || undefined
+      ?? ([d.firstName, d.lastName].filter(Boolean).join(' ').trim() || undefined)
   }
 
   // Pick the identity anchor (prefer Aadhaar).
