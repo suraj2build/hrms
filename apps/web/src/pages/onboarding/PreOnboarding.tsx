@@ -383,13 +383,17 @@ export function PreOnboarding() {
 
   const inviteMutation = useMutation({
     mutationFn: (payload: InviteForm) => api.post('/onboarding/pre-joinee', payload).then(r => r.data),
-    onSuccess: (data: { data?: { invite_url?: string; invite_token?: string } }) => {
+    onSuccess: (data: { data?: { invite_url?: string; invite_token?: string; email_sent?: boolean } }) => {
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
       const path = data?.data?.invite_url ?? `/pre-join/${data?.data?.invite_token ?? ''}`
       const url = path.startsWith('http') ? path : `${window.location.origin}${path}`
       setInviteLink(url)
-      toast.success('Invitation sent successfully')
+      toast.success(
+        data?.data?.email_sent
+          ? 'Invitation created — email sent to candidate'
+          : 'Invitation created — share the link below (email not sent)',
+      )
     },
     onError: () => toast.error('Failed to send invitation'),
   })

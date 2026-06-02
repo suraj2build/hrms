@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
+import {
+  sendEmail, preJoineeInviteEmail, APP_PUBLIC_URL,
+  type SendEmailResult,
+} from '../../lib/email-service.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -268,13 +272,33 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     }
 
     // invite_url points at the PUBLIC candidate page route, not the API route.
-    const inviteUrl = `/pre-join/${token}`
+    const inviteUrl     = `/pre-join/${token}`
+    const fullInviteUrl = `${APP_PUBLIC_URL}${inviteUrl}`
+
+    // ── Fire the invite email (best-effort — never blocks invite creation) ──
+    let emailResult: SendEmailResult = { sent: false, skipped: true }
+    try {
+      // Resolve company name for the email greeting
+      const { data: tenant } = await fastify.supabase
+        .from('tenants').select('name').eq('id', tenantId).maybeSingle()
+      const tmpl = preJoineeInviteEmail({
+        candidateName: `${body.first_name} ${body.last_name}`.trim(),
+        companyName:   tenant?.name ?? 'our company',
+        joiningDate:   body.joining_date,
+        inviteUrl:     fullInviteUrl,
+      })
+      emailResult = await sendEmail({ to: body.email, subject: tmpl.subject, html: tmpl.html })
+    } catch (e) {
+      fastify.log.warn({ event: 'pre_joinee.invite_email', err: e })
+    }
 
     return reply.code(201).send({
       data: {
         ...data,
         invite_token: token,
         invite_url:   inviteUrl,
+        email_sent:   emailResult.sent,
+        email_skipped: emailResult.skipped ?? false,
       },
     })
   })
