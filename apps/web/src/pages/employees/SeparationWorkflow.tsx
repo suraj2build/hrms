@@ -91,48 +91,6 @@ function FnFStatusBadge({ status }: { status: FnF['status'] }) {
   return <Badge variant="secondary" className="text-[10px] rounded-full bg-muted/50">Draft</Badge>
 }
 
-// ── Mock data fallback (replace with real API when backend is ready) ──────────
-// In production, these come from useQuery hitting the real endpoints.
-
-function buildMockRows(): SeparationRow[] {
-  const makeClears = (empId: string): ClearanceDept[] =>
-    CLEARANCE_DEPTS.map((dept, i) => ({
-      id: `${empId}-${dept}`,
-      department: dept,
-      status: i < 2 ? 'cleared' : 'pending',
-      cleared_by: i < 2 ? 'Admin User' : null,
-      cleared_at: i < 2 ? '2025-05-10' : null,
-      remarks: null,
-      sequence: i + 1,
-    }))
-  return [
-    {
-      id: 'sep-1', employee_id: 'emp-1', employee_code: 'EMP001',
-      employee_name: 'Arjun Sharma', department: 'Engineering',
-      separation_type: 'resignation', last_working_date: '2025-06-15',
-      clearances: makeClears('sep-1'),
-      fnf: { id: 'fnf-1', last_payroll_amount: 85000, leave_encashment_amount: 12000, gratuity_amount: 34000, other_additions: 0, notice_period_deduction: 0, other_deductions: 2000, net_payable: 129000, status: 'draft' },
-      status: 'active',
-    },
-    {
-      id: 'sep-2', employee_id: 'emp-2', employee_code: 'EMP045',
-      employee_name: 'Priya Menon', department: 'HR',
-      separation_type: 'end_of_contract', last_working_date: '2025-05-31',
-      clearances: CLEARANCE_DEPTS.map((dept, i) => ({ id: `sep-2-${dept}`, department: dept, status: 'cleared' as const, cleared_by: 'Admin', cleared_at: '2025-05-20', remarks: null, sequence: i + 1 })),
-      fnf: { id: 'fnf-2', last_payroll_amount: 60000, leave_encashment_amount: 8000, gratuity_amount: 18000, other_additions: 5000, notice_period_deduction: 0, other_deductions: 0, net_payable: 91000, status: 'approved' },
-      status: 'active',
-    },
-    {
-      id: 'sep-3', employee_id: 'emp-3', employee_code: 'EMP078',
-      employee_name: 'Rahul Iyer', department: 'Finance',
-      separation_type: 'termination', last_working_date: '2025-04-30',
-      clearances: CLEARANCE_DEPTS.map((dept, i) => ({ id: `sep-3-${dept}`, department: dept, status: 'cleared' as const, cleared_by: 'Admin', cleared_at: '2025-04-28', remarks: null, sequence: i + 1 })),
-      fnf: { id: 'fnf-3', last_payroll_amount: 72000, leave_encashment_amount: 0, gratuity_amount: 0, other_additions: 0, notice_period_deduction: 72000, other_deductions: 5000, net_payable: -5000, status: 'paid' },
-      status: 'completed',
-    },
-  ]
-}
-
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ProgressBar({ value, max }: { value: number; max: number }) {
@@ -186,8 +144,8 @@ function ClearancePanel({ row, onClose }: { row: SeparationRow; onClose: () => v
       {/* Department rows */}
       <div className="space-y-3">
         {row.clearances.sort((a, b) => a.sequence - b.sequence).map(cl => (
-          <div key={cl.id} className="rounded-lg border border-border p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
+          <div key={cl.id} className="rounded-lg border border-border p-3 sm:p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
                   {cl.sequence}
@@ -570,7 +528,7 @@ export function SeparationWorkflow() {
 
             <div className="p-6 space-y-6">
               {/* Summary row */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Card className="p-3">
                   <p className="text-[10px] text-muted-foreground mb-0.5">Separation Type</p>
                   <p className="text-xs font-medium capitalize">{selected.separation_type.replace(/_/g, ' ')}</p>

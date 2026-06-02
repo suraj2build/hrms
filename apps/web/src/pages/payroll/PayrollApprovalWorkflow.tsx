@@ -107,7 +107,7 @@ function PipelineStrip({ currentStage }: { currentStage: string }) {
         return (
           <div key={stage.key} className="flex items-center flex-shrink-0">
             <div className={cn(
-              'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap',
               isComplete ? 'bg-success/15 border-success/30 text-success' :
               isCurrent  ? 'bg-primary/10 border-primary/30 text-primary' :
                            'bg-muted/20 border-border text-muted-foreground',

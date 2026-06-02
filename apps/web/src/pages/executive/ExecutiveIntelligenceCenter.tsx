@@ -511,7 +511,7 @@ export default function ExecutiveIntelligenceCenter() {
                 accent={d.absence_rate <= 5 ? 'green' : 'amber'}
               />
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <MetricCard label="Leave Applied" value={d.leave_applied} />
               <MetricCard label="Leave Approved" value={d.leave_approved} accent="green" />
               <MetricCard label="Pending" value={d.leave_pending} accent={d.leave_pending > 5 ? 'amber' : 'default'} />
@@ -887,7 +887,7 @@ export default function ExecutiveIntelligenceCenter() {
 
           {/* Trust */}
           <SectionCard title="Trust & Identity Risk" icon={<ShieldCheck className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
               <MetricCard
                 label="High Risk"
                 value={d.trust_high_risk}
