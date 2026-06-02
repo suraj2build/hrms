@@ -169,6 +169,154 @@ function mapSubmissionRow(row: any) {
   }
 }
 
+// ── Shared merge helper ─────────────────────────────────────────────────────
+// Merges a pre-joinee invitation into the AI-onboarding review queue:
+//   1. fetch the invitation's identity fields
+//   2. create an onboarding_session
+//   3. copy pre_joinee_documents → onboarding_documents (DOC_TYPE_MAP)
+//   4. prefill a draft_employee_profile (status 'hr_review_pending')
+//   5. link the invitation to its session_id
+// Returns the new sessionId, or null on any error (logs a warning; never throws).
+type MergeSubmission = {
+  dob:                 any
+  gender:              any
+  address_line1:       any
+  city:                any
+  state:               any
+  pincode:             any
+  pan_number:          any
+  uan_number:          any
+  bank_name:           any
+  bank_account_number: any
+  bank_ifsc:           any
+  bank_account_type:   any
+}
+
+async function mergeInvitationToSession(
+  fastify: FastifyInstance,
+  invitationId: string,
+  tenantId: string,
+  sub: MergeSubmission,
+): Promise<string | null> {
+  try {
+    // 1. Fetch the invitation's identity fields.
+    const { data: inv } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .select('first_name, last_name, email, designation, department, joining_date')
+      .eq('id', invitationId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    const firstName = inv?.first_name ?? null
+    const lastName  = inv?.last_name ?? null
+    const candidateName = `${firstName ?? ''} ${lastName ?? ''}`.trim() || (inv?.email ?? 'Candidate')
+
+    // 2. Create the onboarding session (created_by null — public/candidate action).
+    const { data: session, error: sessErr } = await fastify.supabase
+      .from('onboarding_sessions')
+      .insert({
+        tenant_id:      tenantId,
+        candidate_name: candidateName,
+        status:         'active',
+        created_by:     null,
+      })
+      .select('id')
+      .single()
+
+    if (sessErr || !session) throw sessErr ?? new Error('session insert returned no row')
+    const sessionId: string = session.id
+
+    // 3. Copy pre_joinee_documents → onboarding_documents (mapping document_type).
+    //    'photo' is not allowed by the onboarding_documents CHECK → skip.
+    const DOC_TYPE_MAP: Record<string, string | null> = {
+      cv:      'resume',
+      pan:     'pan',
+      aadhaar: 'aadhaar',
+      cheque:  'bank_proof',
+      photo:   null, // not allowed by onboarding_documents CHECK → skip
+    }
+
+    const { data: preDocs } = await fastify.supabase
+      .from('pre_joinee_documents')
+      .select('document_type, file_name, storage_path, mime_type, file_size')
+      .eq('invitation_id', invitationId)
+      .eq('tenant_id', tenantId)
+
+    const docRows = (preDocs ?? [])
+      .map((d: any) => {
+        const mapped = DOC_TYPE_MAP[d.document_type] ?? 'other'
+        if (mapped === null) return null // skip photo
+        return {
+          tenant_id:         tenantId,
+          session_id:        sessionId,
+          document_type:     mapped,
+          file_name:         d.file_name ?? d.document_type,
+          storage_path:      d.storage_path,
+          mime_type:         d.mime_type ?? null,
+          file_size:         d.file_size ?? null,
+          extraction_status: 'pending',
+        }
+      })
+      .filter((r: any): r is NonNullable<typeof r> => r !== null)
+
+    if (docRows.length > 0) {
+      const { error: docInsErr } = await fastify.supabase
+        .from('onboarding_documents')
+        .insert(docRows)
+      if (docInsErr) {
+        fastify.log.warn({ event: 'pre_joinee.merge.docs', invitation_id: invitationId, session_id: sessionId, err: docInsErr })
+      }
+    }
+
+    // 4. Prefill the draft_employee_profile from invitation + resolved submission.
+    const allowedGenders = new Set(['male', 'female', 'other', 'prefer_not_to_say'])
+    const draftGender = sub.gender && allowedGenders.has(sub.gender) ? sub.gender : null
+
+    const { error: draftErr } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .insert({
+        tenant_id:           tenantId,
+        session_id:          sessionId,
+        status:              'hr_review_pending',
+        first_name:          firstName,
+        last_name:           lastName,
+        email:               inv?.email ?? null,
+        phone:               null, // submission has no phone
+        dob:                 sub.dob,
+        gender:              draftGender,
+        address_line1:       sub.address_line1,
+        address_city:        sub.city,
+        address_state:       sub.state,
+        address_pincode:     sub.pincode,
+        joining_date:        inv?.joining_date ?? null,
+        pan_number:          sub.pan_number,
+        uan_number:          sub.uan_number,
+        bank_name:           sub.bank_name,
+        bank_account_number: sub.bank_account_number,
+        bank_ifsc:           sub.bank_ifsc,
+        bank_account_type:   sub.bank_account_type,
+      })
+    if (draftErr) {
+      fastify.log.warn({ event: 'pre_joinee.merge.draft', invitation_id: invitationId, session_id: sessionId, err: draftErr })
+    }
+
+    // 5. Link the invitation to its onboarding session.
+    const { error: linkErr } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .update({ session_id: sessionId })
+      .eq('id', invitationId)
+      .eq('tenant_id', tenantId)
+    if (linkErr) {
+      fastify.log.warn({ event: 'pre_joinee.merge.link', invitation_id: invitationId, session_id: sessionId, err: linkErr })
+    }
+
+    return sessionId
+  } catch (mergeErr) {
+    fastify.log.warn({ event: 'pre_joinee.merge', invitation_id: invitationId, err: mergeErr })
+    return null
+  }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default async function preJoineeRoutes(fastify: FastifyInstance) {
@@ -410,6 +558,72 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     }
 
     return reply.code(204).send()
+  })
+
+  // ── 3b. POST /onboarding/pre-joinee/:id/push-to-review ─────────────────────
+  // Backfill: push an already-submitted candidate into the AI review queue.
+  // Idempotent — if a session is already linked, returns it unchanged.
+  fastify.post('/onboarding/pre-joinee/:id/push-to-review', auth, async (req: any, reply) => {
+    const tenantId: string = req.tenantId
+    const { id } = req.params as { id: string }
+
+    // 1. Load the invitation.
+    const { data: invitation, error: invErr } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .select('id, session_id, status, tenant_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    if (invErr || !invitation) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Invitation not found' })
+    }
+
+    // 2. Already linked → idempotent return.
+    if (invitation.session_id) {
+      return reply.send({ data: { session_id: invitation.session_id, already: true } })
+    }
+
+    // 3. Load its submission row.
+    const { data: subRow, error: subErr } = await fastify.supabase
+      .from('pre_joinee_submissions')
+      .select('*')
+      .eq('invitation_id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (subErr) {
+      fastify.log.error({ event: 'pre_joinee.push_to_review.submission', tenant_id: tenantId, id, err: subErr })
+      return reply.code(500).send({ error: 'DB_ERROR', message: subErr.message })
+    }
+    if (!subRow) {
+      return reply.code(400).send({ error: 'NO_SUBMISSION', message: 'Candidate has not submitted yet' })
+    }
+
+    // 4. Build the sub object (columns already match) and merge.
+    const sub = {
+      dob:                 subRow.dob,
+      gender:              subRow.gender,
+      address_line1:       subRow.address_line1,
+      city:                subRow.city,
+      state:               subRow.state,
+      pincode:             subRow.pincode,
+      pan_number:          subRow.pan_number,
+      uan_number:          subRow.uan_number,
+      bank_name:           subRow.bank_name,
+      bank_account_number: subRow.bank_account_number,
+      bank_ifsc:           subRow.bank_ifsc,
+      bank_account_type:   subRow.bank_account_type,
+    }
+
+    const sessionId = await mergeInvitationToSession(fastify, id, tenantId, sub)
+
+    // 5. Failure → 500.
+    if (!sessionId) {
+      return reply.code(500).send({ error: 'MERGE_FAILED' })
+    }
+
+    return reply.send({ data: { session_id: sessionId } })
   })
 
   // ── 4. POST /onboarding/pre-joinee/:id/approve — approve + create employee ─
@@ -911,128 +1125,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     // ── Best-effort merge into the AI-onboarding review queue ──────────────────
     // Creates an onboarding_session, copies the candidate's uploaded documents
     // into onboarding_documents, and prefills a draft_employee_profile so HR can
-    // extract/validate/approve from the existing review UI. This is wrapped in a
-    // try/catch: a failure here must NEVER fail the candidate's submission.
-    let mergedSessionId: string | null = null
-    try {
-      // 1. Fetch the invitation's identity fields (the submit lookup above only
-      //    selected status/expiry columns).
-      const { data: inv } = await fastify.supabase
-        .from('pre_joinee_invitations')
-        .select('first_name, last_name, email, designation, department, joining_date')
-        .eq('id', invitation.id)
-        .eq('tenant_id', tenantId)
-        .maybeSingle()
-
-      const firstName = inv?.first_name ?? null
-      const lastName  = inv?.last_name ?? null
-      const candidateName = `${firstName ?? ''} ${lastName ?? ''}`.trim() || (inv?.email ?? 'Candidate')
-
-      // 2. Create the onboarding session (created_by null — public/candidate action).
-      const { data: session, error: sessErr } = await fastify.supabase
-        .from('onboarding_sessions')
-        .insert({
-          tenant_id:      tenantId,
-          candidate_name: candidateName,
-          status:         'active',
-          created_by:     null,
-        })
-        .select('id')
-        .single()
-
-      if (sessErr || !session) throw sessErr ?? new Error('session insert returned no row')
-      const sessionId: string = session.id
-      mergedSessionId = sessionId
-
-      // 3. Copy pre_joinee_documents → onboarding_documents (mapping document_type).
-      //    'photo' is not allowed by the onboarding_documents CHECK (see 109) → skip.
-      const DOC_TYPE_MAP: Record<string, string | null> = {
-        cv:      'resume',
-        pan:     'pan',
-        aadhaar: 'aadhaar',
-        cheque:  'bank_proof',
-        photo:   null, // not allowed by onboarding_documents CHECK → skip
-      }
-
-      const { data: preDocs } = await fastify.supabase
-        .from('pre_joinee_documents')
-        .select('document_type, file_name, storage_path, mime_type, file_size')
-        .eq('invitation_id', invitation.id)
-        .eq('tenant_id', tenantId)
-
-      const docRows = (preDocs ?? [])
-        .map((d: any) => {
-          const mapped = DOC_TYPE_MAP[d.document_type] ?? 'other'
-          if (mapped === null) return null // skip photo
-          return {
-            tenant_id:         tenantId,
-            session_id:        sessionId,
-            document_type:     mapped,
-            file_name:         d.file_name ?? d.document_type,
-            storage_path:      d.storage_path,
-            mime_type:         d.mime_type ?? null,
-            file_size:         d.file_size ?? null,
-            extraction_status: 'pending',
-          }
-        })
-        .filter((r: any): r is NonNullable<typeof r> => r !== null)
-
-      if (docRows.length > 0) {
-        const { error: docInsErr } = await fastify.supabase
-          .from('onboarding_documents')
-          .insert(docRows)
-        if (docInsErr) {
-          fastify.log.warn({ event: 'pre_joinee.merge.docs', invitation_id: invitation.id, session_id: sessionId, err: docInsErr })
-        }
-      }
-
-      // 4. Prefill the draft_employee_profile from invitation + the resolved
-      //    submission values already computed in `sub`.
-      const allowedGenders = new Set(['male', 'female', 'other', 'prefer_not_to_say'])
-      const draftGender = sub.gender && allowedGenders.has(sub.gender) ? sub.gender : null
-
-      const { error: draftErr } = await fastify.supabase
-        .from('draft_employee_profiles')
-        .insert({
-          tenant_id:           tenantId,
-          session_id:          sessionId,
-          status:              'hr_review_pending',
-          first_name:          firstName,
-          last_name:           lastName,
-          email:               inv?.email ?? null,
-          phone:               null, // submission has no phone
-          dob:                 sub.dob,
-          gender:              draftGender,
-          address_line1:       sub.address_line1,
-          address_city:        sub.city,
-          address_state:       sub.state,
-          address_pincode:     sub.pincode,
-          joining_date:        inv?.joining_date ?? null,
-          pan_number:          sub.pan_number,
-          uan_number:          sub.uan_number,
-          bank_name:           sub.bank_name,
-          bank_account_number: sub.bank_account_number,
-          bank_ifsc:           sub.bank_ifsc,
-          bank_account_type:   sub.bank_account_type,
-        })
-      if (draftErr) {
-        fastify.log.warn({ event: 'pre_joinee.merge.draft', invitation_id: invitation.id, session_id: sessionId, err: draftErr })
-      }
-
-      // 5. Link the invitation to its onboarding session.
-      const { error: linkErr } = await fastify.supabase
-        .from('pre_joinee_invitations')
-        .update({ session_id: sessionId })
-        .eq('id', invitation.id)
-        .eq('tenant_id', tenantId)
-      if (linkErr) {
-        fastify.log.warn({ event: 'pre_joinee.merge.link', invitation_id: invitation.id, session_id: sessionId, err: linkErr })
-      }
-    } catch (mergeErr) {
-      // Submission already succeeded — log and continue.
-      fastify.log.warn({ event: 'pre_joinee.merge', invitation_id: invitation.id, err: mergeErr })
-      mergedSessionId = null
-    }
+    // extract/validate/approve from the existing review UI. A failure here must
+    // NEVER fail the candidate's submission (helper returns null, never throws).
+    const mergedSessionId = await mergeInvitationToSession(fastify, invitation.id, tenantId, sub)
 
     return reply.send({
       message: 'Submission received. HR will review your details.',

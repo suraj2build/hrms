@@ -11,10 +11,11 @@
  */
 
 import { useState, Fragment } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Copy, Check, Eye, UserCheck, UserX, Trash2, Link,
-  Users, Clock, ClipboardList, CheckCircle2,
+  Users, Clock, ClipboardList, CheckCircle2, Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -53,6 +54,7 @@ interface PreJoinee {
   status: InviteStatus
   invite_token: string
   invite_url?: string | null
+  session_id?: string | null
   submitted_at?: string | null
   created_at: string
   submission?: PreJoineeSubmission | null
@@ -329,7 +331,11 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, r
 
 export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {}) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { copied, copy } = useCopyText()
+
+  // ── AI Review push state (id of the invitation currently being pushed)
+  const [pushingId, setPushingId] = useState<string | null>(null)
 
   // ── Dialog state
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -451,6 +457,33 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
     setInviteLink(null)
   }
 
+  async function openInAiReview(joinee: PreJoinee) {
+    if (joinee.session_id) {
+      navigate(`/admin/onboarding/${joinee.session_id}/review`)
+      return
+    }
+    setPushingId(joinee.id)
+    try {
+      const res = await api.post<{ data?: { session_id?: string } }>(
+        `/onboarding/pre-joinee/${joinee.id}/push-to-review`,
+      )
+      const sessionId = res?.data?.session_id
+      if (!sessionId) {
+        toast.error('Could not open in AI Review')
+        return
+      }
+      qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
+      toast.success('Sent to AI Review')
+      navigate(`/admin/onboarding/${sessionId}/review`)
+    } catch (e: any) {
+      toast.error('Failed to send to AI Review', {
+        description: e?.message ?? e?.body?.message ?? 'Unknown error',
+      })
+    } finally {
+      setPushingId(null)
+    }
+  }
+
   function openReview(joinee: PreJoinee) {
     setDrawerJoinee(joinee)
     setDrawerOpen(true)
@@ -544,22 +577,15 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
                           </Button>
                         )}
                         {inv.status === 'submitted' && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => approveMutation.mutate(inv.id)}
-                              disabled={approveMutation.isPending}
-                              className="h-7 px-2 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                            >
-                              <UserCheck className="mr-1 h-3 w-3" />
-                              Approve
-                            </Button>
-                            <RejectInlineButton
-                              onReject={notes => rejectMutation.mutate({ id: inv.id, notes })}
-                              disabled={rejectMutation.isPending}
-                            />
-                          </>
+                          <Button
+                            size="sm"
+                            onClick={() => openInAiReview(inv)}
+                            disabled={pushingId === inv.id}
+                            className="h-7 px-2 text-xs"
+                          >
+                            <Sparkles className="mr-1 h-3 w-3" />
+                            {pushingId === inv.id ? 'Opening…' : 'Open in AI Review'}
+                          </Button>
                         )}
                         {inv.status === 'pending' && (
                           <Button
@@ -767,56 +793,3 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
   )
 }
 
-// ── Inline reject button with popover notes ────────────────────────────────────
-
-function RejectInlineButton({ onReject, disabled }: { onReject: (notes: string) => void; disabled: boolean }) {
-  const [open, setOpen] = useState(false)
-  const [notes, setNotes] = useState('')
-
-  if (!open) {
-    return (
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => setOpen(true)}
-        className="h-7 px-2 text-xs border-red-300 text-red-700 hover:bg-red-50"
-      >
-        <UserX className="mr-1 h-3 w-3" />
-        Reject
-      </Button>
-    )
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <Input
-        autoFocus
-        value={notes}
-        onChange={e => setNotes(e.target.value)}
-        placeholder="Rejection notes…"
-        className="h-7 w-36 text-xs"
-        onKeyDown={e => {
-          if (e.key === 'Escape') { setOpen(false); setNotes('') }
-          if (e.key === 'Enter' && notes.trim()) { onReject(notes); setOpen(false); setNotes('') }
-        }}
-      />
-      <Button
-        size="sm"
-        variant="destructive"
-        onClick={() => { if (notes.trim()) { onReject(notes); setOpen(false); setNotes('') } else { toast.error('Notes required') } }}
-        disabled={disabled}
-        className="h-7 px-2 text-xs"
-      >
-        OK
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => { setOpen(false); setNotes('') }}
-        className="h-7 px-2 text-xs"
-      >
-        ✕
-      </Button>
-    </div>
-  )
-}
