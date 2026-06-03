@@ -328,7 +328,11 @@ export async function extractFromDocument(
   // (so a rate-limited / quota-exhausted free-tier key — e.g. Gemini 429 — does
   // not break extraction when another provider key is configured).
   const primary = (process.env.AI_PROVIDER ?? 'anthropic').toLowerCase()
-  const order = [primary, 'anthropic', 'openai', 'gemini']
+  // Fallback order: primary first, then others — but ONLY if they have a key
+  // AND are not the same as the primary. Anthropic is placed last so a
+  // Gemini-primary setup does not silently drain an Anthropic credit balance.
+  const fallbackOrder = ['gemini', 'openai', 'anthropic'].filter((p) => p !== primary)
+  const order = [primary, ...fallbackOrder]
     .filter((p, i, arr) => arr.indexOf(p) === i && PROVIDERS[p])
     .filter((p) => PROVIDERS[p].hasKey())
 
