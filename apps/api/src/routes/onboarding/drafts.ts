@@ -478,9 +478,10 @@ export default async function draftRoutes(fastify: FastifyInstance) {
 
     const { data: onboardingDocs, error: onboardingDocsError } = await fastify.supabase
       .from('onboarding_documents')
-      .select('document_type, file_name, storage_path, file_size, mime_type, uploaded_by')
+      .select('document_type, file_name, storage_path, file_size, mime_type, uploaded_by, extraction_status')
       .eq('session_id', draft.session_id)
       .eq('tenant_id', req.tenantId)
+      .neq('extraction_status', 'rejected')   // never copy identity-rejected docs to employee master
 
     if (onboardingDocsError) {
       fastify.log.warn({ onboardingDocsError, sessionId: draft.session_id }, 'approve — failed to fetch onboarding docs for copy')
