@@ -323,7 +323,7 @@ function AttKpiCard({ data, navigate }: { data: DayData[]; navigate: (to: string
   }, [data])
 
   return (
-    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden' }}>
+    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden', borderTop: '3px solid var(--primary)', borderRadius: 12 }}>
       {/* 3px top accent bar — green for attendance */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#10b981' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -378,7 +378,7 @@ function NetPayKpiCard({ slips, navigate }: { slips: PayslipSummary[]; navigate:
     : null
 
   return (
-    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden' }}>
+    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden', borderTop: '3px solid var(--primary)', borderRadius: 12 }}>
       {/* 3px top accent bar — amber for pay */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#f59e0b' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -436,7 +436,7 @@ function OpenActionsKpiCard({
   }, [requests, regRequests])
 
   return (
-    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden' }}>
+    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden', borderTop: '3px solid var(--primary)', borderRadius: 12 }}>
       {/* 3px top accent bar — amber if actions pending, muted if none */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: total > 0 ? '#f59e0b' : 'var(--border)' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

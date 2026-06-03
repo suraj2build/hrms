@@ -363,7 +363,7 @@ function KpiChip({
 }) {
   const inner = (
     <div className={cn(
-      'flex flex-col gap-0.5 p-3 rounded-lg border border-border bg-card hover:bg-accent/40 transition-colors',
+      'flex flex-col gap-0.5 p-3 rounded-xl border border-border border-t-[3px] border-t-primary bg-card hover:bg-accent/40 transition-colors',
       href && 'cursor-pointer',
     )}>
       <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</span>

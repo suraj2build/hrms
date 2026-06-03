@@ -2945,19 +2945,19 @@ export function EmployeeProfile() {
                     Pending Revision Impact Preview
                   </p>
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-lg border bg-muted/20 p-2.5 text-center">
+                    <div className="rounded-xl border border-border border-t-[3px] border-t-primary bg-muted/20 p-2.5 text-center">
                       <p className="text-[10px] text-muted-foreground">Monthly Change</p>
                       <p className={cn('text-sm font-bold tabular-nums', isUp ? 'text-success' : 'text-destructive')}>
                         {isUp ? '+' : ''}{fmtMoney(monthly)}/mo
                       </p>
                     </div>
-                    <div className="rounded-lg border bg-muted/20 p-2.5 text-center">
+                    <div className="rounded-xl border border-border border-t-[3px] border-t-primary bg-muted/20 p-2.5 text-center">
                       <p className="text-[10px] text-muted-foreground">Annual Change</p>
                       <p className={cn('text-sm font-bold tabular-nums', isUp ? 'text-success' : 'text-destructive')}>
                         {isUp ? '+' : ''}{fmtMoney(delta)}/yr
                       </p>
                     </div>
-                    <div className="rounded-lg border bg-muted/20 p-2.5 text-center">
+                    <div className="rounded-xl border border-border border-t-[3px] border-t-primary bg-muted/20 p-2.5 text-center">
                       <p className="text-[10px] text-muted-foreground">PF Employer</p>
                       <p className={cn('text-sm font-bold tabular-nums', pfImpact >= 0 ? 'text-foreground' : 'text-destructive')}>
                         {pfImpact >= 0 ? '+' : ''}{fmtMoney(pfImpact)}/mo

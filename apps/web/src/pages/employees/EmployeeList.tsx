@@ -193,8 +193,9 @@ function StatsStrip({
       {cards.map((c, i) => (
         <div key={i} style={{
           background: 'var(--card)',
-          borderRadius: 10,
+          borderRadius: 12,
           border: '1px solid var(--border)',
+          borderTop: '3px solid var(--primary)',
           borderLeft: `3px solid ${c.accent}`,
           padding: '10px 14px',
           display: 'flex',

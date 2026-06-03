@@ -394,6 +394,7 @@ function KPIStrip({ summary, pendingLeave, pendingReg }: {
         return (
           <div key={t.label} style={{
             background: T.card, border: `1px solid ${T.border}`, borderRadius: 12,
+            borderTop: '3px solid var(--primary)',
             padding: '12px 14px', boxShadow: T.shadow,
             display: 'flex', alignItems: 'center', gap: 12,
             position: 'relative', overflow: 'hidden',
