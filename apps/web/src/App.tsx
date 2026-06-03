@@ -145,7 +145,6 @@ const StatutoryDashboard    = lazy(() => import('@/pages/payroll/StatutoryDashbo
 
 // Sprint 12 — Workforce Optimization + Event Governance + Orchestration + Governance Evolution + Incidents + Webhooks + Integrations
 const WorkforceOptimizationEngine = lazy(() => import('@/pages/attendance/WorkforceOptimizationEngine').then(m => ({ default: m.WorkforceOptimizationEngine })))
-const ExecutiveIntelligence       = lazy(() => import('@/pages/analytics/ExecutiveIntelligence').then(m => ({ default: m.ExecutiveIntelligence })))
 const EventGovernance             = lazy(() => import('@/pages/system/EventGovernance').then(m => ({ default: m.EventGovernance })))
 const OrchestrationConsole        = lazy(() => import('@/pages/system/OrchestrationConsole').then(m => ({ default: m.OrchestrationConsole })))
 const IncidentManagement          = lazy(() => import('@/pages/system/IncidentManagement').then(m => ({ default: m.IncidentManagement })))
@@ -592,8 +591,8 @@ export default function App() {
                 {/* Workforce Optimization Engine (Phase 1) */}
                 <Route path="/admin/workforce/optimization"  element={<WorkforceOptimizationEngine />} />
 
-                {/* Executive Intelligence (Phase 2) */}
-                <Route path="/admin/analytics/executive"     element={<ExecutiveIntelligence />} />
+                {/* Executive Intelligence — consolidated to the canonical /admin/executive landing */}
+                <Route path="/admin/analytics/executive"     element={<Navigate to="/admin/executive" replace />} />
 
                 {/* Governance Evolution (Phase 6) */}
                 <Route path="/admin/approvals/governance-matrix" element={<GovernanceMatrix />} />

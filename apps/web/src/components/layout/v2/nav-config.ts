@@ -98,6 +98,7 @@ import {
   LogOut,
   FileText,
   Search,
+  BadgeCheck,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -343,9 +344,14 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Processing',
         items: [
+          { id: 'payroll-validation', label: 'Validation',  route: '/admin/payroll/validation',  icon: CheckSquare },
+          { id: 'payroll-reconcile',  label: 'Reconciliation', route: '/admin/payroll/reconciliation', icon: Scale },
           { id: 'payroll-governance', label: 'Governance',  route: '/admin/payroll/governance',  icon: ShieldCheck },
-          { id: 'payroll-payout',     label: 'Payout',      route: '/admin/payroll/payout',      icon: CreditCard  },
           { id: 'payroll-approvals',  label: 'Approvals',   route: '/admin/payroll/approvals',   icon: CheckSquare },
+          { id: 'payroll-finalize',   label: 'Finalization', route: '/admin/payroll/finalize',   icon: BadgeCheck },
+          { id: 'payroll-payout',     label: 'Payout',      route: '/admin/payroll/payout',      icon: CreditCard  },
+          { id: 'payroll-payout-recon', label: 'Payout Reconciliation', route: '/admin/payroll/payout-reconciliation', icon: RotateCcw },
+          { id: 'payroll-statutory-dash', label: 'Statutory Dashboard', route: '/admin/payroll/statutory-dashboard', icon: Landmark },
           { id: 'payroll-accounting', label: 'Accounting',  route: '/admin/payroll/accounting',  icon: BookOpen    },
         ],
       },
@@ -456,7 +462,6 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'reports-center',  label: 'All Reports',     route: '/admin/reports',                       icon: BarChart2  },
           { id: 'muster-roll',     label: 'Muster Roll',     route: '/admin/attendance/muster',             icon: BookOpen   },
-          { id: 'salary-sheet',    label: 'Salary Sheets',   route: '/admin/reports/salary-sheet',          icon: Receipt    },
           { id: 'workforce-cost',  label: 'Workforce Cost',  route: '/admin/payroll/cost-intelligence',     icon: BarChart3  },
           { id: 'payroll-ledger',  label: 'Payroll Ledger',  route: '/admin/payroll/ledger',                icon: BookOpen   },
         ],
