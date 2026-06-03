@@ -89,7 +89,7 @@ function deriveOpState(emp: EmployeeListItem): { label: string; bg: string; colo
   const totalDays = totalMs / 86_400_000
   const totalMo   = totalDays / 30.44
 
-  if (emp.status === 'separated')  return { label: 'Separated',   bg: '#f3f4f6', color: '#4b5563', dot: '#9ca3af' }
+  if (emp.status === 'separated')  return { label: 'Separated',   bg: 'var(--muted)', color: 'var(--muted-foreground)', dot: 'var(--muted-foreground)' }
   if (emp.status === 'inactive')   return { label: 'Inactive',    bg: '#fef2f2', color: '#dc2626', dot: '#ef4444' }
   if (emp.status === 'on_notice')  return { label: 'On Notice',   bg: '#fff7ed', color: '#c2410c', dot: '#f97316' }
   if (totalDays <= 30)             return { label: 'Onboarding',  bg: '#fff7ed', color: '#c2410c', dot: '#fb923c' }
@@ -110,7 +110,7 @@ function deriveAccessDisplay(emp: EmployeeListItem): {
 } {
   const s = emp.user_account?.status
   if (!s || s === 'no_account')
-    return { label: 'No Account',  sub: 'Setup required',       iconBg: '#f3f4f6', iconColor: '#9ca3af', Icon: Lock   }
+    return { label: 'No Account',  sub: 'Setup required',       iconBg: 'var(--muted)', iconColor: 'var(--muted-foreground)', Icon: Lock   }
   if (s === 'suspended')
     return { label: 'Locked',      sub: 'Access suspended',     iconBg: '#fef2f2', iconColor: '#ef4444', Icon: X      }
   if (s === 'pending_verification')
@@ -155,7 +155,7 @@ function StatsStrip({
       label: 'WORKFORCE',
       value: stats.total.toString(),
       sub:   stats.newThisMonth > 0 ? `↑ ${stats.newThisMonth} joined this month` : 'Active roster',
-      subColor: stats.newThisMonth > 0 ? '#16a34a' : '#9ca3af',
+      subColor: stats.newThisMonth > 0 ? '#16a34a' : 'var(--muted-foreground)',
       accent: '#10b981',
     },
     {
@@ -169,7 +169,7 @@ function StatsStrip({
       label: 'ONBOARDING',
       value: stats.onboarding.toString(),
       sub:   stats.onboarding > 0 ? 'Settling in' : 'None this month',
-      subColor: stats.onboarding > 0 ? '#f59e0b' : '#9ca3af',
+      subColor: stats.onboarding > 0 ? '#f59e0b' : 'var(--muted-foreground)',
       accent: '#f97316',
     },
     {
@@ -183,7 +183,7 @@ function StatsStrip({
       label: 'SITES',
       value: sitesCount.toString(),
       sub:   cities > 0 ? `${cities} cit${cities === 1 ? 'y' : 'ies'} covered` : 'Work locations',
-      subColor: '#6b7280',
+      subColor: 'var(--muted-foreground)',
       accent: '#0ea5e9',
     },
   ]
@@ -192,9 +192,9 @@ function StatsStrip({
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
       {cards.map((c, i) => (
         <div key={i} style={{
-          background: '#fff',
+          background: 'var(--card)',
           borderRadius: 10,
-          border: '1px solid #e5e7eb',
+          border: '1px solid var(--border)',
           borderLeft: `3px solid ${c.accent}`,
           padding: '10px 14px',
           display: 'flex',
@@ -202,10 +202,10 @@ function StatsStrip({
           gap: 2,
           boxShadow: '0 1px 3px rgba(0,0,0,.04)',
         }}>
-          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: '#b0b7c3' }}>
+          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
             {c.label}
           </span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#111827', letterSpacing: '-.025em', fontFamily: '"Geist Mono",ui-monospace,monospace', lineHeight: 1.15 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.025em', fontFamily: '"Geist Mono",ui-monospace,monospace', lineHeight: 1.15 }}>
             {c.value}
           </div>
           <div style={{ fontSize: 10.5, color: c.subColor, fontWeight: 500, marginTop: 1 }}>
@@ -377,7 +377,7 @@ export function EmployeeList() {
     const active = field && sortKey === field
     return (
       <th
-        style={{ width, padding: '8px 10px', textAlign: 'left', fontWeight: 700, fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: active ? '#2f1f57' : '#9ca3af', whiteSpace: 'nowrap', cursor: field ? 'pointer' : 'default', userSelect: 'none', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}
+        style={{ width, padding: '8px 10px', textAlign: 'left', fontWeight: 700, fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: active ? 'var(--primary)' : 'var(--muted-foreground)', whiteSpace: 'nowrap', cursor: field ? 'pointer' : 'default', userSelect: 'none', background: 'var(--muted)', borderBottom: '1px solid var(--border)' }}
         onClick={() => field && toggleSort(field)}
       >
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -403,14 +403,14 @@ export function EmployeeList() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ background: '#f6f7fb', minHeight: '100vh', padding: '20px 24px 32px' }}>
+    <div style={{ background: 'var(--muted)', minHeight: '100vh', padding: '20px 24px 32px' }}>
       <div style={{ maxWidth: 1600, margin: '0 auto' }}>
 
         {/* ── Page header ──────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: '-.02em', margin: 0 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.02em', margin: 0 }}>
                 People Operations
               </h1>
               <span style={{
@@ -420,23 +420,23 @@ export function EmployeeList() {
                 WORKFORCE SURFACE
               </span>
             </div>
-            <p style={{ fontSize: 12.5, color: '#9ca3af', margin: 0, fontWeight: 500 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--muted-foreground)', margin: 0, fontWeight: 500 }}>
               Live workforce operational stream — {allEmployees.length} people across {sites.length} site{sites.length !== 1 ? 's' : ''}
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
+            <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--muted-foreground)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
               <Bookmark className="w-3.5 h-3.5" />
               Saved Views
             </button>
             {isAdmin && (
               <>
-                <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
+                <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--muted-foreground)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
                   <Download className="w-3.5 h-3.5" />
                   Export
                 </button>
                 <button
-                  style={{ height: 34, padding: '0 16px', borderRadius: 8, background: '#2f1f57', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'inherit' }}
+                  style={{ height: 34, padding: '0 16px', borderRadius: 8, background: 'var(--primary)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'inherit' }}
                   onClick={() => navigate(`${basePath}/employees/new`)}
                 >
                   <UserPlus className="w-3.5 h-3.5" />
@@ -453,18 +453,18 @@ export function EmployeeList() {
         </div>
 
         {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
+        <div style={{ background: 'var(--card)', borderRadius: 10, border: '1px solid var(--border)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
           {/* Search */}
           <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
-            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#9ca3af', pointerEvents: 'none' }} />
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--muted-foreground)', pointerEvents: 'none' }} />
             <input
               type="text"
               placeholder="Search name, code, email, department..."
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1) }}
-              style={{ width: '100%', paddingLeft: 32, paddingRight: 44, height: 34, border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none', color: '#111827', fontFamily: 'inherit', background: '#fff' }}
+              style={{ width: '100%', paddingLeft: 32, paddingRight: 44, height: 34, border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, outline: 'none', color: 'var(--foreground)', fontFamily: 'inherit', background: 'var(--card)' }}
             />
-            <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: '#d1d5db', fontFamily: '"Geist Mono",ui-monospace,monospace', fontWeight: 600, background: '#f9fafb', border: '1px solid #e5e7eb', padding: '2px 5px', borderRadius: 5 }}>
+            <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--border)', fontFamily: '"Geist Mono",ui-monospace,monospace', fontWeight: 600, background: 'var(--muted)', border: '1px solid var(--border)', padding: '2px 5px', borderRadius: 5 }}>
               ⌘K
             </span>
           </div>
@@ -516,29 +516,29 @@ export function EmployeeList() {
               <select
                 value={f.value}
                 onChange={e => f.onChange(e.target.value)}
-                style={{ height: 34, paddingLeft: 12, paddingRight: 28, border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12.5, fontWeight: 500, color: f.value !== 'all' ? '#2f1f57' : '#374151', background: f.value !== 'all' ? '#ede8f5' : '#fff', cursor: 'pointer', outline: 'none', appearance: 'none', fontFamily: 'inherit' }}
+                style={{ height: 34, paddingLeft: 12, paddingRight: 28, border: '1px solid var(--border)', borderRadius: 8, fontSize: 12.5, fontWeight: 500, color: f.value !== 'all' ? 'var(--primary)' : 'var(--muted-foreground)', background: f.value !== 'all' ? 'var(--accent)' : 'var(--card)', cursor: 'pointer', outline: 'none', appearance: 'none', fontFamily: 'inherit' }}
               >
                 {f.options.map(o => (
                   <option key={o.v} value={o.v}>{o.l}</option>
                 ))}
               </select>
-              <ChevronDown style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: '#9ca3af', pointerEvents: 'none' }} />
+              <ChevronDown style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, color: 'var(--muted-foreground)', pointerEvents: 'none' }} />
             </div>
           ))}
 
           {/* Right: count + view toggle */}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 12.5, color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)', fontWeight: 500, whiteSpace: 'nowrap' }}>
               {sorted.length} of {allEmployees.length} people
             </span>
-            <div style={{ display: 'flex', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
               {[
                 { icon: Table2,      label: 'Table', active: true },
                 { icon: LayoutGrid,  label: 'Grid',  active: false },
               ].map(v => (
                 <button
                   key={v.label}
-                  style={{ height: 32, padding: '0 12px', background: v.active ? '#f3f4f6' : '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: v.active ? 600 : 500, color: v.active ? '#111827' : '#9ca3af', fontFamily: 'inherit' }}
+                  style={{ height: 32, padding: '0 12px', background: v.active ? 'var(--muted)' : 'var(--card)', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: v.active ? 600 : 500, color: v.active ? 'var(--foreground)' : 'var(--muted-foreground)', fontFamily: 'inherit' }}
                 >
                   <v.icon className="w-3.5 h-3.5" />
                   {v.label}
@@ -549,7 +549,7 @@ export function EmployeeList() {
         </div>
 
         {/* ── Table ────────────────────────────────────────────────────────── */}
-        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflowX: 'auto', marginTop: 10 }}>
+        <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', overflowX: 'auto', marginTop: 10 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 800 }}>
             <colgroup>
               <col style={{ width: '3%'  }} />
@@ -564,13 +564,13 @@ export function EmployeeList() {
             <thead>
               <tr>
                 {/* Checkbox col */}
-                <th style={{ width: '3%', padding: '8px 0 8px 12px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                <th style={{ width: '3%', padding: '8px 0 8px 12px', background: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                   <input
                     type="checkbox"
                     checked={allSelected}
                     ref={el => { if (el) el.indeterminate = someSelected }}
                     onChange={toggleSelectAll}
-                    style={{ width: 13, height: 13, accentColor: '#2f1f57', cursor: 'pointer' }}
+                    style={{ width: 13, height: 13, accentColor: 'var(--primary)', cursor: 'pointer' }}
                   />
                 </th>
                 <ColHead label="Employee"   field="name"         width="20%" />
@@ -587,11 +587,11 @@ export function EmployeeList() {
                 Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
               ) : pageItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: '40px 24px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                  <td colSpan={8} style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 13 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                       <Filter style={{ width: 28, height: 28, opacity: .4 }} />
                       <span>No employees match your filters.</span>
-                      <button onClick={() => { setSearch(''); setStatusFilter('all'); setAccessFilter('all'); setDeptFilter('all'); setLocFilter('all') }} style={{ color: '#2f1f57', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>
+                      <button onClick={() => { setSearch(''); setStatusFilter('all'); setAccessFilter('all'); setDeptFilter('all'); setLocFilter('all') }} style={{ color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>
                         Clear all filters
                       </button>
                     </div>
@@ -616,7 +616,7 @@ export function EmployeeList() {
         {/* ── Pagination ───────────────────────────────────────────────────── */}
         {totalPages > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
               Page {page} of {totalPages} · {sorted.length} results
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -629,7 +629,7 @@ export function EmployeeList() {
                   <button
                     key={n}
                     onClick={() => setPage(n)}
-                    style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${n === page ? '#2f1f57' : '#e5e7eb'}`, background: n === page ? '#2f1f57' : '#fff', color: n === page ? '#fff' : '#374151', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                    style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${n === page ? 'var(--primary)' : 'var(--border)'}`, background: n === page ? 'var(--primary)' : 'var(--card)', color: n === page ? '#fff' : 'var(--muted-foreground)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                   >
                     {n}
                   </button>
@@ -660,7 +660,7 @@ function PageBtn({ children, disabled, onClick }: { children: React.ReactNode; d
     <button
       disabled={disabled}
       onClick={onClick}
-      style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, opacity: disabled ? .4 : 1, fontFamily: 'inherit' }}
+      style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--muted-foreground)', fontSize: 12, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, opacity: disabled ? .4 : 1, fontFamily: 'inherit' }}
     >
       {children}
     </button>
@@ -706,9 +706,9 @@ function EmployeeRow({
 
   return (
     <tr
-      style={{ background: selected ? '#eef2ff' : '#fff', transition: 'background .08s', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
-      onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.background = '#f9fafb' }}
-      onMouseLeave={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.background = '#fff' }}
+      style={{ background: selected ? 'var(--accent)' : 'var(--card)', transition: 'background .08s', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+      onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.background = 'var(--muted)' }}
+      onMouseLeave={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.background = 'var(--card)' }}
       onClick={() => navigate(`${basePath}/employees/${emp.id}`)}
     >
       {/* Checkbox */}
@@ -717,7 +717,7 @@ function EmployeeRow({
           type="checkbox"
           checked={selected}
           onChange={onSelect}
-          style={{ width: 13, height: 13, accentColor: '#2f1f57', cursor: 'pointer' }}
+          style={{ width: 13, height: 13, accentColor: 'var(--primary)', cursor: 'pointer' }}
         />
       </td>
 
@@ -731,17 +731,17 @@ function EmployeeRow({
             }
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {emp.first_name} {emp.last_name}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1.5 }}>
-              <span style={{ fontSize: 10.5, fontFamily: '"Geist Mono",ui-monospace,monospace', color: '#9ca3af', fontWeight: 500, flexShrink: 0 }}>
+              <span style={{ fontSize: 10.5, fontFamily: '"Geist Mono",ui-monospace,monospace', color: 'var(--muted-foreground)', fontWeight: 500, flexShrink: 0 }}>
                 {emp.employee_code}
               </span>
               {emp.designation?.name && (
                 <>
-                  <span style={{ color: '#d1d5db', fontSize: 9 }}>·</span>
-                  <span style={{ fontSize: 11, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: 'var(--border)', fontSize: 9 }}>·</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {emp.designation.name}
                   </span>
                 </>
@@ -764,12 +764,12 @@ function EmployeeRow({
         {dept ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <span style={{ width: 9, height: 9, borderRadius: 2, background: deptColor(dept.name), flexShrink: 0 }} />
-            <span style={{ fontSize: 12.5, fontWeight: 500, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {dept.name}
             </span>
           </div>
         ) : (
-          <span style={{ fontSize: 12, color: '#d1d5db' }}>—</span>
+          <span style={{ fontSize: 12, color: 'var(--border)' }}>—</span>
         )}
       </td>
 
@@ -778,17 +778,17 @@ function EmployeeRow({
         {locCity ? (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Building2 style={{ width: 11, height: 11, color: '#9ca3af', flexShrink: 0 }} />
-              <span style={{ fontSize: 12.5, fontWeight: 500, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <Building2 style={{ width: 11, height: 11, color: 'var(--muted-foreground)', flexShrink: 0 }} />
+              <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {locCity}
               </span>
             </div>
             {locCode && (
-              <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 1, paddingLeft: 15 }}>{locCode}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 1, paddingLeft: 15 }}>{locCode}</div>
             )}
           </div>
         ) : (
-          <span style={{ fontSize: 11.5, color: '#d1d5db', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 11.5, color: 'var(--border)', display: 'flex', alignItems: 'center', gap: 4 }}>
             <MapPin style={{ width: 10, height: 10 }} />
             No location
           </span>
@@ -798,14 +798,14 @@ function EmployeeRow({
       {/* Tenure — inline: "3y 11m · joined Jun 15, 22" + bar */}
       <td style={{ padding: '8px 10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#374151', fontFamily: '"Geist Mono",ui-monospace,monospace', flexShrink: 0 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted-foreground)', fontFamily: '"Geist Mono",ui-monospace,monospace', flexShrink: 0 }}>
             {tenure.short}
           </span>
-          <span style={{ fontSize: 10.5, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             · joined {tenure.full}
           </span>
         </div>
-        <div style={{ height: 3, background: '#f3f4f6', borderRadius: 999, width: '85%' }}>
+        <div style={{ height: 3, background: 'var(--muted)', borderRadius: 999, width: '85%' }}>
           <div style={{ height: '100%', borderRadius: 999, background: barColor, width: `${barPct}%` }} />
         </div>
       </td>
@@ -817,8 +817,8 @@ function EmployeeRow({
             <span style={{ color: access.iconColor, display: 'flex' }}><AccessIcon className="w-3 h-3" /></span>
           </span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{access.label}</div>
-            <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{access.sub}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>{access.label}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{access.sub}</div>
           </div>
         </div>
       </td>
@@ -829,25 +829,25 @@ function EmployeeRow({
           <button
             title="Send email"
             onClick={() => window.open(`mailto:${emp.email}`)}
-            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#9ca3af', flexShrink: 0 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f3f4f6'; (e.currentTarget as HTMLButtonElement).style.color = '#374151' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#fff'; (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af' }}
+            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--muted-foreground)', flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--card)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
           >
             <Mail className="w-3 h-3" />
           </button>
           <button
             title="More options"
-            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#9ca3af', flexShrink: 0 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f3f4f6'; (e.currentTarget as HTMLButtonElement).style.color = '#374151' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#fff'; (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af' }}
+            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--muted-foreground)', flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--card)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
           >
             <TrendingUp className="w-3 h-3 rotate-90" />
           </button>
           <button
             onClick={() => navigate(`${basePath}/employees/${emp.id}`)}
-            style={{ height: 26, padding: '0 9px', borderRadius: 6, background: '#2f1f57', border: 'none', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}
+            style={{ height: 26, padding: '0 9px', borderRadius: 6, background: 'var(--primary)', border: 'none', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#231645' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#2f1f57' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--primary)' }}
           >
             → Open Profile
           </button>
@@ -897,7 +897,7 @@ function BulkBar({
       </button>
       <button
         onClick={onClear}
-        style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+        style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--muted-foreground)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
       >
         ✕ Clear
       </button>
@@ -909,22 +909,22 @@ function BulkBar({
 
 function SkeletonRow() {
   return (
-    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+    <tr style={{ borderBottom: '1px solid var(--border)' }}>
       <td style={{ padding: '8px 0 8px 12px', width: 38 }}>
-        <div style={{ width: 13, height: 13, borderRadius: 3, background: '#f3f4f6' }} />
+        <div style={{ width: 13, height: 13, borderRadius: 3, background: 'var(--muted)' }} />
       </td>
       <td style={{ padding: '8px 10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f3f4f6', flexShrink: 0 }} />
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--muted)', flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
-            <div style={{ height: 11, background: '#f3f4f6', borderRadius: 4, width: '65%', marginBottom: 5 }} />
-            <div style={{ height: 9, background: '#f3f4f6', borderRadius: 4, width: '45%' }} />
+            <div style={{ height: 11, background: 'var(--muted)', borderRadius: 4, width: '65%', marginBottom: 5 }} />
+            <div style={{ height: 9, background: 'var(--muted)', borderRadius: 4, width: '45%' }} />
           </div>
         </div>
       </td>
       {[90, 100, 110, 120, 110, 130].map((w, i) => (
         <td key={i} style={{ padding: '8px 10px' }}>
-          <div style={{ height: 11, background: '#f3f4f6', borderRadius: 4, width: w }} />
+          <div style={{ height: 11, background: 'var(--muted)', borderRadius: 4, width: w }} />
         </td>
       ))}
     </tr>

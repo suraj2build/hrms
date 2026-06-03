@@ -85,15 +85,15 @@ interface Holiday {
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
 const CARD: CSSProperties = {
-  background: '#fff',
-  border: '1px solid #ececf3',
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
   borderRadius: 14,
   boxShadow: '0 1px 0 rgba(15,16,36,.04),0 1px 2px rgba(15,16,36,.04)',
 }
 
 const CARD_HEAD: CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '10px 16px', borderBottom: '1px solid #f1f2f7',
+  padding: '10px 16px', borderBottom: '1px solid var(--border)',
 }
 
 const MONO: CSSProperties = { fontFamily: '"Geist Mono",ui-monospace,monospace' }
@@ -102,7 +102,7 @@ const MONO: CSSProperties = { fontFamily: '"Geist Mono",ui-monospace,monospace' 
 
 function CardLabel({ children }: { children: ReactNode }) {
   return (
-    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.14em', textTransform: 'uppercase' as const, color: '#6a6e88' }}>
+    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.14em', textTransform: 'uppercase' as const, color: 'var(--muted-foreground)' }}>
       {children}
     </span>
   )
@@ -259,7 +259,7 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
       {/* Name + meta */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: '#0f1024', letterSpacing: '-.015em' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.015em' }}>
             {name}
           </span>
           {grade && (
@@ -279,8 +279,8 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
             { k: 'Reports to', v: manager },
             { k: 'Location', v: location },
           ].map(f => (
-            <span key={f.k} style={{ fontSize: 11.5, color: '#6a6e88' }}>
-              <span style={{ fontWeight: 600, color: '#9498ad', marginRight: 3 }}>{f.k}</span>
+            <span key={f.k} style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>
+              <span style={{ fontWeight: 600, color: 'var(--muted-foreground)', marginRight: 3 }}>{f.k}</span>
               <span style={{ color: '#2b2d44', fontWeight: 500, ...(f.mono ? MONO : {}) }}>
                 {f.v}
               </span>
@@ -293,14 +293,14 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
 
       {/* Tenure */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
-        <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase' as const, color: '#9498ad' }}>
+        <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase' as const, color: 'var(--muted-foreground)' }}>
           Tenure
         </span>
-        <span style={{ fontSize: 19, fontWeight: 700, color: '#0f1024', letterSpacing: '-.02em', lineHeight: 1.15, ...MONO }}>
+        <span style={{ fontSize: 19, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1.15, ...MONO }}>
           {tenure}
         </span>
         {joinedStr && (
-          <span style={{ fontSize: 10.5, color: '#9498ad', marginTop: 1 }}>Joined {joinedStr}</span>
+          <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 1 }}>Joined {joinedStr}</span>
         )}
       </div>
     </section>
@@ -334,7 +334,7 @@ function AttKpiCard({ data, navigate }: { data: DayData[]; navigate: (to: string
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: '#0f1024', letterSpacing: '-.03em', lineHeight: 1 }}>
+        <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.03em', lineHeight: 1 }}>
           {stats.rate}%
         </div>
         <div style={{ fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -344,13 +344,13 @@ function AttKpiCard({ data, navigate }: { data: DayData[]; navigate: (to: string
       </div>
 
       <div style={{ display: 'flex', gap: 6 }}>
-        <div style={{ flex: 1, borderRadius: 7, background: '#f6f7fb', padding: '5px 8px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f1024', ...MONO }}>{stats.present}/{stats.total}</div>
-          <div style={{ fontSize: 10, color: '#6a6e88', marginTop: 1 }}>Days present</div>
+        <div style={{ flex: 1, borderRadius: 7, background: 'var(--muted)', padding: '5px 8px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)', ...MONO }}>{stats.present}/{stats.total}</div>
+          <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>Days present</div>
         </div>
-        <div style={{ flex: 1, borderRadius: 7, background: '#f6f7fb', padding: '5px 8px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: stats.late > 0 ? '#f59e0b' : '#0f1024', ...MONO }}>{stats.late}</div>
-          <div style={{ fontSize: 10, color: '#6a6e88', marginTop: 1 }}>Late arrivals</div>
+        <div style={{ flex: 1, borderRadius: 7, background: 'var(--muted)', padding: '5px 8px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: stats.late > 0 ? '#f59e0b' : 'var(--foreground)', ...MONO }}>{stats.late}</div>
+          <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>Late arrivals</div>
         </div>
       </div>
 
@@ -389,7 +389,7 @@ function NetPayKpiCard({ slips, navigate }: { slips: PayslipSummary[]; navigate:
       </div>
 
       <div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: '#0f1024', letterSpacing: '-.02em', lineHeight: 1, ...MONO }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1, ...MONO }}>
           {latest ? fmtINR(latest.net_pay) : '—'}
         </div>
         {delta !== null ? (
@@ -401,14 +401,14 @@ function NetPayKpiCard({ slips, navigate }: { slips: PayslipSummary[]; navigate:
             {delta >= 0 ? '+' : ''}{fmtINR(Math.abs(delta))} vs prev
           </div>
         ) : monthLabel ? (
-          <div style={{ fontSize: 11, color: '#6a6e88', marginTop: 4 }}>{monthLabel} payslip</div>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>{monthLabel} payslip</div>
         ) : (
-          <div style={{ fontSize: 11, color: '#9498ad', marginTop: 4 }}>No payslip yet</div>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>No payslip yet</div>
         )}
       </div>
 
       {creditDate && (
-        <div style={{ fontSize: 11, color: '#6a6e88', background: '#f6f7fb', borderRadius: 7, padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', background: 'var(--muted)', borderRadius: 7, padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <Calendar style={{ width: 10, height: 10 }} />
           Credited {creditDate}
         </div>
@@ -438,24 +438,24 @@ function OpenActionsKpiCard({
   return (
     <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden' }}>
       {/* 3px top accent bar — amber if actions pending, muted if none */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: total > 0 ? '#f59e0b' : '#e2e8f0' }} />
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: total > 0 ? '#f59e0b' : 'var(--border)' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <CardLabel>Open Actions</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: total > 0 ? '#fff3da' : '#f6f7fb', display: 'grid', placeItems: 'center' }}>
-          <AlertCircle style={{ width: 12, height: 12, color: total > 0 ? '#f59e0b' : '#9498ad' }} />
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: total > 0 ? '#fff3da' : 'var(--muted)', display: 'grid', placeItems: 'center' }}>
+          <AlertCircle style={{ width: 12, height: 12, color: total > 0 ? '#f59e0b' : 'var(--muted-foreground)' }} />
         </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <div style={{ fontSize: 32, fontWeight: 700, color: total > 0 ? '#f59e0b' : '#0f1024', letterSpacing: '-.03em', lineHeight: 1, ...MONO }}>
+        <div style={{ fontSize: 32, fontWeight: 700, color: total > 0 ? '#f59e0b' : 'var(--foreground)', letterSpacing: '-.03em', lineHeight: 1, ...MONO }}>
           {total}
         </div>
-        <div style={{ fontSize: 11, color: total > 0 ? '#835500' : '#6a6e88' }}>
+        <div style={{ fontSize: 11, color: total > 0 ? '#835500' : 'var(--muted-foreground)' }}>
           {awaitingInput > 0 ? `${awaitingInput} awaiting input` : 'All clear'}
         </div>
       </div>
 
-      <div style={{ fontSize: 11, color: '#9498ad' }}>
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
         {total > 0 ? 'Items need your attention' : 'No pending actions'}
       </div>
 
@@ -491,7 +491,7 @@ function CompStructure({
       <div style={CARD_HEAD}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <CardLabel>Compensation Structure</CardLabel>
-          {effectiveFrom && <span style={{ fontSize: 10.5, color: '#9498ad' }}>Revised {effectiveFrom}</span>}
+          {effectiveFrom && <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)' }}>Revised {effectiveFrom}</span>}
         </div>
         <LinkBtn onClick={() => navigate('/ess/compensation?tab=compensation')}>
           Details <ChevronRight style={{ width: 12, height: 12 }} />
@@ -507,11 +507,11 @@ function CompStructure({
             { k: 'Net Take-Home',v: latestSlip ? fmtINR(latestSlip.net_pay) : '—' },
           ].map(m => (
             <div key={m.k} style={{
-              borderRadius: 8, border: '1px solid #ececf3', padding: '8px 10px',
-              background: m.accent ? 'linear-gradient(135deg,#eef0ff,#f8f9ff)' : '#fafbfd',
+              borderRadius: 8, border: '1px solid var(--border)', padding: '8px 10px',
+              background: m.accent ? 'linear-gradient(135deg,#eef0ff,#f8f9ff)' : 'var(--card)',
             }}>
-              <div style={{ fontSize: 9, fontWeight: 600, color: '#9498ad', textTransform: 'uppercase' as const, letterSpacing: '.12em' }}>{m.k}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: m.accent ? '#4338ca' : '#0f1024', marginTop: 3, ...MONO }}>
+              <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase' as const, letterSpacing: '.12em' }}>{m.k}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: m.accent ? '#4338ca' : 'var(--foreground)', marginTop: 3, ...MONO }}>
                 {m.v}
               </div>
             </div>
@@ -521,7 +521,7 @@ function CompStructure({
         {/* Earnings bars */}
         {earnings.length > 0 && (
           <>
-            <div style={{ fontSize: 9.5, fontWeight: 600, color: '#9498ad', textTransform: 'uppercase' as const, letterSpacing: '.1em', marginBottom: 7 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase' as const, letterSpacing: '.1em', marginBottom: 7 }}>
               Earnings
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 12 }}>
@@ -530,7 +530,7 @@ function CompStructure({
                   <div style={{ width: 100, flexShrink: 0, fontSize: 11.5, color: '#2b2d44', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                     {c.name}
                   </div>
-                  <div style={{ flex: 1, height: 5, borderRadius: 999, background: '#f1f2f7', overflow: 'hidden' }}>
+                  <div style={{ flex: 1, height: 5, borderRadius: 999, background: 'var(--muted)', overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 999,
                       background: 'linear-gradient(90deg,#6366f1,#8b5cf6)',
@@ -538,7 +538,7 @@ function CompStructure({
                       transition: 'width .3s ease',
                     }} />
                   </div>
-                  <div style={{ width: 68, textAlign: 'right' as const, fontSize: 11.5, fontWeight: 600, color: '#0f1024', flexShrink: 0, ...MONO }}>
+                  <div style={{ width: 68, textAlign: 'right' as const, fontSize: 11.5, fontWeight: 600, color: 'var(--foreground)', flexShrink: 0, ...MONO }}>
                     {fmtINR(c.computed_monthly)}
                   </div>
                 </div>
@@ -550,17 +550,17 @@ function CompStructure({
         {/* Deduction pills */}
         {deductions.length > 0 && (
           <>
-            <div style={{ fontSize: 9.5, fontWeight: 600, color: '#9498ad', textTransform: 'uppercase' as const, letterSpacing: '.1em', marginBottom: 6 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase' as const, letterSpacing: '.1em', marginBottom: 6 }}>
               Deductions
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 5 }}>
               {deductions.slice(0, 5).map(c => (
                 <div key={c.code} style={{
                   display: 'flex', alignItems: 'center', gap: 5,
-                  borderRadius: 7, border: '1px solid #ececf3',
-                  background: '#fafbfd', padding: '3px 8px',
+                  borderRadius: 7, border: '1px solid var(--border)',
+                  background: 'var(--card)', padding: '3px 8px',
                 }}>
-                  <span style={{ fontSize: 11, color: '#6a6e88' }}>{c.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{c.name}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, color: '#f43f5e', ...MONO }}>
                     {fmtINR(c.computed_monthly)}
                   </span>
@@ -572,12 +572,12 @@ function CompStructure({
 
         {/* Fallback */}
         {components.length === 0 && comp && (
-          <div style={{ textAlign: 'center' as const, color: '#9498ad', fontSize: 13, paddingTop: 8 }}>
+          <div style={{ textAlign: 'center' as const, color: 'var(--muted-foreground)', fontSize: 13, paddingTop: 8 }}>
             Component breakdown not available
           </div>
         )}
         {!comp && (
-          <div style={{ textAlign: 'center' as const, color: '#9498ad', fontSize: 13, padding: '16px 0' }}>
+          <div style={{ textAlign: 'center' as const, color: 'var(--muted-foreground)', fontSize: 13, padding: '16px 0' }}>
             No compensation data
           </div>
         )}
@@ -647,31 +647,31 @@ function MyRequests({
             { k: 'Rejected', v: rejected, dot: '#f43f5e' },
           ].map(t => (
             <div key={t.k} style={{
-              flex: 1, borderRadius: 8, border: '1px solid #ececf3',
-              background: '#fafbfd', padding: '6px 8px',
+              flex: 1, borderRadius: 8, border: '1px solid var(--border)',
+              background: 'var(--card)', padding: '6px 8px',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: t.dot, flexShrink: 0 }} />
-                <span style={{ fontSize: 9.5, color: '#6a6e88', fontWeight: 600 }}>{t.k}</span>
+                <span style={{ fontSize: 9.5, color: 'var(--muted-foreground)', fontWeight: 600 }}>{t.k}</span>
               </div>
-              <span style={{ fontSize: 17, fontWeight: 700, color: '#0f1024', ...MONO }}>{t.v}</span>
+              <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--foreground)', ...MONO }}>{t.v}</span>
             </div>
           ))}
         </div>
 
         {/* Request rows */}
         {recentItems.length > 0 ? recentItems.map((r, i) => {
-          const ss = statusStyle[r.status?.toLowerCase()] ?? { bg: '#f6f7fb', color: '#6a6e88' }
+          const ss = statusStyle[r.status?.toLowerCase()] ?? { bg: 'var(--muted)', color: 'var(--muted-foreground)' }
           return (
             <div key={r.id} style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0',
-              borderTop: i > 0 ? '1px solid #f6f7fb' : undefined,
+              borderTop: i > 0 ? '1px solid var(--border)' : undefined,
             }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#0f1024', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                   {r.detail}
                 </div>
-                <div style={{ fontSize: 10.5, color: '#9498ad', marginTop: 1 }}>
+                <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 1 }}>
                   {r.type} · #{r.ref}
                 </div>
               </div>
@@ -682,12 +682,12 @@ function MyRequests({
                 }}>
                   {r.status}
                 </span>
-                <span style={{ fontSize: 10, color: '#9498ad' }}>{timeAgo(r.when)}</span>
+                <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{timeAgo(r.when)}</span>
               </div>
             </div>
           )
         }) : (
-          <div style={{ textAlign: 'center' as const, padding: '12px 0', color: '#9498ad', fontSize: 12 }}>
+          <div style={{ textAlign: 'center' as const, padding: '12px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
             No recent requests
           </div>
         )}
@@ -723,23 +723,23 @@ function LeaveUsage({ balances, navigate }: { balances: LeaveBalance[]; navigate
           <div key={item.name}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#0f1024' }}>{item.name}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>{item.name}</span>
                 {!item.isPaid && (
-                  <span style={{ fontSize: 8.5, fontWeight: 700, color: '#9498ad', border: '1px solid #ececf3', borderRadius: 4, padding: '0px 4px', textTransform: 'uppercase' as const, letterSpacing: '.08em' }}>
+                  <span style={{ fontSize: 8.5, fontWeight: 700, color: 'var(--muted-foreground)', border: '1px solid var(--border)', borderRadius: 4, padding: '0px 4px', textTransform: 'uppercase' as const, letterSpacing: '.08em' }}>
                     Unpaid
                   </span>
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 11, color: '#6a6e88', ...MONO }}>
-                  <b style={{ color: '#0f1024' }}>{item.remaining}</b>/{item.total}d
+                <span style={{ fontSize: 11, color: 'var(--muted-foreground)', ...MONO }}>
+                  <b style={{ color: 'var(--foreground)' }}>{item.remaining}</b>/{item.total}d
                 </span>
-                <span style={{ fontSize: 10, fontWeight: 600, color: item.pctUsed > 70 ? '#f43f5e' : '#9498ad' }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: item.pctUsed > 70 ? '#f43f5e' : 'var(--muted-foreground)' }}>
                   {item.pctUsed}%
                 </span>
               </div>
             </div>
-            <div style={{ height: 5, borderRadius: 999, background: '#f1f2f7', overflow: 'hidden' }}>
+            <div style={{ height: 5, borderRadius: 999, background: 'var(--muted)', overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 999,
                 background: item.pctUsed > 70
@@ -751,7 +751,7 @@ function LeaveUsage({ balances, navigate }: { balances: LeaveBalance[]; navigate
             </div>
           </div>
         )) : (
-          <div style={{ textAlign: 'center' as const, padding: '12px 0', color: '#9498ad', fontSize: 12 }}>
+          <div style={{ textAlign: 'center' as const, padding: '12px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
             No leave balance data
           </div>
         )}
@@ -807,7 +807,7 @@ function Upcoming({ holidays, navigate }: { holidays: Holiday[]; navigate: (to: 
           return (
             <div key={h.id} style={{
               display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0',
-              borderTop: i > 0 ? '1px solid #f6f7fb' : undefined,
+              borderTop: i > 0 ? '1px solid var(--border)' : undefined,
             }}>
               <div style={{
                 width: 28, height: 28, borderRadius: 8, flexShrink: 0,
@@ -817,22 +817,22 @@ function Upcoming({ holidays, navigate }: { holidays: Holiday[]; navigate: (to: 
                 <Calendar style={{ width: 12, height: 12, color: '#4338ca' }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#0f1024', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                   {h.name}
                 </div>
-                <div style={{ fontSize: 10.5, color: '#9498ad', marginTop: 1 }}>{fmtHolDate(h.date)}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 1 }}>{fmtHolDate(h.date)}</div>
               </div>
               <div style={{
                 fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 999, flexShrink: 0,
-                background: du === 0 ? '#ecfbf3' : du <= 7 ? '#fff3da' : '#f6f7fb',
-                color:      du === 0 ? '#0a6d4a' : du <= 7 ? '#835500' : '#6a6e88',
+                background: du === 0 ? '#ecfbf3' : du <= 7 ? '#fff3da' : 'var(--muted)',
+                color:      du === 0 ? '#0a6d4a' : du <= 7 ? '#835500' : 'var(--muted-foreground)',
               }}>
                 {du === 0 ? 'Today' : du === 1 ? 'Tomorrow' : `${du}d`}
               </div>
             </div>
           )
         }) : (
-          <div style={{ textAlign: 'center' as const, padding: '12px 0', color: '#9498ad', fontSize: 12 }}>
+          <div style={{ textAlign: 'center' as const, padding: '12px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
             No upcoming holidays
           </div>
         )}
@@ -882,16 +882,16 @@ function QuickActionsBar({ navigate, basePath }: { navigate: (to: string) => voi
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 gap: 6, padding: '12px 6px',
                 background: 'transparent', border: 'none', cursor: 'pointer',
-                borderRight: i < QA_ITEMS.length - 1 ? '1px solid #f1f2f7' : undefined,
+                borderRight: i < QA_ITEMS.length - 1 ? '1px solid var(--border)' : undefined,
                 transition: 'background .1s ease',
               }}
-              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#f6f7fb'}
+              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted)'}
               onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
             >
               <div style={{ width: 30, height: 30, borderRadius: 8, display: 'grid', placeItems: 'center', background: t.bg }}>
                 <QIcon style={{ width: 13, height: 13, color: t.color } as CSSProperties} />
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#0f1024', whiteSpace: 'nowrap' as const }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--foreground)', whiteSpace: 'nowrap' as const }}>
                 {qa.label}
               </span>
             </button>
@@ -1017,7 +1017,7 @@ export function EmployeeDashboard() {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-5" style={{ background: '#f6f7fb', minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-5" style={{ background: 'var(--muted)', minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* 1. Profile bar */}
       <ProfileBar emp={emp} />
 

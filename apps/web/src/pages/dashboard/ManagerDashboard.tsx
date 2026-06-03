@@ -96,13 +96,13 @@ type ApprovalFilter = 'all' | 'leave' | 'reg'
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
 const T = {
-  bg:      '#f6f7fb',
-  card:    '#ffffff',
-  border:  '#ececf3',
-  borderL: '#f1f2f7',
-  text:    '#0f1024',
-  sub:     '#6a6e88',
-  muted:   '#9498ad',
+  bg:      'var(--muted)',
+  card:    'var(--card)',
+  border:  'var(--border)',
+  borderL: 'var(--border)',
+  text:    'var(--foreground)',
+  sub:     'var(--muted-foreground)',
+  muted:   'var(--muted-foreground)',
   shadow:  '0 1px 0 rgba(15,16,36,.04),0 1px 3px rgba(15,16,36,.06)',
   radius:  14,
   mono:    '"Geist Mono",ui-monospace,monospace',
@@ -200,10 +200,10 @@ function DonutChart({
 
   if (total === 0) return (
     <svg width={size} height={size}>
-      <circle cx={cx} cy={cy} r={outerR} fill="#f1f2f7" />
-      <circle cx={cx} cy={cy} r={innerR} fill="#fff" />
-      <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight={700} fill="#9498ad" fontFamily={T.mono}>0</text>
-      <text x={cx} y={cy + size * 0.15} textAnchor="middle" fontSize={size * 0.1} fill="#9498ad">Total</text>
+      <circle cx={cx} cy={cy} r={outerR} fill="var(--muted)" />
+      <circle cx={cx} cy={cy} r={innerR} fill="var(--card)" />
+      <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight={700} fill="var(--muted-foreground)" fontFamily={T.mono}>0</text>
+      <text x={cx} y={cy + size * 0.15} textAnchor="middle" fontSize={size * 0.1} fill="var(--muted-foreground)">Total</text>
     </svg>
   )
 
@@ -231,7 +231,7 @@ function DonutChart({
   return (
     <svg width={size} height={size}>
       {paths}
-      <circle cx={cx} cy={cy} r={innerR} fill="#fff" />
+      <circle cx={cx} cy={cy} r={innerR} fill="var(--card)" />
       <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.21} fontWeight={700} fill={T.text} fontFamily={T.mono}>{total}</text>
       <text x={cx} y={cy + size * 0.155} textAnchor="middle" fontSize={size * 0.1} fill={T.muted}>Total</text>
     </svg>
@@ -539,7 +539,7 @@ function ApprovalsQueue({
             style={{
               padding: '4px 12px', borderRadius: 999, fontSize: 11.5, fontWeight: 600,
               cursor: 'pointer', fontFamily: 'inherit', transition: 'all .1s',
-              border: `1px solid ${filter === c.key ? '#1d4ed8' : '#e4e5f0'}`,
+              border: `1px solid ${filter === c.key ? '#1d4ed8' : 'var(--border)'}`,
               background: filter === c.key ? '#eff6ff' : 'transparent',
               color: filter === c.key ? '#1d4ed8' : T.sub,
             }}
@@ -576,7 +576,7 @@ function ApprovalsQueue({
                   padding: '9px 12px', borderRadius: 10,
                   border: '1px solid transparent', transition: 'background .1s,border-color .1s',
                 }}
-                onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.background = '#fafbfd'; el.style.borderColor = T.border }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.background = 'var(--card)'; el.style.borderColor = T.border }}
                 onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.background = ''; el.style.borderColor = 'transparent' }}
               >
                 {/* Avatar */}
@@ -984,11 +984,11 @@ function WhosOutCard({ teamMembers, navigate }: {
               <div
                 key={m.employee_id}
                 style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 6px', borderRadius: 7 }}
-                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#fafbfd'}
+                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--card)'}
                 onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = ''}
               >
                 <div style={{
-                  width: 27, height: 27, borderRadius: 7, background: '#f1f2f7',
+                  width: 27, height: 27, borderRadius: 7, background: 'var(--muted)',
                   display: 'grid', placeItems: 'center', fontSize: 9.5, fontWeight: 700, color: T.sub, flexShrink: 0,
                 }}>
                   {initials(m.name)}
@@ -1097,7 +1097,7 @@ function PendingRegularisationCard({ regularisations, navigate }: {
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '6px 8px', borderRadius: 7, marginBottom: 3,
                 }}
-                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#fafbfd'}
+                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--card)'}
                 onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = ''}
               >
                 <div style={{ minWidth: 0 }}>

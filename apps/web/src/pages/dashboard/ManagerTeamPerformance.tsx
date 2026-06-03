@@ -162,7 +162,7 @@ function RateBar({ value, color }: { value: number; color: string }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <div style={{
         flex: 1, height: 6, borderRadius: 999,
-        background: '#f1f2f7', overflow: 'hidden',
+        background: 'var(--muted)', overflow: 'hidden',
       }}>
         <div style={{
           height: '100%', width: `${Math.min(100, value)}%`,
@@ -265,15 +265,15 @@ export function ManagerTeamPerformance() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ padding: '24px 28px 40px', background: '#f6f7fb', minHeight: '100%' }}>
+    <div style={{ padding: '24px 28px 40px', background: 'var(--muted)', minHeight: '100%' }}>
 
       {/* ── Page header ───────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-.02em', color: '#0f1024' }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--foreground)' }}>
             Team Performance
           </h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6a6e88' }}>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted-foreground)' }}>
             Attendance-based performance metrics · {teamMembers.length} direct report{teamMembers.length !== 1 ? 's' : ''}
           </p>
         </div>
@@ -287,9 +287,9 @@ export function ManagerTeamPerformance() {
               style={{
                 padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'inherit', transition: 'all .12s',
-                border: `1px solid ${win === w.value ? '#1d4ed8' : '#e4e5f0'}`,
-                background: win === w.value ? '#eff6ff' : '#fff',
-                color: win === w.value ? '#1d4ed8' : '#6a6e88',
+                border: `1px solid ${win === w.value ? '#1d4ed8' : 'var(--border)'}`,
+                background: win === w.value ? '#eff6ff' : 'var(--card)',
+                color: win === w.value ? '#1d4ed8' : 'var(--muted-foreground)',
               }}
             >
               {w.label}
@@ -327,12 +327,12 @@ export function ManagerTeamPerformance() {
               icon: AlertTriangle,
               label: 'Needs Attention',
               value: summary.needsAttention,
-              color: summary.needsAttention > 0 ? '#f43f5e' : '#9498ad',
-              bg: summary.needsAttention > 0 ? '#fff0f2' : '#f1f2f7',
+              color: summary.needsAttention > 0 ? '#f43f5e' : 'var(--muted-foreground)',
+              bg: summary.needsAttention > 0 ? '#fff0f2' : 'var(--muted)',
             },
           ].map(({ icon: Icon, label, value, color, bg }) => (
             <div key={label} style={{
-              background: '#fff', border: '1px solid #ececf3', borderRadius: 14,
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14,
               padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14,
               boxShadow: '0 1px 0 rgba(15,16,36,.04)',
             }}>
@@ -343,7 +343,7 @@ export function ManagerTeamPerformance() {
                 <Icon style={{ width: 18, height: 18, color }} />
               </div>
               <div>
-                <div style={{ fontSize: 10.5, color: '#6a6e88', fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase' }}>
                   {label}
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 700, color, fontFamily: '"Geist Mono",ui-monospace,monospace', letterSpacing: '-.02em', lineHeight: 1.2, marginTop: 2 }}>
@@ -357,7 +357,7 @@ export function ManagerTeamPerformance() {
 
       {/* ── Performance table ─────────────────────────────────────────── */}
       <div style={{
-        background: '#fff', border: '1px solid #ececf3', borderRadius: 14,
+        background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14,
         boxShadow: '0 1px 0 rgba(15,16,36,.04)',
         overflow: 'hidden',
       }}>
@@ -368,8 +368,8 @@ export function ManagerTeamPerformance() {
           gridTemplateColumns: '1fr 110px 140px 140px 110px 130px',
           gap: 0,
           padding: '10px 22px',
-          borderBottom: '1px solid #f1f2f7',
-          background: '#fafbfd',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--card)',
         }}>
           {([
             { key: 'name',            label: 'Member'           },
@@ -384,7 +384,7 @@ export function ManagerTeamPerformance() {
               onClick={col.key ? () => toggleSort(col.key!) : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                fontSize: 10.5, fontWeight: 700, color: '#6a6e88',
+                fontSize: 10.5, fontWeight: 700, color: 'var(--muted-foreground)',
                 letterSpacing: '.1em', textTransform: 'uppercase',
                 cursor: col.key ? 'pointer' : 'default',
                 userSelect: 'none',
@@ -401,7 +401,7 @@ export function ManagerTeamPerformance() {
           <div style={{ padding: '16px 22px' }}>
             {[1, 2, 3, 4].map(i => (
               <div key={i} style={{
-                height: 52, borderRadius: 8, background: '#f1f2f7',
+                height: 52, borderRadius: 8, background: 'var(--muted)',
                 marginBottom: 8, animation: 'pulse 1.5s ease-in-out infinite',
               }} />
             ))}
@@ -412,10 +412,10 @@ export function ManagerTeamPerformance() {
         {!loading && sorted.length === 0 && (
           <div style={{
             padding: '48px 22px', textAlign: 'center',
-            color: '#9498ad', fontSize: 14,
+            color: 'var(--muted-foreground)', fontSize: 14,
           }}>
             <Users style={{ width: 40, height: 40, opacity: .25, margin: '0 auto 12px' }} />
-            <div style={{ fontWeight: 600, color: '#0f1024', fontSize: 15 }}>No direct reports found</div>
+            <div style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: 15 }}>No direct reports found</div>
             <div style={{ fontSize: 12, marginTop: 4 }}>Contact HR if your team hasn't been assigned yet.</div>
           </div>
         )}
@@ -434,11 +434,11 @@ export function ManagerTeamPerformance() {
                 gridTemplateColumns: '1fr 110px 140px 140px 110px 130px',
                 gap: 0,
                 padding: '12px 22px',
-                borderBottom: idx < sorted.length - 1 ? '1px solid #f8f9fb' : 'none',
+                borderBottom: idx < sorted.length - 1 ? '1px solid var(--border)' : 'none',
                 alignItems: 'center',
                 transition: 'background .1s',
               }}
-              onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#fafbfd'}
+              onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--muted)'}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = ''}
             >
               {/* Member */}
@@ -452,10 +452,10 @@ export function ManagerTeamPerformance() {
                   {m.name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2)}
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0f1024', lineHeight: 1.2 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', lineHeight: 1.2 }}>
                     {m.name}
                   </div>
-                  <div style={{ fontSize: 10.5, color: '#9498ad', fontFamily: '"Geist Mono",ui-monospace,monospace', marginTop: 1 }}>
+                  <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', fontFamily: '"Geist Mono",ui-monospace,monospace', marginTop: 1 }}>
                     {m.employee_code}
                   </div>
                 </div>
@@ -463,8 +463,8 @@ export function ManagerTeamPerformance() {
 
               {/* Worked / Working days */}
               <div style={{ fontSize: 13, fontFamily: '"Geist Mono",ui-monospace,monospace' }}>
-                <span style={{ fontWeight: 700, color: '#0f1024' }}>{m.presentDays}</span>
-                <span style={{ color: '#9498ad' }}> / {m.workingDays}d</span>
+                <span style={{ fontWeight: 700, color: 'var(--foreground)' }}>{m.presentDays}</span>
+                <span style={{ color: 'var(--muted-foreground)' }}> / {m.workingDays}d</span>
               </div>
 
               {/* Attendance rate */}
@@ -479,8 +479,8 @@ export function ManagerTeamPerformance() {
 
               {/* Avg hours */}
               <div style={{ fontSize: 13, fontFamily: '"Geist Mono",ui-monospace,monospace' }}>
-                <span style={{ fontWeight: 700, color: '#0f1024' }}>{fmt2(m.avgDailyHours)}</span>
-                <span style={{ color: '#9498ad', fontSize: 11 }}> hrs</span>
+                <span style={{ fontWeight: 700, color: 'var(--foreground)' }}>{fmt2(m.avgDailyHours)}</span>
+                <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}> hrs</span>
                 {m.lateDays > 0 && (
                   <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2 }}>
                     {m.lateDays} late day{m.lateDays !== 1 ? 's' : ''}
@@ -515,12 +515,12 @@ export function ManagerTeamPerformance() {
       {!loading && sorted.length > 0 && (
         <div style={{
           marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 20,
-          fontSize: 11.5, color: '#9498ad',
+          fontSize: 11.5, color: 'var(--muted-foreground)',
         }}>
           {Object.entries(TIER_CONFIG).map(([, tc]) => (
             <div key={tc.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: tc.dot, flexShrink: 0 }} />
-              <span style={{ color: '#6a6e88', fontWeight: 600 }}>{tc.label}</span>
+              <span style={{ color: 'var(--muted-foreground)', fontWeight: 600 }}>{tc.label}</span>
             </div>
           ))}
           <span style={{ marginLeft: 'auto', fontSize: 10.5 }}>
