@@ -162,7 +162,7 @@ export function OwnerTenants() {
         {isOwner() && (
           <Button
             onClick={() => setCreateOpen(true)}
-            className="bg-[#0D9488] hover:bg-[#0F766E] text-white gap-1.5"
+            className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white gap-1.5"
           >
             <Plus className="h-4 w-4" /> New Tenant
           </Button>
@@ -437,7 +437,7 @@ export function OwnerTenants() {
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.name.trim() || createMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
             >
               {createMut.isPending ? 'Creating…' : 'Create Tenant'}
             </Button>

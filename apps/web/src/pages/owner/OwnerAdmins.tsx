@@ -62,7 +62,7 @@ export function OwnerAdmins() {
           <p className="text-sm text-slate-500">{admins.length} admin{admins.length !== 1 ? 's' : ''}</p>
         </div>
         {isOwner() && (
-          <Button onClick={() => setInviteOpen(true)} className="bg-[#0D9488] hover:bg-[#0F766E] text-white gap-1.5">
+          <Button onClick={() => setInviteOpen(true)} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white gap-1.5">
             <Plus className="h-4 w-4" /> Invite Admin
           </Button>
         )}
@@ -78,7 +78,7 @@ export function OwnerAdmins() {
           }`}>
             {/* Avatar */}
             <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-              a.role === 'owner' ? 'bg-[#0F766E]' : 'bg-slate-800'
+              a.role === 'owner' ? 'bg-[#1E5BA8]' : 'bg-slate-800'
             }`}>
               <span className="text-sm font-bold text-[#5EEAD4]">{a.name.charAt(0).toUpperCase()}</span>
             </div>
@@ -160,7 +160,7 @@ export function OwnerAdmins() {
             <Button
               onClick={() => inviteMut.mutate()}
               disabled={!form.name.trim() || !form.email.trim() || inviteMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
             >
               {inviteMut.isPending ? 'Sending…' : 'Send Invitation'}
             </Button>

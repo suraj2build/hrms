@@ -15,7 +15,7 @@ const buttonVariants = cva(
         // ── Core ─────────────────────────────────────────────────────────
         // Primary action = brand gradient (green → teal → blue)
         default:
-          'bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white shadow-sm ' +
+          'bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white shadow-sm ' +
           'hover:brightness-[1.08] active:brightness-95 transition-[filter,box-shadow]',
         secondary:
           'bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80',
@@ -36,7 +36,7 @@ const buttonVariants = cva(
 
         // ── Legacy Aurora aliases — kept for backward compat ─────────────
         glass:   'bg-card border border-border text-foreground hover:bg-muted',
-        accent:  'bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white shadow-sm hover:brightness-[1.08] active:brightness-95',
+        accent:  'bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white shadow-sm hover:brightness-[1.08] active:brightness-95',
         magenta: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
         coral:   'bg-warning text-warning-foreground hover:bg-warning/90',
         teal:    'bg-info text-info-foreground hover:bg-info/90',

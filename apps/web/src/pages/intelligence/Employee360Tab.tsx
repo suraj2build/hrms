@@ -81,7 +81,7 @@ export function Employee360Tab({ employeeId }: { employeeId: string }) {
   return (
     <div className="space-y-4 max-w-3xl">
       {/* Brand-consistent header */}
-      <div className="rounded-lg bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] px-5 py-3 text-white">
+      <div className="rounded-lg bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] px-5 py-3 text-white">
         <h2 className="text-base font-semibold">Profile Intelligence</h2>
         <p className="text-xs text-white/75 mt-0.5">Read-only 360 view — derived live from operational records</p>
       </div>

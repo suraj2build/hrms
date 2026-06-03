@@ -63,7 +63,7 @@ export function OnboardingHub() {
                 <span className="text-[10px] font-normal text-muted-foreground/60">{t.sub}</span>
               </span>
               {isActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF]" />
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8]" />
               )}
             </button>
           )

@@ -1032,7 +1032,7 @@ export function HRReviewWorkspace() {
                   )}
                   <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] transition-all duration-300"
+                      className="h-full rounded-full bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] transition-all duration-300"
                       style={{ width: `${pct}%` }}
                     />
                   </div>

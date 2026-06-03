@@ -217,7 +217,7 @@ export function OwnerTenantDetail() {
             <h2 className="text-sm font-semibold text-white">Details</h2>
             {editing && (
               <div className="flex gap-1.5">
-                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-[#0D9488] hover:bg-[#0F766E] text-white h-7 text-xs gap-1">
+                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white h-7 text-xs gap-1">
                   <Save className="h-3 w-3" /> Save
                 </Button>
                 <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-slate-400 h-7 text-xs gap-1">
@@ -293,7 +293,7 @@ export function OwnerTenantDetail() {
                 >
                   {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
-                <Button onClick={issueLicense} className="bg-[#0D9488] hover:bg-[#0F766E] text-white">
+                <Button onClick={issueLicense} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white">
                   Issue License
                 </Button>
               </div>
@@ -385,7 +385,7 @@ export function OwnerTenantDetail() {
             <Button
               size="sm"
               onClick={() => setAddAdminOpen(true)}
-              className="bg-[#0D9488] hover:bg-[#0F766E] text-white h-7 text-xs gap-1"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white h-7 text-xs gap-1"
             >
               <UserPlus className="h-3 w-3" /> Add Admin
             </Button>
@@ -417,7 +417,7 @@ export function OwnerTenantDetail() {
                 <tr key={a.id} className="hover:bg-slate-800/30">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-full bg-[#0F766E] flex items-center justify-center flex-shrink-0">
+                      <div className="h-6 w-6 rounded-full bg-[#1E5BA8] flex items-center justify-center flex-shrink-0">
                         <span className="text-[10px] font-bold text-[#5EEAD4]">{displayName.charAt(0).toUpperCase()}</span>
                       </div>
                       <span className="text-[13px] text-slate-200 font-medium">{displayName}</span>
@@ -572,7 +572,7 @@ export function OwnerTenantDetail() {
             <Button
               onClick={() => addAdminMut.mutate()}
               disabled={!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim() || addAdminMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#0F766E] text-white"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
             >
               {addAdminMut.isPending ? 'Creating…' : 'Create Admin'}
             </Button>

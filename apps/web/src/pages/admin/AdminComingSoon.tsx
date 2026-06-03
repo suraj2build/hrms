@@ -33,7 +33,7 @@ export function AdminComingSoon() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
-      <div className="h-16 w-16 rounded-2xl bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] flex items-center justify-center">
+      <div className="h-16 w-16 rounded-2xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] flex items-center justify-center">
         <Sparkles className="h-8 w-8 text-white" />
       </div>
 

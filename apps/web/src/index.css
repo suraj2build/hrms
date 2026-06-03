@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -11,9 +11,9 @@
  */
 
 @theme inline {
-  --font-sans:    "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans:    "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono:    "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
-  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
 
   --radius-sm:  calc(var(--radius) - 4px);
   --radius-md:  calc(var(--radius) - 2px);
@@ -96,69 +96,68 @@
 
 /* ── Light mode tokens ─────────────────────────────────────────────────────── */
 :root {
-  /* Design System 2.0 — crisper radius scale (Linear/Rippling/Deel feel).
-     Base 10px → sm 6 / md 8 / lg 10 / xl 14 / 2xl 18. Was 16px (bubbly). */
-  --radius: 0.625rem;   /* 10px */
+  /* Harmony Next Gen — cards rounded-xl (12px), buttons rounded-lg (8-10px) */
+  --radius: 0.75rem;   /* 12px */
 
-  /* ── Surfaces (#F8F8F8 near-white system) ───────────────────── */
-  --background:            oklch(0.988 0     0);    /* #FCFCFC near-pure white canvas */
-  --foreground:            oklch(0.145 0.020 255);  /* charcoal near-black */
-  --card:                  oklch(1.0   0     0);    /* pure white — floats on canvas */
-  --card-foreground:       oklch(0.145 0.020 255);
-  --popover:               oklch(1.0   0     0);
-  --popover-foreground:    oklch(0.145 0.020 255);
+  /* ── Surfaces — Harmony cool-gray canvas ─────────────────────── */
+  --background:            #F3F5F8;   /* cool light-gray page canvas */
+  --foreground:            #17202B;   /* primary text */
+  --card:                  #FFFFFF;   /* card surface */
+  --card-foreground:       #17202B;
+  --popover:               #FFFFFF;
+  --popover-foreground:    #17202B;
 
-  /* ── Primary: #0D9488 teal ─────────────────────────────────── */
-  --primary:               oklch(0.617 0.094 185);
-  --primary-foreground:    oklch(0.99  0     0);
+  /* ── Primary: #1A4D8F deep navy ─────────────────────────────── */
+  --primary:               #1A4D8F;
+  --primary-foreground:    #FFFFFF;
 
-  /* ── Secondary / Muted — pure neutral gray ──────────────────── */
-  --secondary:             oklch(0.945 0.004 292);
-  --secondary-foreground:  oklch(0.25  0.080 292);
-  --muted:                 oklch(0.950 0.003 292);
-  --muted-foreground:      oklch(0.50  0.015 292);
-  --accent:                oklch(0.945 0.004 292);
-  --accent-foreground:     oklch(0.25  0.080 292);
+  /* ── Secondary / Muted — navy-tint + neutral ────────────────── */
+  --secondary:             #EBF3FC;   /* primary-soft */
+  --secondary-foreground:  #163F75;   /* primary-dark */
+  --muted:                 #EEF1F5;   /* faint surface */
+  --muted-foreground:      #637080;   /* secondary text */
+  --accent:                #EBF3FC;   /* hover tint */
+  --accent-foreground:     #163F75;
 
-  /* ── Status ─────────────────────────────────────────────────── */
-  --destructive:             oklch(0.62 0.19  18);
-  --destructive-foreground:  oklch(0.99 0     0);
-  --success:                 oklch(0.56 0.14 148);
-  --success-foreground:      oklch(0.99 0     0);
-  --warning:                 oklch(0.75 0.14  78);
-  --warning-foreground:      oklch(0.15 0.025 210);
-  --info:                    oklch(0.63 0.13 232);
-  --info-foreground:         oklch(0.99 0     0);
+  /* ── Status — Harmony semantic palette ──────────────────────── */
+  --destructive:             #C93535;
+  --destructive-foreground:  #FFFFFF;
+  --success:                 #1A8050;
+  --success-foreground:      #FFFFFF;
+  --warning:                 #B07B18;
+  --warning-foreground:      #FFFFFF;
+  --info:                    #2260A8;
+  --info-foreground:         #FFFFFF;
 
-  /* ── Border / Input — pure neutral gray ────────────────────── */
-  --border:  oklch(0.878 0.004 292);
-  --input:   oklch(0.878 0.004 292);
-  --ring:    oklch(0.617 0.094 185);
+  /* ── Border / Input ─────────────────────────────────────────── */
+  --border:  #E3E9F0;
+  --input:   #E3E9F0;
+  --ring:    #1A4D8F;
 
-  /* ── Charts ─────────────────────────────────────────────────── */
-  --chart-1: oklch(0.617 0.094 185);  /* teal = primary */
-  --chart-2: oklch(0.56  0.14  148);  /* green */
-  --chart-3: oklch(0.75  0.14   78);  /* amber */
-  --chart-4: oklch(0.62  0.19   18);  /* rose */
-  --chart-5: oklch(0.55  0.13  232);  /* blue */
+  /* ── Charts — navy / green / amber / red / blue ─────────────── */
+  --chart-1: #1A4D8F;
+  --chart-2: #1A8050;
+  --chart-3: #B07B18;
+  --chart-4: #C93535;
+  --chart-5: #2260A8;
 
-  /* ── Sidebar: pure white panel ─────────────────────────────── */
-  --sidebar:                    oklch(1.0   0     0);
-  --sidebar-foreground:         oklch(0.22  0.060 292);
-  --sidebar-primary:            oklch(0.617 0.094 185);
-  --sidebar-primary-foreground: oklch(0.99  0     0);
-  --sidebar-accent:             oklch(0.945 0.004 292);
-  --sidebar-accent-foreground:  oklch(0.22  0.060 292);
-  --sidebar-border:             oklch(0.878 0.004 292);
-  --sidebar-ring:               oklch(0.617 0.094 185);
+  /* ── Sidebar: white panel, navy accents ────────────────────── */
+  --sidebar:                    #FFFFFF;
+  --sidebar-foreground:         #17202B;
+  --sidebar-primary:            #1A4D8F;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent:             #EBF3FC;
+  --sidebar-accent-foreground:  #163F75;
+  --sidebar-border:             #E3E9F0;
+  --sidebar-ring:               #1A4D8F;
 
-  /* ── Legacy accent aliases ───────────────────────────────────── */
-  --accent-magenta: oklch(0.62 0.19  18);
-  --accent-coral:   oklch(0.75 0.14  78);
-  --accent-teal:    oklch(0.617 0.094 185);  /* teal primary */
-  --accent-violet:  oklch(0.548 0.215 264);  /* repurposed to blue */
-  --accent-sky:     oklch(0.55  0.13  232);
-  --accent-amber:   oklch(0.75  0.14   78);
+  /* ── Legacy accent aliases → Harmony semantics ───────────────── */
+  --accent-magenta: #C93535;
+  --accent-coral:   #B07B18;
+  --accent-teal:    #1A4D8F;   /* now navy primary */
+  --accent-violet:  #2260A8;
+  --accent-sky:     #2260A8;
+  --accent-amber:   #B07B18;
 
   /* ── Legacy brand vars ───────────────────────────────────────── */
   --brand-navy:      oklch(0.245 0.130 292);
@@ -173,8 +172,8 @@
 
   /* ── Gradients ───────────────────────────────────────────────── */
   --grad-hero:    linear-gradient(135deg, oklch(0.18 0.120 292) 0%, oklch(0.30 0.140 292) 100%);
-  --grad-primary: linear-gradient(135deg, #047857 0%, #0F766E 50%, #1E40AF 100%);
-  --grad-sidebar: linear-gradient(180deg, oklch(1.0  0     0  ) 0%, oklch(0.988 0 0)      100%);
+  --grad-primary: linear-gradient(135deg, #1A4D8F 0%, #2260A8 100%);
+  --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #F3F5F8 100%);
   --grad-orb-ring: linear-gradient(135deg, oklch(0.245 0.130 292), oklch(0.42 0.100 292));
 
   /* ── Operational severity surface tokens ────────────────── */
@@ -199,9 +198,9 @@
   --popover:               oklch(0.18 0.020 255);
   --popover-foreground:    oklch(0.93 0.008 250);
 
-  /* In dark mode primary becomes a lighter teal — lifted for visibility */
-  --primary:               oklch(0.74 0.10 184);   /* light teal, visible on dark */
-  --primary-foreground:    oklch(0.13 0.018 292);
+  /* In dark mode primary becomes a lighter navy/azure — lifted for visibility */
+  --primary:               #5B8FD6;   /* light navy, visible on dark */
+  --primary-foreground:    #0B1220;
 
   --secondary:             oklch(0.24 0.040 292);
   --secondary-foreground:  oklch(0.90 0.010 292);
@@ -221,9 +220,9 @@
 
   --border: oklch(1 0 0 / 0.10);
   --input:  oklch(1 0 0 / 0.12);
-  --ring:   oklch(0.74 0.10 184);
+  --ring:   #5B8FD6;
 
-  --chart-1: oklch(0.74 0.10 184);
+  --chart-1: #5B8FD6;
   --chart-2: oklch(0.68 0.17  145);
   --chart-3: oklch(0.82 0.16   75);
   --chart-4: oklch(0.68 0.20   25);
@@ -231,12 +230,12 @@
 
   --sidebar:                    oklch(0.11 0.030 292);
   --sidebar-foreground:         oklch(0.88 0.012 292);
-  --sidebar-primary:            oklch(0.74 0.10 184);
-  --sidebar-primary-foreground: oklch(0.13 0.018 292);
+  --sidebar-primary:            #5B8FD6;
+  --sidebar-primary-foreground: #0B1220;
   --sidebar-accent:             oklch(0.23 0.040 292);
   --sidebar-accent-foreground:  oklch(0.88 0.012 292);
   --sidebar-border:             oklch(1    0     0 / 0.08);
-  --sidebar-ring:               oklch(0.74 0.10 184);
+  --sidebar-ring:               #5B8FD6;
 
   --accent-magenta: oklch(0.68 0.20  25);
   --accent-coral:   oklch(0.82 0.16  75);
@@ -255,7 +254,7 @@
   --elev-3: 0 10px 24px rgba(0, 0, 0, 0.45), 0 4px 8px rgba(0, 0, 0, 0.30);
 
   --grad-hero:    linear-gradient(135deg, oklch(0.10 0.080 292) 0%, oklch(0.20 0.100 292) 100%);
-  --grad-primary: linear-gradient(135deg, #047857 0%, #0F766E 50%, #1E40AF 100%);
+  --grad-primary: linear-gradient(135deg, #2260A8 0%, #5B8FD6 100%);
   --grad-sidebar: linear-gradient(180deg, oklch(0.10 0.040 292) 0%, oklch(0.13 0.030 292) 100%);
   --grad-orb-ring: linear-gradient(135deg, oklch(0.68 0.110 292), oklch(0.70 0.14 230));
 }
@@ -304,7 +303,7 @@
 
   /* Emvora brand gradient text — green → teal → blue */
   .brand-gradient-text {
-    background: linear-gradient(135deg, #047857 0%, #0F766E 45%, #1E40AF 100%);
+    background: linear-gradient(135deg, #1A4D8F 0%, #1E5BA8 45%, #2260A8 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -521,7 +520,7 @@
     font-size: 10px;
     font-weight: 500;
     background: rgba(13, 148, 136, 0.07);
-    color: #0F766E;
+    color: #1A4D8F;
     border-radius: 9999px;
     padding: 0.1rem 0.5rem;
     white-space: nowrap;

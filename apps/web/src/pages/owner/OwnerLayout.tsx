@@ -133,7 +133,7 @@ export function OwnerLayout() {
         {/* Bottom: admin info + logout */}
         <div className="border-t border-slate-800 p-3 space-y-1">
           <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
-            <div className="h-7 w-7 rounded-full bg-[#0F766E] flex items-center justify-center flex-shrink-0">
+            <div className="h-7 w-7 rounded-full bg-[#1E5BA8] flex items-center justify-center flex-shrink-0">
               <span className="text-[11px] font-bold text-[#5EEAD4]">
                 {admin.name.charAt(0).toUpperCase()}
               </span>

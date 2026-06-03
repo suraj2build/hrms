@@ -57,7 +57,7 @@ export function OrgHealth() {
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6 max-w-6xl">
       {/* Gradient header */}
-      <div className="rounded-xl bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white p-5">
+      <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5">
         <h1 className="text-lg font-semibold">Organization Health</h1>
         <p className="text-sm text-white/80">
           Headcount, movement, and attrition signals — derived from live employee data

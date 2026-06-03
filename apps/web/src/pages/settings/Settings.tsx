@@ -769,7 +769,7 @@ function GuidanceSettingsCard({ canEdit }: { canEdit: boolean }) {
                     <span className="text-sm text-foreground">{item.label}</span>
                     <input
                       type="checkbox"
-                      className="h-4 w-4 accent-[#0F766E]"
+                      className="h-4 w-4 accent-[#1E5BA8]"
                       checked={checked}
                       disabled={!canEdit || saving}
                       onChange={(e) => toggle(group.key, item.k, e.target.checked)}

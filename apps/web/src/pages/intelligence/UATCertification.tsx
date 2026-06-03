@@ -169,7 +169,7 @@ export function UATCertification() {
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6 max-w-5xl">
       {/* Header */}
-      <div className="rounded-xl bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] text-white p-5 flex items-start justify-between gap-4">
+      <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5 flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-lg font-semibold flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> UAT Certification Workspace</h1>
           <p className="text-sm text-white/80">Per-module enterprise-readiness sign-off. Marks are saved locally for {tenant?.name ?? 'this tenant'}.</p>
@@ -193,7 +193,7 @@ export function UATCertification() {
 
       {/* Overall progress bar */}
       <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-        <div className="h-full rounded-full bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] transition-all" style={{ width: `${totals.pct}%` }} />
+        <div className="h-full rounded-full bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] transition-all" style={{ width: `${totals.pct}%` }} />
       </div>
 
       {/* Modules */}

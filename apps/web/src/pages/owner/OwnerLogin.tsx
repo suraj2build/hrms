@@ -104,7 +104,7 @@ export function OwnerLogin() {
 
               <Button
                 type="submit"
-                className="w-full bg-[#0D9488] hover:bg-[#0F766E] text-white"
+                className="w-full bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
                 disabled={isSubmitting}
               >
                 {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

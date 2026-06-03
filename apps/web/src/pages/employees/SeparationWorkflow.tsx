@@ -135,7 +135,7 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
 
 // ── Lifecycle Stepper ─────────────────────────────────────────────────────────
 
-const BRAND_GRADIENT = 'bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF]'
+const BRAND_GRADIENT = 'bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8]'
 
 function LifecycleStepper({ row }: { row: SeparationRow }) {
   const current = stageIndex(row.lifecycle_stage)
