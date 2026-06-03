@@ -6,6 +6,7 @@
  * intelligence API. No mock data. Every observation cites its source table.
  */
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import { Badge } from '@/components/ui/badge'
@@ -185,18 +186,7 @@ export function WorkforceCommand() {
 
       {d && (
         <>
-          {/* KPI bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-            <KpiTile label="Active Employees"    value={d.kpis.active_headcount} />
-            <KpiTile label="Joined This Month"   value={d.kpis.joiners_this_month} />
-            <KpiTile label="On Notice"           value={d.kpis.on_notice}           urgent={Number(d.kpis.on_notice) > 0} />
-            <KpiTile label="Stalled Onboarding"  value={d.kpis.stalled_onboarding}  urgent={Number(d.kpis.stalled_onboarding) > 0} />
-            <KpiTile label="Pending Separations" value={d.kpis.pending_separations} urgent={Number(d.kpis.pending_separations) > 0} />
-            <KpiTile label="Assets at Risk"      value={d.kpis.assets_at_risk}      urgent={Number(d.kpis.assets_at_risk) > 0} />
-            <KpiTile label="Probation Due"       value={d.kpis.probation_due}       urgent={Number(d.kpis.probation_due) > 5} />
-          </div>
-
-          {/* AI summary */}
+          {/* AI summary — promoted above metrics: lead with the takeaway */}
           <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-1">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Workforce Attention Summary
@@ -205,6 +195,27 @@ export function WorkforceCommand() {
             <p className="text-[11px] text-muted-foreground">
               Sources: employees · onboarding_sessions · employee_separation · employee_asset_ledger
             </p>
+          </div>
+
+          {/* Needs Attention — actionable metrics (highlight when non-zero) */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Needs Attention</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiTile label="On Notice"           value={d.kpis.on_notice}           urgent={Number(d.kpis.on_notice) > 0} />
+              <KpiTile label="Stalled Onboarding"  value={d.kpis.stalled_onboarding}  urgent={Number(d.kpis.stalled_onboarding) > 0} />
+              <KpiTile label="Pending Separations" value={d.kpis.pending_separations} urgent={Number(d.kpis.pending_separations) > 0} />
+              <KpiTile label="Assets at Risk"      value={d.kpis.assets_at_risk}      urgent={Number(d.kpis.assets_at_risk) > 0} />
+              <KpiTile label="Probation Due"       value={d.kpis.probation_due}       urgent={Number(d.kpis.probation_due) > 5} />
+            </div>
+          </div>
+
+          {/* Workforce — context metrics (steady-state) */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Workforce</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiTile label="Active Employees"  value={d.kpis.active_headcount} />
+              <KpiTile label="Joined This Month" value={d.kpis.joiners_this_month} />
+            </div>
           </div>
 
           {/* Observations */}
@@ -216,9 +227,14 @@ export function WorkforceCommand() {
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Items Requiring Attention ({d.observations.length})
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Items Requiring Attention ({d.observations.length})
+                </p>
+                <Link to="/admin/intelligence/action-center" className="text-xs font-medium text-primary hover:underline">
+                  View Action Center →
+                </Link>
+              </div>
               {d.observations.map(obs => <ObservationCard key={obs.id} obs={obs} />)}
             </div>
           )}
