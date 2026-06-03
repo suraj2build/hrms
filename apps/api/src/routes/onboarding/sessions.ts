@@ -650,16 +650,21 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         // when no authoritative full_name is present.
         const fullName = fields['full_name']?.value
         const haveFullName = !!fullName
+        const toTitle = (s: string) => s.trim().replace(/\b\w/g, (c) => c.toUpperCase()).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
         if (fullName) {
           const parts = fullName.trim().split(/\s+/)
-          cols['first_name'] = parts[0] ?? fullName
-          if (parts.length > 1) cols['last_name'] = parts.slice(1).join(' ')
+          cols['first_name'] = toTitle(parts[0] ?? fullName)
+          if (parts.length > 1) cols['last_name'] = toTitle(parts.slice(1).join(' '))
         }
 
         for (const [rawName, fieldData] of Object.entries(fields)) {
           if (!fieldData.value || rawName === 'full_name') continue
           // Don't let resume first/last overwrite the authoritative full_name split
           if (haveFullName && (rawName === 'first_name' || rawName === 'last_name')) continue
+          // Title-case name fields coming from any source
+          if ((rawName === 'first_name' || rawName === 'last_name') && typeof fieldData.value === 'string') {
+            fieldData = { ...fieldData, value: toTitle(fieldData.value) }
+          }
 
           const colName = FIELD_MAP[rawName] !== undefined ? FIELD_MAP[rawName] : rawName
 
