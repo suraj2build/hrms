@@ -23,7 +23,7 @@ import { useNavigate }          from 'react-router-dom'
 import { useQuery }             from '@tanstack/react-query'
 import {
   AlertTriangle, CheckCircle2, XCircle,
-  Zap, RefreshCw, AlertCircle,
+  Zap, RefreshCw, AlertCircle, Info,
   Database, Users,
   Radio,
   ExternalLink, GitMerge, Lock,
@@ -858,6 +858,18 @@ export function ControlCenter() {
                   row.severity === 'medium'   ? 'border-l-info bg-info/[0.02]' :
                                                 'border-l-muted-foreground/30',
                 )}>
+                  {/* Harmony severity icon chip */}
+                  <span className={cn(
+                    'h-[34px] w-[34px] rounded-lg flex items-center justify-center flex-shrink-0',
+                    row.severity === 'critical' ? 'bg-destructive/10 text-destructive' :
+                    row.severity === 'high'     ? 'bg-warning/10 text-warning' :
+                    row.severity === 'medium'   ? 'bg-info/10 text-info' :
+                                                   'bg-muted text-muted-foreground',
+                  )}>
+                    {row.severity === 'critical' ? <AlertTriangle className="h-[17px] w-[17px]" />
+                     : row.severity === 'high'   ? <AlertCircle className="h-[17px] w-[17px]" />
+                     : <Info className="h-[17px] w-[17px]" />}
+                  </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={cn(
