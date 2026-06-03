@@ -421,19 +421,29 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           error: extractionResult.error,
         }, 'extract: Claude done')
 
-        // 5. Update document row
-        const { error: docUpdErr } = await fastify.supabase
+        // 5a. Update extraction STATUS first (critical — must never stay 'processing').
+        //     Done in a separate query so a missing metadata column on the live DB
+        //     cannot cause the status update to fail silently.
+        const { error: statusUpdErr } = await fastify.supabase
           .from('onboarding_documents')
           .update({
-            extraction_status: extractionResult.error ? 'failed' : 'extracted',
-            confidence_score: extractionResult.overall_confidence,
-            extracted_text: parseResult.text || null,
-            document_summary: extractionResult.document_summary || null,
-            extraction_error: extractionResult.error ?? null,
+            extraction_status:  extractionResult.error ? 'failed' : 'extracted',
+            extraction_error:   extractionResult.error ?? null,
+            confidence_score:   extractionResult.overall_confidence,
+          })
+          .eq('id', doc.id)
+        if (statusUpdErr) fastify.log.error({ statusUpdErr, docId: doc.id }, 'extract: CRITICAL — failed to update document status')
+
+        // 5b. Update optional metadata columns (non-critical — may not exist on older DBs).
+        await fastify.supabase
+          .from('onboarding_documents')
+          .update({
+            extracted_text:     parseResult.text || null,
+            document_summary:   extractionResult.document_summary || null,
             extraction_version: extractionResult.extraction_version,
           })
           .eq('id', doc.id)
-        if (docUpdErr) fastify.log.error({ docUpdErr, docId: doc.id }, 'extract: failed to update document status')
+          // ignore error — these columns may not exist on older schema versions
 
         if (extractionResult.error) {
           docErrors.push({ docId: doc.id, step: 'claude', reason: extractionResult.error })
