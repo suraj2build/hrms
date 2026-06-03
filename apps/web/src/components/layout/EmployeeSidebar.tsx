@@ -3,7 +3,7 @@
  * Section headings are static labels; only the whole sidebar collapses to icon-rail.
  */
 
-import { useMemo }             from 'react'
+import { useMemo, useEffect } from 'react'
 import { Link, useLocation }  from 'react-router-dom'
 import { useQuery }           from '@tanstack/react-query'
 import {
@@ -163,11 +163,14 @@ function usePendingCount(employeeId: string | null) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function EmployeeSidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
   const { profile }  = useAuthStore()
   const employeeId   = profile?.employee_id ?? null
   const location     = useLocation()
   const pendingCount = usePendingCount(employeeId)
+
+  // Close the mobile drawer on navigation
+  useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
 
   // Manager-only nav items — hidden for pure employee role
   const isManager = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
@@ -194,10 +197,16 @@ export function EmployeeSidebar() {
   )
 
   return (
+   <>
+    {mobileNavOpen && (
+      <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setMobileNavOpen(false)} aria-hidden />
+    )}
     <aside
       className={cn(
-        'flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 flex-shrink-0',
-        sidebarCollapsed ? 'w-[68px]' : 'w-[220px]',
+        'flex flex-col h-screen bg-sidebar border-r border-sidebar-border flex-shrink-0',
+        'fixed inset-y-0 left-0 z-50 w-[240px] transition-transform duration-300 lg:static lg:z-auto lg:transition-all',
+        mobileNavOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0',
+        sidebarCollapsed ? 'lg:w-[68px]' : 'lg:w-[220px]',
       )}
     >
       {/* ── Logo ─────────────────────────────────────────────────────────── */}
@@ -339,8 +348,8 @@ export function EmployeeSidebar() {
         </div>
       )}
 
-      {/* ── Collapse toggle ───────────────────────────────────────────────── */}
-      <div className={cn('p-2 border-t border-sidebar-border flex-shrink-0', sidebarCollapsed && 'flex justify-center')}>
+      {/* ── Collapse toggle (desktop only) ─────────────────────────────────── */}
+      <div className={cn('p-2 border-t border-sidebar-border flex-shrink-0 hidden lg:block', sidebarCollapsed && 'lg:flex lg:justify-center')}>
         <Button
           variant="ghost"
           size="sm"
@@ -357,5 +366,6 @@ export function EmployeeSidebar() {
         </Button>
       </div>
     </aside>
+   </>
   )
 }

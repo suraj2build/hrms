@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { ChevronDown, ChevronRight, PanelLeftClose } from 'lucide-react'
+import { ChevronDown, ChevronRight, PanelLeftClose, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { Button } from '@/components/ui/button'
@@ -154,9 +154,21 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
 // ── ContextualSidebar ─────────────────────────────────────────────────────────
 
 export function ContextualSidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
   const location = useLocation()
   const domain: Domain | null = getDomainForPath(location.pathname)
+
+  // Close the mobile drawer whenever the route changes
+  useEffect(() => { setMobileNavOpen(false) }, [location.pathname, location.search, setMobileNavOpen])
+
+  // On mobile the drawer is full-width-ish (never icon-rail); on lg+ it respects collapse.
+  // Wrapper classes: off-canvas under lg, static inline at lg+.
+  const shellCls = cn(
+    'flex flex-col h-full bg-sidebar border-r border-sidebar-border flex-shrink-0 transition-transform duration-300',
+    'fixed inset-y-0 left-0 z-50 w-[244px] lg:static lg:z-auto lg:transition-all',
+    mobileNavOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0',
+    sidebarCollapsed ? 'lg:w-[52px]' : 'lg:w-[224px]',
+  )
 
   // Track expanded groups per domain
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -186,27 +198,35 @@ export function ContextualSidebar() {
   // No domain matched — render empty sidebar (shouldn't happen inside AdminShellV2)
   if (!domain) {
     return (
-      <aside
-        className={cn(
-          'flex flex-col h-full bg-sidebar border-r border-sidebar-border flex-shrink-0 transition-all duration-300',
-          sidebarCollapsed ? 'w-[52px]' : 'w-[224px]',
-        )}
-      />
+      <aside className={shellCls} />
     )
   }
 
   return (
-    <aside
-      className={cn(
-        'flex flex-col h-full bg-sidebar border-r border-sidebar-border flex-shrink-0 transition-all duration-300',
-        sidebarCollapsed ? 'w-[52px]' : 'w-[224px]',
-      )}
-    >
+   <>
+    {/* Mobile backdrop */}
+    {mobileNavOpen && (
+      <div
+        className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+        onClick={() => setMobileNavOpen(false)}
+        aria-hidden
+      />
+    )}
+    <aside className={shellCls}>
       {/* ── Domain label header ──────────────────────────────────── */}
       {!sidebarCollapsed && (
         <div className="flex items-center gap-2 h-11 px-4 border-b border-sidebar-border flex-shrink-0">
           <domain.icon className="h-4 w-4 text-primary flex-shrink-0" />
           <p className="text-sm font-semibold text-sidebar-foreground truncate">{domain.label}</p>
+          {/* Mobile-only close */}
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            className="ml-auto lg:hidden text-muted-foreground hover:text-foreground"
+            aria-label="Close navigation"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
       {sidebarCollapsed && (
@@ -232,10 +252,10 @@ export function ContextualSidebar() {
 
       </nav>
 
-      {/* ── Collapse toggle ──────────────────────────────────────── */}
+      {/* ── Collapse toggle (desktop only) ───────────────────────── */}
       <div className={cn(
-        'p-2 border-t border-sidebar-border flex-shrink-0',
-        sidebarCollapsed && 'flex justify-center',
+        'p-2 border-t border-sidebar-border flex-shrink-0 hidden lg:block',
+        sidebarCollapsed && 'lg:flex lg:justify-center',
       )}>
         <Button
           variant="ghost"
@@ -255,5 +275,6 @@ export function ContextualSidebar() {
         </Button>
       </div>
     </aside>
+   </>
   )
 }

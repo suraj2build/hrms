@@ -1,5 +1,6 @@
-import { LogOut, ChevronDown } from 'lucide-react'
+import { LogOut, ChevronDown, Menu } from 'lucide-react'
 import { useNavigate }         from 'react-router-dom'
+import { useUIStore }          from '@/stores/uiStore'
 import { toast }               from 'sonner'
 import { supabase }            from '@/lib/supabase/client'
 import { useAuthStore }        from '@/stores/authStore'
@@ -37,6 +38,7 @@ export function Topbar() {
   const { profile, tenant, clear } = useAuthStore()
   const navigate = useNavigate()
   const basePath = useBasePath()
+  const toggleMobileNav = useUIStore(s => s.toggleMobileNav)
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -47,6 +49,16 @@ export function Topbar() {
 
   return (
     <header className="h-14 border-b border-border bg-background flex items-center px-4 gap-3 flex-shrink-0">
+      {/* Mobile hamburger — opens the shell sidebar drawer */}
+      <button
+        type="button"
+        onClick={toggleMobileNav}
+        className="lg:hidden p-1.5 -ml-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0"
+        aria-label="Open navigation menu"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
       {/* Command palette trigger */}
       <CommandPaletteTrigger className="flex-shrink-0" />
 

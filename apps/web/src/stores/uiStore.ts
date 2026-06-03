@@ -18,6 +18,11 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void
   toggleSidebar: () => void
 
+  // ── Mobile nav drawer (session-only; <lg screens) ────────────────────────────
+  mobileNavOpen: boolean
+  setMobileNavOpen: (open: boolean) => void
+  toggleMobileNav: () => void
+
   // ── Per-section open/closed state ──────────────────────────────────────────
   // Key format: "admin:SectionHeading" | "ess:SectionHeading"
   sectionStates: Record<string, boolean>
@@ -53,6 +58,11 @@ export const useUIStore = create<UIState>()(
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       toggleSidebar: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+      // ── mobile nav drawer ─────────────────────────────────────────────────────
+      mobileNavOpen: false,
+      setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
+      toggleMobileNav: () => set((state) => ({ mobileNavOpen: !state.mobileNavOpen })),
 
       // ── sections ────────────────────────────────────────────────────────────
       sectionStates: {},

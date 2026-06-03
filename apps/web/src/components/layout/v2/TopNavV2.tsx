@@ -12,8 +12,9 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Sun, Moon, LogOut, ChevronDown } from 'lucide-react'
+import { Search, Sun, Moon, LogOut, ChevronDown, Menu } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/stores/uiStore'
 import { LogoMark } from '@/components/brand/Logo'
 import { DOMAINS, getDomainForPath } from './nav-config'
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
@@ -42,6 +43,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const navigate   = useNavigate()
   const basePath   = useBasePath()
   const { profile, tenant, clear } = useAuthStore()
+  const toggleMobileNav = useUIStore(s => s.toggleMobileNav)
   const [notifOpen, setNotifOpen]  = useState(false)
   const { resolvedTheme, setTheme } = useTheme()
   const dark = resolvedTheme === 'dark'
@@ -60,6 +62,16 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
 
   return (
     <header className="sticky top-0 z-40 w-full h-[52px] border-b border-border bg-card backdrop-blur-md flex items-stretch px-0 flex-shrink-0 shadow-sm shadow-border/30 overflow-hidden">
+
+      {/* ── Mobile hamburger (opens contextual sidebar drawer) ──── */}
+      <button
+        type="button"
+        onClick={toggleMobileNav}
+        className="lg:hidden flex items-center justify-center px-3 border-r border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+        aria-label="Open navigation menu"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
 
       {/* ── Brand ──────────────────────────────────────────────── */}
       <button
