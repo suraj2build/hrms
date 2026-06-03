@@ -445,6 +445,19 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Safety net: never leave a document stuck in 'processing' once the run has
+    // finished its loop. Any still 'processing' here means its terminal update
+    // was missed — mark it 'failed' so the UI never shows a permanent spinner.
+    {
+      const { error: sweepErr } = await fastify.supabase
+        .from('onboarding_documents')
+        .update({ extraction_status: 'failed', extraction_error: 'Extraction did not complete — please retry' })
+        .eq('session_id', sessionId)
+        .eq('tenant_id', req.tenantId)
+        .eq('extraction_status', 'processing')
+      if (sweepErr) fastify.log.error({ sweepErr, sessionId }, 'extract: failed to sweep stuck processing documents')
+    }
+
     // ── Merge & create/update draft profile ────────────────────────────────
     let draftProfileId: string | null = null
 

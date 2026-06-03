@@ -20,6 +20,8 @@ export interface DocFieldRow {
 export interface IdentityCheckResult {
   errors: string[]
   warnings: string[]
+  /** Normalised document types that failed identity verification (hard mismatch). */
+  flaggedDocTypes: string[]
 }
 
 const ANCHOR_ORDER = ['aadhaar', 'pan', 'passport', 'driving_license']
@@ -108,6 +110,7 @@ function normalizeDob(v: string): string {
 export function crossCheckIdentity(rows: DocFieldRow[]): IdentityCheckResult {
   const errors: string[] = []
   const warnings: string[] = []
+  const flagged = new Set<string>()
 
   // Group name + dob per document type.
   const byDoc: Record<string, { name?: string; firstName?: string; lastName?: string; holder?: string; dob?: string }> = {}
@@ -136,7 +139,7 @@ export function crossCheckIdentity(rows: DocFieldRow[]): IdentityCheckResult {
   const anchorType = ANCHOR_ORDER.find((dt) => docName(dt))
   if (!anchorType) {
     warnings.push('No government ID (Aadhaar/PAN) with a readable name was found — identity could not be cross-verified. Aadhaar is the required base proof.')
-    return { errors, warnings }
+    return { errors, warnings, flaggedDocTypes: [] }
   }
 
   const anchorName = docName(anchorType)!
@@ -152,6 +155,7 @@ export function crossCheckIdentity(rows: DocFieldRow[]): IdentityCheckResult {
     if (candidateName) {
       const verdict = compareNames(anchorName, candidateName)
       if (verdict === 'mismatch') {
+        flagged.add(dt)
         errors.push(
           `Name mismatch: "${candidateName}" on ${label} does not match the ${anchorLabel} name "${anchorName}". Verify this document belongs to the candidate or re-upload a correct one.`,
         )
@@ -165,11 +169,12 @@ export function crossCheckIdentity(rows: DocFieldRow[]): IdentityCheckResult {
     // ── DOB check ──
     const candidateDob = byDoc[dt]?.dob
     if (anchorDob && candidateDob && normalizeDob(anchorDob) !== normalizeDob(candidateDob)) {
+      flagged.add(dt)
       errors.push(
         `Date of birth mismatch: ${label} shows ${candidateDob} but ${anchorLabel} shows ${anchorDob}. Verify the document belongs to the candidate.`,
       )
     }
   }
 
-  return { errors, warnings }
+  return { errors, warnings, flaggedDocTypes: Array.from(flagged) }
 }

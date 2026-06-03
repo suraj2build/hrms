@@ -184,6 +184,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
     const validationErrors: string[] = []
     const validationWarnings: string[] = []
     let duplicateRisk: string | null = null
+    let identityFlags: string[] = []
 
     // ── PAN number format ────────────────────────────────────────────────
     if (draft.pan_number) {
@@ -336,9 +337,10 @@ export default async function draftRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
 
       if (docFields && docFields.length > 0) {
-        const { errors: idErrors, warnings: idWarnings } = crossCheckIdentity(docFields)
+        const { errors: idErrors, warnings: idWarnings, flaggedDocTypes } = crossCheckIdentity(docFields)
         validationErrors.push(...idErrors)
         validationWarnings.push(...idWarnings)
+        identityFlags = flaggedDocTypes
       }
     }
 
@@ -361,6 +363,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
         validation_errors: validationErrors,
         validation_warnings: validationWarnings,
         duplicate_risk: duplicateRisk,
+        identity_flags: identityFlags,
         status: newStatus,
       },
     })

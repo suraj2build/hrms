@@ -112,6 +112,7 @@ interface ValidationResult {
   validation_errors: string[]
   validation_warnings: string[]
   duplicate_risk: boolean
+  identity_flags?: string[]
   status: string
 }
 
@@ -756,6 +757,12 @@ export function HRReviewWorkspace() {
   // Documents come from the session response (GET /sessions/:id returns them inline)
   const documents: OnboardingDocument[] = session?.documents ?? []
 
+  // Document types flagged by the last identity check (name/DOB mismatch vs Aadhaar)
+  const flaggedDocTypes = new Set(
+    (validationResult?.identity_flags ?? []).map((t) => t.toLowerCase().replace(/[\s-]/g, '_')),
+  )
+  const isDocFlagged = (dt: string) => flaggedDocTypes.has(dt.toLowerCase().replace(/[\s-]/g, '_'))
+
   const { data: draftData, isLoading: draftLoading } = useQuery<{ data: DraftProfile }>({
     queryKey: ['onboarding-draft', draftProfileId],
     queryFn: () => api.get(`/onboarding/drafts/${draftProfileId}`),
@@ -1008,10 +1015,12 @@ export function HRReviewWorkspace() {
                   <button
                     key={doc.id}
                     onClick={() => setSelectedDocId(doc.id === selectedDocId ? null : doc.id)}
-                    className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
-                      selectedDocId === doc.id
-                        ? 'bg-primary/10 border border-primary/20'
-                        : 'hover:bg-muted/40'
+                    className={`w-full text-left px-3 py-2 rounded-md transition-colors border ${
+                      isDocFlagged(doc.document_type)
+                        ? 'border-destructive/40 bg-destructive/5'
+                        : selectedDocId === doc.id
+                        ? 'bg-primary/10 border-primary/20'
+                        : 'border-transparent hover:bg-muted/40'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
@@ -1035,9 +1044,15 @@ export function HRReviewWorkspace() {
                     <p className="text-[10px] text-muted-foreground truncate mb-1">
                       {doc.file_name}
                     </p>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <ExtractionStatusBadge status={doc.extraction_status} />
                       <ConfidenceBadge score={doc.confidence_score ?? null} />
+                      {isDocFlagged(doc.document_type) && (
+                        <Badge variant="destructive" className="text-[9px] px-1.5 py-0 gap-0.5">
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          Identity mismatch
+                        </Badge>
+                      )}
                     </div>
                   </button>
                 ))
