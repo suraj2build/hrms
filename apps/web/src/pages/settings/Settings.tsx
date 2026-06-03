@@ -688,9 +688,108 @@ function CompanyProfileCard({ data, onSaved, activateTick }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+// ── Help & Guidance ─────────────────────────────────────────────────────────
+
+interface GuidanceCfg {
+  features: Record<string, boolean>
+  roles:    Record<string, boolean>
+  modules:  Record<string, boolean>
+}
+
+const GUIDANCE_GROUPS: Array<{ key: 'features' | 'roles' | 'modules'; label: string; items: Array<{ k: string; label: string }> }> = [
+  { key: 'features', label: 'Guidance Features', items: [
+    { k: 'enable_help_framework',    label: 'Help framework (master switch)' },
+    { k: 'enable_process_guides',    label: 'Process guides' },
+    { k: 'enable_field_guidance',    label: 'Field guidance' },
+    { k: 'enable_why_explanations',  label: 'Why explanations' },
+    { k: 'enable_walkthroughs',      label: 'Walkthroughs (preview)' },
+    { k: 'enable_context_assistant', label: 'Context assistant (preview)' },
+  ]},
+  { key: 'roles', label: 'Role Visibility', items: [
+    { k: 'employee_help_enabled', label: 'Employees' },
+    { k: 'manager_help_enabled',  label: 'Managers' },
+    { k: 'hr_help_enabled',       label: 'HR admins' },
+    { k: 'admin_help_enabled',    label: 'Super admins' },
+  ]},
+  { key: 'modules', label: 'Module Visibility', items: [
+    { k: 'employee_master',        label: 'Employee Master' },
+    { k: 'attendance',             label: 'Attendance' },
+    { k: 'leave',                  label: 'Leave' },
+    { k: 'payroll',                label: 'Payroll' },
+    { k: 'compensation',           label: 'Compensation' },
+    { k: 'assets',                 label: 'Assets' },
+    { k: 'onboarding',             label: 'Onboarding' },
+    { k: 'separation',             label: 'Separation' },
+    { k: 'executive_intelligence', label: 'Executive Intelligence' },
+  ]},
+]
+
+function GuidanceSettingsCard({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient()
+  const { data: cfg } = useQuery<{ data: GuidanceCfg }>({
+    queryKey: ['guidance-config'],
+    queryFn:  () => api.get('/workspace/guidance/config'),
+    staleTime: 60_000,
+  })
+  const [saving, setSaving] = useState(false)
+  const g = (cfg as any)?.data ?? cfg
+
+  async function toggle(group: 'features' | 'roles' | 'modules', key: string, value: boolean) {
+    if (!canEdit || !g) return
+    setSaving(true)
+    try {
+      await api.put('/workspace/guidance/config', { [group]: { [key]: value } })
+      await qc.invalidateQueries({ queryKey: ['guidance-config'] })
+      toast.success('Guidance settings updated')
+    } catch (e) {
+      toast.error('Failed to update', { description: e instanceof Error ? e.message : undefined })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Help &amp; Guidance</CardTitle>
+        <CardDescription>
+          Contextual help shown inside modules ([Help] [Process] [Why] in page headers and field hints).
+          Visibility respects these tenant settings, the user role, and the module.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {!g ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : GUIDANCE_GROUPS.map(group => (
+          <div key={group.key} className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{group.label}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {group.items.map(item => {
+                const checked = !!(g as any)[group.key]?.[item.k]
+                return (
+                  <label key={item.k} className={cn('flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2', !canEdit && 'opacity-70')}>
+                    <span className="text-sm text-foreground">{item.label}</span>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[#0F766E]"
+                      checked={checked}
+                      disabled={!canEdit || saving}
+                      onChange={(e) => toggle(group.key, item.k, e.target.checked)}
+                    />
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+        {!canEdit && <p className="text-xs text-muted-foreground">Only HR admins can change these settings.</p>}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function Settings() {
-  const { tenant }  = useAuthStore()
+  const { tenant, profile }  = useAuthStore()
   const qc          = useQueryClient()
+  const canEditGuidance = profile?.role === 'hr_admin' || profile?.role === 'super_admin'
 
   // tick-based activation: each key holds a counter; incrementing it fires
   // the card's useEffect even if clicked twice in a row (boolean can't do that)
@@ -786,6 +885,9 @@ export function Settings() {
           }))
         }}
       />
+
+      {/* Help & Guidance */}
+      <GuidanceSettingsCard canEdit={canEditGuidance} />
 
       {/* Getting Started Checklist */}
       <GettingStarted data={company} checklist={checklist} onActivate={activate} />

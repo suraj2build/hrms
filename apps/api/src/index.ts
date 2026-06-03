@@ -204,6 +204,7 @@ import notificationInboxRoute              from './routes/notifications/inbox.js
 import workspaceStatsRoutes                from './routes/workspace/stats.js'
 import workspaceCompanyRoutes             from './routes/workspace/company-settings.js'
 import workspaceSetupChecklistRoutes      from './routes/workspace/setup-checklist.js'
+import workspaceGuidanceRoutes            from './routes/workspace/guidance.js'
 
 // Routes — Sprint 12: Workforce Optimization + Event Governance + Orchestration + Governance Evolution + Incidents + Webhooks + Integrations + ESS Operational + Executive Intelligence
 import workforceOptimizationRoute          from './routes/attendance/workforce-optimization.js'
@@ -589,6 +590,7 @@ async function start() {
   await fastify.register(workspaceStatsRoutes)          // GET /onboarding/stats|events, /employees/overview, /attendance/stats|events, /payroll/runs/stats|events, /payroll/compliance/stats, /payroll/reconciliation, /ops/health|events
   await fastify.register(workspaceCompanyRoutes)        // GET|PATCH /workspace/company, GET|PATCH /workspace/employee-code
   await fastify.register(workspaceSetupChecklistRoutes) // GET /workspace/setup-checklist
+  await fastify.register(workspaceGuidanceRoutes)       // GET|PUT /workspace/guidance/config, GET /workspace/guidance/content
 
   // ── Owner Panel (platform admin — separate from tenant auth) ─────────────────
   await fastify.register(ownerRoutes)                   // GET|POST|PATCH /owner/*

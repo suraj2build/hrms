@@ -25,6 +25,7 @@ import { toast }                                         from 'sonner'
 
 import { PageContainer }    from '@/components/layout/PageContainer'
 import { PageHeader }        from '@/components/layout/PageHeader'
+import { GuidanceHeaderActions } from '@/lib/guidance'
 import { SectionCard }       from '@/components/layout/SectionCard'
 import { PeriodLockBanner }  from '@/components/layout/PeriodLockBanner'
 import { Button }            from '@/components/ui/button'
@@ -1906,6 +1907,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
       <PageHeader
         title="Apply for Leave"
         subtitle="Submit a new leave request with dynamic policy mapping"
+        actions={<GuidanceHeaderActions module="leave" pageKey="leave-apply" />}
       />
       {fromDate && periodLocked && (
         <PeriodLockBanner state={periodState} month={lockMonth} />
