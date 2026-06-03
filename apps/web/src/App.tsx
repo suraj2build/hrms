@@ -257,6 +257,7 @@ const ExecutiveNarrative   = lazy(() => import('@/pages/intelligence/ExecutiveNa
 const ActionCenter         = lazy(() => import('@/pages/intelligence/ActionCenter').then(m => ({ default: m.ActionCenter })))
 const WorkforceDigest      = lazy(() => import('@/pages/intelligence/WorkforceDigest').then(m => ({ default: m.WorkforceDigest })))
 const WorkforceSearch      = lazy(() => import('@/pages/intelligence/WorkforceSearch').then(m => ({ default: m.WorkforceSearch })))
+const UATCertification     = lazy(() => import('@/pages/intelligence/UATCertification').then(m => ({ default: m.UATCertification })))
 
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
@@ -684,6 +685,7 @@ export default function App() {
                 <Route path="/admin/intelligence/action-center"     element={<ActionCenter />} />
                 <Route path="/admin/intelligence/digest"            element={<WorkforceDigest />} />
                 <Route path="/admin/intelligence/search"            element={<WorkforceSearch />} />
+                <Route path="/admin/intelligence/uat-certification"  element={<UATCertification />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />

@@ -92,8 +92,13 @@ ALTER TABLE profiles
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- Ensure base columns from 001 that older bootstraps may lack.
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country  TEXT NOT NULL DEFAULT 'IN';
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country    TEXT NOT NULL DEFAULT 'IN';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS settings   JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS industry   TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS size_range TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url   TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan       TEXT NOT NULL DEFAULT 'starter';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS timezone   TEXT NOT NULL DEFAULT 'UTC';
 
 -- Licensing / billing columns from migration 202.
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS trial_ends_at       TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '30 days');

@@ -543,6 +543,7 @@ export const DOMAINS: Domain[] = [
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity    },
           { id: 'workforce-digest',      label: 'Workforce Digest',       route: '/admin/intelligence/digest',            icon: FileText    },
           { id: 'workforce-search',      label: 'Workforce Search',       route: '/admin/intelligence/search',            icon: Search      },
+          { id: 'uat-certification',     label: 'UAT Certification',      route: '/admin/intelligence/uat-certification', icon: ShieldCheck },
           { id: 'workforce-intel',       label: 'Workforce Intelligence', route: '/admin/intelligence',                   icon: Brain     },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],
