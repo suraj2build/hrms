@@ -661,10 +661,6 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           if (!fieldData.value || rawName === 'full_name') continue
           // Don't let resume first/last overwrite the authoritative full_name split
           if (haveFullName && (rawName === 'first_name' || rawName === 'last_name')) continue
-          // Title-case name fields coming from any source
-          if ((rawName === 'first_name' || rawName === 'last_name') && typeof fieldData.value === 'string') {
-            fieldData = { ...fieldData, value: toTitle(fieldData.value) }
-          }
 
           const colName = FIELD_MAP[rawName] !== undefined ? FIELD_MAP[rawName] : rawName
 
@@ -672,6 +668,12 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           if (!colName || !VALID_COLUMNS.has(colName)) continue
 
           let value: unknown = fieldData.value
+
+          // Title-case name fields from any source (Aadhaar returns UPPERCASE,
+          // resume may return lowercase — normalise to Title Case)
+          if ((colName === 'first_name' || colName === 'last_name') && typeof value === 'string') {
+            value = toTitle(value)
+          }
 
           // Normalise gender
           if (colName === 'gender') {
