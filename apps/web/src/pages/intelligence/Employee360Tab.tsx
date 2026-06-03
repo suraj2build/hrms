@@ -1,232 +1,167 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api/client";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+/**
+ * Employee360Tab — read-only "Insights" tab inside the Employee Profile.
+ * Additive; never replaces existing profile sections. Shape matches the real
+ * GET /intelligence/employee/:id/360 response. No business logic.
+ */
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api/client'
+import { Badge } from '@/components/ui/badge'
+import {
+  Loader2, ChevronDown, ChevronUp, Shield, Clock, Package,
+  CalendarDays, Briefcase, LogOut, AlertTriangle,
+} from 'lucide-react'
 
-interface LeaveBalance {
-  leave_type: string;
-  balance: number;
-  used: number;
-  total: number;
-}
+interface LeaveBalance { leave_type: string; balance: number; used: number }
 
 interface Employee360Data {
-  employee_id: string;
-  joining_date?: string | null;
-  compliance?: {
-    status?: string | null;
-    probation_due?: boolean | null;
-    separation_stage?: string | null;
-    assets_assigned?: number | null;
-  } | null;
-  onboarding?: {
-    status?: string | null;
-    completion_percentage?: number | null;
-  } | null;
-  leave_balances?: LeaveBalance[] | null;
-  ai_summary?: string | null;
-  sources?: string[] | null;
+  employee: {
+    id: string; name: string; code?: string | null; status: string
+    joining_date?: string | null; tenure_days?: number | null
+    department_id?: string | null; designation?: string | null
+  }
+  compliance: {
+    probation_due: boolean
+    separation_stage: string | null
+    assets_assigned: number
+    assets?: Array<{ id: string; name?: string; asset_code?: string }>
+  }
+  compensation: { ctc_annual: number; effective_from: string } | null
+  leave: { balances: LeaveBalance[] } | null
+  attendance_signal: unknown | null
+  onboarding: { status: string; completed_at: string | null } | null
+  summary: string
+  generated_at: string
+  sources: string[]
 }
 
-function calcTenure(joiningDate: string): { days: number; months: number } {
-  const joined = new Date(joiningDate);
-  const now = new Date();
-  const diffMs = now.getTime() - joined.getTime();
-  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  const months = Math.floor(days / 30);
-  return { days, months };
+function tenureLabel(days?: number | null): string | null {
+  if (days == null) return null
+  if (days < 60) return `${days} days`
+  const months = Math.floor(days / 30)
+  if (months < 24) return `${months} months (${days} days)`
+  return `${(days / 365).toFixed(1)} years`
 }
 
-function complianceVariant(
-  status?: string | null
-): "default" | "secondary" | "destructive" | "outline" {
-  if (!status) return "outline";
-  const s = status.toLowerCase();
-  if (s === "compliant" || s === "ok" || s === "good") return "default";
-  if (s === "warning" || s === "pending") return "secondary";
-  if (s === "non-compliant" || s === "critical") return "destructive";
-  return "outline";
+function StatRow({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-xs text-muted-foreground flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" /> {label}</span>
+      <span className="text-sm text-foreground">{children}</span>
+    </div>
+  )
 }
 
 export function Employee360Tab({ employeeId }: { employeeId: string }) {
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false)
 
-  const { data, isLoading, isError, error } = useQuery<Employee360Data>({
-    queryKey: ["employee-360", employeeId],
-    queryFn: async () => {
-      const response = await api.get<{ data: Employee360Data }>(
-        `/intelligence/employee/${employeeId}/360`
-      );
-      return response.data;
-    },
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['employee-360', employeeId],
+    queryFn: () => api.get<{ data: Employee360Data }>(`/intelligence/employee/${employeeId}/360`).then(r => r.data),
     enabled: !!employeeId,
-  });
+    staleTime: 60_000,
+  })
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-        Loading intelligence data...
-      </div>
-    );
-  }
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground text-sm">
+      <Loader2 className="h-4 w-4 animate-spin" /> Loading profile intelligence…
+    </div>
+  )
+  if (isError) return (
+    <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+      Failed to load insights: {error instanceof Error ? error.message : 'Unknown error'}
+    </div>
+  )
+  if (!data) return null
 
-  if (isError) {
-    return (
-      <div className="flex items-center justify-center py-12 text-destructive text-sm">
-        Failed to load 360 data:{" "}
-        {error instanceof Error ? error.message : "Unknown error"}
-      </div>
-    );
-  }
-
-  if (!data) {
-    return (
-      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-        No intelligence data available.
-      </div>
-    );
-  }
-
-  const tenure =
-    data.joining_date ? calcTenure(data.joining_date) : null;
+  const emp = data.employee
+  const tenure = tenureLabel(emp.tenure_days)
+  const inSeparation = !!data.compliance.separation_stage
 
   return (
-    <div className="space-y-5">
-      {/* Header strip */}
-      <div className="rounded-lg bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 px-5 py-3">
-        <h2 className="text-base font-semibold text-white tracking-wide">
-          Profile Intelligence
-        </h2>
-        <p className="text-xs text-white/70 mt-0.5">
-          AI-powered 360 view for this employee
-        </p>
+    <div className="space-y-4 max-w-3xl">
+      {/* Brand-consistent header */}
+      <div className="rounded-lg bg-gradient-to-r from-[#047857] via-[#0F766E] to-[#1E40AF] px-5 py-3 text-white">
+        <h2 className="text-base font-semibold">Profile Intelligence</h2>
+        <p className="text-xs text-white/75 mt-0.5">Read-only 360 view — derived live from operational records</p>
       </div>
 
-      {/* Compliance section */}
-      {data.compliance && (
-        <div className="rounded-lg border bg-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Compliance</h3>
-          <div className="flex flex-wrap gap-3 items-center">
-            {data.compliance.status != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Status:</span>
-                <Badge variant={complianceVariant(data.compliance.status)}>
-                  {data.compliance.status}
-                </Badge>
+      {/* Summary first */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+        <p className="text-sm leading-relaxed text-foreground">{data.summary}</p>
+        {data.sources?.length > 0 && (
+          <>
+            <button onClick={() => setSourcesOpen(v => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+              {sourcesOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              Why this summary?
+            </button>
+            {sourcesOpen && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {data.sources.map((s, i) => (
+                  <span key={i} className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/5">{s}</span>
+                ))}
               </div>
             )}
-            {data.compliance.probation_due != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">
-                  Probation Due:
-                </span>
-                <Badge
-                  variant={
-                    data.compliance.probation_due ? "destructive" : "default"
-                  }
-                >
-                  {data.compliance.probation_due ? "Yes" : "No"}
-                </Badge>
-              </div>
-            )}
-            {data.compliance.separation_stage != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">
-                  Separation Stage:
-                </span>
-                <Badge variant="secondary">
-                  {data.compliance.separation_stage}
-                </Badge>
-              </div>
-            )}
-            {data.compliance.assets_assigned != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">
-                  Assets Assigned:
-                </span>
-                <Badge variant="outline">
-                  {data.compliance.assets_assigned}
-                </Badge>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
-      {/* Tenure badge */}
-      {tenure && (
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-semibold text-foreground mb-2">
-            Tenure
-          </h3>
-          <Badge variant="outline" className="text-sm px-3 py-1">
-            {tenure.days} days &nbsp;/&nbsp; {tenure.months} months with
-            company
-          </Badge>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Compliance */}
+        <div className="rounded-lg border border-border bg-card p-4 space-y-1">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Compliance</h3>
+          <StatRow icon={Shield} label="Status">
+            <Badge variant={emp.status === 'active' ? 'success' : emp.status === 'separated' ? 'destructive' : 'secondary'} className="capitalize">{emp.status.replace(/_/g, ' ')}</Badge>
+          </StatRow>
+          <StatRow icon={Clock} label="Tenure">{tenure ?? '—'}</StatRow>
+          <StatRow icon={AlertTriangle} label="Probation">
+            {emp.status === 'active' && data.compliance.probation_due
+              ? <Badge variant="warning">Confirmation due</Badge>
+              : <span className="text-muted-foreground">Not due</span>}
+          </StatRow>
+          <StatRow icon={Package} label="Assets assigned">{data.compliance.assets_assigned}</StatRow>
+          {inSeparation && (
+            <StatRow icon={LogOut} label="Separation">
+              <Badge variant="destructive" className="capitalize">{data.compliance.separation_stage!.replace(/_/g, ' ')}</Badge>
+            </StatRow>
+          )}
         </div>
-      )}
 
-      {/* Onboarding status */}
-      {data.onboarding && (
-        <div className="rounded-lg border bg-card p-4 space-y-2">
-          <h3 className="text-sm font-semibold text-foreground">Onboarding</h3>
-          <div className="flex flex-wrap gap-3 items-center">
-            {data.onboarding.status != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Status:</span>
-                <Badge variant="secondary">{data.onboarding.status}</Badge>
-              </div>
-            )}
-            {data.onboarding.completion_percentage != null && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">
-                  Completion:
-                </span>
-                <Badge variant="outline">
-                  {data.onboarding.completion_percentage}%
-                </Badge>
-              </div>
-            )}
-          </div>
+        {/* Role + compensation + onboarding */}
+        <div className="rounded-lg border border-border bg-card p-4 space-y-1">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Profile</h3>
+          <StatRow icon={Briefcase} label="Employee code">{emp.code ?? '—'}</StatRow>
+          <StatRow icon={CalendarDays} label="Joined">{emp.joining_date ?? '—'}</StatRow>
+          {data.compensation && (
+            <StatRow icon={Briefcase} label="CTC (annual)">₹{Number(data.compensation.ctc_annual).toLocaleString('en-IN')}</StatRow>
+          )}
+          {data.onboarding && (
+            <StatRow icon={CalendarDays} label="Onboarding">
+              <Badge variant="secondary" className="capitalize">{data.onboarding.status.replace(/_/g, ' ')}</Badge>
+            </StatRow>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Leave balances */}
-      {data.leave_balances && data.leave_balances.length > 0 && (
-        <div className="rounded-lg border bg-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            Leave Balances
-          </h3>
+      {data.leave?.balances && data.leave.balances.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leave Balances</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b text-muted-foreground text-xs">
-                  <th className="text-left py-1.5 pr-4 font-medium">
-                    Leave Type
-                  </th>
-                  <th className="text-right py-1.5 px-3 font-medium">Total</th>
+                <tr className="border-b border-border text-muted-foreground text-xs">
+                  <th className="text-left py-1.5 pr-4 font-medium">Leave Type</th>
                   <th className="text-right py-1.5 px-3 font-medium">Used</th>
-                  <th className="text-right py-1.5 pl-3 font-medium">
-                    Balance
-                  </th>
+                  <th className="text-right py-1.5 pl-3 font-medium">Balance</th>
                 </tr>
               </thead>
               <tbody>
-                {data.leave_balances.map((lb, idx) => (
-                  <tr key={idx} className="border-b last:border-0">
-                    <td className="py-2 pr-4 text-foreground">
-                      {lb.leave_type}
-                    </td>
-                    <td className="py-2 px-3 text-right text-muted-foreground">
-                      {lb.total}
-                    </td>
-                    <td className="py-2 px-3 text-right text-muted-foreground">
-                      {lb.used}
-                    </td>
-                    <td className="py-2 pl-3 text-right font-medium text-foreground">
-                      {lb.balance}
-                    </td>
+                {data.leave.balances.map((lb, i) => (
+                  <tr key={i} className="border-b border-border/50 last:border-0">
+                    <td className="py-2 pr-4 text-foreground">{lb.leave_type}</td>
+                    <td className="py-2 px-3 text-right text-muted-foreground">{lb.used}</td>
+                    <td className="py-2 pl-3 text-right font-medium text-foreground">{lb.balance}</td>
                   </tr>
                 ))}
               </tbody>
@@ -235,50 +170,11 @@ export function Employee360Tab({ employeeId }: { employeeId: string }) {
         </div>
       )}
 
-      {/* AI Summary */}
-      {data.ai_summary && (
-        <div className="rounded-lg border bg-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">AI Summary</h3>
-          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
-            {data.ai_summary}
-          </p>
-
-          {/* Why this summary expandable */}
-          {data.sources && data.sources.length > 0 && (
-            <div className="pt-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
-                onClick={() => setSourcesOpen((prev) => !prev)}
-              >
-                {sourcesOpen ? "Hide" : "Why this summary?"}
-                <span className="ml-1">{sourcesOpen ? "▲" : "▼"}</span>
-              </Button>
-              {sourcesOpen && (
-                <div className="mt-2 rounded-md bg-muted/50 px-3 py-2 space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                    Sources used to generate this summary:
-                  </p>
-                  <ul className="space-y-1">
-                    {data.sources.map((src, idx) => (
-                      <li
-                        key={idx}
-                        className="text-xs text-foreground flex items-start gap-1.5"
-                      >
-                        <span className="text-muted-foreground mt-0.5">
-                          {idx + 1}.
-                        </span>
-                        <span>{src}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      <p className="text-[11px] text-muted-foreground">
+        Generated {new Date(data.generated_at).toLocaleString()} · sources: {data.sources?.join(' · ') || 'employees'}
+      </p>
     </div>
-  );
+  )
 }
+
+export default Employee360Tab
