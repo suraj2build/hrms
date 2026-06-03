@@ -334,6 +334,15 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
     }
 
     // ── Process each document ─────────────────────────────────────────────
+    // Sort: Aadhaar first, PAN second — these are the identity anchors.
+    // All other documents are validated AGAINST the anchor after extraction.
+    const ANCHOR_PRIORITY: Record<string, number> = { aadhaar: 0, pan: 1, passport: 2 }
+    const sortedDocuments = [...documents].sort((a, b) => {
+      const pa = ANCHOR_PRIORITY[a.document_type?.toLowerCase().replace(/[\s-]/g, '_') ?? ''] ?? 99
+      const pb = ANCHOR_PRIORITY[b.document_type?.toLowerCase().replace(/[\s-]/g, '_') ?? ''] ?? 99
+      return pa - pb
+    })
+
     const extractionResults: Array<{
       documentId: string
       documentType: string
@@ -342,9 +351,15 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
     }> = []
     const docErrors: Array<{ docId: string; step: string; reason: string }> = []
 
+    // Anchor name/DOB extracted from Aadhaar (or PAN as fallback).
+    // Set after the first anchor doc succeeds — used to reject mismatches.
+    let anchorName: string | null = null
+    let anchorDob:  string | null = null
+    let anchorDocType: string | null = null
+
     let documentsExtracted = 0
 
-    for (const doc of documents) {
+    for (const doc of sortedDocuments) {
       fastify.log.info({ docId: doc.id, docType: doc.document_type, storagePath: doc.storage_path }, 'extract: processing document')
       // Mark this document as in-progress so the UI can show live progress
       // (committed immediately — the review screen polls and reflects it).
@@ -425,7 +440,103 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         } else if (extractionResult.fields.length === 0) {
           docErrors.push({ docId: doc.id, step: 'claude', reason: 'Claude returned 0 fields — document may be blank or unsupported format' })
         } else {
-          // 6. Collect for batch insert after draft profile is created (needs draft_id FK)
+          const normDocType = (doc.document_type ?? '').toLowerCase().replace(/[\s-]/g, '_')
+          const isAnchorDoc = normDocType === 'aadhaar' || normDocType === 'pan' || normDocType === 'passport'
+
+          // Extract name/DOB from this result for anchor or comparison
+          const getName = (fields: any[]): string | null => {
+            const full = fields.find((f: any) => f.field_name === 'full_name')?.value
+            if (full) return (full as string).toUpperCase().trim()
+            const first = fields.find((f: any) => f.field_name === 'first_name')?.value ?? ''
+            const last  = fields.find((f: any) => f.field_name === 'last_name')?.value ?? ''
+            const holder = fields.find((f: any) => f.field_name === 'account_holder_name')?.value ?? ''
+            const combined = [first, last].filter(Boolean).join(' ').trim() || holder
+            return combined ? (combined as string).toUpperCase().trim() : null
+          }
+          const getDob = (fields: any[]): string | null =>
+            fields.find((f: any) => f.field_name === 'dob')?.value ?? null
+
+          const docName = getName(extractionResult.fields as any[])
+          const docDob  = getDob(extractionResult.fields as any[])
+
+          // Set anchor from first successful Aadhaar/PAN/Passport
+          if (isAnchorDoc && !anchorName && docName) {
+            anchorName    = docName
+            anchorDob     = docDob
+            anchorDocType = normDocType
+            fastify.log.info({ anchorName, anchorDob, anchorDocType }, 'extract: identity anchor set')
+          }
+
+          // 6. Identity check for non-anchor docs (if anchor is available)
+          if (!isAnchorDoc && anchorName && docName) {
+            // Simple token-based match (same logic as identity-check.ts)
+            const HONORIFICS = new Set(['MR','MRS','MS','SHRI','SMT','KUMARI','KUM','DR'])
+            const tokens = (s: string) => s.toUpperCase().replace(/[^A-Z\s]/g, ' ')
+              .split(/\s+/).filter((t) => t.length > 0 && !HONORIFICS.has(t))
+            const lev = (a: string, b: string): number => {
+              const m = a.length, n = b.length
+              if (!m) return n; if (!n) return m
+              const dp = Array.from({ length: m + 1 }, (_,i) => [i, ...Array(n).fill(0)])
+              for (let j = 0; j <= n; j++) dp[0][j] = j
+              for (let i = 1; i <= m; i++)
+                for (let j = 1; j <= n; j++) {
+                  const c = a[i-1] === b[j-1] ? 0 : 1
+                  dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+c)
+                }
+              return dp[m][n]
+            }
+            const tokMatch = (a: string, b: string) => {
+              if (a === b) return true
+              if (a.length === 1 || b.length === 1) return a[0] === b[0]
+              return lev(a, b) <= Math.max(1, Math.floor(Math.min(a.length, b.length) / 4))
+            }
+            const anchorToks = tokens(anchorName)
+            const docToks    = tokens(docName)
+            const small = anchorToks.length <= docToks.length ? anchorToks : docToks
+            const large = anchorToks.length <= docToks.length ? docToks : anchorToks
+            const used = new Set<number>()
+            let aligned = 0
+            for (const t of small) {
+              const idx = large.findIndex((lt, i) => !used.has(i) && tokMatch(t, lt))
+              if (idx >= 0) { used.add(idx); aligned++ }
+            }
+            const isMismatch = aligned === 0 || aligned / small.length < 0.5
+
+            if (isMismatch) {
+              const reason = `Identity mismatch: name "${docName}" does not match ${anchorDocType} anchor "${anchorName}". Document rejected — no data extracted.`
+              fastify.log.warn({ docId: doc.id, docName, anchorName }, 'extract: identity mismatch — rejecting document')
+              docErrors.push({ docId: doc.id, step: 'identity', reason })
+              await fastify.supabase
+                .from('onboarding_documents')
+                .update({ extraction_status: 'rejected', extraction_error: reason })
+                .eq('id', doc.id)
+              continue  // ← skip adding to extractionResults — no data from this doc
+            }
+
+            // DOB mismatch check (hard reject)
+            if (anchorDob && docDob) {
+              const norm = (d: string) => {
+                const s = d.trim()
+                const a = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+                if (a) return `${a[1]}-${a[2]}-${a[3]}`
+                const b = s.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/)
+                if (b) return `${b[3]}-${b[2]}-${b[1]}`
+                return s
+              }
+              if (norm(anchorDob) !== norm(docDob)) {
+                const reason = `Identity mismatch: DOB "${docDob}" does not match ${anchorDocType} DOB "${anchorDob}". Document rejected.`
+                fastify.log.warn({ docId: doc.id, docDob, anchorDob }, 'extract: DOB mismatch — rejecting document')
+                docErrors.push({ docId: doc.id, step: 'identity', reason })
+                await fastify.supabase
+                  .from('onboarding_documents')
+                  .update({ extraction_status: 'rejected', extraction_error: reason })
+                  .eq('id', doc.id)
+                continue
+              }
+            }
+          }
+
+          // 7. Collect for merge (only docs that passed identity check reach here)
           extractionResults.push({
             documentId: doc.id,
             documentType: doc.document_type,
@@ -596,6 +707,22 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (existing?.id) {
+        // Wipe all extractable columns first so stale data from a previous
+        // (partial/wrong) run can never survive a re-extraction.
+        const NULLABLE_EXTRACT_COLS: Record<string, null> = {
+          first_name: null, last_name: null, email: null, phone: null,
+          dob: null, gender: null, address_line1: null, address_city: null,
+          address_state: null, address_pincode: null, joining_date: null,
+          employment_type: null, pan_number: null, uan_number: null,
+          esi_number: null, pf_number: null, bank_name: null,
+          bank_account_number: null, bank_ifsc: null, bank_account_type: null,
+          ctc_annual: null, previous_employer: null, previous_designation: null,
+        }
+        await fastify.supabase
+          .from('draft_employee_profiles')
+          .update({ ...NULLABLE_EXTRACT_COLS, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+
         const { error: updateErr } = await fastify.supabase
           .from('draft_employee_profiles')
           .update({

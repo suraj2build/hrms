@@ -301,15 +301,19 @@ function SourceBadge({ source, isHrOverride }: { source: string | null; isHrOver
 
 function ExtractionStatusBadge({ status }: { status: string }) {
   const map: Record<string, BadgeVariant> = {
-    pending: 'outline',
+    pending:    'outline',
     processing: 'warning',
-    extracted: 'success',   // DB value after successful extraction
-    completed: 'success',   // legacy alias
-    failed: 'destructive',
+    extracted:  'success',
+    completed:  'success',
+    failed:     'destructive',
+    rejected:   'destructive',
+  }
+  const label: Record<string, string> = {
+    rejected: '⛔ rejected',
   }
   return (
     <Badge variant={map[status] ?? 'outline'} className="text-[9px] px-1.5 py-0">
-      {status}
+      {label[status] ?? status}
     </Badge>
   )
 }
@@ -1016,7 +1020,7 @@ export function HRReviewWorkspace() {
                     key={doc.id}
                     onClick={() => setSelectedDocId(doc.id === selectedDocId ? null : doc.id)}
                     className={`w-full text-left px-3 py-2 rounded-md transition-colors border ${
-                      isDocFlagged(doc.document_type)
+                      doc.extraction_status === 'rejected' || isDocFlagged(doc.document_type)
                         ? 'border-destructive/40 bg-destructive/5'
                         : selectedDocId === doc.id
                         ? 'bg-primary/10 border-primary/20'
@@ -1317,6 +1321,21 @@ export function HRReviewWorkspace() {
                     <ExtractionStatusBadge status={selectedDoc.extraction_status} />
                     <ConfidenceBadge score={selectedDoc.confidence_score ?? null} />
                   </div>
+
+                  {/* Rejection reason */}
+                  {selectedDoc.extraction_status === 'rejected' && (selectedDoc as any).extraction_error && (
+                    <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2">
+                      <p className="text-[10px] text-destructive font-medium mb-0.5 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" /> Document Rejected
+                      </p>
+                      <p className="text-[10px] text-destructive/80 leading-relaxed">
+                        {(selectedDoc as any).extraction_error}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Re-upload the correct document for this candidate.
+                      </p>
+                    </div>
+                  )}
 
                   <Button
                     variant="outline"
