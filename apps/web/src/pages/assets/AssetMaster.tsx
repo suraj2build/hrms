@@ -5,6 +5,7 @@ import { Package, Plus, Pencil, Trash2, Loader2, UserPlus, Undo2 } from 'lucide-
 import { PageContainer }                          from '@/components/layout/PageContainer'
 import { PageHeader }                             from '@/components/layout/PageHeader'
 import { SectionCard }                            from '@/components/layout/SectionCard'
+import { GuidanceHeaderActions }                  from '@/lib/guidance'
 import { Button }                                 from '@/components/ui/button'
 import { Input }                                  from '@/components/ui/input'
 import { Badge }                                  from '@/components/ui/badge'
@@ -194,7 +195,12 @@ export function AssetMaster() {
       <PageHeader
         title="Assets"
         subtitle="Track company assets and their assignment to employees"
-        actions={isAdmin ? <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" />Add Asset</Button> : undefined}
+        actions={
+          <>
+            <GuidanceHeaderActions module="assets" pageKey="assets" />
+            {isAdmin && <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" />Add Asset</Button>}
+          </>
+        }
       />
 
       {/* Stats */}
