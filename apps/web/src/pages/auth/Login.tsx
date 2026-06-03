@@ -89,18 +89,21 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md space-y-6">
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{ background: 'linear-gradient(135deg, #EBF3FC 0%, #F3F5F8 50%, #E8F3EC 100%)' }}
+    >
+      <div className="w-full max-w-[440px] space-y-6">
         {/* Branding */}
         <div className="text-center">
           <div className="inline-flex items-center justify-center mb-4">
             <LogoMark size={48} />
           </div>
-          <h1 className="text-2xl font-bold">Welcome back</h1>
-          <p className="text-sm text-muted-foreground mt-1">Sign in to your Emvora account</p>
+          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-sm text-muted-foreground mt-1.5">Sign in to your Emvora workspace</p>
         </div>
 
-        <Card>
+        <Card className="shadow-elev-3">
           <CardContent className="pt-6 space-y-4">
             {/* Google SSO */}
             <Button type="button" variant="outline" className="w-full" onClick={signInWithGoogle} disabled={googleLoading}>
