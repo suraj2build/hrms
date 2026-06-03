@@ -250,6 +250,9 @@ const StatutoryGroups      = lazy(() => import('@/pages/masters/StatutoryGroups'
 const AssetCategories      = lazy(() => import('@/pages/masters/AssetCategories').then(m => ({ default: m.AssetCategories })))
 const AssetMaster          = lazy(() => import('@/pages/assets/AssetMaster').then(m => ({ default: m.AssetMaster })))
 const AdminComingSoon      = lazy(() => import('@/pages/admin/AdminComingSoon').then(m => ({ default: m.AdminComingSoon })))
+// Intelligence — AI Workforce OS Phase 1
+const WorkforceCommand     = lazy(() => import('@/pages/intelligence/WorkforceCommand').then(m => ({ default: m.WorkforceCommand })))
+const ExecutiveNarrative   = lazy(() => import('@/pages/intelligence/ExecutiveNarrative').then(m => ({ default: m.ExecutiveNarrative })))
 
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
@@ -671,6 +674,8 @@ export default function App() {
                 <Route path="/admin/masters/asset-categories"        element={<AssetCategories />} />
                 <Route path="/admin/assets"                          element={<AssetMaster />} />
                 <Route path="/admin/recruitment"                     element={<AdminComingSoon />} />
+                {/* AI Workforce OS — Intelligence Layer */}
+                <Route path="/admin/intelligence/workforce-command"  element={<WorkforceCommand />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />
