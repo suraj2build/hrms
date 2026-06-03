@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { api }          from '@/lib/api/client'
+import { ManagerInsights } from '@/pages/intelligence/ManagerInsights'
 import type { Employee } from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1250,6 +1251,9 @@ export function ManagerDashboardPage() {
 
         {/* Hero card */}
         <CoreIdentity emp={emp} teamSize={summary.total} pendingCount={pendingCount} />
+
+        {/* Team intelligence (read-only; renders nothing when no signals) */}
+        <ManagerInsights />
 
         {/* KPI strip */}
         <KPIStrip summary={summary} pendingLeave={leaveRequests.length} pendingReg={regularisations.length} />

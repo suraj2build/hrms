@@ -76,7 +76,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
       {/* ── Brand ──────────────────────────────────────────────── */}
       <button
         type="button"
-        onClick={() => navigate('/admin/control-center')}
+        onClick={() => navigate('/admin/intelligence/workforce-command')}
         className="flex items-center gap-2 shrink-0 px-4 group border-r border-border/60 bg-card hover:bg-muted/40 transition-colors"
       >
         <LogoMark size={28} />

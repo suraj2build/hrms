@@ -145,16 +145,18 @@ export const DOMAINS: Domain[] = [
     matchPrefixes: [
       '/admin/control-center',
       '/admin/dashboard',     // kept so redirect still activates this domain
+      '/admin/intelligence/workforce-command', // primary HR landing
       '/admin/executive',     // Executive Intelligence Center
       '/admin/settings',      // Company / Global Settings
     ],
-    defaultRoute: '/admin/control-center',
+    defaultRoute: '/admin/intelligence/workforce-command',
     groups: [
       {
         label: 'Overview',
         items: [
-          { id: 'control-center',   label: 'Control Center',         route: '/admin/control-center', exact: true, icon: Command   },
-          { id: 'executive-center', label: 'Executive Intelligence', route: '/admin/executive',                   icon: BarChart3 },
+          { id: 'workforce-command-home', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain },
+          { id: 'control-center',         label: 'Control Center',         route: '/admin/control-center', exact: true, icon: Command   },
+          { id: 'executive-center',       label: 'Executive Intelligence', route: '/admin/executive',                   icon: BarChart3 },
         ],
       },
       {
@@ -543,7 +545,6 @@ export const DOMAINS: Domain[] = [
           { id: 'session-intelligence',  label: 'Session Intelligence',   route: '/admin/attendance/intelligence-center', icon: Activity  },
           { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap       },
           { id: 'workforce-analytics',   label: 'Workforce Analytics',    route: '/admin/analytics/workforce',            icon: BarChart2 },
-          { id: 'workforce-command',     label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', icon: Brain       },
           { id: 'org-health',            label: 'Org Health',             route: '/admin/intelligence/org-health',        icon: TrendingUp  },
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity    },
           { id: 'workforce-digest',      label: 'Workforce Digest',       route: '/admin/intelligence/digest',            icon: FileText    },

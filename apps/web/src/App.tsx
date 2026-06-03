@@ -493,7 +493,7 @@ export default function App() {
                 <Route path="/admin/control-center" element={<ControlCenter />} />
 
                 {/* Dashboard — redirects to Control Center (content absorbed there) */}
-                <Route path="/admin/dashboard" element={<Navigate to="/admin/control-center" replace />} />
+                <Route path="/admin/dashboard" element={<Navigate to="/admin/intelligence/workforce-command" replace />} />
 
                 {/* ── Workspace shells consolidated — navigation moved to sidebar ── */}
                 {/* Routes preserved as redirects so existing links don't break */}
