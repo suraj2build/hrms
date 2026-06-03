@@ -521,20 +521,28 @@ export default async function draftRoutes(fastify: FastifyInstance) {
         })
     }
 
-    // Create profiles row if email matches an auth user
+    // Link auth profile → employee (non-fatal — schema cache reload may be needed)
     if (draft.email) {
-      const { data: authUser } = await fastify.supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', draft.email)
-        .eq('tenant_id', req.tenantId)
-        .maybeSingle()
-
-      if (authUser) {
-        await fastify.supabase
+      try {
+        const { data: authUser } = await fastify.supabase
           .from('profiles')
-          .update({ employee_id: employeeId })
-          .eq('id', authUser.id)
+          .select('id')
+          .eq('email', draft.email)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+
+        if (authUser) {
+          const { error: profileLinkErr } = await fastify.supabase
+            .from('profiles')
+            .update({ employee_id: employeeId })
+            .eq('id', authUser.id)
+          if (profileLinkErr) {
+            // Likely a schema cache issue — run: NOTIFY pgrst, 'reload schema';
+            fastify.log.warn({ profileLinkErr, employeeId }, 'approve: profile employee_id link failed (non-fatal — run schema cache reload)')
+          }
+        }
+      } catch (e) {
+        fastify.log.warn({ e, employeeId }, 'approve: profile link threw (non-fatal)')
       }
     }
 

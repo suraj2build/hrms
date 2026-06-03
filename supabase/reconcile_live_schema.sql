@@ -32,7 +32,11 @@
 --      correct: super_admin/hr_admin/manager/employee).
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- 1a. Ensure email column exists (migration 203) and backfill from auth.users.
+-- 1a. Ensure employee_id column exists (migration 002 — often missing on live DBs).
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS employee_id UUID REFERENCES employees(id) ON DELETE SET NULL;
+
+-- 1b. Ensure email column exists (migration 203) and backfill from auth.users.
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS email TEXT;
 
