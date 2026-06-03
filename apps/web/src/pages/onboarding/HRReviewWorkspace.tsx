@@ -72,6 +72,10 @@ interface DraftProfile {
   id: string
   session_id: string
   status: string
+  validation_errors?: string[]
+  validation_warnings?: string[]
+  duplicate_risk?: string | null
+  exception_approved?: boolean
   first_name?: string
   last_name?: string
   email?: string
@@ -900,6 +904,20 @@ export function HRReviewWorkspace() {
 
   const conflictedFields = fields.filter((f) => f.is_conflicting)
 
+  // Seed validationResult from persisted draft data on load — so "Approve with
+  // Exception" button shows even after a page reload without re-running validation.
+  const effectiveValidation: ValidationResult | null =
+    validationResult ??
+    (draft && (draft.validation_errors || draft.status === 'validation_pending')
+      ? {
+          validation_errors:   draft.validation_errors   ?? [],
+          validation_warnings: draft.validation_warnings ?? [],
+          duplicate_risk:      !!draft.duplicate_risk,
+          identity_flags:      [],
+          status:              draft.status,
+        }
+      : null)
+
   const canApprove =
     session?.status === 'approval_pending' ||
     draft?.status === 'approval_pending'
@@ -1499,8 +1517,8 @@ export function HRReviewWorkspace() {
 
               {/* Exception pass — shown when validation has errors but draft exists */}
               {!canApprove && draftProfileId &&
-                validationResult &&
-                validationResult.validation_errors.length > 0 && (
+                effectiveValidation &&
+                effectiveValidation.validation_errors.length > 0 && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1565,10 +1583,10 @@ export function HRReviewWorkspace() {
             </DialogDescription>
           </DialogHeader>
 
-          {validationResult && validationResult.validation_errors.length > 0 && (
+          {effectiveValidation && effectiveValidation.validation_errors.length > 0 && (
             <div className="rounded-md bg-destructive/5 border border-destructive/20 p-3 space-y-1.5">
-              <p className="text-xs font-medium text-destructive">Overriding {validationResult.validation_errors.length} error{validationResult.validation_errors.length > 1 ? 's' : ''}:</p>
-              {validationResult.validation_errors.map((e, i) => (
+              <p className="text-xs font-medium text-destructive">Overriding {effectiveValidation.validation_errors.length} error{effectiveValidation.validation_errors.length > 1 ? 's' : ''}:</p>
+              {effectiveValidation.validation_errors.map((e, i) => (
                 <p key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
                   <span className="text-destructive mt-0.5">•</span>{e}
                 </p>
