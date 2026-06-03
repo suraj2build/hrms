@@ -31,6 +31,7 @@ import { Badge }          from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api }            from '@/lib/api/client'
 import { cn }             from '@/lib/utils'
+import { ExecutiveNarrative } from '@/pages/intelligence/ExecutiveNarrative'
 
 // ── Local types (match API response shapes) ───────────────────────────────────
 
@@ -325,6 +326,9 @@ export default function ExecutiveIntelligenceCenter() {
     return (
       <div className="space-y-4">
         <NarrativeBox text={d.narrative} />
+
+        {/* Monthly workforce narrative — deltas + provenance (read-only) */}
+        <ExecutiveNarrative />
 
         {/* Workforce */}
         <SectionCard title="Workforce Snapshot" icon={<Users className="h-4 w-4 text-muted-foreground" />}>
