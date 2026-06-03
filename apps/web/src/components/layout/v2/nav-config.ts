@@ -96,6 +96,8 @@ import {
   Lock,
   GraduationCap,
   LogOut,
+  FileText,
+  Search,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -536,7 +538,11 @@ export const DOMAINS: Domain[] = [
           { id: 'session-intelligence',  label: 'Session Intelligence',   route: '/admin/attendance/intelligence-center', icon: Activity  },
           { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap       },
           { id: 'workforce-analytics',   label: 'Workforce Analytics',    route: '/admin/analytics/workforce',            icon: BarChart2 },
-          { id: 'workforce-command',     label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', icon: Brain     },
+          { id: 'workforce-command',     label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', icon: Brain       },
+          { id: 'org-health',            label: 'Org Health',             route: '/admin/intelligence/org-health',        icon: TrendingUp  },
+          { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity    },
+          { id: 'workforce-digest',      label: 'Workforce Digest',       route: '/admin/intelligence/digest',            icon: FileText    },
+          { id: 'workforce-search',      label: 'Workforce Search',       route: '/admin/intelligence/search',            icon: Search      },
           { id: 'workforce-intel',       label: 'Workforce Intelligence', route: '/admin/intelligence',                   icon: Brain     },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],

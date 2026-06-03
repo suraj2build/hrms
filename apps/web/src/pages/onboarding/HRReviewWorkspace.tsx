@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { OnboardingReadiness } from '@/pages/intelligence/OnboardingReadiness'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FileText, Upload, AlertTriangle, CheckCircle2, XCircle,
@@ -1457,6 +1458,13 @@ export function HRReviewWorkspace() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Onboarding readiness intelligence (read-only) */}
+            {sessionId && (
+              <div className="pt-2 border-t border-border">
+                <OnboardingReadiness sessionId={sessionId} />
               </div>
             )}
 

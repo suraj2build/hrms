@@ -22,8 +22,9 @@ import {
   MapPin, LayoutGrid, CalendarClock, GraduationCap,
   AlertTriangle, CheckCircle2, Banknote, TrendingUp,
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy,
-  ChevronDown, Info, RefreshCw, Package,
+  ChevronDown, Info, RefreshCw, Package, Brain,
 } from 'lucide-react'
+import { Employee360Tab } from '@/pages/intelligence/Employee360Tab'
 import {
   SeverityBadge,
   RiskIndicator,
@@ -1509,6 +1510,7 @@ export function EmployeeProfile() {
       { key: 'jobinfo',    label: 'Job Info',        icon: Briefcase  },
       { key: 'onboarding',      label: 'Onboarding',       icon: GraduationCap },
       { key: 'important-dates', label: 'Important Dates',   icon: CalendarClock },
+      { key: 'insights',   label: 'Insights',       icon: Brain      },
       ...(isAdmin ? [{ key: 'account', label: 'User Account', icon: KeyRound }] : []),
     ],
     employment:    [
@@ -2107,6 +2109,10 @@ export function EmployeeProfile() {
           {/* ─────────────────────────────────────────────────────────────────
               CORE › Important Dates
           ──────────────────────────────────────────────────────────────────── */}
+          {subTab === 'insights' && id && (
+            <Employee360Tab employeeId={id} />
+          )}
+
           {subTab === 'important-dates' && (
             <Card>
               <CardHeader className="pb-3">

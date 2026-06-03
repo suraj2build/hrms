@@ -252,7 +252,11 @@ const AssetMaster          = lazy(() => import('@/pages/assets/AssetMaster').the
 const AdminComingSoon      = lazy(() => import('@/pages/admin/AdminComingSoon').then(m => ({ default: m.AdminComingSoon })))
 // Intelligence — AI Workforce OS Phase 1
 const WorkforceCommand     = lazy(() => import('@/pages/intelligence/WorkforceCommand').then(m => ({ default: m.WorkforceCommand })))
+const OrgHealth            = lazy(() => import('@/pages/intelligence/OrgHealth').then(m => ({ default: m.OrgHealth })))
 const ExecutiveNarrative   = lazy(() => import('@/pages/intelligence/ExecutiveNarrative').then(m => ({ default: m.ExecutiveNarrative })))
+const ActionCenter         = lazy(() => import('@/pages/intelligence/ActionCenter').then(m => ({ default: m.ActionCenter })))
+const WorkforceDigest      = lazy(() => import('@/pages/intelligence/WorkforceDigest').then(m => ({ default: m.WorkforceDigest })))
+const WorkforceSearch      = lazy(() => import('@/pages/intelligence/WorkforceSearch').then(m => ({ default: m.WorkforceSearch })))
 
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
@@ -676,6 +680,10 @@ export default function App() {
                 <Route path="/admin/recruitment"                     element={<AdminComingSoon />} />
                 {/* AI Workforce OS — Intelligence Layer */}
                 <Route path="/admin/intelligence/workforce-command"  element={<WorkforceCommand />} />
+                <Route path="/admin/intelligence/org-health"        element={<OrgHealth />} />
+                <Route path="/admin/intelligence/action-center"     element={<ActionCenter />} />
+                <Route path="/admin/intelligence/digest"            element={<WorkforceDigest />} />
+                <Route path="/admin/intelligence/search"            element={<WorkforceSearch />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />
