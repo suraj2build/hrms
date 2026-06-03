@@ -102,16 +102,17 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const sepEmpIds = (pendingSep ?? []).map((s: any) => s.employee_id as string)
       let assetsAtRiskCount = 0
       if (sepEmpIds.length > 0) {
+        // assets.assigned_to is the denormalized current holder; status='assigned'
         const { data: assetRisk } = await fastify.supabase
-          .from('employee_asset_ledger').select('id, employee_id')
-          .eq('tenant_id', tenantId).eq('status', 'assigned').in('employee_id', sepEmpIds).limit(50)
+          .from('assets').select('id, assigned_to')
+          .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds).limit(50)
         if (assetRisk && assetRisk.length > 0) {
           assetsAtRiskCount = assetRisk.length
           observations.push({
             id: 'assets-at-risk', category: 'assets', severity: 'critical',
             title: assetRisk.length + ' asset' + (assetRisk.length > 1 ? 's' : '') + ' assigned to employees under separation',
             body: 'Company assets remain with employees in the separation process. Must be recovered before final clearance.',
-            source_records: [{ table: 'employee_asset_ledger', count: assetRisk.length }],
+            source_records: [{ table: 'assets', count: assetRisk.length }],
             generated_at: now.toISOString(),
           })
         }
@@ -177,11 +178,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         : { data: [] as any[] }
       const team       = teamData ?? []
       const teamSize   = team.length
+      const teamIds    = team.map((e: any) => e.id as string)
       const newJoiners = team.filter((e: any) => e.joining_date && e.joining_date >= monthStart).length
       const probDue    = team.filter((e: any) => e.joining_date && e.joining_date <= ninetyDaysAgo).length
+      // Pending leave for the team: leave_requests are not assigned an approver until
+      // actioned, so count PENDING requests raised by the manager's direct reports.
       let pendingLeave = 0
-      if (managerId) {
-        const { count } = await fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('approver_id', managerId).eq('status', 'pending')
+      if (teamIds.length > 0) {
+        const { count } = await fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).in('employee_id', teamIds).eq('status', 'PENDING')
         pendingLeave = count ?? 0
       }
       const parts: string[] = []
@@ -248,10 +252,10 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
       const sources: string[] = []
 
-      // ── employees ──
+      // ── employees (lean schema — no department_id; that lives in job_history) ──
       const { data: emp } = await fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code, status, joining_date, department_id')
+        .select('id, first_name, last_name, employee_code, status, joining_date')
         .eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
       if (!emp) return reply.code(404).send({ error: 'NOT_FOUND' })
       sources.push('employees')
@@ -260,71 +264,73 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const tenureDays   = joiningDate ? Math.floor((now.getTime() - joiningDate.getTime()) / (1000 * 60 * 60 * 24)) : null
       const probationDue = joiningDate ? joiningDate < ninetyDaysAgo && emp.status === 'active' : false
 
-      // ── employee_separation ──
+      // ── employee_separation (timestamp column is created_at, not initiated_at) ──
       const { data: sep } = await fastify.supabase
         .from('employee_separation')
-        .select('lifecycle_stage, initiated_at')
+        .select('lifecycle_stage, created_at, last_working_date')
         .eq('employee_id', employeeId).eq('tenant_id', tenantId).maybeSingle()
       if (sep) sources.push('employee_separation')
 
-      // ── employee_asset_ledger ──
+      // ── assets (current holder = assets.assigned_to; status='assigned') ──
       const { data: assetRows, count: assetCount } = await fastify.supabase
-        .from('employee_asset_ledger')
-        .select('id, asset_name, asset_code, category', { count: 'exact' })
-        .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'assigned').limit(50)
-      if ((assetCount ?? 0) > 0) sources.push('employee_asset_ledger')
+        .from('assets')
+        .select('id, name, asset_code, category_id', { count: 'exact' })
+        .eq('assigned_to', employeeId).eq('tenant_id', tenantId).eq('status', 'assigned').limit(50)
+      if ((assetCount ?? 0) > 0) sources.push('assets')
 
-      // ── onboarding_sessions ──
-      const { data: onboarding } = await fastify.supabase
-        .from('onboarding_sessions')
-        .select('status, completed_at')
-        .eq('tenant_id', tenantId)
-        .or('employee_id.eq.' + employeeId + ',converted_employee_id.eq.' + employeeId)
-        .order('created_at', { ascending: false }).limit(1).maybeSingle()
-      if (onboarding) sources.push('onboarding_sessions')
+      // ── onboarding (linked via draft_employee_profiles.linked_employee_id → session) ──
+      let onboarding: { status: string } | null = null
+      try {
+        const { data: draftLink } = await fastify.supabase
+          .from('draft_employee_profiles')
+          .select('status, session_id')
+          .eq('tenant_id', tenantId).eq('linked_employee_id', employeeId)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle()
+        if (draftLink) { onboarding = { status: draftLink.status }; sources.push('draft_employee_profiles') }
+      } catch (_) { /* skip */ }
 
-      // ── leave_balances (graceful) ──
+      // ── leave balances (table is employee_leave_balance) ──
       let leavePayload: { balances: { leave_type: string; balance: number; used: number }[] } | null = null
       try {
         const { data: leavRows, error: leaveErr } = await fastify.supabase
-          .from('leave_balances')
-          .select('leave_type, balance, used')
+          .from('employee_leave_balance')
+          .select('leave_type_id, balance, year')
           .eq('employee_id', employeeId).eq('tenant_id', tenantId).limit(20)
         if (!leaveErr && leavRows && leavRows.length > 0) {
-          leavePayload = { balances: leavRows.map((r: any) => ({ leave_type: r.leave_type, balance: Number(r.balance ?? 0), used: Number(r.used ?? 0) })) }
-          sources.push('leave_balances')
+          leavePayload = { balances: leavRows.map((r: any) => ({ leave_type: r.leave_type_id, balance: Number(r.balance ?? 0), used: 0 })) }
+          sources.push('employee_leave_balance')
         }
-      } catch (_) { /* table may not exist — skip */ }
+      } catch (_) { /* skip */ }
 
-      // ── employee_compensation (graceful) ──
+      // ── compensation (table is employee_compensations, plural; current = is_active) ──
       let compensationPayload: { ctc_annual: number; effective_from: string } | null = null
       try {
         const { data: comp, error: compErr } = await fastify.supabase
-          .from('employee_compensation')
+          .from('employee_compensations')
           .select('ctc_annual, effective_from')
-          .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+          .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('is_active', true)
           .order('effective_from', { ascending: false }).limit(1).maybeSingle()
         if (!compErr && comp) {
           compensationPayload = { ctc_annual: Number(comp.ctc_annual ?? 0), effective_from: comp.effective_from }
-          sources.push('employee_compensation')
+          sources.push('employee_compensations')
         }
-      } catch (_) { /* table may not exist — skip */ }
+      } catch (_) { /* skip */ }
 
-      // ── job_history for current department/designation (graceful) ──
-      let currentDept: string | null = emp.department_id ?? null
+      // ── job_history for current department/designation (is_current row) ──
+      let currentDept: string | null = null
       let currentDesignation: string | null = null
       try {
         const { data: jh, error: jhErr } = await fastify.supabase
           .from('job_history')
-          .select('department_id, designation, effective_from')
-          .eq('employee_id', employeeId).eq('tenant_id', tenantId)
-          .order('effective_from', { ascending: false }).limit(1).maybeSingle()
+          .select('department_id, designation_id, is_current')
+          .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('is_current', true)
+          .limit(1).maybeSingle()
         if (!jhErr && jh) {
-          if (jh.department_id) currentDept = jh.department_id
-          if (jh.designation)   currentDesignation = jh.designation
+          if (jh.department_id)   currentDept = jh.department_id
+          if (jh.designation_id)  currentDesignation = jh.designation_id
           sources.push('job_history')
         }
-      } catch (_) { /* table may not exist — skip */ }
+      } catch (_) { /* skip */ }
 
       // ── build deterministic summary ──
       const summaryParts: string[] = []
@@ -357,7 +363,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           compensation: compensationPayload,
           leave:        leavePayload,
           attendance_signal: null, // Phase 2 will populate
-          onboarding:   onboarding ? { status: onboarding.status, completed_at: onboarding.completed_at ?? null } : null,
+          onboarding:   onboarding ? { status: onboarding.status, completed_at: null } : null,
           summary:      summaryParts.join(' '),
           generated_at: now.toISOString(),
           sources,
@@ -382,8 +388,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
       const { data: emp } = await fastify.supabase.from('employees').select('id, first_name, last_name, status, joining_date, employee_code').eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
       if (!emp) return reply.code(404).send({ error: 'NOT_FOUND' })
-      const { data: sep }     = await fastify.supabase.from('employee_separation').select('lifecycle_stage, initiated_at').eq('employee_id', employeeId).eq('tenant_id', tenantId).maybeSingle()
-      const { count: assets } = await fastify.supabase.from('employee_asset_ledger').select('id', { count: 'exact', head: true }).eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'assigned')
+      const { data: sep }     = await fastify.supabase.from('employee_separation').select('lifecycle_stage, created_at').eq('employee_id', employeeId).eq('tenant_id', tenantId).maybeSingle()
+      const { count: assets } = await fastify.supabase.from('assets').select('id', { count: 'exact', head: true }).eq('assigned_to', employeeId).eq('tenant_id', tenantId).eq('status', 'assigned')
       const joiningDate  = emp.joining_date ? new Date(emp.joining_date) : null
       const probationDue = joiningDate ? joiningDate < ninetyDaysAgo && emp.status === 'active' : false
       const parts: string[] = []
@@ -407,32 +413,46 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const now = new Date()
     const thirtyDaysAgo   = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    const probationCutoff = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    const todayStr        = now.toISOString().slice(0, 10)
+    const ninetyDaysAgo   = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     try {
-      // Fetch active employees with department info (limit 2000 to avoid huge payloads)
+      // Active employees (lean schema — no department on employees)
       let empRows: any[] = []
       try {
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, department_id, joining_date, probation_end_date, departments(id, name)')
+          .select('id, joining_date')
           .eq('tenant_id', tenantId)
           .eq('status', 'active')
           .limit(2000)
         empRows = data ?? []
       } catch (_e) { empRows = [] }
 
-      // Group by department
+      // Department comes from the current job_history row (is_current=true) + departments join
+      const empToDept = new Map<string, { id: string; name: string }>()
+      try {
+        const { data: jh } = await fastify.supabase
+          .from('job_history')
+          .select('employee_id, department_id, departments(id, name)')
+          .eq('tenant_id', tenantId)
+          .eq('is_current', true)
+          .limit(5000)
+        for (const r of jh ?? []) {
+          const dep: any = r.departments
+          if (r.department_id) empToDept.set(r.employee_id, { id: r.department_id, name: dep?.name ?? 'Unknown' })
+        }
+      } catch (_e) { /* skip */ }
+
+      // Group by department (probation = active and joined > 90 days ago, joining_date proxy)
       const deptMap = new Map<string, { id: string; name: string; empIds: string[]; joiners_30d: number; probation_due: number }>()
       for (const e of empRows) {
-        const dept: any = e.departments
-        const deptId   = e.department_id ?? '__none__'
-        const deptName = dept?.name ?? 'Unassigned'
+        const dep      = empToDept.get(e.id)
+        const deptId   = dep?.id ?? '__none__'
+        const deptName = dep?.name ?? 'Unassigned'
         if (!deptMap.has(deptId)) deptMap.set(deptId, { id: deptId, name: deptName, empIds: [], joiners_30d: 0, probation_due: 0 })
         const entry = deptMap.get(deptId)!
         entry.empIds.push(e.id)
         if (e.joining_date && e.joining_date >= thirtyDaysAgo) entry.joiners_30d++
-        if (e.probation_end_date && e.probation_end_date >= todayStr && e.probation_end_date <= probationCutoff) entry.probation_due++
+        if (e.joining_date && e.joining_date <= ninetyDaysAgo) entry.probation_due++
       }
 
       // Fetch separations in last 30 days to map exits per department
@@ -479,27 +499,34 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const now = new Date()
 
-    // Fetch all employees once (joining_date, termination_date)
+    // Fetch all employees once (lean schema has no termination_date)
     let allEmp: any[] = []
     try {
       const { data } = await fastify.supabase
         .from('employees')
-        .select('id, joining_date, termination_date')
+        .select('id, joining_date')
         .eq('tenant_id', tenantId)
         .limit(5000)
       allEmp = data ?? []
     } catch (_e) { allEmp = [] }
 
-    // Fetch all separations once
+    // Separations carry the exit date (last_working_date); fall back to relieved_at
     let allSep: any[] = []
     try {
       const { data } = await fastify.supabase
         .from('employee_separation')
-        .select('id, updated_at')
+        .select('id, employee_id, last_working_date, relieved_at')
         .eq('tenant_id', tenantId)
         .limit(5000)
       allSep = data ?? []
     } catch (_e) { allSep = [] }
+
+    // employee_id -> exit date (YYYY-MM-DD)
+    const empExitDate = new Map<string, string>()
+    for (const s of allSep) {
+      const exit = s.last_working_date ?? (s.relieved_at ? s.relieved_at.slice(0, 10) : null)
+      if (s.employee_id && exit) empExitDate.set(s.employee_id, exit.slice(0, 10))
+    }
 
     const months: { period: string; headcount: number; joiners: number; exits: number }[] = []
     for (let i = 5; i >= 0; i--) {
@@ -513,7 +540,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const headcount = allEmp.filter(e => {
         if (!e.joining_date) return false
         const joined = e.joining_date.slice(0, 10)
-        const left   = e.termination_date ? e.termination_date.slice(0, 10) : null
+        const left   = empExitDate.get(e.id) ?? null
         return joined <= monthEnd && (left === null || left > monthEnd)
       }).length
 
@@ -523,11 +550,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         return joined >= monthStart && joined <= monthEnd
       }).length
 
-      const exits = allSep.filter(s => {
-        if (!s.updated_at) return false
-        const d2 = s.updated_at.slice(0, 10)
-        return d2 >= monthStart && d2 <= monthEnd
-      }).length
+      const exits = Array.from(empExitDate.values()).filter(d2 => d2 >= monthStart && d2 <= monthEnd).length
 
       months.push({ period: periodStr, headcount, joiners, exits })
     }
@@ -576,12 +599,12 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // 2. Separations initiated in last 48h
+      // 2. Separations initiated in last 48h (timestamp column is created_at)
       const { data: newSeps, error: newSepErr } = await fastify.supabase
         .from('employee_separation')
-        .select('id, employee_id, initiated_at, lifecycle_stage')
+        .select('id, employee_id, created_at, lifecycle_stage')
         .eq('tenant_id', tenantId)
-        .gte('initiated_at', fortyEightHoursAgo)
+        .gte('created_at', fortyEightHoursAgo)
         .limit(100)
       if (!newSepErr && newSeps && newSeps.length > 0) {
         const n = newSeps.length
@@ -600,11 +623,11 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         if (sepEmpIds.length > 0) {
           const { data: assetsInSep, error: assetSepErr } = await fastify.supabase
             .from('employee_asset_ledger')
-            .select('id, employee_id, assigned_at')
+            .select('id, employee_id, action_date')
             .eq('tenant_id', tenantId)
-            .eq('status', 'assigned')
+            .eq('action', 'assigned')
             .in('employee_id', sepEmpIds)
-            .gte('assigned_at', fortyEightHoursAgo)
+            .gte('created_at', fortyEightHoursAgo)
             .limit(100)
           if (!assetSepErr && assetsInSep && assetsInSep.length > 0) {
             const na = assetsInSep.length
@@ -621,13 +644,13 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // 4. Assets assigned in last 48h (general)
+      // 4. Assets assigned in last 48h (general — ledger action='assigned')
       const { data: recentAssets, error: assetErr } = await fastify.supabase
         .from('employee_asset_ledger')
-        .select('id, employee_id, assigned_at')
+        .select('id, employee_id, action_date')
         .eq('tenant_id', tenantId)
-        .eq('status', 'assigned')
-        .gte('assigned_at', fortyEightHoursAgo)
+        .eq('action', 'assigned')
+        .gte('created_at', fortyEightHoursAgo)
         .limit(100)
       if (!assetErr && recentAssets && recentAssets.length > 0) {
         const n = recentAssets.length
@@ -683,21 +706,36 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     try {
+      // SSOT status values are active/inactive/on_notice/separated (no 'resigned')
       let rows: any[] = []
       try {
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, status, updated_at, departments(name)')
+          .select('id, status, updated_at')
           .eq('tenant_id', tenantId)
-          .in('status', ['resigned', 'on_notice'])
+          .in('status', ['on_notice', 'separated'])
           .gte('updated_at', ninetyDaysAgo)
           .limit(500)
         rows = data ?? []
       } catch (_e) { rows = [] }
 
+      // Resolve department via current job_history row (employees has no department_id)
+      const empDept = new Map<string, string>()
+      if (rows.length > 0) {
+        try {
+          const { data: jh } = await fastify.supabase
+            .from('job_history')
+            .select('employee_id, departments(name)')
+            .eq('tenant_id', tenantId)
+            .eq('is_current', true)
+            .in('employee_id', rows.map((r: any) => r.id))
+          for (const j of jh ?? []) empDept.set(j.employee_id, (j.departments as any)?.name ?? 'Unassigned')
+        } catch (_e) { /* skip */ }
+      }
+
       const deptCountMap = new Map<string, number>()
       for (const r of rows) {
-        const deptName = (r.departments as any)?.name ?? 'Unassigned'
+        const deptName = empDept.get(r.id) ?? 'Unassigned'
         deptCountMap.set(deptName, (deptCountMap.get(deptName) ?? 0) + 1)
       }
 
@@ -732,12 +770,12 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', twentyFourAgo)
       const { count: assetsToday } = await fastify.supabase
         .from('employee_asset_ledger').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('status', 'assigned').gte('assigned_at', twentyFourAgo)
+        .eq('tenant_id', tenantId).eq('action', 'assigned').gte('created_at', twentyFourAgo)
       let pendingApprovals = 0
       try {
         const { count: leaveP } = await fastify.supabase
           .from('leave_requests').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('status', 'pending')
+          .eq('tenant_id', tenantId).eq('status', 'PENDING')
         pendingApprovals += leaveP ?? 0
       } catch (_) {}
       const j = newJoiners ?? 0, s = separationsToday ?? 0, a = assetsToday ?? 0, p = pendingApprovals
@@ -757,7 +795,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         sources: [
           { table: 'employees',             description: 'joining_date = today' },
           { table: 'employee_separation',   description: 'lifecycle_stage in (relieved, archived), last 24h' },
-          { table: 'employee_asset_ledger', description: 'assigned_at last 24h' },
+          { table: 'employee_asset_ledger', description: 'action=assigned last 24h' },
           { table: 'leave_requests',        description: 'status = pending' },
         ],
       })
@@ -896,7 +934,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         interpreted_as = `joining_date >= ${monthStart}`
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          .select('id, first_name, last_name, employee_code, status, joining_date')
           .eq('tenant_id', tenantId)
           .gte('joining_date', monthStart)
           .limit(50)
@@ -909,7 +947,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         interpreted_as = `joining_date >= ${weekStart} (Monday of current week)`
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          .select('id, first_name, last_name, employee_code, status, joining_date')
           .eq('tenant_id', tenantId)
           .gte('joining_date', weekStart)
           .limit(50)
@@ -934,7 +972,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         if (empIds.length > 0) {
           const { data } = await fastify.supabase
             .from('employees')
-            .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+            .select('id, first_name, last_name, employee_code, status, joining_date')
             .eq('tenant_id', tenantId)
             .in('id', empIds.slice(0, 50))
             .limit(50)
@@ -944,7 +982,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           try {
             const { data } = await fastify.supabase
               .from('employees')
-              .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+              .select('id, first_name, last_name, employee_code, status, joining_date')
               .eq('tenant_id', tenantId)
               .is('pan_number', null)
               .limit(50)
@@ -956,7 +994,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         interpreted_as = "status = 'on_notice'"
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          .select('id, first_name, last_name, employee_code, status, joining_date')
           .eq('tenant_id', tenantId)
           .eq('status', 'on_notice')
           .limit(50)
@@ -967,7 +1005,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         interpreted_as = `joining_date <= ${ninetyDaysAgo} AND status = 'active'`
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          .select('id, first_name, last_name, employee_code, status, joining_date')
           .eq('tenant_id', tenantId)
           .eq('status', 'active')
           .lte('joining_date', ninetyDaysAgo)
@@ -978,34 +1016,33 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         interpreted_as = "status = 'separated'"
         const { data } = await fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          .select('id, first_name, last_name, employee_code, status, joining_date')
           .eq('tenant_id', tenantId)
           .eq('status', 'separated')
           .limit(50)
         employees = data ?? []
 
       } else if (filterType === 'without_onboarding') {
-        interpreted_as = 'no completed onboarding session'
-        sources.push('onboarding_sessions')
-        // get employee IDs that have a completed onboarding
+        interpreted_as = 'no completed onboarding (draft_employee_profiles.linked_employee_id)'
+        sources.push('draft_employee_profiles')
+        // Employees linked to a completed onboarding draft
         let completedEmpIds: string[] = []
         try {
-          const { data: sessions } = await fastify.supabase
-            .from('onboarding_sessions')
-            .select('converted_employee_id, employee_id')
+          const { data: drafts } = await fastify.supabase
+            .from('draft_employee_profiles')
+            .select('linked_employee_id')
             .eq('tenant_id', tenantId)
-            .eq('status', 'employee_created')
+            .not('linked_employee_id', 'is', null)
             .limit(1000)
           const ids = new Set<string>()
-          for (const s of (sessions ?? [])) {
-            if (s.converted_employee_id) ids.add(s.converted_employee_id)
-            if (s.employee_id) ids.add(s.employee_id)
+          for (const s of (drafts ?? [])) {
+            if (s.linked_employee_id) ids.add(s.linked_employee_id)
           }
           completedEmpIds = Array.from(ids)
         } catch (_) {}
         let query = fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          .select('id, first_name, last_name, employee_code, status, joining_date')
           .eq('tenant_id', tenantId)
           .eq('status', 'active')
         if (completedEmpIds.length > 0) {
@@ -1015,23 +1052,24 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         employees = data ?? []
 
       } else if (filterType === 'with_assets') {
-        interpreted_as = 'has row in employee_asset_ledger status=assigned'
-        sources.push('employee_asset_ledger')
+        interpreted_as = 'has a currently-assigned asset (assets.status=assigned)'
+        sources.push('assets')
         let empIds: string[] = []
         try {
           const { data: assetRows } = await fastify.supabase
-            .from('employee_asset_ledger')
-            .select('employee_id')
+            .from('assets')
+            .select('assigned_to')
             .eq('tenant_id', tenantId)
             .eq('status', 'assigned')
+            .not('assigned_to', 'is', null)
             .limit(200)
-          const ids = new Set<string>((assetRows ?? []).map((r: any) => r.employee_id as string))
+          const ids = new Set<string>((assetRows ?? []).map((r: any) => r.assigned_to as string))
           empIds = Array.from(ids)
         } catch (_) {}
         if (empIds.length > 0) {
           const { data } = await fastify.supabase
             .from('employees')
-            .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+            .select('id, first_name, last_name, employee_code, status, joining_date')
             .eq('tenant_id', tenantId)
             .in('id', empIds.slice(0, 50))
             .limit(50)
@@ -1048,19 +1086,44 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tenantId)
           .ilike('name', `%${departmentKeyword}%`)
           .limit(20)
+        sources.push('job_history')
         const deptIds = (depts ?? []).map((d: any) => d.id as string)
         if (deptIds.length > 0) {
-          const { data } = await fastify.supabase
-            .from('employees')
-            .select('id, first_name, last_name, employee_code, status, joining_date, department_id, departments(name)')
+          // employees has no department_id — resolve member ids via current job_history
+          const { data: jh } = await fastify.supabase
+            .from('job_history')
+            .select('employee_id')
             .eq('tenant_id', tenantId)
+            .eq('is_current', true)
             .in('department_id', deptIds)
-            .limit(50)
-          employees = data ?? []
+            .limit(200)
+          const memberIds = (jh ?? []).map((r: any) => r.employee_id as string)
+          if (memberIds.length > 0) {
+            const { data } = await fastify.supabase
+              .from('employees')
+              .select('id, first_name, last_name, employee_code, status, joining_date')
+              .eq('tenant_id', tenantId)
+              .in('id', memberIds.slice(0, 50))
+              .limit(50)
+            employees = data ?? []
+          }
         }
       }
 
-      // Normalize department field
+      // Attach department name via current job_history (single batch lookup)
+      const deptByEmp = new Map<string, string>()
+      if (employees.length > 0) {
+        try {
+          const { data: jh2 } = await fastify.supabase
+            .from('job_history')
+            .select('employee_id, departments(name)')
+            .eq('tenant_id', tenantId)
+            .eq('is_current', true)
+            .in('employee_id', employees.map((e: any) => e.id))
+          for (const r of jh2 ?? []) deptByEmp.set(r.employee_id, (r.departments as any)?.name ?? '')
+        } catch (_) { /* skip */ }
+      }
+
       const normalizedEmployees = employees.map((e: any) => ({
         id:            e.id,
         first_name:    e.first_name,
@@ -1068,7 +1131,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         employee_code: e.employee_code,
         status:        e.status,
         joining_date:  e.joining_date ?? null,
-        department:    (e.departments as any)?.name ?? null,
+        department:    deptByEmp.get(e.id) || null,
       }))
 
       return reply.send({
