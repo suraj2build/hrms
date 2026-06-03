@@ -304,7 +304,8 @@ function KpiCard({
   return (
     <div
       className={cn(
-        'rounded-2xl bg-card shadow-card p-5 flex flex-col gap-3',
+        // Harmony KPI signature: 3px colored top-border + card surface
+        'rounded-xl border border-border border-t-[3px] border-t-primary bg-card shadow-card p-5 flex flex-col gap-3',
         onClick && 'cursor-pointer hover:shadow-card-md transition-shadow',
       )}
       onClick={onClick}
