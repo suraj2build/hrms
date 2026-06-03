@@ -289,12 +289,12 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
   })
   const approveRegMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
-    onSuccess:  () => { toast.success('Regularization approved'); invalidate() },
+    onSuccess:  () => { toast.success('Regularisation approved'); invalidate() },
     onError:    () => toast.error('Failed to approve'),
   })
   const rejectRegMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/reject`, {}),
-    onSuccess:  () => { toast.success('Regularization rejected'); invalidate() },
+    onSuccess:  () => { toast.success('Regularisation rejected'); invalidate() },
     onError:    () => toast.error('Failed to reject'),
   })
 

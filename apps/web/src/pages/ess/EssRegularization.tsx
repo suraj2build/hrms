@@ -271,7 +271,7 @@ export function EssRegularization() {
   return (
     <PageContainer>
       <PageHeader
-        title="Attendance Regularization"
+        title="Attendance Regularisation"
         subtitle="Raise regularization requests for attendance exceptions"
       />
 
@@ -300,7 +300,7 @@ export function EssRegularization() {
 
           {/* ── Request Regularization form ───────────────────────────────────── */}
           <SectionCard
-            title="Request Regularization"
+            title="Request Regularisation"
             icon={<ClipboardCheck className="h-4 w-4 text-muted-foreground" />}
           >
             <form onSubmit={handleSubmit} className="space-y-5">

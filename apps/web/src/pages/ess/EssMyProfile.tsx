@@ -467,7 +467,7 @@ function PrimaryActions() {
 
   const actions = [
     { label: 'Apply Leave',           icon: CalendarDays, href: '/ess/leave/apply',                   color: 'primary'  },
-    { label: 'Raise Regularization',  icon: Clock,        href: '/ess/attendance/regularization',      color: 'warning'  },
+    { label: 'Raise Regularisation',  icon: Clock,        href: '/ess/attendance/regularization',      color: 'warning'  },
     { label: 'View Attendance',       icon: CalendarDays, href: '/ess/attendance',                     color: 'info'     },
     { label: 'Download Payslip',      icon: Download,     href: '/ess/payroll/my-slips',               color: 'success'  },
     { label: 'Reimbursements',        icon: Receipt,      href: '/ess/reimbursements',                 color: 'default'  },
@@ -780,7 +780,7 @@ function AttendanceTab({ summary, summaryLoading }: { summary: OperationalSummar
         </Link>
         <Link to="/ess/attendance/regularization" className="flex-1">
           <Button variant="outline" size="sm" className="w-full text-xs">
-            <Clock className="h-3.5 w-3.5 mr-1.5" /> Raise Regularization
+            <Clock className="h-3.5 w-3.5 mr-1.5" /> Raise Regularisation
           </Button>
         </Link>
       </div>

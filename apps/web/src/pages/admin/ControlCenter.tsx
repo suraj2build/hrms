@@ -804,7 +804,7 @@ export function ControlCenter() {
 
         {/* Pending Regularizations KPI — replaces raw anomaly count (non-actionable) */}
         <KpiCard
-          label="Pending Regularizations"
+          label="Pending Regularisations"
           value={regList.length}
           icon={ClipboardList}
           iconBg={regList.length > 0 ? 'bg-violet-50' : 'bg-muted'}

@@ -178,7 +178,7 @@ export function WorkforceDigest() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Workforce Digest</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Rule-based workforce summaries. Data sourced live from HRMS tables — no AI inference.
+          Rule-based workforce summaries. Data sourced live from Emvora — no AI inference.
         </p>
       </div>
 

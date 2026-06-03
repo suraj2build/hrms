@@ -133,7 +133,7 @@ function PlatformHealthBanner({
           <span className={cn('text-xs font-semibold', statusColor)}>{statusLabel}</span>
         </div>
         <p className="text-[11px] text-muted-foreground leading-snug mb-3">
-          Operational health score across all active HRMS domains. Resolve blockers
+          Operational health score across all active Emvora domains. Resolve blockers
           before running payroll or processing attendance.
         </p>
 
@@ -384,7 +384,7 @@ export function ReadinessDashboard() {
               <h1 className="text-sm font-semibold text-foreground">Platform Readiness</h1>
             </div>
             <p className="text-xs text-muted-foreground">
-              Real-time operational health across all HRMS domains
+              Real-time operational health across all Emvora domains
             </p>
           </div>
           <Button

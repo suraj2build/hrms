@@ -464,7 +464,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'reports-center',  label: 'All Reports',     route: '/admin/reports',                       icon: BarChart2  },
           { id: 'muster-roll',     label: 'Muster Roll',     route: '/admin/attendance/muster',             icon: BookOpen   },
-          { id: 'workforce-cost',  label: 'Workforce Cost',  route: '/admin/payroll/cost-intelligence',     icon: BarChart3  },
+          { id: 'workforce-cost',  label: 'Cost Intelligence', route: '/admin/payroll/cost-intelligence',     icon: BarChart3  },
           { id: 'payroll-ledger',  label: 'Payroll Ledger',  route: '/admin/payroll/ledger',                icon: BookOpen   },
         ],
       },
@@ -536,7 +536,7 @@ export const DOMAINS: Domain[] = [
         label: 'Simulation & Optimization',
         items: [
           { id: 'policy-simulation',    label: 'Policy Simulation',      route: '/admin/attendance/simulate-policy',          icon: FlaskConical },
-          { id: 'workforce-opt',        label: 'Workforce Optimization', route: '/admin/workforce/optimization',              icon: TrendingUp   },
+          { id: 'workforce-opt',        label: 'Optimization',           route: '/admin/workforce/optimization',              icon: TrendingUp   },
         ],
       },
       {
@@ -544,13 +544,13 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'session-intelligence',  label: 'Session Intelligence',   route: '/admin/attendance/intelligence-center', icon: Activity  },
           { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap       },
-          { id: 'workforce-analytics',   label: 'Workforce Analytics',    route: '/admin/analytics/workforce',            icon: BarChart2 },
+          { id: 'workforce-analytics',   label: 'Headcount Analytics',     route: '/admin/analytics/workforce',            icon: BarChart2 },
           { id: 'org-health',            label: 'Org Health',             route: '/admin/intelligence/org-health',        icon: TrendingUp  },
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity    },
-          { id: 'workforce-digest',      label: 'Workforce Digest',       route: '/admin/intelligence/digest',            icon: FileText    },
-          { id: 'workforce-search',      label: 'Workforce Search',       route: '/admin/intelligence/search',            icon: Search      },
+          { id: 'workforce-digest',      label: 'Daily Digest',            route: '/admin/intelligence/digest',            icon: FileText    },
+          { id: 'workforce-search',      label: 'People Search',            route: '/admin/intelligence/search',            icon: Search      },
           { id: 'uat-certification',     label: 'UAT Certification',      route: '/admin/intelligence/uat-certification', icon: ShieldCheck },
-          { id: 'workforce-intel',       label: 'Workforce Intelligence', route: '/admin/intelligence',                   icon: Brain     },
+          { id: 'workforce-intel',       label: 'Intelligence Hub',         route: '/admin/intelligence',                   icon: Brain     },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],
       },
