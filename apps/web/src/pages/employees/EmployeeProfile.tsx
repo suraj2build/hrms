@@ -2645,11 +2645,11 @@ export function EmployeeProfile() {
                               {separationData.data.clearances.filter((c: any) => c.status === 'cleared').length}/5 departments cleared
                             </span>
                           </div>
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div className="h-1.5 rounded-full bg-border overflow-hidden">
                             <div
                               className={cn(
                                 'h-full rounded-full transition-all',
-                                separationData.data.clearances.filter((c: any) => c.status === 'cleared').length === 5 ? 'bg-success' : 'bg-primary',
+                                (() => { const p = (separationData.data.clearances.filter((c: any) => c.status === 'cleared').length / 5) * 100; return p >= 95 ? 'bg-success' : p >= 50 ? 'bg-warning' : 'bg-destructive' })(),
                               )}
                               style={{ width: `${(separationData.data.clearances.filter((c: any) => c.status === 'cleared').length / 5) * 100}%` }}
                             />
