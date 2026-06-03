@@ -14,8 +14,8 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      // Layout — match Input sizing exactly
-      'flex h-10 w-full items-center justify-between rounded-md text-sm',
+      // Layout — match Input sizing exactly (h-9 aligns with Button default)
+      'flex h-9 w-full items-center justify-between rounded-md text-sm',
       'px-3 py-2',
       // Surface & border
       'border border-input bg-background text-foreground',

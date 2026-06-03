@@ -51,12 +51,12 @@ export function PageHeader({ title, subtitle, breadcrumb, actions, className }: 
                 {crumb.href ? (
                   <Link
                     to={crumb.href}
-                    className="text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors leading-none"
+                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors leading-none"
                   >
                     {crumb.label}
                   </Link>
                 ) : (
-                  <span className="text-[11px] text-muted-foreground/60 leading-none">
+                  <span className="text-[11px] text-muted-foreground leading-none">
                     {crumb.label}
                   </span>
                 )}

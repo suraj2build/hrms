@@ -53,7 +53,7 @@ const SheetContent = React.forwardRef<
       ref={ref}
       className={cn(
         'fixed inset-y-0 right-0 z-50 flex h-full flex-col',
-        'bg-card border-l border-border shadow-2xl',
+        'bg-card border-l border-border shadow-elev-3',
         'w-full',
         SIZE_MAP[size],
         'duration-300',
