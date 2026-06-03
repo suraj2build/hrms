@@ -854,15 +854,27 @@ export function HRReviewWorkspace() {
     onError: (e: Error) => toast.error('Validation failed', { description: e.message }),
   })
 
-  const { mutate: approveAndCreate, isPending: approving } = useMutation<{ data: { employee_id: string; employee_code: string } }, Error, void>({
-    mutationFn: () => api.post<{ data: { employee_id: string; employee_code: string } }>(`/onboarding/drafts/${draftProfileId}/approve`, {}),
+  const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false)
+  const [exceptionReason, setExceptionReason] = useState('')
+
+  const { mutate: approveAndCreate, isPending: approving } = useMutation<{ data: { employee_id: string; employee_code: string; exception_pass?: boolean } }, Error, { exception_pass?: boolean; exception_reason?: string }>({
+    mutationFn: (vars: { exception_pass?: boolean; exception_reason?: string }) =>
+      api.post<{ data: { employee_id: string; employee_code: string; exception_pass?: boolean } }>(
+        `/onboarding/drafts/${draftProfileId}/approve`,
+        vars.exception_pass ? { exception_pass: true, exception_reason: vars.exception_reason } : {},
+      ),
     onSuccess: (resp) => {
       qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
       const code = resp.data?.employee_code
-      toast.success('Employee created', { description: code ? `Employee code: ${code}` : 'Navigating to employee profile…' })
-      if (resp.data?.employee_id) {
-        navigate(`/admin/employees/${resp.data.employee_id}`)
+      if (resp.data?.exception_pass) {
+        toast.success('Employee created with exception', {
+          description: `${code} — document follow-up required`,
+        })
+      } else {
+        toast.success('Employee created', { description: code ? `Employee code: ${code}` : undefined })
       }
+      setExceptionDialogOpen(false)
+      if (resp.data?.employee_id) navigate(`/admin/employees/${resp.data.employee_id}`)
     },
     onError: (e: Error) => toast.error('Failed to create employee', { description: e.message }),
   })
@@ -1474,7 +1486,7 @@ export function HRReviewWorkspace() {
                   size="sm"
                   className="w-full justify-start h-9 bg-success hover:bg-success/90 text-success-foreground"
                   disabled={approving}
-                  onClick={() => approveAndCreate()}
+                  onClick={() => approveAndCreate({})}
                 >
                   {approving ? (
                     <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
@@ -1482,6 +1494,22 @@ export function HRReviewWorkspace() {
                     <UserCheck className="h-3.5 w-3.5 mr-2" />
                   )}
                   {approving ? 'Creating Employee…' : 'Approve & Create Employee'}
+                </Button>
+              )}
+
+              {/* Exception pass — shown when validation has errors but draft exists */}
+              {!canApprove && draftProfileId &&
+                validationResult &&
+                validationResult.validation_errors.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full justify-start h-9 border-warning/40 text-warning hover:bg-warning/5"
+                  disabled={approving}
+                  onClick={() => { setExceptionReason(''); setExceptionDialogOpen(true) }}
+                >
+                  <UserCheck className="h-3.5 w-3.5 mr-2" />
+                  Approve with Exception
                 </Button>
               )}
 
@@ -1523,6 +1551,58 @@ export function HRReviewWorkspace() {
           }}
         />
       )}
+
+      {/* ── Exception Approval Dialog ────────────────────────────────────────── */}
+      <Dialog open={exceptionDialogOpen} onOpenChange={setExceptionDialogOpen}>
+        <DialogContent className="sm:max-w-md w-[calc(100%-2rem)]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              Approve with Exception
+            </DialogTitle>
+            <DialogDescription>
+              This candidate has validation issues. The employee will be created but flagged for document follow-up.
+            </DialogDescription>
+          </DialogHeader>
+
+          {validationResult && validationResult.validation_errors.length > 0 && (
+            <div className="rounded-md bg-destructive/5 border border-destructive/20 p-3 space-y-1.5">
+              <p className="text-xs font-medium text-destructive">Overriding {validationResult.validation_errors.length} error{validationResult.validation_errors.length > 1 ? 's' : ''}:</p>
+              {validationResult.validation_errors.map((e, i) => (
+                <p key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
+                  <span className="text-destructive mt-0.5">•</span>{e}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Reason for exception <span className="text-muted-foreground">(optional)</span></Label>
+            <textarea
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              rows={3}
+              placeholder="e.g. Candidate joining urgently — bank proof to be submitted within 7 days"
+              value={exceptionReason}
+              onChange={(e) => setExceptionReason(e.target.value)}
+            />
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setExceptionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-warning hover:bg-warning/90 text-warning-foreground"
+              disabled={approving}
+              onClick={() => approveAndCreate({ exception_pass: true, exception_reason: exceptionReason || undefined })}
+            >
+              {approving ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> : <UserCheck className="h-3.5 w-3.5 mr-2" />}
+              {approving ? 'Creating…' : 'Confirm & Create Employee'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Document Viewer ──────────────────────────────────────────────────── */}
       <Dialog

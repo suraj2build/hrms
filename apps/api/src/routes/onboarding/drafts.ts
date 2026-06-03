@@ -370,12 +370,25 @@ export default async function draftRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /onboarding/drafts/:id/approve ───────────────────────────────────
+  // Supports an optional exception pass:
+  //   { exception_pass: true, exception_reason: "..." }
+  // When exception_pass is true, approval is allowed even from
+  // 'validation_pending' status (errors present). The employee is created
+  // and flagged onboarding_status='documents_pending' for follow-up.
+  const approveSchema = z.object({
+    exception_pass:   z.boolean().optional().default(false),
+    exception_reason: z.string().max(500).optional(),
+  })
+
   fastify.post('/drafts/:id/approve', auth, async (req: any, reply) => {
     if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const { id } = req.params as { id: string }
+    const parsed = approveSchema.safeParse(req.body ?? {})
+    const exceptionPass   = parsed.success ? parsed.data.exception_pass   : false
+    const exceptionReason = parsed.success ? parsed.data.exception_reason  : undefined
 
     const { data: draft, error: draftError } = await fastify.supabase
       .from('draft_employee_profiles')
@@ -388,10 +401,16 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
     }
 
-    if (draft.status !== 'approval_pending') {
+    const allowedStatuses = exceptionPass
+      ? ['approval_pending', 'validation_pending']
+      : ['approval_pending']
+
+    if (!allowedStatuses.includes(draft.status)) {
       return reply.code(409).send({
         error: 'INVALID_STATUS',
-        message: `Draft must be in approval_pending status (current: ${draft.status})`,
+        message: exceptionPass
+          ? `Cannot approve: draft status is "${draft.status}". Run validation first.`
+          : `Draft must be in approval_pending status (current: ${draft.status}). Run validation, or use exception pass to override errors.`,
       })
     }
 
@@ -518,13 +537,18 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Update draft status
+    // Update draft status — record exception details if applicable
     await fastify.supabase
       .from('draft_employee_profiles')
       .update({
         status: 'employee_created',
         linked_employee_id: employeeId,
         updated_at: new Date().toISOString(),
+        ...(exceptionPass ? {
+          exception_approved: true,
+          exception_reason: exceptionReason ?? 'Approved with exception by HR',
+          exception_errors: draft.validation_errors ?? [],
+        } : {}),
       })
       .eq('id', id)
 
@@ -534,19 +558,32 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .update({ status: 'employee_created', linked_employee_id: employeeId })
       .eq('id', draft.session_id)
 
-    // Audit log
+    // Audit log — record exception details for traceability
     await fastify.supabase
       .from('onboarding_audit_log')
       .insert({
         tenant_id: req.tenantId,
         session_id: draft.session_id,
         draft_id: id,
-        action: 'employee_created',
+        action: exceptionPass ? 'employee_created_with_exception' : 'employee_created',
         actor_id: req.userId,
-        details: { employee_id: employeeId, employee_code: employeeCode },
+        details: {
+          employee_id: employeeId,
+          employee_code: employeeCode,
+          ...(exceptionPass ? {
+            exception_reason: exceptionReason ?? 'Approved with exception by HR',
+            overridden_errors: draft.validation_errors ?? [],
+          } : {}),
+        },
       })
 
-    return reply.code(201).send({ data: { employee_id: employeeId, employee_code: employeeCode } })
+    return reply.code(201).send({
+      data: {
+        employee_id: employeeId,
+        employee_code: employeeCode,
+        exception_pass: exceptionPass,
+      },
+    })
   })
 
   // ── POST /onboarding/drafts/:id/reject ────────────────────────────────────
