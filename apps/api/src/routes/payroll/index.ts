@@ -48,17 +48,33 @@ async function computeSlipWithStatutory(
   month: string,
 ): Promise<PayrollSlipResult> {
   let slipArgs = args
+  let denomWarning: string | undefined
   try {
     const empWorkingDays = await countWorkingDaysForEmployee(supabase, tenantId, args.employeeId, month)
-    if (empWorkingDays > 0) slipArgs = { ...args, total_working_days: empWorkingDays }
-  } catch {
-    // Roster resolution failed — keep the tenant-level denominator already in args.
+    if (empWorkingDays > 0) {
+      slipArgs = { ...args, total_working_days: empWorkingDays }
+    } else {
+      // Roster resolved to 0 working days — do NOT silently use the Sat/Sun count.
+      denomWarning =
+        `Roster resolved 0 working days for ${month}; fell back to tenant working-day count ` +
+        `(${args.total_working_days}). Verify roster/holiday setup — LOP may be inaccurate.`
+      console.warn(`[payroll] employee ${args.employeeId}: ${denomWarning}`)
+    }
+  } catch (e: any) {
+    // Roster resolution FAILED — surface it instead of silently reverting to Sat/Sun.
+    denomWarning =
+      `Per-employee roster working-day resolution failed (${e?.message ?? 'error'}); used the ` +
+      `tenant Sat/Sun count (${args.total_working_days}). LOP may be wrong for non-Sat/Sun rosters.`
+    console.warn(`[payroll] employee ${args.employeeId}: ${denomWarning}`)
   }
-  const base = computePayrollSlip(slipArgs)
+  const base0 = computePayrollSlip(slipArgs)
+  const base = denomWarning
+    ? { ...base0, warning: [base0.warning, denomWarning].filter(Boolean).join(' ') }
+    : base0
   if (!base.component_breakdown.length) return base
   const params   = await resolveEmployeeStatutoryParams(supabase, tenantId, args.employeeId, month)
   const calMonth = Number(month.slice(5, 7))
-  return applyStatutoryToSlip(base, params, calMonth).slip
+  return applyStatutoryToSlip(base, params, calMonth).slip   // spread preserves base.warning
 }
 import {
   validatePayrollSlipPayload,
@@ -2682,18 +2698,23 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (!run) return reply.send({ data: null, message: 'No payroll run found' })
 
-    // Aggregate component amounts from slips for statutory deductions
+    const reconMonth = run.month as string
+
+    // ── COMPUTED (from payslips) ────────────────────────────────────────────
+    // Real slip codes: PF_EMPLOYEE/PF_EMPLOYER, ESI_EMPLOYEE/ESI_EMPLOYER, PTAX.
+    // TDS is intentionally not on the slip (handled by the tax-governance flow),
+    // so its slip-computed stays 0 and is reconciled against the projection only.
     const { data: slips } = await fastify.supabase
       .from('payroll_slips')
-      .select('component_breakdown, gross_pay, net_pay, employee_id')
+      .select('component_breakdown, employee_id')
       .eq('run_id', run.id)
       .eq('tenant_id', tenantId)
 
     const recon = {
-      pf:  { payable: 0, computed: 0, variance: 0 },
-      esi: { payable: 0, computed: 0, variance: 0 },
-      pt:  { payable: 0, computed: 0, variance: 0 },
-      tds: { payable: 0, computed: 0, variance: 0 },
+      pf:  { payable: 0, computed: 0, variance: 0, filed: false },
+      esi: { payable: 0, computed: 0, variance: 0, filed: false },
+      pt:  { payable: 0, computed: 0, variance: 0, filed: false },
+      tds: { payable: 0, computed: 0, variance: 0, filed: false },
     }
     const employeeCount = slips?.length ?? 0
 
@@ -2701,34 +2722,67 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       for (const comp of (slip.component_breakdown ?? [])) {
         const code = (comp.code ?? '').toUpperCase()
         const amt  = Number(comp.monthly_amount ?? 0)
-        if (code === 'EPF' || code === 'PF')        { recon.pf.computed  += amt; recon.pf.payable  += amt }
-        else if (code === 'ESI')                    { recon.esi.computed += amt; recon.esi.payable += amt }
-        else if (code === 'PT' || code === 'PTAX')  { recon.pt.computed  += amt; recon.pt.payable  += amt }
-        else if (code === 'TDS')                    { recon.tds.computed += amt; recon.tds.payable += amt }
+        if (code === 'PF_EMPLOYEE' || code === 'PF_EMPLOYER' || code === 'EPF' || code === 'PF') recon.pf.computed  += amt
+        else if (code === 'ESI_EMPLOYEE' || code === 'ESI_EMPLOYER' || code === 'ESI')            recon.esi.computed += amt
+        else if (code === 'PTAX' || code === 'PT' || code === 'PROFESSIONAL_TAX')                 recon.pt.computed  += amt
+        else if (code === 'TDS' || code === 'INCOME_TAX')                                         recon.tds.computed += amt
       }
     }
 
-    // Variances (filed amounts not tracked in DB yet — show as 0 diff)
-    recon.pf.variance  = recon.pf.payable  - recon.pf.computed
-    recon.esi.variance = recon.esi.payable - recon.esi.computed
-    recon.pt.variance  = recon.pt.payable  - recon.pt.computed
-    recon.tds.variance = recon.tds.payable - recon.tds.computed
+    // ── PAYABLE (from actual filing tables for this month) ──────────────────
+    const [epfRows, esiRows, ptaxRows, tdsRows] = await Promise.all([
+      fastify.supabase.from('epf_contributions')
+        .select('employee_contribution, total_employer_contribution, voluntary_pf')
+        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
+      fastify.supabase.from('esi_contributions')
+        .select('total_contribution')
+        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
+      fastify.supabase.from('ptax_contributions')
+        .select('ptax_amount')
+        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
+      fastify.supabase.from('tds_monthly_projections')
+        .select('tds_this_month')
+        .eq('tenant_id', tenantId).eq('projection_month', reconMonth),
+    ])
 
-    const readyForFiling =
-      Math.abs(recon.pf.variance)  < 1 &&
-      Math.abs(recon.esi.variance) < 1 &&
-      Math.abs(recon.pt.variance)  < 1 &&
-      Math.abs(recon.tds.variance) < 1
+    const sum = (rows: any[] | null | undefined, fn: (r: any) => number) =>
+      Math.round((rows ?? []).reduce((s, r) => s + fn(r), 0) * 100) / 100
+
+    recon.pf.payable  = sum(epfRows.data, r => Number(r.employee_contribution ?? 0) + Number(r.total_employer_contribution ?? 0) + Number(r.voluntary_pf ?? 0))
+    recon.esi.payable = sum(esiRows.data, r => Number(r.total_contribution ?? 0))
+    recon.pt.payable  = sum(ptaxRows.data, r => Number(r.ptax_amount ?? 0))
+    recon.tds.payable = sum(tdsRows.data, r => Number(r.tds_this_month ?? 0))
+
+    recon.pf.filed  = (epfRows.data?.length  ?? 0) > 0
+    recon.esi.filed = (esiRows.data?.length  ?? 0) > 0
+    recon.pt.filed  = (ptaxRows.data?.length ?? 0) > 0
+    recon.tds.filed = (tdsRows.data?.length  ?? 0) > 0
+
+    // TDS isn't on the slip; reconcile the projection against itself (informational)
+    // so its "ready" reflects whether the projection was generated, not a slip diff.
+    if (recon.tds.computed === 0) recon.tds.computed = recon.tds.payable
+
+    recon.pf.variance  = Math.round((recon.pf.payable  - recon.pf.computed)  * 100) / 100
+    recon.esi.variance = Math.round((recon.esi.payable - recon.esi.computed) * 100) / 100
+    recon.pt.variance  = Math.round((recon.pt.payable  - recon.pt.computed)  * 100) / 100
+    recon.tds.variance = Math.round((recon.tds.payable - recon.tds.computed) * 100) / 100
+
+    // A statute is ready only when its filing rows EXIST and the variance is within ₹1.
+    const statReady = (s: { variance: number; filed: boolean }) => s.filed && Math.abs(s.variance) < 1
+    const readyForFiling = statReady(recon.pf) && statReady(recon.esi) && statReady(recon.pt) && statReady(recon.tds)
 
     return reply.send({
       data: {
         run: { id: run.id, month: run.month, status: run.status, employee_count: employeeCount },
-        pf:  { ...recon.pf,  label: 'Provident Fund',      ready: Math.abs(recon.pf.variance)  < 1 },
-        esi: { ...recon.esi, label: 'Employee State Insurance', ready: Math.abs(recon.esi.variance) < 1 },
-        pt:  { ...recon.pt,  label: 'Professional Tax',    ready: Math.abs(recon.pt.variance)  < 1 },
-        tds: { ...recon.tds, label: 'Tax Deducted at Source', ready: Math.abs(recon.tds.variance) < 1 },
+        pf:  { ...recon.pf,  label: 'Provident Fund',           ready: statReady(recon.pf)  },
+        esi: { ...recon.esi, label: 'Employee State Insurance', ready: statReady(recon.esi) },
+        pt:  { ...recon.pt,  label: 'Professional Tax',         ready: statReady(recon.pt)  },
+        tds: { ...recon.tds, label: 'Tax Deducted at Source',   ready: statReady(recon.tds) },
         ready_for_filing: readyForFiling,
         total_statutory: recon.pf.computed + recon.esi.computed + recon.pt.computed + recon.tds.computed,
+        note: readyForFiling
+          ? undefined
+          : 'Not ready: statutory contributions must be generated (EPF/ESI/PT/TDS) and match payslip totals within ₹1 before filing.',
       },
     })
   })

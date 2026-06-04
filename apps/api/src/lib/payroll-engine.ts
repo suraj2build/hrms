@@ -152,9 +152,20 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
   // Basis is gross_pay (sum of earning components), NOT ctc_monthly.
   // ctc_monthly includes employer contributions (PF, gratuity, etc.) which are
   // NOT paid to the employee and must not inflate the LOP deduction.
-  const safe_working_days = total_working_days > 0 ? total_working_days : 1
-  const lop_daily_rate    = gross_pay / safe_working_days
-  const lop_amount        = round2(Math.max(0, attendance.lop_days * lop_daily_rate))
+  //
+  // Guard: when there are no scheduled working days we have NO valid basis to
+  // prorate LOP. Do NOT clamp the denominator to 1 — that would make a single
+  // LOP day wipe the entire salary. Skip the LOP deduction and flag for review.
+  let lop_amount = 0
+  let zeroDenomWarning: string | undefined
+  if (total_working_days > 0) {
+    const lop_daily_rate = gross_pay / total_working_days
+    lop_amount = round2(Math.max(0, attendance.lop_days * lop_daily_rate))
+  } else if (attendance.lop_days > 0) {
+    zeroDenomWarning =
+      `Total working days is 0 for ${month} but ${attendance.lop_days} LOP day(s) present — ` +
+      'LOP deduction skipped to avoid wiping salary; verify holiday/roster/working-day setup.'
+  }
 
   const total_deductions = round2(deduction_total_base + lop_amount)
   const net_pay          = round2(Math.max(0, gross_pay - total_deductions))
@@ -173,8 +184,8 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     net_pay,
     employer_contributions,
     component_breakdown: components,
-    // Propagate no-attendance warning so the run creation response surfaces it
-    warning: noAttendanceWarning,
+    // Propagate no-attendance + zero-working-days warnings so the run surfaces them.
+    warning: [noAttendanceWarning, zeroDenomWarning].filter(Boolean).join(' ') || undefined,
   }
 }
 
