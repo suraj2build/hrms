@@ -2928,6 +2928,84 @@ export function EmployeeProfile() {
                       )}
                     </Grid2>
                   )}
+
+                {/* ── Full CTC structure breakup ─────────────────────────── */}
+                {comp && Array.isArray(comp.components) && comp.components.length > 0 && (() => {
+                  const rateLabel = (c: any) =>
+                    c.calculation_type === 'balance'      ? 'Balance'
+                    : c.calculation_type === 'fixed'       ? 'Fixed'
+                    : c.calculation_type === 'pct_of_basic' ? `${c.value}% of Basic`
+                    : c.calculation_type === 'pct_of_ctc'   ? `${c.value}% of CTC`
+                    : c.calculation_type === 'pct_of_gross' ? `${c.value}% of Gross`
+                    : c.calculation_type
+                  const groups: Array<{ key: string; title: string }> = [
+                    { key: 'earning',                title: 'Earnings' },
+                    { key: 'deduction',              title: 'Deductions' },
+                    { key: 'employer_contribution',  title: 'Employer Contributions' },
+                  ]
+                  const t = comp.totals
+                  return (
+                    <div className="mt-5 rounded-xl border border-border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/40 border-b border-border">
+                          <tr>
+                            <th className="text-left  text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2">Component</th>
+                            <th className="text-left  text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2">Rate</th>
+                            <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2">Monthly</th>
+                            <th className="text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2">Annual</th>
+                          </tr>
+                        </thead>
+                        {groups.map(g => {
+                          const rows = comp.components
+                            .filter((c: any) => c.component_type === g.key)
+                            .sort((a: any, b: any) => (a.sequence ?? 0) - (b.sequence ?? 0))
+                          if (rows.length === 0) return null
+                          return (
+                            <tbody key={g.key}>
+                              <tr className="bg-muted/20">
+                                <td colSpan={4} className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{g.title}</td>
+                              </tr>
+                              {rows.map((c: any) => (
+                                <tr key={c.id} className="border-b border-border/40">
+                                  <td className="px-3 py-2 text-foreground">
+                                    {c.name}{c.is_basic && <span className="ml-1.5 text-[9px] font-bold text-primary">BASIC</span>}
+                                  </td>
+                                  <td className="px-3 py-2 text-[11px] text-muted-foreground font-mono">{rateLabel(c)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(c.monthly_amount)}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{fmtMoney(c.annual_amount)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          )
+                        })}
+                        {t && (
+                          <tfoot className="border-t-2 border-border">
+                            <tr>
+                              <td className="px-3 py-2 text-[11px] font-semibold text-muted-foreground" colSpan={2}>Gross Earnings</td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtMoney(t.gross_monthly)}</td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtMoney(t.gross_annual)}</td>
+                            </tr>
+                            <tr>
+                              <td className="px-3 py-2 text-[11px] text-muted-foreground" colSpan={2}>Employer Contributions</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{fmtMoney(t.employer_contributions_monthly)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{fmtMoney(t.employer_contributions_annual)}</td>
+                            </tr>
+                            <tr className="bg-primary/5">
+                              <td className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-primary" colSpan={2}>Total CTC</td>
+                              <td className="px-3 py-2 text-right font-bold tabular-nums">{fmtMoney(Math.round((t.gross_monthly + t.employer_contributions_monthly) * 100) / 100)}</td>
+                              <td className="px-3 py-2 text-right font-bold tabular-nums">{fmtMoney(Math.round((t.gross_annual + t.employer_contributions_annual) * 100) / 100)}</td>
+                            </tr>
+                            <tr>
+                              <td className="px-3 py-2 text-[11px] text-muted-foreground" colSpan={2}>Net Take-Home</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-success">{fmtMoney(t.net_monthly)}</td>
+                              <td className="px-3 py-2 text-right tabular-nums text-success">{fmtMoney(t.net_annual)}</td>
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
+                  )
+                })()}
               </CardContent>
             </Card>
 
