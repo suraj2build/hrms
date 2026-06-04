@@ -537,7 +537,7 @@ export default function App() {
                 <Route path="/admin/employees/separation"         element={<SeparationWorkflow />} />
 
                 {/* Attendance */}
-                <Route path="/admin/attendance"                   element={<Attendance />} />
+                <Route path="/admin/attendance"                   element={<Navigate to="/admin/attendance/center" replace />} />
                 <Route path="/admin/attendance/muster"            element={<MusterRoll />} />
                 <Route path="/admin/attendance/audit"             element={<AttendanceAudit />} />
                 <Route path="/admin/attendance/anomalies"         element={<AttendanceAnomalies />} />
@@ -545,7 +545,7 @@ export default function App() {
                 {/* Redirect legacy corrections URL → regularisation */}
                 <Route path="/admin/attendance/corrections"       element={<Navigate to="/admin/attendance/regularisation" replace />} />
                 <Route path="/admin/attendance/muster-upload"     element={<MusterUpload />} />
-                <Route path="/admin/attendance/upload"            element={<AttendanceUpload />} />
+                <Route path="/admin/attendance/upload"            element={<Navigate to="/admin/attendance/upload-workspace" replace />} />
                 <Route path="/admin/attendance/upload-workspace" element={<AttendanceUploadWorkspace />} />
                 <Route path="/admin/attendance/periods"           element={<AttendancePeriods />} />
                 <Route path="/admin/attendance/policy"            element={<AttendancePolicy />} />

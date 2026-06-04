@@ -148,6 +148,7 @@ export const DOMAINS: Domain[] = [
       '/admin/intelligence/workforce-command', // primary HR landing
       '/admin/executive',     // Executive Intelligence Center
       '/admin/settings',      // Company / Global Settings
+      '/admin/readiness',     // Platform health console
     ],
     defaultRoute: '/admin/intelligence/workforce-command',
     groups: [
@@ -156,6 +157,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'workforce-command-home', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain },
           { id: 'control-center',         label: 'Control Center',         route: '/admin/control-center', exact: true, icon: Command   },
+          { id: 'platform-health',        label: 'Platform Health',        route: '/admin/readiness',                   icon: Activity  },
           { id: 'executive-center',       label: 'Executive Intelligence', route: '/admin/executive',                   icon: BarChart3 },
         ],
       },
@@ -193,6 +195,8 @@ export const DOMAINS: Domain[] = [
       '/admin/employees/separation',
       '/admin/assets',
       '/admin/recruitment',
+      '/admin/workforce/center',
+      '/admin/documents',
     ],
     defaultRoute: '/admin/employees',
     groups: [
@@ -200,6 +204,8 @@ export const DOMAINS: Domain[] = [
         label: 'Employees',
         items: [
           { id: 'employees',          label: 'Employee Directory', route: '/admin/employees',          exact: true, icon: Users         },
+          { id: 'workforce-ops',      label: 'Ops Center',         route: '/admin/workforce/center',                icon: Activity      },
+          { id: 'admin-documents',    label: 'Documents',          route: '/admin/documents',                       icon: FileText      },
           { id: 'onboarding',         label: 'Onboarding',         route: '/admin/onboarding',         exact: true, icon: UserPlus      },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',         icon: GraduationCap },
           { id: 'separation-workflow',label: 'Separation',         route: '/admin/employees/separation',           icon: LogOut        },
@@ -248,6 +254,7 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Scheduling',
         items: [
+          { id: 'shift-roster',  label: 'Shift Roster',       route: '/admin/roster',                icon: CalendarClock },
           { id: 'emp-shifts',    label: 'Shift Overrides',    route: '/admin/employee-shifts',       icon: AlarmClock },
           { id: 'roster-intel',  label: 'Roster Intelligence', route: '/admin/roster/intelligence',  icon: Brain      },
         ],
@@ -439,6 +446,7 @@ export const DOMAINS: Domain[] = [
         label: 'Queue',
         items: [
           { id: 'ops-queue',   label: 'Operations Queue', route: '/admin/my-work-queue',       icon: Inbox       },
+          { id: 'daily-ops',   label: 'Daily Operations', route: '/admin/daily-ops',           icon: Activity    },
           { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare },
           { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen    },
         ],
@@ -505,6 +513,7 @@ export const DOMAINS: Domain[] = [
       '/admin/system/event-governance',
       '/admin/attendance/risk',
       '/admin/attendance/confidence',
+      '/admin/attendance/policy-conflicts',
       // Simulation & Optimization
       '/admin/attendance/simulate-policy',
       '/admin/workforce/optimization',
@@ -532,6 +541,7 @@ export const DOMAINS: Domain[] = [
           { id: 'event-governance',     label: 'Event Governance',       route: '/admin/system/event-governance',             icon: Radio        },
           { id: 'attendance-risk',      label: 'Attendance Risk',        route: '/admin/attendance/risk',                     icon: AlertTriangle },
           { id: 'attendance-confidence',label: 'Attendance Confidence',  route: '/admin/attendance/confidence',               icon: Target       },
+          { id: 'policy-conflicts',     label: 'Policy Conflicts',       route: '/admin/attendance/policy-conflicts',         icon: AlertTriangle },
         ],
       },
       {
