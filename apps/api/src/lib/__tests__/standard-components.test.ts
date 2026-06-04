@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import { STANDARD_SALARY_COMPONENTS } from '../standard-salary-components.js'
 
-const CALC_TYPES = ['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross']
+const CALC_TYPES = ['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross', 'balance']
 
 describe('STANDARD_SALARY_COMPONENTS', () => {
   it('has a non-trivial set of components', () => {
@@ -51,11 +51,11 @@ describe('STANDARD_SALARY_COMPONENTS', () => {
     }
   })
 
-  it('SPECIAL (balancer) and TDS have no default rule', () => {
-    for (const code of ['SPECIAL', 'TDS']) {
-      const c = STANDARD_SALARY_COMPONENTS.find(x => x.code === code)!
-      expect(c.default_calculation_type).toBeNull()
-    }
+  it('SPECIAL is the CTC balancer (calc_type=balance); TDS has no default rule', () => {
+    const special = STANDARD_SALARY_COMPONENTS.find(x => x.code === 'SPECIAL')!
+    expect(special.default_calculation_type).toBe('balance')
+    const tds = STANDARD_SALARY_COMPONENTS.find(x => x.code === 'TDS')!
+    expect(tds.default_calculation_type).toBeNull()
   })
 
   it('reserves the engine PF codes so seeding reuses them', () => {

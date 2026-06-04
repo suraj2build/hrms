@@ -693,9 +693,16 @@ async function fetchPunches(
     windowStart = new Date(shiftStartUtc.getTime() - 2 * 60 * 60_000).toISOString()
     windowEnd   = new Date(shiftEndUtc.getTime()   + 4 * 60 * 60_000).toISOString()
   } else {
-    // No shift — capture from local midnight of `date` through end of `date+1`
-    windowStart = localToUtc(date,          '00:00:00', tz).toISOString()
-    windowEnd   = localToUtc(addOneDay(date), '23:59:59', tz).toISOString()
+    // No shift — capture punches for THIS local day only.
+    //
+    // Previously the window ran through the END of `date+1`, a ~48h span. With
+    // back-to-back daily punches (e.g. 09:00–18:00 on consecutive days) this
+    // pulled the NEXT day's IN/OUT into today's computation, producing TWO
+    // sessions and doubling work_hours (9h → 18h). Bounding to the single local
+    // day fixes that; cross-midnight OUT punches are stored on (and recomputed
+    // for) the next day by the upload pipeline, so they are attributed there.
+    windowStart = localToUtc(date, '00:00:00', tz).toISOString()
+    windowEnd   = localToUtc(date, '23:59:59', tz).toISOString()
   }
 
   const { data } = await supabase
