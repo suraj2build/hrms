@@ -480,11 +480,14 @@ export async function processAttendanceForDate(
   // If this date is in holiday_calendar, every employee who punched in will
   // get status='holiday', work_hours=0.  Employees with NO raw logs are
   // unaffected (we never create absence rows for them regardless).
+  // Optional (restricted/RH) holidays are not automatic days off — exclude them
+  // so this legacy engine converges with payroll / attendance-engine.
   const { data: holidayRows, error: holidayError } = await supabase
     .from('holiday_calendar')
     .select('name, is_optional, location_id, site_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .eq('date', date)
+    .eq('is_optional', false)
 
   if (holidayError) {
     // Non-fatal — log and continue without holiday override

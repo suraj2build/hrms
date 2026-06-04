@@ -755,11 +755,16 @@ async function fetchHoliday(
   date:       string,
   ctx:        { site_id: string | null; work_location_id: string | null; site_holiday_group_id: string | null },
 ): Promise<{ name: string; is_optional: boolean } | null> {
+  // Convergence (Medium): optional (restricted/RH) holidays are NOT automatic
+  // days off — they must be explicitly availed via a leave/RH request. Payroll,
+  // leave-request-service and roster-calendar already exclude is_optional=true;
+  // this filter aligns the attendance engine so day_fraction does not diverge.
   const { data: holidays } = await supabase
     .from('holiday_calendar')
     .select('name, is_optional, site_id, location_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .eq('date', date)
+    .eq('is_optional', false)
 
   if (!holidays?.length) return null
 
@@ -845,8 +850,73 @@ export async function computeDay(
   const graceMinutes     = shift?.graceMinutes ?? policy.grace_minutes
 
   // ── Priority chain ─────────────────────────────────────────────────────────
+  //
+  // Convergence (Medium): a HOLIDAY or WEEKLY-OFF with no punches is a paid rest
+  // day and MUST win over an overlapping leave. Previously leave was checked
+  // first, so an UNPAID leave spanning a public holiday became LOP (day_fraction
+  // 0) — disagreeing with the leave-approval path (routes/attendance/leave.ts),
+  // which deliberately excludes holidays/weekly-offs from the leave span so they
+  // stay payable. Resting days are now evaluated before leave so both paths agree
+  // (and a paid-leave day is never silently consumed on a holiday).
 
-  // 1. Approved leave → LEAVE (session-aware)
+  const workedToday = punches.length > 0
+
+  // 1. Holiday without punches → paid rest day (wins over leave).
+  if (holiday && !workedToday) {
+    return {
+      tenant_id, employee_id, date,
+      status:               'holiday',
+      work_hours:           0,
+      late_minutes:         0,
+      overtime_minutes:     0,
+      is_payable:           true,
+      day_fraction:         1.0,
+      worked_on_weekly_off: false,
+      worked_on_holiday:    false,
+      computed_source:      'engine' as const,
+      reason:               `Holiday: ${holiday.name}`,
+      meta:                 { punchesCount: 0, hasUnpunchedOut: false },
+    }
+  }
+
+  // 2. Weekly off without punches → WEEKLY_OFF (also wins over leave).
+  // Weekly-off days come exclusively from rosters (not shifts).
+  // The advanced roster-calendar-engine evaluates rule-based off patterns
+  // (alternate Saturdays, cyclic schedules, rotational offs, etc.) first;
+  // falls back to the legacy pattern_json.weekly_off_days array if no rules exist.
+  const legacyWeeklyOffDays = getWeeklyOffDays(
+    [],   // shift weekly_off_days deprecated — roster is the sole source
+    orgCtx.emp_roster_weekly_off,
+    orgCtx.site_default_roster_weekly_off,
+  )
+  const weeklyOffStatus = await resolveIsWeeklyOff(
+    supabase,
+    tenant_id,
+    orgCtx.roster_id,
+    legacyWeeklyOffDays,
+    date,
+  )
+  const isWeeklyOff = weeklyOffStatus.is_weekly_off
+
+  if (isWeeklyOff && !workedToday) {
+    return {
+      tenant_id, employee_id, date,
+      status:               'weekly_off',
+      work_hours:           0,
+      late_minutes:         0,
+      overtime_minutes:     0,
+      is_payable:           true,
+      day_fraction:         1.0,
+      worked_on_weekly_off: false,
+      worked_on_holiday:    false,
+      computed_source:      'engine' as const,
+      reason:               'Weekly off — no punches',
+      meta:                 { punchesCount: 0, hasUnpunchedOut: false },
+    }
+  }
+
+  // 3. Approved leave → LEAVE (session-aware). Only reached on actual working
+  //    days now — rest days above already returned.
   if (approvedLeave) {
     const { is_paid, half_day } = approvedLeave
     // For a HALF-DAY leave, the other half of the day may have been worked.
@@ -872,65 +942,6 @@ export async function computeDay(
       computed_source:      'engine' as const,
       reason:               half_day ? `Approved half-day leave on ${date}` : `Approved leave on ${date}`,
       meta:                 { punchesCount: punches.length, hasUnpunchedOut: false },
-    }
-  }
-
-  // 2. Holiday
-  if (holiday) {
-    const workedOnHoliday = punches.length > 0
-    if (!workedOnHoliday) {
-      return {
-        tenant_id, employee_id, date,
-        status:               'holiday',
-        work_hours:           0,
-        late_minutes:         0,
-        overtime_minutes:     0,
-        is_payable:           true,
-        day_fraction:         1.0,
-        worked_on_weekly_off: false,
-        worked_on_holiday:    false,
-        computed_source:      'engine' as const,
-        reason:               `Holiday: ${holiday.name}`,
-        meta:                 { punchesCount: 0, hasUnpunchedOut: false },
-      }
-    }
-    // Has punches → fall through to punch-based computation;
-    // worked_on_holiday flag set at return site below.
-  }
-
-  // 3. Weekly off without punches → WEEKLY_OFF
-  // Weekly-off days come exclusively from rosters (not shifts).
-  // The advanced roster-calendar-engine evaluates rule-based off patterns
-  // (alternate Saturdays, cyclic schedules, rotational offs, etc.) first;
-  // falls back to the legacy pattern_json.weekly_off_days array if no rules exist.
-  const legacyWeeklyOffDays = getWeeklyOffDays(
-    [],   // shift weekly_off_days deprecated — roster is the sole source
-    orgCtx.emp_roster_weekly_off,
-    orgCtx.site_default_roster_weekly_off,
-  )
-  const weeklyOffStatus = await resolveIsWeeklyOff(
-    supabase,
-    tenant_id,
-    orgCtx.roster_id,
-    legacyWeeklyOffDays,
-    date,
-  )
-  const isWeeklyOff = weeklyOffStatus.is_weekly_off
-
-  if (isWeeklyOff && punches.length === 0) {
-    return {
-      tenant_id, employee_id, date,
-      status:               'weekly_off',
-      work_hours:           0,
-      late_minutes:         0,
-      overtime_minutes:     0,
-      is_payable:           true,
-      day_fraction:         1.0,
-      worked_on_weekly_off: false,
-      worked_on_holiday:    false,
-      computed_source:      'engine' as const,
-      reason:               'Weekly off — no punches',
-      meta:                 { punchesCount: 0, hasUnpunchedOut: false },
     }
   }
 

@@ -147,12 +147,15 @@ export async function computeWorkingLeaveDays(
   const orgCtx = await resolveEmployeeOrgContext(supabase, tenantId, employeeId, from)
 
   // ── Fetch applicable holidays in the date range ─────────────────────────────
+  // Optional (restricted/RH) holidays are not automatic days off — exclude them
+  // so leave-day counting converges with payroll and leave-request-service.
   const { data: rawHolidays } = await supabase
     .from('holiday_calendar')
     .select('date, name, is_optional, site_id, location_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .gte('date', from)
     .lte('date', to)
+    .eq('is_optional', false)
 
   const holidaySet = getHolidayDates(
     (rawHolidays ?? []) as HolidayRowWithDate[],
