@@ -55,7 +55,7 @@ export function OwnerAdmins() {
   }
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Platform Admins</h1>
@@ -92,7 +92,7 @@ export function OwnerAdmins() {
                 )}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 ${
                   a.role === 'owner'
-                    ? 'border-purple-500/40 text-purple-300 bg-purple-500/10'
+                    ? 'border-purple-500/40 text-purple-700 bg-purple-500/10'
                     : 'border-slate-200 text-slate-500'
                 }`}>
                   {a.role === 'owner' ? <Crown className="h-2.5 w-2.5" /> : <Shield className="h-2.5 w-2.5" />}
@@ -109,8 +109,8 @@ export function OwnerAdmins() {
                 onClick={() => toggleActive(a.id, a.is_active)}
                 className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                   a.is_active
-                    ? 'border-red-500/30 text-red-400 hover:bg-red-500/10'
-                    : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'
+                    ? 'border-red-500/30 text-red-600 hover:bg-red-500/10'
+                    : 'border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10'
                 }`}
               >
                 {a.is_active ? <><UserX className="h-3.5 w-3.5" /> Deactivate</> : <><UserCheck className="h-3.5 w-3.5" /> Activate</>}

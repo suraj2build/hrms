@@ -79,7 +79,7 @@ export function OwnerApiKeys() {
   const tenantNameMap = tenants.reduce<Record<string, string>>((acc, t) => { acc[t.id] = t.name; return acc }, {})
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900">API Keys</h1>
@@ -98,13 +98,13 @@ export function OwnerApiKeys() {
       )}
 
       {!isLoading && keys.length === 0 && (
-        <div className="rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-slate-500">
           No API keys yet. Generate one for a tenant.
         </div>
       )}
 
       {Object.entries(byTenant).map(([tenantId, tKeys]) => (
-        <div key={tenantId} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div key={tenantId} className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-slate-200 flex items-center gap-2">
             <Key className="h-3.5 w-3.5 text-slate-500" />
             <span className="text-sm font-semibold text-slate-700">{tenantNameMap[tenantId] ?? tenantId}</span>
@@ -133,7 +133,7 @@ export function OwnerApiKeys() {
                   <td className="px-4 py-2.5 text-[12px] text-slate-500">{fmtDate(k.last_used_at)}</td>
                   <td className="px-4 py-2.5">
                     {k.is_active
-                      ? <span className="flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Active</span>
+                      ? <span className="flex items-center gap-1 text-[11px] text-emerald-600"><CheckCircle2 className="h-3 w-3" /> Active</span>
                       : <span className="flex items-center gap-1 text-[11px] text-slate-400"><Clock className="h-3 w-3" /> Revoked</span>
                     }
                   </td>
@@ -141,7 +141,7 @@ export function OwnerApiKeys() {
                     {k.is_active && (
                       <button
                         onClick={() => revokeMut.mutate(k.id)}
-                        className="text-slate-400 hover:text-red-400 transition-colors"
+                        className="text-slate-400 hover:text-red-600 transition-colors"
                         title="Revoke key"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -214,16 +214,16 @@ export function OwnerApiKeys() {
       <Dialog open={!!newKey} onOpenChange={() => { setNewKey(null); setShowKey(false) }}>
         <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-400">
+            <DialogTitle className="flex items-center gap-2 text-emerald-600">
               <CheckCircle2 className="h-5 w-5" /> API Key Generated
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <p className="text-sm text-amber-300 font-medium">
+            <p className="text-sm text-amber-700 font-medium">
               ⚠ Save this key now — it will never be shown again.
             </p>
             <div className="relative rounded-lg bg-slate-100 border border-slate-200 p-3">
-              <p className="font-mono text-[12px] text-emerald-300 break-all pr-16">
+              <p className="font-mono text-[12px] text-emerald-700 break-all pr-16">
                 {showKey ? newKey : '•'.repeat(Math.min((newKey?.length ?? 40), 40))}
               </p>
               <div className="absolute top-2 right-2 flex gap-1">

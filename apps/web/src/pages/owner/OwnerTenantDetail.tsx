@@ -30,8 +30,8 @@ interface ApiKeyRow   { id: string; name: string; key_prefix: string; scopes: st
 interface TenantAdmin { id: string; full_name: string; email: string | null; role: string; is_active: boolean; created_at: string }
 
 const STATUS_COLOR: Record<string, string> = {
-  active:    'text-emerald-400', trial: 'text-amber-400',
-  suspended: 'text-red-400',    expired: 'text-orange-400', cancelled: 'text-slate-500',
+  active:    'text-emerald-600', trial: 'text-amber-600',
+  suspended: 'text-red-600',    expired: 'text-orange-600', cancelled: 'text-slate-500',
 }
 
 function fmtDate(d: string | null) {
@@ -199,7 +199,7 @@ export function OwnerTenantDetail() {
             <span className="text-sm text-slate-500">{t.slug}</span>
             <span className={`text-xs font-semibold uppercase ${STATUS_COLOR[t.status]}`}>{t.status}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full border ${
-              t.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300 bg-purple-500/10' : 'border-slate-200 text-slate-500'
+              t.plan === 'enterprise' ? 'border-purple-500/40 text-purple-700 bg-purple-500/10' : 'border-slate-200 text-slate-500'
             }`}>{t.plan}</span>
           </div>
         </div>
@@ -211,9 +211,9 @@ export function OwnerTenantDetail() {
               </Button>
             )}
             {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-slate-900 text-xs">Activate</Button>}
-            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" variant="outline" className="border-red-500/40 text-red-400 text-xs">Suspend</Button>}
+            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" variant="outline" className="border-red-500/40 text-red-600 text-xs">Suspend</Button>}
             {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" variant="ghost"   className="text-slate-400 hover:text-slate-500 text-xs">Cancel</Button>}
-            <Button onClick={deleteTenant} size="sm" variant="outline" className="border-red-600/50 text-red-400 hover:bg-red-600/10 text-xs gap-1">
+            <Button onClick={deleteTenant} size="sm" variant="outline" className="border-red-600/50 text-red-600 hover:bg-red-600/10 text-xs gap-1">
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
           </div>
@@ -222,7 +222,7 @@ export function OwnerTenantDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Details card */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">Details</h2>
             {editing && (
@@ -289,7 +289,7 @@ export function OwnerTenantDetail() {
 
         {/* License management */}
         {isOwner() && (
-          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+          <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4 space-y-4">
             <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
               <Award className="h-4 w-4 text-[#0D9488]" /> License Management
             </h2>
@@ -308,7 +308,7 @@ export function OwnerTenantDetail() {
                 </Button>
               </div>
               <p className="text-[11px] text-slate-500">
-                Sets status to <span className="text-emerald-400">active</span> and records license_issued_at / license_expires_at.
+                Sets status to <span className="text-emerald-600">active</span> and records license_issued_at / license_expires_at.
               </p>
             </div>
           </div>
@@ -317,7 +317,7 @@ export function OwnerTenantDetail() {
 
       {/* Billing snapshots */}
       {t.billing_snapshots.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-200">
             <h2 className="text-sm font-semibold text-slate-900">Billing History</h2>
           </div>
@@ -335,7 +335,7 @@ export function OwnerTenantDetail() {
                   <td className="px-4 py-2.5 text-slate-700 font-mono text-[12px]">{b.snapshot_month}</td>
                   <td className="px-4 py-2.5 text-slate-700">{b.employee_count}</td>
                   <td className="px-4 py-2.5 text-slate-700">{fmtCurrency(b.per_employee_rate)}</td>
-                  <td className="px-4 py-2.5 text-emerald-300 font-semibold">{fmtCurrency(b.amount_due)}</td>
+                  <td className="px-4 py-2.5 text-emerald-700 font-semibold">{fmtCurrency(b.amount_due)}</td>
                   <td className="px-4 py-2.5 text-slate-500 text-[11px]">{b.plan}</td>
                 </tr>
               ))}
@@ -346,7 +346,7 @@ export function OwnerTenantDetail() {
 
       {/* API keys */}
       {t.api_keys.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-200">
             <h2 className="text-sm font-semibold text-slate-900">API Keys</h2>
           </div>
@@ -372,7 +372,7 @@ export function OwnerTenantDetail() {
                   </td>
                   <td className="px-4 py-2.5 text-[12px] text-slate-500">{fmtDate(k.last_used_at)}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-emerald-600' : 'text-slate-400'}`}>
                       {k.is_active ? 'Active' : 'Revoked'}
                     </span>
                   </td>
@@ -384,7 +384,7 @@ export function OwnerTenantDetail() {
       )}
 
       {/* ── Tenant Admins ──────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-[#0D9488]" />
@@ -449,7 +449,7 @@ export function OwnerTenantDetail() {
                     {fmtDate(a.created_at)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className={`text-[11px] font-medium ${a.is_active ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <span className={`text-[11px] font-medium ${a.is_active ? 'text-emerald-600' : 'text-red-600'}`}>
                       {a.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
@@ -461,7 +461,7 @@ export function OwnerTenantDetail() {
                           variant="ghost"
                           onClick={() => { setResetAdminId(a.id); setResetPwd(''); setShowResetPwd(false) }}
                           disabled={resetPasswordMut.isPending}
-                          className="h-6 px-2 text-[10px] text-slate-500 hover:text-amber-300 hover:bg-amber-500/10 gap-1"
+                          className="h-6 px-2 text-[10px] text-slate-500 hover:text-amber-700 hover:bg-amber-500/10 gap-1"
                           title="Reset password"
                         >
                           <KeyRound className="h-3 w-3" /> Reset
@@ -473,8 +473,8 @@ export function OwnerTenantDetail() {
                           disabled={toggleAdminMut.isPending}
                           className={`h-6 px-2 text-[10px] gap-1 ${
                             a.is_active
-                              ? 'text-slate-500 hover:text-red-400 hover:bg-red-500/10'
-                              : 'text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10'
+                              ? 'text-slate-500 hover:text-red-600 hover:bg-red-500/10'
+                              : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-500/10'
                           }`}
                         >
                           {a.is_active ? <UserX className="h-3 w-3" /> : <UserCheck className="h-3 w-3" />}
@@ -496,7 +496,7 @@ export function OwnerTenantDetail() {
         <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-amber-400" />
+              <KeyRound className="h-4 w-4 text-amber-600" />
               Reset Admin Password
             </DialogTitle>
           </DialogHeader>
@@ -534,7 +534,7 @@ export function OwnerTenantDetail() {
                 </Button>
               </div>
               {resetPwd && resetPwd.trim().length > 0 && resetPwd.trim().length < 8 && (
-                <p className="text-[10px] text-red-400">Password must be at least 8 characters.</p>
+                <p className="text-[10px] text-red-600">Password must be at least 8 characters.</p>
               )}
             </div>
           </div>
@@ -632,7 +632,7 @@ export function OwnerTenantDetail() {
 
             {adminForm.password && showAdminPwd && (
               <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs">
-                <span className="text-amber-400 font-semibold">Save before submitting: </span>
+                <span className="text-amber-600 font-semibold">Save before submitting: </span>
                 <code className="text-amber-200 font-mono select-all">{adminForm.password}</code>
               </div>
             )}
@@ -655,7 +655,7 @@ export function OwnerTenantDetail() {
         <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-amber-400" />
+              <KeyRound className="h-4 w-4 text-amber-600" />
               Password Reset
             </DialogTitle>
           </DialogHeader>
@@ -668,7 +668,7 @@ export function OwnerTenantDetail() {
                   onClick={() => copyPassword(resetResult.temp_password)}
                   className="text-slate-500 hover:text-slate-800 transition-colors"
                 >
-                  {copiedPwd ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  {copiedPwd ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
                 </button>
               </div>
               <p className="text-[11px] text-amber-500">⚠ Share this with the admin now — it won't be shown again.</p>

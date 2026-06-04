@@ -44,7 +44,7 @@ export function OwnerBilling() {
     .slice(0, 6)
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900">Billing</h1>
         <p className="text-sm text-slate-500">Payroll-triggered billing snapshots</p>
@@ -52,17 +52,17 @@ export function OwnerBilling() {
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
-          <CreditCard className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
+          <CreditCard className="h-8 w-8 text-emerald-600 flex-shrink-0" />
           <div>
             <p className="text-[11px] text-slate-500 uppercase tracking-wide">Total (filtered)</p>
             <p className="text-xl font-bold text-slate-900">{fmtCurrency(totalAmount)}</p>
           </div>
         </div>
         {monthSummary.map(([month, amount]) => (
-          <div key={month} className="rounded-xl border border-slate-200 bg-white p-3">
+          <div key={month} className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3">
             <p className="text-[11px] text-slate-500 font-mono">{month}</p>
-            <p className="text-base font-semibold text-emerald-300 mt-0.5">{fmtCurrency(amount)}</p>
+            <p className="text-base font-semibold text-emerald-700 mt-0.5">{fmtCurrency(amount)}</p>
           </div>
         ))}
       </div>
@@ -91,7 +91,7 @@ export function OwnerBilling() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
+      <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white border-b border-slate-200">
             <tr>
@@ -113,10 +113,10 @@ export function OwnerBilling() {
                 <td className="px-4 py-2.5 text-[13px] text-slate-800">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
                 <td className="px-4 py-2.5 text-slate-700">{r.employee_count}</td>
                 <td className="px-4 py-2.5 text-slate-500">{fmtCurrency(r.per_employee_rate)}</td>
-                <td className="px-4 py-2.5 font-semibold text-emerald-300">{fmtCurrency(r.amount_due)}</td>
+                <td className="px-4 py-2.5 font-semibold text-emerald-700">{fmtCurrency(r.amount_due)}</td>
                 <td className="px-4 py-2.5">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300' : 'border-slate-200 text-slate-500'
+                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-700' : 'border-slate-200 text-slate-500'
                   }`}>
                     {r.plan}
                   </span>

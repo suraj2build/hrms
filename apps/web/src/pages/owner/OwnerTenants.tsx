@@ -35,18 +35,18 @@ interface TenantHealthResponse {
 }
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  active:    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />,
-  trial:     <Clock        className="h-3.5 w-3.5 text-amber-400" />,
-  suspended: <Ban          className="h-3.5 w-3.5 text-red-400" />,
-  expired:   <AlertTriangle className="h-3.5 w-3.5 text-orange-400" />,
+  active:    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />,
+  trial:     <Clock        className="h-3.5 w-3.5 text-amber-600" />,
+  suspended: <Ban          className="h-3.5 w-3.5 text-red-600" />,
+  expired:   <AlertTriangle className="h-3.5 w-3.5 text-orange-600" />,
   cancelled: <XCircle      className="h-3.5 w-3.5 text-slate-500" />,
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  active:    'border-emerald-500/30 text-emerald-300 bg-emerald-500/10',
-  trial:     'border-amber-500/30 text-amber-300 bg-amber-500/10',
-  suspended: 'border-red-500/30 text-red-300 bg-red-500/10',
-  expired:   'border-orange-500/30 text-orange-300 bg-orange-500/10',
+  active:    'border-emerald-300 text-emerald-700 bg-emerald-100/70',
+  trial:     'border-amber-300 text-amber-700 bg-amber-100/70',
+  suspended: 'border-red-300 text-red-700 bg-red-100/70',
+  expired:   'border-orange-300 text-orange-700 bg-orange-100/70',
   cancelled: 'border-slate-200 text-slate-500 bg-slate-100',
 }
 
@@ -152,17 +152,17 @@ export function OwnerTenants() {
   const tenants = data?.data ?? []
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Tenants</h1>
-          <p className="text-sm text-slate-500">{data?.meta?.total ?? 0} total companies</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tenants</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{data?.meta?.total ?? 0} total companies</p>
         </div>
         {isOwner() && (
           <Button
             onClick={() => setCreateOpen(true)}
-            className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900 gap-1.5"
+            className="shrink-0 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-lg shadow-teal-500/20 gap-1.5"
           >
             <Plus className="h-4 w-4" /> New Tenant
           </Button>
@@ -177,15 +177,17 @@ export function OwnerTenants() {
             placeholder="Search by name…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-8 bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm"
+            className="pl-8 bg-white/60 backdrop-blur border-white/70 text-slate-900 placeholder:text-slate-400 h-9 text-sm shadow-sm"
           />
         </div>
         {['', 'active', 'trial', 'suspended', 'expired'].map(s => (
           <button
             key={s}
             onClick={() => setStatusFilt(s)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              statusFilt === s ? 'bg-[#0D9488] text-slate-900' : 'bg-slate-100 text-slate-500 hover:text-slate-800'
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
+              statusFilt === s
+                ? 'bg-gradient-to-r from-teal-500 to-indigo-600 text-white shadow-md shadow-teal-500/20'
+                : 'bg-white/60 backdrop-blur border border-white/70 text-slate-600 hover:text-slate-900 hover:bg-white shadow-sm'
             }`}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -194,12 +196,13 @@ export function OwnerTenants() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-white border-b border-slate-200">
+      <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[840px] text-sm">
+          <thead className="bg-white/50 border-b border-slate-200/70">
             <tr>
               {['Company', 'Plan', 'Status', 'Rate / emp', 'Employees', 'Live Activity', 'Last Payroll'].map(h => (
-                <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-3">{h}</th>
               ))}
               <th className="w-8" />
             </tr>
@@ -215,8 +218,8 @@ export function OwnerTenants() {
               const h = healthMap.get(t.id)
               const lastPayroll = h?.last_payroll_run
               const payrollStatusColor: Record<string, string> = {
-                finalized: 'text-emerald-400',
-                processing: 'text-amber-400',
+                finalized: 'text-emerald-600',
+                processing: 'text-amber-600',
                 draft: 'text-slate-500',
               }
               return (
@@ -239,8 +242,8 @@ export function OwnerTenants() {
                 <td className="px-4 py-3">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
                     t.plan === 'enterprise'
-                      ? 'border-purple-500/40 text-purple-300 bg-purple-500/10'
-                      : 'border-slate-200 text-slate-500 bg-slate-100'
+                      ? 'border-purple-300 text-purple-700 bg-purple-100/70'
+                      : 'border-slate-200 text-slate-600 bg-slate-100/70'
                   }`}>
                     {t.plan}
                   </span>
@@ -272,8 +275,8 @@ export function OwnerTenants() {
                   {h ? (
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-1.5 text-[12px]">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${h.active_users > 0 ? 'bg-emerald-400' : 'bg-slate-300'}`} />
-                        <span className={h.active_users > 0 ? 'text-emerald-400' : 'text-slate-500'}>
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${h.active_users > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                        <span className={h.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
                           {h.active_users} user{h.active_users !== 1 ? 's' : ''}
                         </span>
                       </div>
@@ -310,6 +313,7 @@ export function OwnerTenants() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Create dialog */}
