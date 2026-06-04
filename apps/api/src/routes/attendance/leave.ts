@@ -900,22 +900,40 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave applications' })
     }
 
-    // Upsert attendance_daily rows for all employees × all dates
-    const dailyRows = employee_ids.flatMap((emp_id) =>
-      dates.map((d) => ({
-        tenant_id:            req.tenantId,
-        employee_id:          emp_id,
-        date:                 d,
-        status:               'leave',
-        work_hours:           0,
-        late_minutes:         0,
-        overtime_minutes:     0,
-        worked_on_weekly_off: false,
-        worked_on_holiday:    false,
-        is_payable:           lt.is_paid,
-        day_fraction:         lt.is_paid ? 1.0 : 0.0,
-      }))
-    )
+    // Build attendance_daily rows PER EMPLOYEE on their roster WORKING dates only
+    // (holidays/weekly-offs inside the span stay paid rest days — never converted to
+    // LOP), stamp computed_source='leave_approval' so an engine recompute won't revert,
+    // and deduct leave balance for paid leave. (Was: raw calendar expansion, no balance,
+    // no source flag — turned rest days into LOP and skipped balance.)
+    const dailyRows: Array<Record<string, unknown>> = []
+    for (const emp_id of employee_ids) {
+      let workingDates: string[] = dates
+      try {
+        const wd = await computeWorkingLeaveDays(fastify.supabase, req.tenantId, emp_id, from_date, to_date)
+        workingDates = (wd.counted_dates && wd.counted_dates.length > 0) ? wd.counted_dates : dates
+        if (lt.is_paid && wd.computed_days > 0) {
+          const year = new Date(from_date).getFullYear()
+          try {
+            await fastify.supabase.rpc('deduct_leave_balance', {
+              p_tenant_id: req.tenantId, p_employee_id: emp_id, p_leave_type_id: leave_type_id,
+              p_days: wd.computed_days, p_year: year,
+            })
+          } catch (e) { req.log.warn({ err: e, emp_id }, 'bulk-assign balance deduction failed — leave committed') }
+        }
+      } catch (e) {
+        req.log.warn({ err: e, emp_id }, 'bulk-assign working-day resolution failed — using full span')
+      }
+      for (const d of workingDates) {
+        const resolved = resolveLeaveDayFraction({ session: 'full_day', isPaid: lt.is_paid })
+        dailyRows.push({
+          tenant_id: req.tenantId, employee_id: emp_id, date: d,
+          status: resolved.status, work_hours: 0, late_minutes: 0, overtime_minutes: 0,
+          worked_on_weekly_off: false, worked_on_holiday: false,
+          is_payable: resolved.is_payable, day_fraction: resolved.day_fraction,
+          computed_source: 'leave_approval',
+        })
+      }
+    }
     const { error: dailyErr } = await fastify.supabase
       .from('attendance_daily')
       .upsert(dailyRows, { onConflict: 'tenant_id,employee_id,date' })

@@ -115,6 +115,8 @@ export interface AttendanceDailyMeta {
   punchesCount:    number
   /** True if the last IN punch in the session list has no OUT match. */
   hasUnpunchedOut: boolean
+  /** Comp-off credit basis when worked on a weekly-off/holiday (0.5 half / 1.0 full). */
+  workedFraction?: number
 }
 
 /**
@@ -1001,9 +1003,14 @@ export async function computeDay(
   const workedOnHoliday   = holiday !== null && punches.length > 0
 
   const punchMeta: AttendanceDailyMeta = { punchesCount: punches.length, hasUnpunchedOut }
+  // Comp-off credit basis: a half-day's work banks 0.5 comp-off, a full day banks 1.0.
+  const workedFraction = status === 'half_day' ? 0.5 : 1.0
 
-  // Worked on weekly off → PRESENT + flag
-  if (workedOnWeeklyOff) {
+  // Worked on weekly off → PRESENT + flag (only if enough hours to not be ABSENT —
+  // a sub-threshold punch must NOT bank a full comp-off; it falls through to weekly_off).
+  // Comp-in-lieu: the rest day stays paid (1.0, already in monthly salary); the work is
+  // compensated by the banked comp-off, not by extra pay.
+  if (workedOnWeeklyOff && status !== 'absent') {
     return {
       tenant_id, employee_id, date,
       status:               'present',
@@ -1016,7 +1023,7 @@ export async function computeDay(
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
       reason:               `Worked on weekly off — ${workHours}h`,
-      meta:                 punchMeta,
+      meta:                 { ...punchMeta, workedFraction },
     }
   }
 
@@ -1034,7 +1041,7 @@ export async function computeDay(
       worked_on_holiday:    true,
       computed_source:      'engine' as const,
       reason:               `Worked on holiday (${holiday!.name}) — ${workHours}h`,
-      meta:                 punchMeta,
+      meta:                 { ...punchMeta, workedFraction },
     }
   }
 
@@ -1271,6 +1278,8 @@ export async function recomputeRange(
           date:                 r.date,
           worked_on_weekly_off: r.worked_on_weekly_off,
           worked_on_holiday:    r.worked_on_holiday,
+          // Half-day worked on an off/holiday banks 0.5 comp-off, full day banks 1.0.
+          days_to_credit:       r.meta?.workedFraction ?? 1.0,
         })),
         changed_by ?? null,
       )
