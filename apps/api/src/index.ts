@@ -187,6 +187,7 @@ import tdsRecoveryRoute                    from './routes/payroll/statutory/tds-
 import payrollAdvancesRoute                from './routes/payroll/advances.js'
 import payrollLoansRoute                   from './routes/payroll/loans.js'
 import payrollReimbursementsRoute          from './routes/payroll/reimbursements.js'
+import payrollFbpRoute                      from './routes/payroll/fbp.js'
 import payrollVariablePayRoute             from './routes/payroll/variable-pay.js'
 import payrollArrearsRoute                 from './routes/payroll/arrears.js'
 import payrollGovernanceRoute              from './routes/payroll/governance.js'
@@ -573,6 +574,7 @@ async function start() {
   await fastify.register(payrollAdvancesRoute,              { prefix: '/payroll/advances' })         // GET/POST /payroll/advances/*
   await fastify.register(payrollLoansRoute,                 { prefix: '/payroll/loans' })            // GET/POST /payroll/loans/*
   await fastify.register(payrollReimbursementsRoute,        { prefix: '/payroll/reimbursements' })  // GET/POST /payroll/reimbursements/*
+  await fastify.register(payrollFbpRoute,                   { prefix: '/payroll/fbp' })             // FBP quarterly reconciliation
   await fastify.register(payrollVariablePayRoute,           { prefix: '/payroll/variable-pay' })    // GET/POST /payroll/variable-pay/*
   await fastify.register(payrollArrearsRoute,               { prefix: '/payroll/arrears' })          // GET/POST /payroll/arrears/*
   await fastify.register(payrollGovernanceRoute,            { prefix: '/payroll/governance' })       // GET/POST /payroll/governance/*

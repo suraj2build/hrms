@@ -10,6 +10,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeTDS } from '../../../lib/statutory/tds-engine.js'
+import { fetchFbpTaxableForEmployee } from '../../../lib/fbp-service.js'
 
 // DB enum values — must match migration 098_tds_foundation.sql CHECK constraint
 const DECLARATION_CATEGORIES = [
@@ -955,7 +956,11 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     const futureMonths = months.filter(m => m >= currentMonth)
     const totalRemainingMonths = futureMonths.length || 1
 
-    const grossAnnualIncome = gross_monthly * 12
+    // FBP true-up: add the LOCKED unsubstantiated FBP taxable (paid − bills) for
+    // the year to taxable income so TDS withholds for it.
+    const fbpTaxable = await fetchFbpTaxableForEmployee(fastify.supabase, req.tenantId, employeeId, financial_year)
+
+    const grossAnnualIncome = gross_monthly * 12 + fbpTaxable
     const tdsResult = computeTDS(
       { grossAnnualIncome, regime, totalDeductions, alreadyDeducted, remainingMonths: totalRemainingMonths },
       { financialYear: financial_year }

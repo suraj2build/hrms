@@ -87,6 +87,7 @@ const BASE_GROUPS: NavGroup[] = [
       { label: 'HRA Declaration',   icon: FileCheck,  href: '/ess/salary/hra'                      },
       { label: 'Previous Employer', icon: FileText,   href: '/ess/salary/previous-employer'        },
       { label: 'Reimbursements',    icon: CreditCard, href: '/ess/reimbursements'                  },
+      { label: 'Flexible Benefits', icon: Receipt,    href: '/ess/fbp'                             },
     ],
   },
   {

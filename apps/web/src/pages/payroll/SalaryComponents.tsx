@@ -57,6 +57,8 @@ interface SalaryComponent {
   display_order:        number
   default_calculation_type: CalcType | null
   default_value:            number | null
+  is_reimbursement:        boolean
+  exemption_limit_annual:  number | null
   created_at:           string
 }
 
@@ -72,6 +74,8 @@ interface ComponentForm {
   is_variable:       boolean
   default_calculation_type: CalcType | ''
   default_value:            string
+  is_reimbursement:        boolean
+  exemption_limit_annual:  string
 }
 
 const EMPTY_FORM: ComponentForm = {
@@ -79,6 +83,7 @@ const EMPTY_FORM: ComponentForm = {
   is_taxable: true, is_pf_applicable: false, is_esi_applicable: false,
   is_pt_applicable: false, is_lwf_applicable: false, is_variable: false,
   default_calculation_type: '', default_value: '',
+  is_reimbursement: false, exemption_limit_annual: '',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -179,6 +184,8 @@ export function SalaryComponents() {
       is_lwf_applicable: c.is_lwf_applicable, is_variable: c.is_variable,
       default_calculation_type: c.default_calculation_type ?? '',
       default_value:            c.default_value != null ? String(c.default_value) : '',
+      is_reimbursement:         c.is_reimbursement ?? false,
+      exemption_limit_annual:   c.exemption_limit_annual != null ? String(c.exemption_limit_annual) : '',
     })
     setEditId(c.id)
     setShowForm(true)
@@ -191,6 +198,9 @@ export function SalaryComponents() {
       ...form,
       default_calculation_type: hasRule ? form.default_calculation_type : null,
       default_value:            hasRule ? Number(form.default_value) : null,
+      is_reimbursement:         form.is_reimbursement,
+      exemption_limit_annual:   form.is_reimbursement && form.exemption_limit_annual !== ''
+        ? Number(form.exemption_limit_annual) : null,
     }
     if (editId) updateMutation.mutate({ id: editId, body })
     else        createMutation.mutate(body)
@@ -297,6 +307,24 @@ export function SalaryComponents() {
                 disabled={form.default_calculation_type === ''}
                 onChange={e => setForm(p => ({ ...p, default_value: e.target.value }))}
                 placeholder={form.default_calculation_type === '' ? '—' : '0'} />
+            </div>
+
+            {/* FBP / reimbursement — paid monthly, reconciled quarterly vs bills */}
+            <div className="space-y-1 sm:col-span-2 lg:col-span-1">
+              <label className="text-xs font-medium text-muted-foreground">Reimbursement (FBP)</label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer h-9">
+                <input type="checkbox" checked={form.is_reimbursement}
+                  onChange={e => setForm(p => ({ ...p, is_reimbursement: e.target.checked }))}
+                  className="rounded" />
+                Reconcile quarterly against bills
+              </label>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Annual Exempt Limit (₹)</label>
+              <Input type="number" min={0} value={form.exemption_limit_annual}
+                disabled={!form.is_reimbursement}
+                onChange={e => setForm(p => ({ ...p, exemption_limit_annual: e.target.value }))}
+                placeholder={form.is_reimbursement ? 'blank = no cap' : '—'} />
             </div>
 
             <div className="flex flex-col gap-2 pt-1 sm:col-span-2 lg:col-span-1">

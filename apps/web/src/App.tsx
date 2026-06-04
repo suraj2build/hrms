@@ -200,6 +200,8 @@ const PayrollPayoutReconciliationCenter  = lazy(() => import('@/pages/payroll/Pa
 const SalaryComponents      = lazy(() => import('@/pages/payroll/SalaryComponents').then(m => ({ default: m.SalaryComponents })))
 const CompensationMaster    = lazy(() => import('@/pages/payroll/CompensationMaster').then(m => ({ default: m.CompensationMaster })))
 const CompensationSetup     = lazy(() => import('@/pages/payroll/CompensationSetup').then(m => ({ default: m.CompensationSetup })))
+const FbpReconciliation     = lazy(() => import('@/pages/payroll/FbpReconciliation').then(m => ({ default: m.FbpReconciliation })))
+const EssFBP                = lazy(() => import('@/pages/ess/EssFBP').then(m => ({ default: m.EssFBP })))
 const PayrollLedger         = lazy(() => import('@/pages/payroll/PayrollLedger').then(m => ({ default: m.PayrollLedger })))
 const PayrollGovernance     = lazy(() => import('@/pages/payroll/PayrollGovernance').then(m => ({ default: m.PayrollGovernance })))
 const PayrollValidation     = lazy(() => import('@/pages/payroll/PayrollValidation').then(m => ({ default: m.PayrollValidation })))
@@ -633,6 +635,7 @@ export default function App() {
                 <Route path="/admin/payroll/advances"                 element={<AdvanceSalary />} />
                 <Route path="/admin/payroll/loans"                    element={<LoanManagement />} />
                 <Route path="/admin/payroll/reimbursements"           element={<Reimbursements />} />
+                <Route path="/admin/payroll/fbp"                      element={<FbpReconciliation />} />
                 <Route path="/admin/payroll/variable-pay"             element={<VariablePay />} />
                 <Route path="/admin/payroll/arrears"                  element={<ArrearEngine />} />
                 {/* Statutory */}
@@ -771,6 +774,7 @@ export default function App() {
                 {/* /ess/payroll/my-slips merged into /ess/compensation (Pay Slips tab) */}
                 <Route path="/ess/payroll/my-slips"        element={<Navigate to="/ess/compensation" replace />} />
                 <Route path="/ess/compensation"            element={<EssCompensation />} />
+                <Route path="/ess/fbp"                     element={<EssFBP />} />
                 <Route path="/ess/profile"                element={<EssMyProfile />} />
                 <Route path="/ess/letters"                element={<EssLetters />} />
                 <Route path="/ess/operational-center"     element={<EssOperationalCenter />} />

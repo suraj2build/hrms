@@ -362,6 +362,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'advances',       label: 'Salary Advances', route: '/admin/payroll/advances',       icon: CreditCard },
           { id: 'reimbursements', label: 'Reimbursements',  route: '/admin/payroll/reimbursements', icon: Receipt    },
+          { id: 'fbp-recon',      label: 'FBP Reconciliation', route: '/admin/payroll/fbp',         icon: Receipt    },
           { id: 'variable-pay',   label: 'Variable Pay',    route: '/admin/payroll/variable-pay',   icon: TrendingUp },
           { id: 'loans',          label: 'Loan Management', route: '/admin/payroll/loans',          icon: Landmark   },
           { id: 'arrears',        label: 'Arrear Engine',   route: '/admin/payroll/arrears',        icon: RotateCcw  },
