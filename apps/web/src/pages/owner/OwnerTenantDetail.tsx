@@ -206,14 +206,14 @@ export function OwnerTenantDetail() {
         {isOwner() && (
           <div className="flex flex-wrap items-center gap-2">
             {!editing && (
-              <Button onClick={startEdit} size="sm" className="bg-white/70 backdrop-blur border border-slate-200 text-slate-700 hover:bg-white hover:text-slate-900 shadow-sm gap-1.5">
+              <Button onClick={startEdit} size="sm" className="bg-white/70 bg-none backdrop-blur border border-slate-200 text-slate-700 hover:bg-white hover:text-slate-900 shadow-sm gap-1.5">
                 <Edit2 className="h-3.5 w-3.5" /> Edit
               </Button>
             )}
-            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20">Activate</Button>}
-            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" className="bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20">Suspend</Button>}
-            {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" className="bg-white/70 backdrop-blur border border-slate-200 text-slate-600 hover:bg-white hover:text-slate-900 shadow-sm">Cancel</Button>}
-            <Button onClick={deleteTenant} size="sm" className="bg-white/70 backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm gap-1.5">
+            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 bg-none hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20">Activate</Button>}
+            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" className="bg-amber-500 bg-none hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20">Suspend</Button>}
+            {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" className="bg-white/70 bg-none backdrop-blur border border-slate-200 text-slate-600 hover:bg-white hover:text-slate-900 shadow-sm">Cancel</Button>}
+            <Button onClick={deleteTenant} size="sm" className="bg-white/70 bg-none backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm gap-1.5">
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
           </div>
@@ -227,7 +227,7 @@ export function OwnerTenantDetail() {
             <h2 className="text-sm font-semibold text-slate-900">Details</h2>
             {editing && (
               <div className="flex gap-1.5">
-                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 h-7 text-xs gap-1">
+                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 h-7 text-xs gap-1">
                   <Save className="h-3 w-3" /> Save
                 </Button>
                 <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-slate-500 h-7 text-xs gap-1">
@@ -303,7 +303,7 @@ export function OwnerTenantDetail() {
                 >
                   {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
-                <Button onClick={issueLicense} className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20">
+                <Button onClick={issueLicense} className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20">
                   Issue License
                 </Button>
               </div>
@@ -395,7 +395,7 @@ export function OwnerTenantDetail() {
             <Button
               size="sm"
               onClick={() => setAddAdminOpen(true)}
-              className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 h-7 text-xs gap-1"
+              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 h-7 text-xs gap-1"
             >
               <UserPlus className="h-3 w-3" /> Add Admin
             </Button>
@@ -543,7 +543,7 @@ export function OwnerTenantDetail() {
               size="sm"
               onClick={() => resetAdminId && resetPasswordMut.mutate({ adminId: resetAdminId, password: resetPwd })}
               disabled={resetPasswordMut.isPending || (resetPwd.trim().length > 0 && resetPwd.trim().length < 8)}
-              className="bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20"
+              className="bg-amber-500 bg-none hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20"
             >
               {resetPasswordMut.isPending ? 'Resetting…' : (resetPwd.trim() ? 'Set Password' : 'Auto-Generate & Reset')}
             </Button>
@@ -642,7 +642,7 @@ export function OwnerTenantDetail() {
             <Button
               onClick={() => addAdminMut.mutate()}
               disabled={!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim() || addAdminMut.isPending}
-              className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
+              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
             >
               {addAdminMut.isPending ? 'Creating…' : 'Create Admin'}
             </Button>
@@ -675,7 +675,7 @@ export function OwnerTenantDetail() {
             </div>
           )}
           <DialogFooter>
-            <Button onClick={() => setResetResult(null)} className="bg-slate-200 hover:bg-slate-300 text-slate-900">
+            <Button onClick={() => setResetResult(null)} className="bg-slate-200 bg-none hover:bg-slate-300 text-slate-900">
               Done
             </Button>
           </DialogFooter>

@@ -145,7 +145,7 @@ export function OwnerRequests() {
                     <Button
                       onClick={() => { setApproveId(r.id); setApproveForm({ plan: 'standard', per_employee_rate: '' }) }}
                       size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20 h-7 text-xs gap-1"
+                      className="bg-emerald-600 bg-none hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20 h-7 text-xs gap-1"
                     >
                       <Check className="h-3 w-3" /> Approve
                     </Button>
@@ -153,7 +153,7 @@ export function OwnerRequests() {
                       onClick={() => { setRejectId(r.id); setRejectReason('') }}
                       size="sm"
                       variant="outline"
-                      className="bg-white/70 backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm h-7 text-xs gap-1"
+                      className="bg-white/70 bg-none backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm h-7 text-xs gap-1"
                     >
                       <X className="h-3 w-3" /> Reject
                     </Button>
@@ -197,7 +197,7 @@ export function OwnerRequests() {
             <Button
               onClick={() => approveId && approveMut.mutate(approveId)}
               disabled={approveMut.isPending}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20"
+              className="bg-emerald-600 bg-none hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20"
             >
               {approveMut.isPending ? 'Creating…' : 'Approve & Create'}
             </Button>
@@ -223,7 +223,7 @@ export function OwnerRequests() {
             <Button
               onClick={() => rejectId && rejectMut.mutate(rejectId)}
               disabled={!rejectReason.trim() || rejectMut.isPending}
-              className="bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-600/20"
+              className="bg-red-600 bg-none hover:bg-red-700 text-white shadow-sm shadow-red-600/20"
             >
               {rejectMut.isPending ? 'Rejecting…' : 'Reject'}
             </Button>
