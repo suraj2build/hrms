@@ -15,6 +15,7 @@ import {
   computeCollision,
   resolveCollisionPolicy,
 } from '../../lib/collision-engine.js'
+import { resolveEmployeeOrgContext } from '../../lib/org-context.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -204,6 +205,74 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
     }))
 
     return reply.send({ data: items })
+  })
+
+  // ── GET /leave/holidays ─────────────────────────────────────────────────
+  // ESS: the employee's applicable COMPANY holiday calendar for a year.
+  // Resolves the employee's org context and returns only the mandatory
+  // holidays (is_optional=false) that apply to them, honoring the
+  // location > site > group > global applicability chain (same rules the
+  // attendance/payroll engines use). Optional holidays have their own page.
+  fastify.get('/leave/holidays', auth, async (req: any, reply) => {
+    const year = Number((req.query as Record<string, string>)?.year ?? new Date().getFullYear())
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Invalid year' })
+    }
+    const yStart = `${year}-01-01`
+    const yEnd   = `${year}-12-31`
+
+    // Resolve the employee (if the profile is linked).
+    const { data: profData } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .maybeSingle()
+    const employeeId: string | null = profData?.employee_id ?? null
+
+    // Org context (site / location / holiday-group). Defaults to all-null
+    // (global-only) when there is no linked employee.
+    const ctx = employeeId
+      ? await resolveEmployeeOrgContext(fastify.supabase, req.tenantId, employeeId, `${year}-06-01`)
+      : { site_id: null, work_location_id: null, site_holiday_group_id: null }
+
+    const { data: rows, error } = await fastify.supabase
+      .from('holiday_calendar')
+      .select('id, date, name, holiday_type, is_optional, site_id, location_id, holiday_group_id')
+      .eq('tenant_id', req.tenantId)
+      .eq('is_optional', false)
+      .gte('date', yStart)
+      .lte('date', yEnd)
+      .order('date')
+
+    if (error) {
+      req.log.error({ err: error }, 'ess holidays list failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch holidays' })
+    }
+
+    // Applicability + per-date priority (location > site > group > global).
+    const rank = (h: any) =>
+      h.location_id      ? 4
+      : h.site_id         ? 3
+      : h.holiday_group_id ? 2
+      : 1
+    const applies = (h: any) =>
+      (!h.site_id && !h.location_id && !h.holiday_group_id) ||
+      (ctx.site_id && h.site_id === ctx.site_id) ||
+      (ctx.work_location_id && h.location_id === ctx.work_location_id) ||
+      (ctx.site_holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id)
+
+    const byDate = new Map<string, any>()
+    for (const h of (rows ?? [])) {
+      if (!applies(h)) continue
+      const cur = byDate.get(h.date)
+      if (!cur || rank(h) > rank(cur)) byDate.set(h.date, h)
+    }
+
+    const data = [...byDate.values()]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((h) => ({ id: h.id, date: h.date, name: h.name, holiday_type: h.holiday_type }))
+
+    return reply.send({ data, year })
   })
 
   // ── POST /leave/optional-holidays/select ───────────────────────────────

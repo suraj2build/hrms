@@ -54,6 +54,31 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     return reply.send({ data: data ?? [] })
   })
 
+  // ── ESS: own quarterly reconciliation outcome (paid vs proof → taxable) ───────
+  // Surfaces the persisted reconciliation HR has computed/locked, so the
+  // employee can see how much of their FBP became taxable (it flows to TDS).
+  fastify.get('/my/reconciliation', auth, async (req: any, reply) => {
+    const empId = await resolveEmployeeId(req)
+    if (!empId) return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+
+    const qs = z.object({ financial_year: z.string().optional(), quarter: z.coerce.number().optional() }).safeParse(req.query)
+    let q = fastify.supabase
+      .from('fbp_reconciliations')
+      .select('id, financial_year, quarter, paid_amount, proof_amount, exemption_limit, taxable_amount, status, reconciled_at, salary_components(id, name, code)')
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', empId)
+      .order('financial_year', { ascending: false })
+      .order('quarter', { ascending: false })
+    if (qs.success && qs.data.financial_year) q = q.eq('financial_year', qs.data.financial_year)
+    if (qs.success && qs.data.quarter) q = q.eq('quarter', qs.data.quarter)
+
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    const rows = data ?? []
+    const total_taxable = Math.round(rows.reduce((s: number, r: any) => s + Number(r.taxable_amount ?? 0), 0) * 100) / 100
+    return reply.send({ data: { rows, total_taxable } })
+  })
+
   // ── ESS: create draft submission ─────────────────────────────────────────────
   fastify.post('/my', auth, async (req: any, reply) => {
     const empId = await resolveEmployeeId(req)

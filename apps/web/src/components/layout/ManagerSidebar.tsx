@@ -96,6 +96,7 @@ const BASE_SECTIONS: NavSection[] = [
         items: [
           { label: 'My Attendance',    icon: CalendarDays, href: '/manager/self/attendance',   exact: true },
           { label: 'Leave & Comp-Off', icon: Scale,        href: '/manager/self/leave/balance'             },
+          { label: 'Company Holidays', icon: CalendarDays, href: '/manager/self/company-holidays'          },
         ],
       },
       {

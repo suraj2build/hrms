@@ -32,6 +32,18 @@ interface Submission {
   quarter: number
   salary_components: { name: string; code: string } | null
 }
+interface ReconRow {
+  id: string
+  financial_year: string
+  quarter: number
+  paid_amount: number
+  proof_amount: number
+  exemption_limit: number | null
+  taxable_amount: number
+  status: string
+  reconciled_at: string | null
+  salary_components: { id: string; name: string; code: string } | null
+}
 
 function currentFY(): string {
   const d = new Date()
@@ -71,6 +83,13 @@ export function EssFBP() {
     queryFn:  () => api.get('/payroll/fbp/my'),
   })
   const submissions = subsQ.data?.data ?? []
+
+  const reconQ = useQuery<{ data: { rows: ReconRow[]; total_taxable: number } }>({
+    queryKey: ['ess-fbp-my-reconciliation'],
+    queryFn:  () => api.get('/payroll/fbp/my/reconciliation'),
+  })
+  const reconRows = reconQ.data?.data?.rows ?? []
+  const totalTaxable = reconQ.data?.data?.total_taxable ?? 0
 
   function reset() { setComponentId(''); setAmount(''); setDescription(''); setFiles([]) }
 
@@ -230,6 +249,53 @@ export function EssFBP() {
               </tbody>
             </table>
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Reconciliation Outcome"
+        icon={<Receipt className="h-4 w-4 text-muted-foreground" />}
+      >
+        {reconQ.isLoading ? (
+          <div className="py-6 text-center text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin inline" /></div>
+        ) : reconRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">
+            Not reconciled yet. Once HR reconciles the quarter, the un-billed (taxable) portion appears here.
+          </p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground text-xs">
+                    <th className="px-3 pb-2 font-medium">Component</th>
+                    <th className="px-3 pb-2 font-medium">Period</th>
+                    <th className="px-3 pb-2 font-medium text-right">Paid</th>
+                    <th className="px-3 pb-2 font-medium text-right">Bills</th>
+                    <th className="px-3 pb-2 font-medium text-right">Taxable</th>
+                    <th className="px-3 pb-2 font-medium text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconRows.map(r => (
+                    <tr key={r.id} className="border-b border-border/50">
+                      <td className="px-3 py-2">{r.salary_components?.name ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{r.financial_year} Q{r.quarter}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{inr(r.paid_amount)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{inr(r.proof_amount)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-medium">{inr(r.taxable_amount)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <Badge variant="secondary" className="text-[10px] capitalize">{r.status}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              Total taxable (added to your income for TDS): <span className="font-medium text-foreground tabular-nums">{inr(totalTaxable)}</span>
+            </p>
+          </>
         )}
       </SectionCard>
     </PageContainer>

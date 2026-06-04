@@ -43,6 +43,7 @@ import { EssIssues }           from '@/pages/ess/EssIssues'
 import { EssSchedule }         from '@/pages/ess/EssSchedule'
 // EssCompOff merged into EssLeaveBalance (/ess/leave/balance → Comp-Off tab)
 import { EssOptionalHolidays } from '@/pages/ess/EssOptionalHolidays'
+import { EssCompanyHolidays } from '@/pages/ess/EssCompanyHolidays'
 import { EssComingSoon }       from '@/pages/ess/EssComingSoon'
 import { MyPayslips }          from '@/pages/payroll/MyPayslips'
 
@@ -732,6 +733,7 @@ export default function App() {
                 <Route path="/manager/self/attendance"                   element={<MyAttendance />} />
                 <Route path="/manager/self/attendance/regularization"    element={<Navigate to="/manager/self/attendance" replace />} />
                 <Route path="/manager/self/leave/balance"                element={<EssLeaveBalance />} />
+                <Route path="/manager/self/company-holidays"             element={<EssCompanyHolidays />} />
                 <Route path="/manager/self/compensation"                 element={<EssCompensation />} />
                 <Route path="/manager/self/declarations"                 element={<Navigate to="/manager/self/salary/tax-planner" replace />} />
                 <Route path="/manager/self/reimbursements"               element={<EssReimbursements />} />
@@ -771,6 +773,7 @@ export default function App() {
                 <Route path="/ess/comp-off"               element={<Navigate to="/ess/leave/balance" replace />} />
                 <Route path="/ess/issues"                 element={<EssIssues />} />
                 <Route path="/ess/optional-holidays"      element={<EssOptionalHolidays />} />
+                <Route path="/ess/company-holidays"       element={<EssCompanyHolidays />} />
                 {/* /ess/payroll/my-slips merged into /ess/compensation (Pay Slips tab) */}
                 <Route path="/ess/payroll/my-slips"        element={<Navigate to="/ess/compensation" replace />} />
                 <Route path="/ess/compensation"            element={<EssCompensation />} />

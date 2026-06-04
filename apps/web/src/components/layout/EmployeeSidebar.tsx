@@ -67,6 +67,7 @@ const BASE_GROUPS: NavGroup[] = [
     items: [
       { label: 'My Attendance',     icon: CalendarDays, href: '/ess/attendance',      exact: true },
       { label: 'Leave & Comp-Off',  icon: Scale,        href: '/ess/leave/balance'                   },
+      { label: 'Company Holidays',  icon: CalendarDays, href: '/ess/company-holidays'                 },
       { label: 'Optional Holidays', icon: CalendarOff,  href: '/ess/optional-holidays'               },
       { label: 'Approvals',         icon: CheckSquare,  href: '/ess/approvals'                             }, // manager-only
     ],
