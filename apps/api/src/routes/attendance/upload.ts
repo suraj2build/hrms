@@ -370,9 +370,19 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       'attendance upload: punches inserted',
     )
 
-    // ── 7. Fire recomputes (fire-and-forget) ────────────────────────────────
-    setImmediate(async () => {
-      for (const { employee_id, date } of recomputeSet.values()) {
+    // ── 7. Recompute attendance_daily — AWAITED + observable ─────────────────
+    // Previously fire-and-forget (setImmediate), which meant "uploaded" did not
+    // imply "computed": failures were silent and the grid stayed empty. We now
+    // await the recompute (bounded parallelism) and surface the counts, so the
+    // upload response reflects whether attendance actually materialised.
+    const targets = [...recomputeSet.values()]
+    let recomputedDays = 0
+    let recomputeFailed = 0
+    const recomputeErrors: Array<{ employee_id: string; date: string; error: string }> = []
+    const CONCURRENCY = 6
+    for (let i = 0; i < targets.length; i += CONCURRENCY) {
+      const batch = targets.slice(i, i + CONCURRENCY)
+      await Promise.all(batch.map(async ({ employee_id, date }) => {
         try {
           await recomputeRange(fastify.supabase, {
             tenant_id:   req.tenantId,
@@ -381,14 +391,22 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
             to_date:     date,
             changed_by:  req.userId,
           })
-        } catch (err) {
-          fastify.log.warn(
-            { err, employee_id, date },
-            'attendance upload: recompute failed (fire-and-forget)',
-          )
+          recomputedDays++
+        } catch (err: any) {
+          recomputeFailed++
+          if (recomputeErrors.length < 20) {
+            recomputeErrors.push({ employee_id, date, error: err?.message ?? 'recompute failed' })
+          }
+          fastify.log.warn({ err, employee_id, date }, 'attendance upload: recompute failed')
         }
-      }
-    })
+      }))
+    }
+    if (recomputeFailed > 0) {
+      fastify.log.error(
+        { tenant_id: req.tenantId, recomputed: recomputedDays, failed: recomputeFailed },
+        'attendance upload: some recomputes failed — attendance may be incomplete',
+      )
+    }
 
     // ── 8. Record upload session audit row (fire-and-forget) ───────────────
     // Inserts a completed upload_sessions record so the observability console
@@ -428,10 +446,14 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
 
     // ── 9. Respond ──────────────────────────────────────────────────────────
     return reply.send({
-      total_rows:       dataLines.length,
-      success_rows:     successRows,
-      failed_rows:      allFailedRows,
+      total_rows:        dataLines.length,
+      success_rows:      successRows,
+      failed_rows:       allFailedRows,
       duplicate_warning: duplicateWarning,  // non-null = same CSV was uploaded within last 24h
+      // Recompute outcome — attendance_daily now materialised synchronously.
+      recomputed_days:   recomputedDays,
+      recompute_failed:  recomputeFailed,
+      recompute_errors:  recomputeErrors,
     })
   })
 

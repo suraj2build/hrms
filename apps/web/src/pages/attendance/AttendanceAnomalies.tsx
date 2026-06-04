@@ -13,12 +13,13 @@
 
 import { useState, useMemo }     from 'react'
 import { useNavigate }           from 'react-router-dom'
-import { useQuery }              from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ChevronLeft, ChevronRight,
   BarChart3, ArrowRight, Loader2,
-  ShieldAlert, CheckCircle2,
+  ShieldAlert, CheckCircle2, RefreshCw,
 } from 'lucide-react'
+import { toast }                 from 'sonner'
 import { PageContainer }         from '@/components/layout/PageContainer'
 import { Button }                from '@/components/ui/button'
 import { cn }                    from '@/lib/utils'
@@ -129,6 +130,7 @@ function KpiTile({
 
 export default function AttendanceAnomalies() {
   const nav = useNavigate()
+  const qc  = useQueryClient()
   const [month, setMonth] = useState(currentMonth)
   const isCurrentMonth    = month === currentMonth()
 
@@ -136,6 +138,20 @@ export default function AttendanceAnomalies() {
     queryKey: ['anomaly-summary', month],
     queryFn:  () => api.get(`/attendance/anomalies/summary?month=${month}`),
     staleTime: 5 * 60_000,
+  })
+
+  // Reconcile: auto-resolve anomalies that the current attendance contradicts
+  // (e.g. stale "no punch" after attendance was recomputed to present/leave).
+  const reconcileMut = useMutation<{ scanned: number; auto_resolved: number }, Error>({
+    mutationFn: () => api.post('/attendance/anomalies/reconcile', {}),
+    onSuccess: (res: any) => {
+      const r = res?.auto_resolved ?? res?.data?.auto_resolved ?? 0
+      toast.success('Anomalies reconciled', {
+        description: `${r} stale anomal${r === 1 ? 'y' : 'ies'} auto-resolved against current attendance.`,
+      })
+      qc.invalidateQueries({ queryKey: ['anomaly-summary'] })
+    },
+    onError: (e) => toast.error('Reconcile failed', { description: e.message }),
   })
 
   const maxRate = useMemo(() => {
@@ -164,20 +180,33 @@ export default function AttendanceAnomalies() {
           </p>
         </div>
 
-        {/* Month navigation */}
-        <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-1 py-1 shadow-card">
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
-            onClick={() => setMonth(prevMonth)}>
-            <ChevronLeft className="h-4 w-4" />
+        <div className="flex items-center gap-2">
+          {/* Reconcile — clears anomalies contradicted by current attendance */}
+          <Button
+            variant="outline" size="sm" className="h-9 gap-1.5"
+            onClick={() => reconcileMut.mutate()}
+            disabled={reconcileMut.isPending}
+            title="Auto-resolve stale anomalies (e.g. 'no punch' on days now marked present/leave)"
+          >
+            {reconcileMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Reconcile
           </Button>
-          <span className="text-sm font-semibold text-foreground px-2 min-w-[130px] text-center">
-            {fmtMonth(month)}
-          </span>
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
-            disabled={isCurrentMonth}
-            onClick={() => setMonth(nextMonth)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+
+          {/* Month navigation */}
+          <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-1 py-1 shadow-card">
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
+              onClick={() => setMonth(prevMonth)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-semibold text-foreground px-2 min-w-[130px] text-center">
+              {fmtMonth(month)}
+            </span>
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
+              disabled={isCurrentMonth}
+              onClick={() => setMonth(nextMonth)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
