@@ -22,8 +22,9 @@ import {
 
 const componentSchema = z.object({
   salary_component_id: z.string().uuid('Invalid component ID'),
-  calculation_type:    z.enum(['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross']),
-  value:               z.number().positive('Value must be positive'),
+  calculation_type:    z.enum(['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross', 'balance']),
+  // 'balance' carries value 0 (it's the residual); other types must be > 0.
+  value:               z.number().nonnegative('Value must be ≥ 0'),
   sequence:            z.number().int().optional().default(0),
 })
 
@@ -389,7 +390,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
         name:                sc.name,
         code:                sc.code,
         component_type:      sc.component_type as 'earning' | 'deduction' | 'employer_contribution',
-        calc_type:           rc.calculation_type as 'pct_of_ctc' | 'pct_of_basic' | 'pct_of_gross' | 'fixed',
+        calc_type:           rc.calculation_type as 'pct_of_ctc' | 'pct_of_basic' | 'pct_of_gross' | 'fixed' | 'balance',
         value:               rc.value,
         sequence:            rc.sequence ?? 0,
         is_basic:            sc.is_basic    ?? false,

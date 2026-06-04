@@ -32,8 +32,11 @@ export interface ComponentInput {
   name:                string
   code:                string
   component_type:      'earning' | 'deduction' | 'employer_contribution'
-  calc_type:           'pct_of_ctc' | 'pct_of_basic' | 'pct_of_gross' | 'fixed'
-  /** Percentage (e.g. 40 = 40 %) for pct_* types; monthly rupees for fixed */
+  calc_type:           'pct_of_ctc' | 'pct_of_basic' | 'pct_of_gross' | 'fixed' | 'balance'
+  /**
+   * Percentage (e.g. 40 = 40 %) for pct_* types; monthly rupees for fixed.
+   * IGNORED for 'balance' — that component is the residual (CTC − everything else).
+   */
   value:               number
   /** Determines computation order; lower = earlier */
   sequence:            number
@@ -108,6 +111,12 @@ export interface CompensationResult {
   pf_applied:      boolean
   /** Basic + NLC-tagged as % of Gross, post-adjustment.  null if NLC disabled. */
   nlc_wage_pct:    number | null
+  /** Total annual cost actually allocated = gross + employer contributions. */
+  total_cost_annual: number
+  /** ctcAnnual − total_cost_annual. 0 (±₹1) when the structure reconciles to CTC. */
+  residual_annual:   number
+  /** True when total_cost_annual matches ctcAnnual within ₹1. */
+  ctc_reconciled:    boolean
 }
 
 // ── Built-in defaults ─────────────────────────────────────────────────────────
@@ -175,233 +184,184 @@ export function computeCompensation({
   if (ctcAnnual <= 0)       throw Object.assign(new Error('CTC must be positive'),            { code: 'CTC_INVALID'   })
   if (!components.length)   throw Object.assign(new Error('At least one component required'), { code: 'NO_COMPONENTS' })
 
-  // ── 1. Separate by component_type; sort each group by sequence ─────────────
-  const earnings       = components.filter(c => c.component_type === 'earning')
-                                    .sort((a, b) => a.sequence - b.sequence)
-  const deductions     = components.filter(c => c.component_type === 'deduction')
-                                    .sort((a, b) => a.sequence - b.sequence)
-  const employerContrib = components.filter(c => c.component_type === 'employer_contribution')
-                                    .sort((a, b) => a.sequence - b.sequence)
+  // ── Separate by component_type; sort each group by sequence ────────────────
+  const earnings        = components.filter(c => c.component_type === 'earning').sort((a, b) => a.sequence - b.sequence)
+  const deductions      = components.filter(c => c.component_type === 'deduction').sort((a, b) => a.sequence - b.sequence)
+  const employerContrib = components.filter(c => c.component_type === 'employer_contribution').sort((a, b) => a.sequence - b.sequence)
 
-  // Guard: pct_of_basic requires a BASIC anchor
-  const hasPctOfBasic = earnings.some(c => c.calc_type === 'pct_of_basic')
   const basicComp     = earnings.find(c => c.is_basic)
                         ?? earnings.find(c => c.calc_type === 'fixed' || c.calc_type === 'pct_of_ctc')
+  const balanceComp   = earnings.find(c => c.calc_type === 'balance')
+  const hasPctOfBasic = earnings.some(c => c.calc_type === 'pct_of_basic')
 
   if (hasPctOfBasic && !basicComp) {
     throw Object.assign(
       new Error(
-        'BASIC salary component not found. ' +
-        'Mark one earning component with is_basic=true, ' +
+        'BASIC salary component not found. Mark one earning with is_basic=true, ' +
         'or ensure a fixed/pct_of_ctc earning precedes pct_of_basic components.',
       ),
       { code: 'MISSING_BASIC' },
     )
   }
 
-  // ── amounts map: salary_component_id → annual rupees ─────────────────────
-  const amounts = new Map<string, number>()
+  const pfEligible = !!(policy.pf_enabled && employee.pf_enabled && basicComp)
 
-  // ── 2. Compute pct_of_ctc earnings ────────────────────────────────────────
-  for (const c of earnings.filter(e => e.calc_type === 'pct_of_ctc')) {
-    amounts.set(c.salary_component_id, r2((c.value / 100) * ctcAnnual))
-  }
+  // ── Pure derivation for a given Basic (annual) ─────────────────────────────
+  // CTC model is ALL-INCLUSIVE: CTC = Σ earnings + Σ employer contributions.
+  // The 'balance' earning (Special Allowance) absorbs the residual so the
+  // structure reconciles to CTC exactly. Employee deductions live WITHIN gross
+  // (they reduce net, not CTC).
+  function derive(basicAnnual: number) {
+    const amt = new Map<string, number>()
 
-  // ── 3. Compute BASIC ──────────────────────────────────────────────────────
-  let basicAnnual = 0
-  if (basicComp) {
-    if (basicComp.calc_type === 'fixed') {
-      basicAnnual = r2(basicComp.value * 12)
-    } else if (basicComp.calc_type === 'pct_of_ctc') {
-      // already computed in step 2; re-read from map (or compute if missing)
-      basicAnnual = amounts.get(basicComp.salary_component_id)
-                   ?? r2((basicComp.value / 100) * ctcAnnual)
+    // pct_of_ctc earnings (non-balance)
+    for (const c of earnings) if (c.calc_type === 'pct_of_ctc') amt.set(c.salary_component_id, r2((c.value / 100) * ctcAnnual))
+    // Basic anchor
+    if (basicComp) amt.set(basicComp.salary_component_id, r2(basicAnnual))
+    // pct_of_basic earnings
+    for (const c of earnings) if (c.calc_type === 'pct_of_basic') amt.set(c.salary_component_id, r2((c.value / 100) * basicAnnual))
+    // fixed (non-basic) earnings
+    for (const c of earnings) if (c.calc_type === 'fixed' && !c.is_basic) amt.set(c.salary_component_id, r2(c.value * 12))
+    // pct_of_gross earnings — on the running sum of non-balance earnings
+    let nbGross = earnings
+      .filter(c => c.calc_type !== 'balance' && c.calc_type !== 'pct_of_gross')
+      .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0)
+    for (const c of earnings) if (c.calc_type === 'pct_of_gross') {
+      const a = r2((c.value / 100) * nbGross); amt.set(c.salary_component_id, a); nbGross = r2(nbGross + a)
     }
-    amounts.set(basicComp.salary_component_id, basicAnnual)
-  }
 
-  // ── 4. Compute pct_of_basic earnings ──────────────────────────────────────
-  for (const c of earnings.filter(e => e.calc_type === 'pct_of_basic')) {
-    amounts.set(c.salary_component_id, r2((c.value / 100) * basicAnnual))
-  }
-
-  // ── 5. Compute remaining fixed earnings (non-basic) ───────────────────────
-  for (const c of earnings.filter(e => e.calc_type === 'fixed' && !e.is_basic)) {
-    amounts.set(c.salary_component_id, r2(c.value * 12))
-  }
-
-  // ── 6. Compute pct_of_gross earnings ──────────────────────────────────────
-  // Gross = sum of all earnings computed so far (pct_of_ctc + fixed + pct_of_basic)
-  let grossAnnual = r2(earnings.reduce((acc, c) => acc + (amounts.get(c.salary_component_id) ?? 0), 0))
-
-  for (const c of earnings.filter(e => e.calc_type === 'pct_of_gross')) {
-    const a = r2((c.value / 100) * grossAnnual)
-    amounts.set(c.salary_component_id, a)
-    grossAnnual = r2(grossAnnual + a)   // accumulate incrementally
-  }
-
-  // ── 7. Finalize gross ─────────────────────────────────────────────────────
-  grossAnnual = r2(earnings.reduce((acc, c) => acc + (amounts.get(c.salary_component_id) ?? 0), 0))
-
-  // ── 8. NLC enforcement ────────────────────────────────────────────────────
-  let nlcApplied  = false
-  let nlcWagePct: number | null = null
-
-  if (policy.nlc_enabled && basicComp && grossAnnual > 0) {
-    // NLC wage = Basic + any component tagged affects_nlc (e.g. DA)
-    const nlcWageAnnual = basicAnnual
-      + r2(earnings
-          .filter(c => !c.is_basic && c.affects_nlc)
-          .reduce((acc, c) => acc + (amounts.get(c.salary_component_id) ?? 0), 0))
-
-    nlcWagePct = r2((nlcWageAnnual / grossAnnual) * 100)
-
-    if (nlcWagePct < 50) {
-      const required = r2(grossAnnual * 0.5)
-      const deficit  = r2(required - nlcWageAnnual)
-
-      // Find the most flexible earning to reduce:
-      //   not the basic anchor, not NLC-tagged, is an earning component
-      const flexible = earnings.find(c =>
-        !c.is_basic &&
-        !c.affects_nlc &&
-        c.component_type === 'earning' &&
-        (amounts.get(c.salary_component_id) ?? 0) > 0
-      )
-
-      if (flexible && deficit > 0) {
-        const flexCurrent = amounts.get(flexible.salary_component_id) ?? 0
-        const reduction   = r2(Math.min(deficit, flexCurrent))
-
-        if (reduction > 0) {
-          // Reduce flexible component
-          amounts.set(flexible.salary_component_id, r2(flexCurrent - reduction))
-
-          // Increase Basic by the same amount to preserve total CTC
-          basicAnnual = r2(basicAnnual + reduction)
-          amounts.set(basicComp.salary_component_id, basicAnnual)
-
-          // Recompute all pct_of_basic components with new basicAnnual
-          for (const c of earnings.filter(e => e.calc_type === 'pct_of_basic')) {
-            amounts.set(c.salary_component_id, r2((c.value / 100) * basicAnnual))
-          }
-
-          // Recompute gross (all earnings)
-          grossAnnual = r2(earnings.reduce((acc, c) => acc + (amounts.get(c.salary_component_id) ?? 0), 0))
-
-          // Update nlcWagePct post-adjustment
-          const newNlcWage = basicAnnual
-            + r2(earnings
-                .filter(c => !c.is_basic && c.affects_nlc)
-                .reduce((acc, c) => acc + (amounts.get(c.salary_component_id) ?? 0), 0))
-          nlcWagePct = grossAnnual > 0 ? r2((newNlcWage / grossAnnual) * 100) : 0
-
-          nlcApplied = true
-        }
+    // Employer contributions (structure-defined: gratuity, etc.)
+    let employerAnnual = 0
+    for (const c of employerContrib) {
+      let a = 0
+      switch (c.calc_type) {
+        case 'fixed':        a = r2(c.value * 12);                  break
+        case 'pct_of_ctc':   a = r2((c.value / 100) * ctcAnnual);   break
+        case 'pct_of_basic': a = r2((c.value / 100) * basicAnnual); break
+        case 'pct_of_gross': a = r2((c.value / 100) * nbGross);     break
+        case 'balance':      a = 0;                                 break  // not valid for employer lines
       }
+      amt.set(c.salary_component_id, a)
+      employerAnnual = r2(employerAnnual + a)
     }
+
+    // Engine-injected PF (employer side counts toward CTC; employee side is a deduction within gross)
+    let pfEmployeeAnnual = 0, pfEmployerAnnual = 0
+    if (pfEligible) {
+      const basicMonthly = r2(basicAnnual / 12)
+      const pfBase = employee.pf_capped ? r2(Math.min(basicMonthly, policy.pf_cap_amount)) : basicMonthly
+      pfEmployeeAnnual = r2(r2(pfBase * (policy.pf_employee_rate / 100)) * 12)
+      pfEmployerAnnual = r2(r2(pfBase * (policy.pf_employer_rate / 100)) * 12)
+      employerAnnual   = r2(employerAnnual + pfEmployerAnnual)
+    }
+
+    // Non-balance earnings total, then the balance (Special Allowance)
+    const nonBalanceEarnings = r2(earnings.filter(c => c.calc_type !== 'balance')
+      .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0))
+    const rawBalance   = r2(ctcAnnual - employerAnnual - nonBalanceEarnings)
+    const balanceAnnual = balanceComp ? Math.max(0, rawBalance) : 0
+    if (balanceComp) amt.set(balanceComp.salary_component_id, balanceAnnual)
+
+    const grossAnnual = r2(nonBalanceEarnings + balanceAnnual)
+    const nlcWage = r2((basicComp ? basicAnnual : 0) + earnings
+      .filter(c => !c.is_basic && c.affects_nlc && c.calc_type !== 'balance')
+      .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0))
+
+    return { amt, basicAnnual, employerAnnual, nonBalanceEarnings, balanceAnnual, rawBalance, grossAnnual, nlcWage, pfEmployeeAnnual, pfEmployerAnnual }
   }
 
-  // ── 9. Compute deductions and employer-contributions ──────────────────────
-  function computeOtherComponent(c: ComponentInput): void {
-    let annual = 0
+  // ── Initial Basic from the structure ───────────────────────────────────────
+  let basic0 = 0
+  if (basicComp) {
+    if (basicComp.calc_type === 'fixed')           basic0 = r2(basicComp.value * 12)
+    else if (basicComp.calc_type === 'pct_of_ctc') basic0 = r2((basicComp.value / 100) * ctcAnnual)
+  }
+  if (basicComp && basic0 <= 0 && balanceComp) {
+    // Basic not directly priced (e.g. only % of basic siblings) — seed at 40% of CTC.
+    basic0 = r2(0.4 * ctcAnnual)
+  }
+
+  let d = derive(basic0)
+
+  // ── NLC enforcement: Basic + NLC-tagged ≥ 50% of Gross ─────────────────────
+  // Funded by shifting money from the balance (Special Allowance) into Basic.
+  // Increasing Basic raises the NLC wage and (via larger employer contributions)
+  // lowers Gross, so the ratio rises monotonically — solve by bisection.
+  let nlcApplied = false
+  let nlcWagePct: number | null = policy.nlc_enabled ? (d.grossAnnual > 0 ? r2((d.nlcWage / d.grossAnnual) * 100) : 0) : null
+
+  if (policy.nlc_enabled && basicComp && balanceComp && d.grossAnnual > 0 && d.nlcWage < r2(0.5 * d.grossAnnual) && d.rawBalance > 0) {
+    let lo = basic0
+    let hi = r2(basic0 + d.rawBalance)   // upper bound: pull the entire balance into Basic
+    let best = d
+    for (let i = 0; i < 48; i++) {
+      const mid = r2((lo + hi) / 2)
+      const dm  = derive(mid)
+      const pct = dm.grossAnnual > 0 ? (dm.nlcWage / dm.grossAnnual) * 100 : 0
+      if (dm.rawBalance < 0) { hi = mid; continue }    // overshoot — Basic too high, balance went negative
+      if (pct >= 50) { hi = mid; best = dm } else { lo = mid }
+      if (hi - lo < 1) break
+    }
+    if (best.rawBalance >= -1 && best.grossAnnual > 0 && (best.nlcWage / best.grossAnnual) * 100 >= 49.5) {
+      d = best
+      nlcApplied = true
+    }
+    nlcWagePct = d.grossAnnual > 0 ? r2((d.nlcWage / d.grossAnnual) * 100) : 0
+  }
+
+  const basicAnnual = d.basicAnnual
+
+  // ── Employee deductions (within gross; pct_of_gross uses final gross) ──────
+  for (const c of deductions) {
+    let a = 0
     switch (c.calc_type) {
-      case 'fixed':        annual = r2(c.value * 12);                         break
-      case 'pct_of_ctc':  annual = r2((c.value / 100) * ctcAnnual);          break
-      case 'pct_of_basic': annual = r2((c.value / 100) * basicAnnual);        break
-      case 'pct_of_gross': annual = r2((c.value / 100) * grossAnnual);        break
+      case 'fixed':        a = r2(c.value * 12);                  break
+      case 'pct_of_ctc':   a = r2((c.value / 100) * ctcAnnual);   break
+      case 'pct_of_basic': a = r2((c.value / 100) * basicAnnual); break
+      case 'pct_of_gross': a = r2((c.value / 100) * d.grossAnnual); break
+      case 'balance':      a = 0;                                 break
     }
-    amounts.set(c.salary_component_id, annual)
+    d.amt.set(c.salary_component_id, a)
   }
 
-  for (const c of deductions)      computeOtherComponent(c)
-  for (const c of employerContrib) computeOtherComponent(c)
-
-  // ── 10. PF injection ──────────────────────────────────────────────────────
-  let pfApplied = false
+  // ── Engine-injected PF components ──────────────────────────────────────────
   const pfComponents: ComputedComponent[] = []
-
-  const pfEnabled = policy.pf_enabled && employee.pf_enabled && basicComp
-
-  if (pfEnabled) {
-    const basicMonthly = r2(basicAnnual / 12)
-    let   pfBase       = basicMonthly
-
-    if (employee.pf_capped) {
-      pfBase = r2(Math.min(pfBase, policy.pf_cap_amount))
-    }
-
-    const empPfMonthly = r2(pfBase * (policy.pf_employee_rate / 100))
-    const erPfMonthly  = r2(pfBase * (policy.pf_employer_rate / 100))
-
-    pfComponents.push({
-      salary_component_id: PF_EMPLOYEE_SENTINEL,
-      name:                'PF Employee Contribution',
-      code:                PF_EMPLOYEE_CODE,
-      component_type:      'deduction',
-      calc_type:           'pct_of_basic',
-      value:               policy.pf_employee_rate,
-      sequence:            9000,
-      is_basic:            false,
-      affects_pf:          false,
-      affects_nlc:         false,
-      monthly_amount:      empPfMonthly,
-      annual_amount:       r2(empPfMonthly * 12),
-      is_engine_generated: true,
-    })
-
-    pfComponents.push({
-      salary_component_id: PF_EMPLOYER_SENTINEL,
-      name:                'PF Employer Contribution',
-      code:                PF_EMPLOYER_CODE,
-      component_type:      'employer_contribution',
-      calc_type:           'pct_of_basic',
-      value:               policy.pf_employer_rate,
-      sequence:            9001,
-      is_basic:            false,
-      affects_pf:          false,
-      affects_nlc:         false,
-      monthly_amount:      erPfMonthly,
-      annual_amount:       r2(erPfMonthly * 12),
-      is_engine_generated: true,
-    })
-
+  let pfApplied = false
+  if (pfEligible) {
     pfApplied = true
+    const empPfMonthly = r2(d.pfEmployeeAnnual / 12)
+    const erPfMonthly  = r2(d.pfEmployerAnnual / 12)
+    pfComponents.push({
+      salary_component_id: PF_EMPLOYEE_SENTINEL, name: 'PF Employee Contribution', code: PF_EMPLOYEE_CODE,
+      component_type: 'deduction', calc_type: 'pct_of_basic', value: policy.pf_employee_rate, sequence: 9000,
+      is_basic: false, affects_pf: false, affects_nlc: false,
+      monthly_amount: empPfMonthly, annual_amount: d.pfEmployeeAnnual, is_engine_generated: true,
+    })
+    pfComponents.push({
+      salary_component_id: PF_EMPLOYER_SENTINEL, name: 'PF Employer Contribution', code: PF_EMPLOYER_CODE,
+      component_type: 'employer_contribution', calc_type: 'pct_of_basic', value: policy.pf_employer_rate, sequence: 9001,
+      is_basic: false, affects_pf: false, affects_nlc: false,
+      monthly_amount: erPfMonthly, annual_amount: d.pfEmployerAnnual, is_engine_generated: true,
+    })
   }
 
-  // ── 11. Build ComputedComponent list ─────────────────────────────────────
-  const inputComputed: ComputedComponent[] = [
-    ...earnings,
-    ...deductions,
-    ...employerContrib,
-  ].map(c => {
-    const annual  = amounts.get(c.salary_component_id) ?? 0
+  // ── Build ComputedComponent list ───────────────────────────────────────────
+  const inputComputed: ComputedComponent[] = [...earnings, ...deductions, ...employerContrib].map(c => {
+    const annual = d.amt.get(c.salary_component_id) ?? 0
     return {
-      salary_component_id: c.salary_component_id,
-      name:                c.name,
-      code:                c.code,
-      component_type:      c.component_type,
-      calc_type:           c.calc_type,
-      value:               c.value,
-      sequence:            c.sequence,
-      is_basic:            c.is_basic,
-      affects_pf:          c.affects_pf,
-      affects_nlc:         c.affects_nlc,
-      monthly_amount:      r2(annual / 12),
-      annual_amount:       annual,
+      salary_component_id: c.salary_component_id, name: c.name, code: c.code,
+      component_type: c.component_type, calc_type: c.calc_type, value: c.value, sequence: c.sequence,
+      is_basic: c.is_basic, affects_pf: c.affects_pf, affects_nlc: c.affects_nlc,
+      monthly_amount: r2(annual / 12), annual_amount: annual,
     }
   })
 
   const allComponents = [...inputComputed, ...pfComponents]
 
-  // ── 12. Totals ────────────────────────────────────────────────────────────
-  const allEarnings       = allComponents.filter(c => c.component_type === 'earning')
-  const allDeductions     = allComponents.filter(c => c.component_type === 'deduction')
-  const allEmployerCon    = allComponents.filter(c => c.component_type === 'employer_contribution')
-
-  const grossAnnualFinal  = sumAnnual(allEarnings)
-  const deductAnnual      = sumAnnual(allDeductions)
-  const employerConAnnual = sumAnnual(allEmployerCon)
+  // ── Totals ─────────────────────────────────────────────────────────────────
+  const grossAnnualFinal  = sumAnnual(allComponents.filter(c => c.component_type === 'earning'))
+  const deductAnnual      = sumAnnual(allComponents.filter(c => c.component_type === 'deduction'))
+  const employerConAnnual = sumAnnual(allComponents.filter(c => c.component_type === 'employer_contribution'))
 
   const totals: CompensationTotals = {
     gross_annual:                   grossAnnualFinal,
@@ -416,29 +376,19 @@ export function computeCompensation({
     net_monthly:                    r2((grossAnnualFinal - deductAnnual) / 12),
   }
 
-  // ── Validation ─────────────────────────────────────────────────────────────
-  // Warn (don't throw) if gross does not match CTC — possible with pct_of_gross
-  // residual mismatches. Callers can decide to surface this.
-  const epsilon = 1  // ₹1 tolerance for floating-point noise
-  if (Math.abs(grossAnnualFinal - ctcAnnual) > epsilon && process.env.NODE_ENV !== 'test') {
-    // Log to stderr so it doesn't end up in structured output
-    process.stderr.write(
-      JSON.stringify({
-        level:   'warn',
-        service: 'compensation-engine',
-        action:  'gross_ctc_mismatch',
-        ctc:     ctcAnnual,
-        gross:   grossAnnualFinal,
-        diff:    r2(grossAnnualFinal - ctcAnnual),
-      }) + '\n',
-    )
-  }
+  // CTC reconciliation = gross + employer contributions (all-inclusive model).
+  const totalCostAnnual = r2(grossAnnualFinal + employerConAnnual)
+  const residualAnnual  = r2(ctcAnnual - totalCostAnnual)
+  const ctcReconciled   = Math.abs(residualAnnual) <= 1
 
   return {
-    components:   allComponents,
+    components:        allComponents,
     totals,
-    nlc_applied:  nlcApplied,
-    pf_applied:   pfApplied,
-    nlc_wage_pct: policy.nlc_enabled ? nlcWagePct : null,
+    nlc_applied:       nlcApplied,
+    pf_applied:        pfApplied,
+    nlc_wage_pct:      policy.nlc_enabled ? nlcWagePct : null,
+    total_cost_annual: totalCostAnnual,
+    residual_annual:   residualAnnual,
+    ctc_reconciled:    ctcReconciled,
   }
 }

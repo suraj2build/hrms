@@ -183,9 +183,9 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
         },
         policy,
       })
-      // Surface the residual so the UI can flag under/over-allocation vs CTC.
-      const residual_annual = Math.round((parsed.data.ctc_annual - result.totals.gross_annual) * 100) / 100
-      return reply.send({ data: { ...result, ctc_annual: parsed.data.ctc_annual, residual_annual } })
+      // The engine now reconciles to CTC inclusively (gross + employer
+      // contributions). residual_annual / ctc_reconciled come straight from it.
+      return reply.send({ data: { ...result, ctc_annual: parsed.data.ctc_annual } })
     } catch (e: any) {
       return reply.code(400).send({ error: e?.code ?? 'COMPUTE_ERROR', message: e?.message ?? 'Failed to compute preview' })
     }

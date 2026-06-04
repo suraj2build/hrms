@@ -27,7 +27,7 @@ import { STANDARD_SALARY_COMPONENTS } from './standard-salary-components.js'
 
 // ── Schemas (the one true contract) ──────────────────────────────────────────────
 
-const CALC_TYPES = ['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross'] as const
+const CALC_TYPES = ['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross', 'balance'] as const
 
 export const componentCreateSchema = z.object({
   name:               z.string().min(1, 'Name is required').max(200),
