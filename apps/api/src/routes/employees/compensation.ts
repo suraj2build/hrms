@@ -199,6 +199,56 @@ function computeTotals(shaped: ReturnType<typeof shapeComponents>) {
 export default async function compensationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
+  // ── GET /compensation-policy  → tenant statutory policy (PF rates · NLC) ─────
+  // Surfaces the previously API-only compensation_policies row so tenants stop
+  // silently inheriting DEFAULT_COMPENSATION_POLICY. Read-only fetch with the
+  // same fallback semantics as the engine helper.
+  fastify.get('/compensation-policy', auth, async (req: any, reply) => {
+    const policy = await fetchCompensationPolicy(fastify, req.tenantId)
+    // Tell the client whether a real row exists (vs engine defaults) so the UI
+    // can indicate "using defaults" until the tenant saves.
+    const { data } = await fastify.supabase
+      .from('compensation_policies')
+      .select('tenant_id')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    return reply.send({ data: { ...policy, is_configured: !!data } })
+  })
+
+  // ── PUT /compensation-policy  → upsert tenant statutory policy ───────────────
+  // Writes the EXISTING compensation_policies table only. No engine/calc change:
+  // the engine already reads this row; this just lets admins set it via UI.
+  const policySchema = z.object({
+    nlc_enabled:      z.boolean(),
+    pf_enabled:       z.boolean(),
+    pf_employee_rate: z.number().min(0).max(30),  // DB CHECK: BETWEEN 0 AND 30
+    pf_employer_rate: z.number().min(0).max(30),   // DB CHECK: BETWEEN 0 AND 30
+    pf_cap_amount:    z.number().min(0),
+  })
+
+  fastify.put('/compensation-policy', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole))
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+
+    const parsed = policySchema.safeParse(req.body)
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message ?? 'Invalid policy' })
+
+    const { data, error } = await fastify.supabase
+      .from('compensation_policies')
+      .upsert(
+        { tenant_id: req.tenantId, ...parsed.data, updated_at: new Date().toISOString() },
+        { onConflict: 'tenant_id' },
+      )
+      .select('nlc_enabled, pf_enabled, pf_employee_rate, pf_employer_rate, pf_cap_amount')
+      .single()
+
+    if (error)
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    return reply.send({ data: { ...data, is_configured: true } })
+  })
+
   // ── GET /employees/:id/compensation  → active compensation ──────────────────
   fastify.get('/employees/:id/compensation', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))

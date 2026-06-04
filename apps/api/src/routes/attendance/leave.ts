@@ -290,17 +290,20 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('id', app.leave_type_id)
       .single()
 
+    // Resolve the roster-aware working dates (excludes holidays + weekly-offs)
+    // for BOTH paid and unpaid leave. Used for balance deduction AND for the
+    // attendance_daily write, so a leave span never overwrites a holiday /
+    // weekly-off day (which would wrongly turn a paid rest day into LOP).
+    const workingDays = await computeWorkingLeaveDays(
+      fastify.supabase,
+      app.tenant_id   as string,
+      app.employee_id as string,
+      app.from_date   as string,
+      app.to_date     as string,
+    )
+
     // Pre-approve balance check (paid leave only)
-    // Use working days (excluding holidays + weekly-offs) for balance check & deduction
-    let workingDays = { computed_days: 0, payable_days: 0 }
     if (lt?.is_paid) {
-      workingDays = await computeWorkingLeaveDays(
-        fastify.supabase,
-        app.tenant_id   as string,
-        app.employee_id as string,
-        app.from_date   as string,
-        app.to_date     as string,
-      )
       const year  = new Date(app.from_date as string).getFullYear()
       const check = await validateBalance(
         fastify.supabase,
@@ -333,8 +336,14 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to approve application' })
     }
 
-    // Apply leave days to attendance_daily
-    const leaveDates = expandDateRange(app.from_date as string, app.to_date as string)
+    // Apply leave days to attendance_daily — ONLY on roster working dates.
+    // Holidays / weekly-offs inside the span are intentionally NOT written, so
+    // they remain paid rest days (a holiday inside an UNPAID leave span must not
+    // become LOP). Falls back to the full span only if roster resolution found
+    // no working dates (defensive — avoids a no-op approval).
+    const leaveDates = workingDays.counted_dates && workingDays.counted_dates.length > 0
+      ? workingDays.counted_dates
+      : expandDateRange(app.from_date as string, app.to_date as string)
     const isPaid        = lt?.is_paid ?? false
     const dayFractionV  = isPaid ? 1.0 : 0.0
 

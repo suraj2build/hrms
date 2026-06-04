@@ -54,6 +54,7 @@ import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-s
 import { resolveEmployeeOrgContext, getWeeklyOffDays } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
+import { generateCompOffRequests }                     from './comp-off-service.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1038,7 +1039,10 @@ export async function computeDay(
     is_payable:           isPayable,
     day_fraction:         dayFraction,
     worked_on_weekly_off: false,
-    worked_on_holiday:    workedOnHoliday,
+    // Only flag worked-on-holiday when the day is actually payable. Previously a
+    // sub-threshold holiday punch produced status='absent' AND worked_on_holiday=true
+    // simultaneously — a contradictory state that could spuriously credit comp-off.
+    worked_on_holiday:    isPayable && workedOnHoliday,
     computed_source:      'engine' as const,
     reason,
     meta:                 punchMeta,
@@ -1244,6 +1248,26 @@ export async function recomputeRange(
 
     if (error) {
       throw new Error(`attendance_daily batch upsert failed: ${error.message}`)
+    }
+
+    // Auto-generate pending comp-off for any worked-on-weekly-off / worked-on-holiday
+    // day. Idempotent (unique on tenant_id,employee_id,worked_date) and gated by HR
+    // approval downstream, so it never changes pay directly. Non-blocking: a failure
+    // here must never abort the attendance recompute.
+    try {
+      await generateCompOffRequests(
+        supabase,
+        tenant_id,
+        safeComputed.map(r => ({
+          employee_id:          r.employee_id,
+          date:                 r.date,
+          worked_on_weekly_off: r.worked_on_weekly_off,
+          worked_on_holiday:    r.worked_on_holiday,
+        })),
+        changed_by ?? null,
+      )
+    } catch (e) {
+      console.warn(`[recomputeRange] comp-off auto-generate failed for employee ${employee_id}:`, e)
     }
   }
 

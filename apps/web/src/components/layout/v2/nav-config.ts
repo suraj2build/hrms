@@ -622,6 +622,7 @@ export const DOMAINS: Domain[] = [
       '/admin/leave/policy-engine',
       '/admin/holidays',
       // Payroll config overrides (longer than /admin/payroll)
+      '/admin/payroll/setup',              // Compensation Setup hub (single front door)
       '/admin/payroll/salary-components',
       '/admin/payroll/compensation',
       '/admin/payroll/simulation',
@@ -675,13 +676,15 @@ export const DOMAINS: Domain[] = [
       },
 
       // ── Payroll Rules ────────────────────────────────────────────────────────
+      // Compensation Setup is the SINGLE front door for salary components,
+      // structures, statutory mappings and statutory policy (tabbed hub).
+      // The individual routes still exist for deep links but are no longer
+      // listed separately here — eliminating the previous scatter.
       {
         label: 'Payroll Rules',
         items: [
-          { id: 'salary-comps',    label: 'Salary Components',   route: '/admin/payroll/salary-components',  icon: Layers        },
+          { id: 'comp-setup',      label: 'Compensation Setup',  route: '/admin/payroll/setup',             icon: Layers        },
           { id: 'payroll-grps',    label: 'Payroll Groups',      route: '/admin/masters/payroll-groups',    icon: DollarSign    },
-          { id: 'comp-master',     label: 'Salary Structures',   route: '/admin/payroll/compensation',      icon: GitMerge      },
-          { id: 'stat-groups',     label: 'Statutory Mappings',  route: '/admin/masters/statutory-groups',  icon: Landmark      },
           { id: 'pay-cycles',      label: 'Pay Cycles',          route: '/admin/attendance/periods',        icon: CalendarClock },
           { id: 'payroll-cal',     label: 'Payroll Calendar',    route: '/admin/payroll-readiness',         icon: CalendarDays  },
           { id: 'simulation',      label: 'Simulation',          route: '/admin/payroll/simulation',        icon: FlaskConical  },

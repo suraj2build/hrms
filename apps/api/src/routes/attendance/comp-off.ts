@@ -32,6 +32,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
+import { generateCompOffRequests } from '../../lib/comp-off-service.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -94,38 +95,21 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       return reply.send({ data: { created: 0, skipped: 0, message: 'No qualifying attendance records found' } })
     }
 
-    // Build insert rows — DB UNIQUE constraint will reject duplicates
-    const rows = (qualifying as Array<{
-      employee_id:          string
-      date:                 string
-      worked_on_weekly_off: boolean
-      worked_on_holiday:    boolean
-    }>).map(row => ({
-      tenant_id:     req.tenantId,
-      employee_id:   row.employee_id,
-      worked_date:   row.date,
-      worked_reason: row.worked_on_holiday ? 'holiday' : 'weekly_off',
-      leave_type_id: leave_type_id ?? null,
-      days_to_credit: 1.0,
-      status:         'pending',
-      created_by:     req.userId,
-    }))
-
-    // Use upsert with ignoreDuplicates to handle existing rows gracefully
-    const { data: inserted, error: insertErr } = await fastify.supabase
-      .from('comp_off_requests')
-      .upsert(rows, {
-        onConflict:       'tenant_id,employee_id,worked_date',
-        ignoreDuplicates: true,
-      })
-      .select('id')
-
-    if (insertErr) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: insertErr.message })
+    // Delegate to the shared generator (same logic the recompute pipeline uses).
+    let created = 0, skipped = 0
+    try {
+      const result = await generateCompOffRequests(
+        fastify.supabase,
+        req.tenantId,
+        qualifying as Array<{ employee_id: string; date: string; worked_on_weekly_off: boolean; worked_on_holiday: boolean }>,
+        req.userId,
+        leave_type_id ?? null,
+      )
+      created = result.created
+      skipped = result.skipped
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: e?.message ?? 'comp-off generation failed' })
     }
-
-    const created = (inserted as any[])?.length ?? 0
-    const skipped = rows.length - created
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,

@@ -26,6 +26,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { expandDateRange } from './leave-engine.js'
+import {
+  resolveEmployeeOrgContext,
+  getWeeklyOffDays,
+  getHolidayDates,
+  getLocalDayOfWeek,
+} from './org-context.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -39,6 +45,11 @@ export interface PayrollComponentSnapshot {
   monthly_amount:      number
   annual_amount:       number
   sequence:            number
+  /** Statutory wage-base flags (from salary_components) — drive the EPF/ESI/PT engines */
+  is_pf_applicable?:   boolean
+  affects_pf?:         boolean
+  is_esi_applicable?:  boolean
+  is_pt_applicable?:   boolean
 }
 
 export interface PayrollSlipInput {
@@ -330,6 +341,80 @@ export async function countWorkingDaysInMonth(
 }
 
 /**
+ * Per-employee scheduled working days in a month — ROSTER-AWARE.
+ *
+ * Working day = calendar day that is NOT this employee's weekly-off AND NOT an
+ * applicable (non-optional) holiday. The weekly-off is resolved per employee
+ * from the roster (emp roster → site default), exactly as the attendance engine
+ * resolves it when computing day_fraction. This makes the LOP denominator
+ * (total_working_days) consistent with the LOP numerator (lop_days), fixing the
+ * mismatch where countWorkingDaysInMonth hardcoded Sat/Sun tenant-wide.
+ *
+ * Fallback: when no roster weekly-off is configured for the employee, defaults
+ * to Sat/Sun ([0,6]) so tenants without rosters keep the previous behavior.
+ *
+ * Throws on holiday DB error (mirrors countWorkingDaysInMonth) so a run aborts
+ * rather than silently producing wrong denominators.
+ */
+export async function countWorkingDaysForEmployee(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  employeeId: string,
+  month:      string,   // 'YYYY-MM'
+): Promise<number> {
+  const [year, mon] = month.split('-').map(Number)
+  const firstDay    = `${month}-01`
+  const lastDay     = new Date(year, mon, 0).toISOString().slice(0, 10)
+  const allDates    = expandDateRange(firstDay, lastDay)
+
+  const ctx = await resolveEmployeeOrgContext(supabase, tenantId, employeeId, firstDay)
+
+  const { data: rawHolidays, error: holErr } = await supabase
+    .from('holiday_calendar')
+    .select('date, name, is_optional, site_id, location_id')
+    .eq('tenant_id', tenantId)
+    .eq('is_optional', false)
+    .gte('date', firstDay)
+    .lte('date', lastDay)
+
+  if (holErr) {
+    throw new Error(
+      `DB error fetching holiday calendar for employee ${employeeId} (${month}): ` +
+      `${holErr.message} [code=${holErr.code}] — payroll run aborted to prevent ` +
+      'incorrect working-day counts',
+    )
+  }
+
+  const holidaySet = getHolidayDates((rawHolidays ?? []) as any, ctx)
+
+  let weeklyOff = getWeeklyOffDays([], ctx.emp_roster_weekly_off, ctx.site_default_roster_weekly_off)
+  if (weeklyOff.length === 0) weeklyOff = [0, 6]   // Sun/Sat default when no roster
+
+  return countScheduledWorkingDays(allDates, weeklyOff, holidaySet, ctx.site_timezone)
+}
+
+/**
+ * Pure counter: how many of `allDates` are scheduled working days — i.e. not a
+ * weekly-off day-of-week and not a holiday. Extracted for unit testing.
+ *
+ * @param allDates    list of YYYY-MM-DD dates
+ * @param weeklyOffDays day-of-week numbers that are weekly-offs (0=Sun … 6=Sat)
+ * @param holidaySet  set of YYYY-MM-DD holiday dates
+ * @param timezone    IANA timezone used to resolve the local day-of-week
+ */
+export function countScheduledWorkingDays(
+  allDates:     string[],
+  weeklyOffDays: number[],
+  holidaySet:   Set<string>,
+  timezone:     string,
+): number {
+  return allDates.filter(d => {
+    const dow = getLocalDayOfWeek(d, timezone)
+    return !weeklyOffDays.includes(dow) && !holidaySet.has(d)
+  }).length
+}
+
+/**
  * Fetch attendance summary for one employee for a given month.
  * Returns zeroes when no records exist.
  */
@@ -450,7 +535,7 @@ export async function fetchActiveCompensation(
       salary_component_id, sequence,
       computed_monthly, computed_annual,
       calculation_type, value,
-      salary_components(id, name, code, component_type)
+      salary_components(id, name, code, component_type, is_pf_applicable, affects_pf, is_esi_applicable, is_pt_applicable)
     `)
     .eq('compensation_id', comp.id)
     .order('sequence', { ascending: true })
@@ -472,6 +557,10 @@ export async function fetchActiveCompensation(
     monthly_amount:      cc.computed_monthly ?? 0,
     annual_amount:       cc.computed_annual  ?? 0,
     sequence:            cc.sequence ?? 0,
+    is_pf_applicable:    !!cc.salary_components?.is_pf_applicable,
+    affects_pf:          !!cc.salary_components?.affects_pf,
+    is_esi_applicable:   !!cc.salary_components?.is_esi_applicable,
+    is_pt_applicable:    !!cc.salary_components?.is_pt_applicable,
   }))
 
   return {

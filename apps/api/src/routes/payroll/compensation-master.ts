@@ -5,6 +5,17 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import {
+  computeCompensation,
+  DEFAULT_COMPENSATION_POLICY,
+  type ComponentInput,
+  type CompensationPolicy,
+} from '../../lib/compensation-engine.js'
+import {
+  listComponents, createComponent, updateComponent, deleteComponent,
+  listStructures, createStructure, updateStructure,
+  listStructureComponents, addStructureComponent, removeStructureComponent,
+} from '../../lib/salary-config-store.js'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
@@ -20,271 +31,159 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
 
   // ── GET /payroll/compensation/components ──────────────────────────────────────
   fastify.get('/components', hrAdminAuth, async (req: any, reply) => {
-    const querySchema = z.object({
-      is_active: z.enum(['true', 'false']).optional(),
-    })
+    const querySchema = z.object({ is_active: z.enum(['true', 'false']).optional() })
     const parsed = querySchema.safeParse(req.query)
-    if (!parsed.success) {
+    if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    }
 
-    let q = fastify.supabase
-      .from('salary_components')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .order('display_order', { ascending: true })
-
-    if (parsed.data.is_active !== undefined) {
-      q = q.eq('is_active', parsed.data.is_active === 'true')
-    }
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    const r = await listComponents(fastify.supabase, req.tenantId, {
+      is_active: parsed.data.is_active === undefined ? undefined : parsed.data.is_active === 'true',
+    })
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.send({ data: r.data })
   })
 
   // ── POST /payroll/compensation/components ─────────────────────────────────────
   fastify.post('/components', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const schema = z.object({
-      name: z.string().min(1).max(200),
-      code: z.string().min(1).max(50),
-      component_type: z.enum(['earning', 'deduction', 'employer_contribution']),
-      is_taxable: z.boolean(),
-      is_pf_applicable: z.boolean(),
-      is_esi_applicable: z.boolean(),
-      is_pt_applicable: z.boolean(),
-      is_lwf_applicable: z.boolean(),
-      display_order: z.number().int().optional(),
-      is_variable: z.boolean().optional(),
-    })
-
-    const parsed = schema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    }
-
-    const { data, error } = await fastify.supabase
-      .from('salary_components')
-      .insert({ ...parsed.data, tenant_id: req.tenantId, is_active: true })
-      .select()
-      .single()
-
-    if (error) {
-      if (error.code === '23505') {
-        return reply.code(409).send({ error: 'DUPLICATE_CODE', message: 'A component with this code already exists' })
-      }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
-    }
-
-    return reply.code(201).send({ data })
+    const r = await createComponent(fastify.supabase, req.tenantId, req.body)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.code(201).send({ data: r.data })
   })
 
   // ── PUT /payroll/compensation/components/:id ──────────────────────────────────
   fastify.put('/components/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const { id } = req.params as { id: string }
-
-    const schema = z.object({
-      name: z.string().min(1).max(200).optional(),
-      code: z.string().min(1).max(50).optional(),
-      component_type: z.enum(['earning', 'deduction', 'employer_contribution']).optional(),
-      is_taxable: z.boolean().optional(),
-      is_pf_applicable: z.boolean().optional(),
-      is_esi_applicable: z.boolean().optional(),
-      is_pt_applicable: z.boolean().optional(),
-      is_lwf_applicable: z.boolean().optional(),
-      display_order: z.number().int().optional(),
-      is_variable: z.boolean().optional(),
-      is_active: z.boolean().optional(),
-    })
-
-    const parsed = schema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    }
-
-    const { data, error } = await fastify.supabase
-      .from('salary_components')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .select()
-      .single()
-
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Component not found' })
-
-    return reply.send({ data })
+    const r = await updateComponent(fastify.supabase, req.tenantId, req.params.id, req.body)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.send({ data: r.data })
   })
 
   // ── DELETE /payroll/compensation/components/:id ───────────────────────────────
   fastify.delete('/components/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const { id } = req.params as { id: string }
-
-    // Check if referenced in salary_structure_components
-    const { count } = await fastify.supabase
-      .from('salary_structure_components')
-      .select('id', { count: 'exact', head: true })
-      .eq('salary_component_id', id)
-      .eq('tenant_id', req.tenantId)
-
-    if ((count ?? 0) > 0) {
-      // Soft delete
-      const { error } = await fastify.supabase
-        .from('salary_components')
-        .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .eq('tenant_id', req.tenantId)
-
-      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-      return reply.send({ message: 'Component deactivated (referenced in salary structures)' })
-    } else {
-      // Hard delete
-      const { error } = await fastify.supabase
-        .from('salary_components')
-        .delete()
-        .eq('id', id)
-        .eq('tenant_id', req.tenantId)
-
-      if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
-      return reply.code(204).send()
-    }
+    const r = await deleteComponent(fastify.supabase, req.tenantId, req.params.id)
+    if (r.error) return reply.code(r.status).send(r.error)
+    if (r.status === 204) return reply.code(204).send()
+    return reply.send(r.data)   // soft-delete → { message }
   })
 
   // ── GET /payroll/compensation/structures ──────────────────────────────────────
   fastify.get('/structures', hrAdminAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('salary_structures')
-      .select('*, salary_structure_components(count)')
-      .eq('tenant_id', req.tenantId)
-      .order('name', { ascending: true })
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    const r = await listStructures(fastify.supabase, req.tenantId, 'count')
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.send({ data: r.data })
   })
 
   // ── POST /payroll/compensation/structures ─────────────────────────────────────
   fastify.post('/structures', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const schema = z.object({
-      name: z.string().min(1).max(200),
-      code: z.string().min(1).max(50),
-      description: z.string().optional(),
-      is_active: z.boolean().default(true),
-    })
-
-    const parsed = schema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    }
-
-    const { data, error } = await fastify.supabase
-      .from('salary_structures')
-      .insert({ ...parsed.data, tenant_id: req.tenantId })
-      .select()
-      .single()
-
-    if (error) {
-      if (error.code === '23505') {
-        return reply.code(409).send({ error: 'DUPLICATE_CODE', message: 'A structure with this code already exists' })
-      }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
-    }
-
-    return reply.code(201).send({ data })
+    const r = await createStructure(fastify.supabase, req.tenantId, req.body)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.code(201).send({ data: r.data })
   })
 
   // ── PUT /payroll/compensation/structures/:id ──────────────────────────────────
   fastify.put('/structures/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const { id } = req.params as { id: string }
-
-    const schema = z.object({
-      name: z.string().min(1).max(200).optional(),
-      code: z.string().min(1).max(50).optional(),
-      description: z.string().optional(),
-      is_active: z.boolean().optional(),
-    })
-
-    const parsed = schema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    }
-
-    const { data, error } = await fastify.supabase
-      .from('salary_structures')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .select()
-      .single()
-
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Structure not found' })
-
-    return reply.send({ data })
+    const r = await updateStructure(fastify.supabase, req.tenantId, req.params.id, req.body)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.send({ data: r.data })
   })
 
   // ── GET /payroll/compensation/structures/:id/components ───────────────────────
   fastify.get('/structures/:id/components', hrAdminAuth, async (req: any, reply) => {
+    const r = await listStructureComponents(fastify.supabase, req.tenantId, req.params.id)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.send({ data: r.data })
+  })
+
+  // ── POST /payroll/compensation/structures/:id/preview ────────────────────────
+  // Dry-run CTC breakup for a structure at a sample annual CTC. Reuses the SAME
+  // pure computeCompensation engine the assignment flow uses — read-only, persists
+  // nothing. Powers the live preview / sum-to-CTC validator in the builder.
+  fastify.post('/structures/:id/preview', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { data, error } = await fastify.supabase
+    const schema = z.object({
+      ctc_annual: z.number().positive('CTC must be positive'),
+      pf_enabled: z.boolean().optional(),
+      pf_capped:  z.boolean().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Structure components + the statutory flags the engine needs.
+    const { data: rows, error } = await fastify.supabase
       .from('salary_structure_components')
-      .select('*, salary_components(id, name, code, component_type)')
+      .select(`
+        calculation_type, default_value, sequence,
+        salary_components(id, name, code, component_type, is_basic, affects_pf, affects_nlc)
+      `)
       .eq('salary_structure_id', id)
       .eq('tenant_id', req.tenantId)
       .order('sequence', { ascending: true })
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    if (!rows || rows.length === 0)
+      return reply.code(400).send({ error: 'NO_COMPONENTS', message: 'Structure has no components to preview' })
+
+    const components: ComponentInput[] = rows.map((r: any) => ({
+      salary_component_id: r.salary_components?.id ?? '',
+      name:                r.salary_components?.name ?? '',
+      code:                r.salary_components?.code ?? '',
+      component_type:      r.salary_components?.component_type ?? 'earning',
+      calc_type:           r.calculation_type,
+      value:               Number(r.default_value),
+      sequence:            r.sequence ?? 0,
+      is_basic:            !!r.salary_components?.is_basic,
+      affects_pf:          !!r.salary_components?.affects_pf,
+      affects_nlc:         !!r.salary_components?.affects_nlc,
+    }))
+
+    // Tenant statutory policy (same fallback as the engine helper).
+    const { data: pol } = await fastify.supabase
+      .from('compensation_policies')
+      .select('nlc_enabled, pf_enabled, pf_employee_rate, pf_employer_rate, pf_cap_amount')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    const policy: CompensationPolicy = pol
+      ? {
+          nlc_enabled:      pol.nlc_enabled,
+          pf_enabled:       pol.pf_enabled,
+          pf_employee_rate: Number(pol.pf_employee_rate),
+          pf_employer_rate: Number(pol.pf_employer_rate),
+          pf_cap_amount:    Number(pol.pf_cap_amount),
+        }
+      : { ...DEFAULT_COMPENSATION_POLICY }
+
+    try {
+      const result = computeCompensation({
+        ctcAnnual:  parsed.data.ctc_annual,
+        components,
+        employee:   {
+          pf_enabled: parsed.data.pf_enabled ?? policy.pf_enabled,
+          pf_capped:  parsed.data.pf_capped ?? true,
+        },
+        policy,
+      })
+      // Surface the residual so the UI can flag under/over-allocation vs CTC.
+      const residual_annual = Math.round((parsed.data.ctc_annual - result.totals.gross_annual) * 100) / 100
+      return reply.send({ data: { ...result, ctc_annual: parsed.data.ctc_annual, residual_annual } })
+    } catch (e: any) {
+      return reply.code(400).send({ error: e?.code ?? 'COMPUTE_ERROR', message: e?.message ?? 'Failed to compute preview' })
+    }
   })
 
   // ── POST /payroll/compensation/structures/:id/components ──────────────────────
   fastify.post('/structures/:id/components', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const { id } = req.params as { id: string }
-
-    const schema = z.object({
-      salary_component_id: z.string().uuid(),
-      calculation_type: z.enum(['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross']),
-      default_value: z.number(),
-      sequence: z.number().int().default(0),
-    })
-
-    const parsed = schema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    }
-
-    const { data, error } = await fastify.supabase
-      .from('salary_structure_components')
-      .insert({
-        ...parsed.data,
-        salary_structure_id: id,
-        tenant_id: req.tenantId,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      if (error.code === '23505') {
-        return reply.code(409).send({ error: 'DUPLICATE_COMPONENT', message: 'Component already exists in this structure' })
-      }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
-    }
-
-    return reply.code(201).send({ data })
+    const r = await addStructureComponent(fastify.supabase, req.tenantId, req.params.id, req.body)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.code(201).send({ data: r.data })
   })
 
   // ── DELETE /payroll/compensation/structures/:id/components/:compId ────────────
   fastify.delete('/structures/:id/components/:compId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id, compId } = req.params as { id: string; compId: string }
-
-    const { error } = await fastify.supabase
-      .from('salary_structure_components')
-      .delete()
-      .eq('id', compId)
-      .eq('salary_structure_id', id)
-      .eq('tenant_id', req.tenantId)
-
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    const r = await removeStructureComponent(fastify.supabase, req.tenantId, id, compId)
+    if (r.error) return reply.code(r.status).send(r.error)
     return reply.code(204).send()
   })
 

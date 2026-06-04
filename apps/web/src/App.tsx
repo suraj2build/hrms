@@ -199,6 +199,7 @@ const PayrollPayoutReconciliationCenter  = lazy(() => import('@/pages/payroll/Pa
 // Phase 13 — Enterprise Payroll Platform
 const SalaryComponents      = lazy(() => import('@/pages/payroll/SalaryComponents').then(m => ({ default: m.SalaryComponents })))
 const CompensationMaster    = lazy(() => import('@/pages/payroll/CompensationMaster').then(m => ({ default: m.CompensationMaster })))
+const CompensationSetup     = lazy(() => import('@/pages/payroll/CompensationSetup').then(m => ({ default: m.CompensationSetup })))
 const PayrollLedger         = lazy(() => import('@/pages/payroll/PayrollLedger').then(m => ({ default: m.PayrollLedger })))
 const PayrollGovernance     = lazy(() => import('@/pages/payroll/PayrollGovernance').then(m => ({ default: m.PayrollGovernance })))
 const PayrollValidation     = lazy(() => import('@/pages/payroll/PayrollValidation').then(m => ({ default: m.PayrollValidation })))
@@ -620,6 +621,8 @@ export default function App() {
                 {/* Payroll Resolution Center */}
                 <Route path="/admin/payroll/blockers/:runId"          element={<PayrollResolutionCenter />} />
                 {/* Phase 13 Payroll */}
+                {/* Compensation Setup hub — single front door (embeds the surfaces below as tabs) */}
+                <Route path="/admin/payroll/setup"                    element={<CompensationSetup />} />
                 <Route path="/admin/payroll/salary-components"        element={<SalaryComponents />} />
                 <Route path="/admin/payroll/compensation"             element={<CompensationMaster />} />
                 <Route path="/admin/payroll/ledger"                   element={<PayrollLedger />} />

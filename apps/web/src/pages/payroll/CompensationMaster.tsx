@@ -20,7 +20,7 @@
  * Access: hr_admin / super_admin only.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Landmark, Plus, Pencil, Loader2, ShieldAlert,
@@ -75,6 +75,32 @@ interface SalaryComponent {
   code:           string
   component_type: ComponentType
   is_active:      boolean
+}
+
+interface CtcPreviewComponent {
+  name:           string
+  code:           string
+  component_type: ComponentType
+  monthly_amount: number
+  annual_amount:  number
+}
+
+interface CtcPreview {
+  components: CtcPreviewComponent[]
+  totals: {
+    gross_monthly:                  number
+    gross_annual:                   number
+    basic_monthly:                  number
+    deductions_monthly:             number
+    employer_contributions_monthly: number
+    net_monthly:                    number
+    net_annual:                     number
+  }
+  nlc_applied:   boolean
+  pf_applied:    boolean
+  nlc_wage_pct:  number | null
+  ctc_annual:    number
+  residual_annual: number
 }
 
 interface StructureForm {
@@ -134,6 +160,7 @@ export function CompensationMaster() {
   const [structureForm, setStructureForm]     = useState<StructureForm>(EMPTY_STRUCTURE_FORM)
   const [showAddDialog, setShowAddDialog]     = useState(false)
   const [addForm, setAddForm]                 = useState<AddComponentForm>(EMPTY_ADD_FORM)
+  const [previewCtc, setPreviewCtc]           = useState('1200000')
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -199,6 +226,21 @@ export function CompensationMaster() {
     onSuccess: () => { invalidateComponents(); invalidateStructures(); toast.success('Component removed') },
     onError: (e: Error) => toast.error('Error', { description: e.message }),
   })
+
+  const previewMutation = useMutation<{ data: CtcPreview }, Error, { ctc_annual: number }>({
+    mutationFn: (body) => api.post(`/payroll/compensation/structures/${selectedId}/preview`, body),
+    onError: (e: Error) => toast.error('Preview failed', { description: e.message }),
+  })
+
+  function runPreview() {
+    const ctc = parseFloat(previewCtc)
+    if (!ctc || ctc <= 0) { toast.error('Enter a valid annual CTC'); return }
+    previewMutation.mutate({ ctc_annual: ctc })
+  }
+
+  // Reset preview when switching structures so stale numbers never linger
+  useEffect(() => { previewMutation.reset() }, [selectedId])  // eslint-disable-line react-hooks/exhaustive-deps
+  const previewResult = previewMutation.data?.data ?? null
 
   // ── Form helpers ─────────────────────────────────────────────────────────────
 
@@ -573,6 +615,122 @@ export function CompensationMaster() {
                     </span>
                   </div>
                 </>
+              )}
+            </SectionCard>
+          )}
+
+          {/* ── Live CTC Preview ─────────────────────────────────────────── */}
+          {selectedId && sortedComponents.length > 0 && (
+            <SectionCard
+              className="mt-4"
+              title="Live CTC Preview"
+              icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+              action={
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number" min={0} value={previewCtc}
+                    onChange={e => setPreviewCtc(e.target.value)}
+                    className="h-8 w-36 text-xs"
+                    placeholder="Annual CTC"
+                  />
+                  <Button size="sm" className="h-8 text-xs" onClick={runPreview}
+                    disabled={previewMutation.isPending}>
+                    {previewMutation.isPending
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                      : <Settings2 className="h-3.5 w-3.5 mr-1" />}
+                    Preview
+                  </Button>
+                </div>
+              }
+            >
+              {!previewResult ? (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  Enter a sample annual CTC and click Preview to see the derived breakup using the
+                  same engine that computes employee compensation. Nothing is saved.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Sum-to-CTC validator */}
+                  {(() => {
+                    const residual = previewResult.residual_annual
+                    const within   = Math.abs(residual) <= 1
+                    return (
+                      <div className={cn(
+                        'flex items-start gap-2 rounded-md px-3 py-2 text-xs border',
+                        within
+                          ? 'border-success/40 bg-success/10 text-foreground'
+                          : 'border-warning/40 bg-warning/10 text-foreground',
+                      )}>
+                        {within ? <Check className="h-4 w-4 text-success mt-0.5 shrink-0" />
+                                : <X className="h-4 w-4 text-warning mt-0.5 shrink-0" />}
+                        <span>
+                          {within
+                            ? `Earnings sum to CTC (₹${previewResult.totals.gross_annual.toLocaleString('en-IN')}/yr). Balanced.`
+                            : residual > 0
+                              ? `Under-allocated by ₹${residual.toLocaleString('en-IN')}/yr — add a Balance / Special Allowance component to absorb the residual.`
+                              : `Over-allocated by ₹${Math.abs(residual).toLocaleString('en-IN')}/yr — earnings exceed CTC. Reduce a component.`}
+                        </span>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Totals strip */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Gross / mo',     value: previewResult.totals.gross_monthly },
+                      { label: 'Deductions / mo', value: previewResult.totals.deductions_monthly },
+                      { label: 'Employer / mo',   value: previewResult.totals.employer_contributions_monthly },
+                      { label: 'Net take-home / mo', value: previewResult.totals.net_monthly, highlight: true },
+                    ].map(s => (
+                      <div key={s.label} className={cn(
+                        'rounded-md border border-border p-2.5',
+                        s.highlight && 'border-primary/30 bg-primary/[0.04]',
+                      )}>
+                        <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                        <p className={cn('text-sm font-semibold tabular-nums',
+                          s.highlight ? 'text-primary' : 'text-foreground')}>
+                          ₹{s.value.toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* NLC / PF flags */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {previewResult.nlc_wage_pct != null && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        Basic {previewResult.nlc_wage_pct}% of gross{previewResult.nlc_applied ? ' (NLC rebalanced)' : ''}
+                      </Badge>
+                    )}
+                    {previewResult.pf_applied && (
+                      <Badge variant="secondary" className="text-[10px]">PF injected</Badge>
+                    )}
+                  </div>
+
+                  {/* Component lines */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {previewResult.components.map((c, i) => (
+                          <tr key={`${c.code}-${i}`} className="border-b border-border/40">
+                            <td className="py-1.5 pr-3">
+                              <span className="flex items-center gap-1.5">
+                                <TypeIcon type={c.component_type} />
+                                {c.name}
+                              </span>
+                            </td>
+                            <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                              ₹{c.monthly_amount.toLocaleString('en-IN')}/mo
+                            </td>
+                            <td className="py-1.5 pl-3 text-right tabular-nums">
+                              ₹{c.annual_amount.toLocaleString('en-IN')}/yr
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </SectionCard>
           )}

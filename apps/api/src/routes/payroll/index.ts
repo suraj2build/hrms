@@ -22,11 +22,44 @@ import { EventType, MODULE } from '../../platform/events/index.js'
 import {
   computePayrollSlip,
   countWorkingDaysInMonth,
+  countWorkingDaysForEmployee,
   fetchAttendanceSummary,
   fetchActiveCompensation,
   round2,
   type PayrollSlipResult,
 } from '../../lib/payroll-engine.js'
+import { resolveEmployeeStatutoryParams } from '../../lib/statutory/statutory-governance.js'
+import { applyStatutoryToSlip } from '../../lib/statutory-payroll.js'
+
+/**
+ * Compute a payroll slip with two corrections layered on the base engine:
+ *   1. Roster-aware LOP denominator — recompute total_working_days PER EMPLOYEE
+ *      so it matches the per-employee weekly-off used for day_fraction (fixes the
+ *      Sat/Sun-hardcoded denominator vs roster-numerator mismatch). Falls back to
+ *      the tenant-level total in `args` if resolution fails.
+ *   2. Config-driven statutory — recompute PF/ESI/PT via the engines (TDS stays
+ *      on the tax-governance flow). Returns the base slip unchanged when the
+ *      employee has no compensation/components to act on.
+ */
+async function computeSlipWithStatutory(
+  supabase: any,
+  tenantId: string,
+  args: Parameters<typeof computePayrollSlip>[0],
+  month: string,
+): Promise<PayrollSlipResult> {
+  let slipArgs = args
+  try {
+    const empWorkingDays = await countWorkingDaysForEmployee(supabase, tenantId, args.employeeId, month)
+    if (empWorkingDays > 0) slipArgs = { ...args, total_working_days: empWorkingDays }
+  } catch {
+    // Roster resolution failed — keep the tenant-level denominator already in args.
+  }
+  const base = computePayrollSlip(slipArgs)
+  if (!base.component_breakdown.length) return base
+  const params   = await resolveEmployeeStatutoryParams(supabase, tenantId, args.employeeId, month)
+  const calMonth = Number(month.slice(5, 7))
+  return applyStatutoryToSlip(base, params, calMonth).slip
+}
 import {
   validatePayrollSlipPayload,
   validateCompensation,
@@ -420,9 +453,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             continue
           }
 
-          const result  = computePayrollSlip({
+          const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, {
             tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days,
-          })
+          }, month)
           const slipRow    = buildSlipRow(tenantId, 'dry-run', result, month)
           const slipValid  = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
 
@@ -597,15 +630,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           )
         }
 
-        // ── Stage 3: Compute slip ─────────────────────────────────────────
-        const result = computePayrollSlip({
+        // ── Stage 3: Compute slip (+ config-driven statutory PF/ESI/PT) ────
+        const result = await computeSlipWithStatutory(fastify.supabase, tenantId, {
           tenantId,
           employeeId: emp.id,
           month,
           compensation,
           attendance,
           total_working_days,
-        })
+        }, month)
 
         // ── Stage 4: Validate slip payload before insert ──────────────────
         const slipRow  = buildSlipRow(tenantId, runId, result, month)
@@ -1250,14 +1283,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
               fetchAttendanceSummary(fastify.supabase, tenantId, employeeId, run.month as string),
             ])
 
-            const freshSlip = computePayrollSlip({
+            const freshSlip = await computeSlipWithStatutory(fastify.supabase, tenantId, {
               tenantId,
               employeeId,
               month:              run.month as string,
               compensation,
               attendance,
               total_working_days,
-            })
+            }, run.month as string)
 
             // 3. Update the existing draft slip in place
             await fastify.supabase
@@ -2054,7 +2087,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           continue
         }
 
-        const result  = computePayrollSlip({ tenantId, employeeId: emp.id, month: run.month, compensation, attendance, total_working_days })
+        const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, { tenantId, employeeId: emp.id, month: run.month, compensation, attendance, total_working_days }, run.month)
         const slipRow = buildSlipRow(tenantId, id, result, run.month)
         const slipVal = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month: run.month })
 
