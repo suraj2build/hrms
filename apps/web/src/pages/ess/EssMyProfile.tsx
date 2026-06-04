@@ -15,6 +15,7 @@
 
 import { useState, useMemo }               from 'react'
 import { Link, useNavigate }               from 'react-router-dom'
+import { SignedImage }                     from '@/components/SignedImage'
 import { useQuery, useQueryClient }        from '@tanstack/react-query'
 import { toast }                           from 'sonner'
 import {
@@ -224,17 +225,16 @@ function ProfileHero({ data }: { data: ProfileData }) {
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
 
         {/* Avatar */}
-        {pers?.profile_photo ? (
-          <img
-            src={pers.profile_photo}
-            alt={fullName}
-            className="w-20 h-20 rounded-full object-cover ring-2 ring-primary/20 flex-shrink-0"
-          />
-        ) : (
-          <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-primary font-bold text-2xl">{initials}</span>
-          </div>
-        )}
+        <SignedImage
+          path={pers?.profile_photo}
+          alt={fullName}
+          className="w-20 h-20 rounded-full object-cover ring-2 ring-primary/20 flex-shrink-0"
+          fallback={
+            <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center flex-shrink-0">
+              <span className="text-primary font-bold text-2xl">{initials}</span>
+            </div>
+          }
+        />
 
         {/* Identity */}
         <div className="flex-1 min-w-0">

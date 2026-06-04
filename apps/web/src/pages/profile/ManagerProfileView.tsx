@@ -17,6 +17,7 @@
 
 import { useMemo }                       from 'react'
 import { Link }                          from 'react-router-dom'
+import { SignedImage }                   from '@/components/SignedImage'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast }                         from 'sonner'
 import {
@@ -366,17 +367,16 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
         {/* ── Employee identity card ──────────────────────────────────── */}
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start gap-3">
-            {pers?.profile_photo ? (
-              <img
-                src={pers.profile_photo}
-                alt={fullName}
-                className="w-14 h-14 rounded-full object-cover ring-2 ring-border flex-shrink-0"
-              />
-            ) : (
-              <div className="w-14 h-14 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-primary font-bold text-lg">{initials}</span>
-              </div>
-            )}
+            <SignedImage
+              path={pers?.profile_photo}
+              alt={fullName}
+              className="w-14 h-14 rounded-full object-cover ring-2 ring-border flex-shrink-0"
+              fallback={
+                <div className="w-14 h-14 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center flex-shrink-0">
+                  <span className="text-primary font-bold text-lg">{initials}</span>
+                </div>
+              }
+            />
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2 mb-0.5">
                 <p className="text-sm font-bold text-foreground">{fullName}</p>

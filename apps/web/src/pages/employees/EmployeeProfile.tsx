@@ -47,6 +47,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter } from '@/components/ui/sheet'
 import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
+import { SignedImage } from '@/components/SignedImage'
 import {
   PFModeBadge,
   ESIStatusBadge,
@@ -1561,16 +1562,12 @@ export function EmployeeProfile() {
           <div className="flex justify-center -mt-14 relative z-10 px-5">
             <div className="relative">
               <div className="h-28 w-28 rounded-2xl ring-[3px] ring-card bg-muted border border-border/50 flex items-center justify-center overflow-hidden shadow-lg">
-                {pi?.profile_photo ? (
-                  <img
-                    src={pi.profile_photo}
-                    alt={`${emp.first_name} ${emp.last_name}`}
-                    className="h-full w-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span className="text-3xl font-black text-primary tracking-tight select-none">{initials}</span>
-                )}
+                <SignedImage
+                  path={pi?.profile_photo}
+                  alt={`${emp.first_name} ${emp.last_name}`}
+                  className="h-full w-full object-cover"
+                  fallback={<span className="text-3xl font-black text-primary tracking-tight select-none">{initials}</span>}
+                />
               </div>
               {photoMutation.isPending && (
                 <div className="absolute inset-0 rounded-2xl bg-background/80 backdrop-blur-sm flex items-center justify-center">

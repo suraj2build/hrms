@@ -12,6 +12,7 @@
 
 import { useState, useMemo, memo } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
+import { SignedImage } from '@/components/SignedImage'
 import { useQuery }          from '@tanstack/react-query'
 import {
   Search, Download, UserPlus, Building2, MapPin,
@@ -726,10 +727,12 @@ function EmployeeRow({
       <td style={{ padding: '8px 10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatar.bg, color: avatar.color, display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
-            {emp.personal_info?.profile_photo
-              ? <img src={emp.personal_info.profile_photo} alt={initials} style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
-              : initials
-            }
+            <SignedImage
+              path={emp.personal_info?.profile_photo}
+              alt={initials}
+              style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }}
+              fallback={<>{initials}</>}
+            />
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
