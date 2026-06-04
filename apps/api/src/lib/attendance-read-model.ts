@@ -209,12 +209,14 @@ export function computeEmployeeSummary(
     else if (s === 'overtime')                      overtime++
     else if (s === 'missing_punch' || s === 'no_punch') missing_punch++
 
-    // Payable days
-    if (s === 'half_day')            payable_days += 0.5
-    else if (PAYABLE_STATUSES.has(s)) payable_days += 1.0
-
-    // LOP days
-    if (LOP_STATUSES.has(s)) lop_days += 1
+    // Payable / LOP days — derive from day_fraction to MATCH the payroll engine
+    // (payroll-engine.fetchAttendanceSummary uses the same rule), so dashboards
+    // and payslips agree. null day_fraction → treated as full present (1.0), same
+    // as payroll. This replaces the old status-set logic which diverged from pay
+    // (e.g. 'leave' was counted as neither payable nor LOP).
+    const frac = r.day_fraction ?? 1.0
+    payable_days += frac
+    lop_days     += Math.max(0, 1 - frac)
 
     // Work metrics
     total_work_hrs += r.work_hours
@@ -229,7 +231,7 @@ export function computeEmployeeSummary(
     present, late, absent, on_leave, half_day,
     holiday, weekly_off, overtime, missing_punch,
     payable_days: Math.round(payable_days * 100) / 100,
-    lop_days,
+    lop_days:     Math.round(lop_days * 100) / 100,
     total_work_hrs: Math.round(total_work_hrs * 100) / 100,
     total_late_min,
     total_ovt_min,
