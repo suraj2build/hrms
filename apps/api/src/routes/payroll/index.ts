@@ -1163,17 +1163,22 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const draftEmpIds = (draftSlips ?? []).map((s: { employee_id: string }) => s.employee_id)
 
       if (draftEmpIds.length > 0) {
-        // Which of these employees have at least one attendance_daily row?
+        // Which of these employees have at least one PROCESSED attendance_daily row?
+        // A row with NULL day_fraction is unprocessed (engine never ran) and would
+        // be treated as full-present (0 LOP) by payroll — so it must NOT count as
+        // valid attendance here, else stale rows finalize silently at full pay.
         const { data: attRows } = await fastify.supabase
           .from('attendance_daily')
-          .select('employee_id')
+          .select('employee_id, day_fraction')
           .eq('tenant_id', tenantId)
           .in('employee_id', draftEmpIds)
           .gte('date', monthStart)
           .lte('date', monthEnd)
 
         const hasAttendance = new Set(
-          (attRows ?? []).map((r: { employee_id: string }) => r.employee_id)
+          (attRows ?? [])
+            .filter((r: { day_fraction: number | null }) => r.day_fraction !== null)
+            .map((r: { employee_id: string }) => r.employee_id)
         )
         const missingIds = draftEmpIds.filter(eid => !hasAttendance.has(eid))
 
@@ -1233,6 +1238,35 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
               }
             })
         }
+      }
+    }
+
+    // ── Open-blockers gate ────────────────────────────────────────────────────────
+    // Do not finalize a run that still has open, blocking issues (compensation
+    // coverage, validation failures, etc.). Overridable with force_finalize.
+    {
+      const { data: openBlockers } = await fastify.supabase
+        .from('payroll_run_blockers')
+        .select('id, severity, reason, message')
+        .eq('tenant_id', tenantId)
+        .eq('run_id', id)
+        .eq('status', 'open')
+        .eq('blocking', true)
+
+      if ((openBlockers?.length ?? 0) > 0 && !force_finalize) {
+        return reply.code(422).send({
+          error:   'OPEN_BLOCKERS',
+          message: `${openBlockers!.length} unresolved blocking issue(s) on this run. ` +
+                   'Resolve them, or pass force_finalize=true with an override_reason.',
+          blocker_count: openBlockers!.length,
+          blockers: openBlockers!.slice(0, 20),
+        })
+      }
+      if ((openBlockers?.length ?? 0) > 0 && force_finalize) {
+        req.log.warn(
+          { run_id: id, month: run.month, overridden_by: req.userId, override_reason: override_reason ?? '(none)', blocker_count: openBlockers!.length },
+          'payroll finalization override: proceeding despite open blockers',
+        )
       }
     }
 
@@ -3512,6 +3546,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   fastify.post('/payroll/runs/:id/payout-obligations', hrAdminAuth, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
+
+    // Guard: payout obligations (bank disbursement) must be built from FINALIZED
+    // slips only — never from mutable draft net_pay.
+    const { data: runRow } = await fastify.supabase
+      .from('payroll_runs').select('status').eq('id', id).eq('tenant_id', tenantId).maybeSingle()
+    if (!runRow) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payroll run not found' })
+    if ((runRow as any).status !== 'finalized') {
+      return reply.code(409).send({
+        error: 'NOT_FINALIZED',
+        message: `Run must be finalized before generating payout obligations (current status: ${(runRow as any).status}).`,
+      })
+    }
 
     // Check if obligations already exist
     const { count: existing } = await fastify.supabase
