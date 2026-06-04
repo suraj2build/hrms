@@ -71,6 +71,34 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       }
     }
 
+    // Resolve rotation policy (employee override → site default)
+    const { data: empRow } = await fastify.supabase
+      .from('employees')
+      .select('rotation_policy_id')
+      .eq('id', employeeId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    const empRotationId = (empRow as any)?.rotation_policy_id ?? null
+    const { data: siteRotRow } = orgCtx.site_id
+      ? await fastify.supabase.from('sites').select('default_rotation_policy_id').eq('id', orgCtx.site_id).maybeSingle()
+      : { data: null as any }
+    const siteRotationId = (siteRotRow as any)?.default_rotation_policy_id ?? null
+    const effectiveRotationId = empRotationId ?? siteRotationId
+    let   rotation_policy: { id: string; name: string } | null = null
+    let   rotation_source: 'employee' | 'site' | null = null
+    if (effectiveRotationId) {
+      const { data: rp } = await fastify.supabase
+        .from('rotation_policies')
+        .select('id, name')
+        .eq('id', effectiveRotationId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (rp) {
+        rotation_policy = rp as any
+        rotation_source = empRotationId ? 'employee' : 'site'
+      }
+    }
+
     // Upcoming holidays (next 5 applicable to this employee)
     const futureEnd = new Date()
     futureEnd.setMonth(futureEnd.getMonth() + 3)
@@ -101,10 +129,13 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       data: {
         site,
         roster,
-        roster_source:     rosterSource,
-        effective_from:    histRow?.effective_from ?? null,
-        source:            histRow ? 'history' : 'employee',
-        upcoming_holidays: upcomingHols,
+        roster_source:        rosterSource,
+        rotation_policy,
+        rotation_source,
+        rotation_policy_id:   empRotationId,   // employee's own override (null = inherit site default)
+        effective_from:       histRow?.effective_from ?? null,
+        source:               histRow ? 'history' : 'employee',
+        upcoming_holidays:    upcomingHols,
       },
     })
   })
@@ -117,12 +148,13 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
     const employeeId = (req.params as any).id
     const bodySchema = z.object({
-      site_id:          z.string().uuid().nullable().optional(),
-      roster_id:        z.string().uuid().nullable().optional(),
-      work_location_id: z.string().uuid().nullable().optional(),
-      cost_center_id:   z.string().uuid().nullable().optional(),
-      effective_from:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      reason:           z.string().max(500).nullable().optional(),
+      site_id:            z.string().uuid().nullable().optional(),
+      roster_id:          z.string().uuid().nullable().optional(),
+      rotation_policy_id: z.string().uuid().nullable().optional(),
+      work_location_id:   z.string().uuid().nullable().optional(),
+      cost_center_id:     z.string().uuid().nullable().optional(),
+      effective_from:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      reason:             z.string().max(500).nullable().optional(),
     })
 
     const parsed = bodySchema.safeParse(req.body)
@@ -139,7 +171,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const { site_id, roster_id, work_location_id, cost_center_id, effective_from, reason } = parsed.data
+    const { site_id, roster_id, rotation_policy_id, work_location_id, cost_center_id, effective_from, reason } = parsed.data
 
     // Close the current assignment (if any)
     const prevDay = new Date(`${effective_from}T12:00:00.000Z`)
@@ -168,10 +200,16 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
-    // Mirror site+roster to employees table for quick lookups
+    // Mirror site + roster + rotation policy to employees table for quick lookups.
+    // rotation_policy_id is only written when explicitly provided (undefined =
+    // leave as-is, null = clear → fall back to the site default rotation policy).
     await fastify.supabase
       .from('employees')
-      .update({ site_id: site_id ?? null, roster_id: roster_id ?? null })
+      .update({
+        site_id:   site_id   ?? null,
+        roster_id: roster_id ?? null,
+        ...(rotation_policy_id !== undefined ? { rotation_policy_id: rotation_policy_id ?? null } : {}),
+      })
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
 

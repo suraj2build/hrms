@@ -963,9 +963,12 @@ export function EmployeeProfile() {
 
   // ── Org context ────────────────────────────────────────────────────────────
   interface OrgContextData {
-    site:              { id: string; name: string; timezone: string } | null
-    roster:            { id: string; name: string; cycle_days: number } | null
-    roster_source:     'employee' | 'site' | null
+    site:               { id: string; name: string; timezone: string } | null
+    roster:             { id: string; name: string; cycle_days: number } | null
+    roster_source:      'employee' | 'site' | null
+    rotation_policy:    { id: string; name: string } | null
+    rotation_source:    'employee' | 'site' | null
+    rotation_policy_id: string | null
     effective_from:    string | null
     source:            'history' | 'employee'
     upcoming_holidays: { date: string; name: string; is_optional: boolean }[]
@@ -980,17 +983,18 @@ export function EmployeeProfile() {
   const orgCtx = orgCtxData?.data
 
   const [orgDlgOpen, setOrgDlgOpen] = useState(false)
-  const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', work_location_id: '', cost_center_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
+  const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', rotation_policy_id: '', work_location_id: '', cost_center_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
 
   const orgMutation = useMutation({
     mutationFn: (body: typeof orgForm) =>
       api.post(`/employees/${id}/org-context`, {
-        site_id:          body.site_id          || null,
-        roster_id:        body.roster_id        || null,
-        work_location_id: body.work_location_id || null,
-        cost_center_id:   body.cost_center_id   || null,
-        effective_from:   body.effective_from,
-        reason:           body.reason           || null,
+        site_id:            body.site_id            || null,
+        roster_id:          body.roster_id          || null,
+        rotation_policy_id: body.rotation_policy_id || null,
+        work_location_id:   body.work_location_id   || null,
+        cost_center_id:     body.cost_center_id     || null,
+        effective_from:     body.effective_from,
+        reason:             body.reason             || null,
       }),
     onSuccess: () => { setOrgDlgOpen(false); refetchOrgCtx(); qc.invalidateQueries({ queryKey: ['job-current', id] }); toast.success('Organisation context updated') },
     onError:   (e: Error) => toast.error('Failed to update org context', { description: e.message }),
@@ -1008,8 +1012,15 @@ export function EmployeeProfile() {
     enabled:  orgDlgOpen,
     staleTime: 120_000,
   })
-  const sitesList   = sitesListData?.data   ?? []
-  const rostersList = rostersListData?.data ?? []
+  const { data: rotationListData } = useQuery<{ data: { id: string; name: string }[] }>({
+    queryKey: ['rotation-policies-list'],
+    queryFn:  () => api.get('/masters/rotation-policies'),
+    enabled:  orgDlgOpen,
+    staleTime: 120_000,
+  })
+  const sitesList    = sitesListData?.data    ?? []
+  const rostersList  = rostersListData?.data  ?? []
+  const rotationList = rotationListData?.data ?? []
 
   // ── Operational assignment state ──────────────────────────────────────────
   type AssignTarget =
@@ -2359,12 +2370,13 @@ export function EmployeeProfile() {
                         <button
                           onClick={() => {
                             setOrgForm({
-                              site_id:          orgCtx?.site?.id          ?? '',
-                              roster_id:        orgCtx?.roster?.id        ?? '',
-                              work_location_id: job?.work_locations?.id   ?? '',
-                              cost_center_id:   job?.cost_center?.id       ?? '',
-                              effective_from:   new Date().toISOString().slice(0, 10),
-                              reason:           '',
+                              site_id:            orgCtx?.site?.id          ?? '',
+                              roster_id:          orgCtx?.roster?.id        ?? '',
+                              rotation_policy_id: orgCtx?.rotation_policy_id ?? '',
+                              work_location_id:   job?.work_locations?.id   ?? '',
+                              cost_center_id:     job?.cost_center?.id       ?? '',
+                              effective_from:     new Date().toISOString().slice(0, 10),
+                              reason:             '',
                             })
                             setOrgDlgOpen(true)
                           }}
@@ -2388,6 +2400,12 @@ export function EmployeeProfile() {
                         {orgCtx?.roster
                           ? <><p className="text-sm font-medium">{orgCtx.roster.name}</p><p className="text-xs text-muted-foreground">{orgCtx.roster.cycle_days}-day cycle{orgCtx.roster_source === 'site' ? ' · inherited from site' : ''}</p></>
                           : <p className="text-sm text-muted-foreground">No roster</p>}
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-0.5">Rotation Policy</p>
+                        {orgCtx?.rotation_policy
+                          ? <><p className="text-sm font-medium">{orgCtx.rotation_policy.name}</p><p className="text-xs text-muted-foreground">{orgCtx.rotation_source === 'site' ? 'inherited from site' : 'employee-specific'}</p></>
+                          : <p className="text-sm text-muted-foreground">None</p>}
                       </div>
                     </Grid2>
                   </CardContent>
@@ -2696,12 +2714,13 @@ export function EmployeeProfile() {
                     {isAdmin && (
                       <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
                         setOrgForm({
-                          site_id:          orgCtx?.site?.id          ?? '',
-                          roster_id:        orgCtx?.roster?.id        ?? '',
-                          work_location_id: job?.work_locations?.id   ?? '',
-                          cost_center_id:   job?.cost_center?.id      ?? '',
-                          effective_from:   new Date().toISOString().slice(0, 10),
-                          reason:           '',
+                          site_id:            orgCtx?.site?.id          ?? '',
+                          roster_id:          orgCtx?.roster?.id        ?? '',
+                          rotation_policy_id: orgCtx?.rotation_policy_id ?? '',
+                          work_location_id:   job?.work_locations?.id   ?? '',
+                          cost_center_id:     job?.cost_center?.id      ?? '',
+                          effective_from:     new Date().toISOString().slice(0, 10),
+                          reason:             '',
                         })
                         setOrgDlgOpen(true)
                       }}>
@@ -2812,6 +2831,14 @@ export function EmployeeProfile() {
                         className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
                         <option value="">— None —</option>
                         {rostersList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Rotation Policy</label>
+                      <select value={orgForm.rotation_policy_id} onChange={(e) => setOrgForm((p) => ({ ...p, rotation_policy_id: e.target.value }))}
+                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                        <option value="">— Inherit from site default —</option>
+                        {rotationList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
