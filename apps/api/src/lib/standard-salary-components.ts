@@ -19,7 +19,7 @@
  */
 
 export type StdComponentType = 'earning' | 'deduction' | 'employer_contribution'
-export type StdCalcType = 'fixed' | 'pct_of_basic' | 'pct_of_ctc' | 'pct_of_gross'
+export type StdCalcType = 'fixed' | 'pct_of_basic' | 'pct_of_ctc' | 'pct_of_gross' | 'balance'
 
 export interface StandardComponent {
   code:               string

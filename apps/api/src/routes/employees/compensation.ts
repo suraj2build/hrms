@@ -450,6 +450,21 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       }
     }).filter(r => r.salary_component_id)  // drop if PF ID resolution failed
 
+    // ── Supersede the prior active compensation ───────────────────────────────
+    // Only one active compensation per employee is allowed (uidx_comp_one_active).
+    // Deactivate the current active record before inserting the new one so an
+    // update/revision doesn't collide with the unique index (history preserved).
+    if (compensationData.is_active) {
+      const { error: supersedeErr } = await fastify.supabase
+        .from('employee_compensations')
+        .update({ is_active: false })
+        .eq('tenant_id',  req.tenantId)
+        .eq('employee_id', req.params.id)
+        .eq('is_active', true)
+      if (supersedeErr)
+        return reply.code(500).send({ error: 'DB_ERROR', message: supersedeErr.message })
+    }
+
     // ── Insert compensation header ─────────────────────────────────────────────
     const { data: comp, error: compErr } = await fastify.supabase
       .from('employee_compensations')
