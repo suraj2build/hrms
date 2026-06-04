@@ -294,6 +294,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     // 1. Active compensation IDs
     const pfBaseMap = new Map<string, number>()
     let wagesFromPfComponents = 0
+    let wagesFromSlip         = 0
     let wagesFallbackCount   = 0
 
     if (empList.length > 0) {
@@ -326,10 +327,18 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // 3. LOP fractions from finalized payslips (payable_days / total_working_days)
+    // 3. Finalized payslips — the AUTHORITATIVE PF wage base.
+    //
+    // PF-base unify (H3): the live payroll run derives PF wages from the slip's
+    // PF-applicable EARNINGS (already LOP-prorated by the day_fraction engine —
+    // see statutory-payroll.applyStatutoryToSlip). To make statutory filing
+    // reconcile EXACTLY against the slip (no linear-LOP drift), we mirror that
+    // here: sum is_pf_applicable / affects_pf earnings from the slip's stored
+    // component_breakdown. The master × linear-LOP path below is a FALLBACK only
+    // for employees with no finalized slip.
     const { data: lopSlipRows } = await fastify.supabase
       .from('payroll_slips')
-      .select('employee_id, total_working_days, payable_days')
+      .select('employee_id, total_working_days, payable_days, component_breakdown')
       .eq('tenant_id', req.tenantId)
       .eq('month', month)
       .eq('status', 'finalized')
@@ -341,18 +350,37 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       ]),
     )
 
+    // PF wages straight off the finalized slip's PF-applicable earnings —
+    // the same base the live run used for PF_EMPLOYEE / PF_EMPLOYER lines.
+    const slipPfWagesMap = new Map<string, number>()
+    for (const r of (lopSlipRows ?? []) as any[]) {
+      const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
+      const pfWages = breakdown
+        .filter((c: any) =>
+          c?.component_type === 'earning' && (c?.is_pf_applicable || c?.affects_pf))
+        .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
+      slipPfWagesMap.set(r.employee_id, Math.round(pfWages * 100) / 100)
+    }
+
     // Compute EPF for each employee
     const contributions = empList.map(emp => {
       const eligibility = eligibilityMap.get(emp.id)
 
-      // PF wages = sum of PF-applicable components × LOP fraction.
-      // Fallback to wageCeiling (with LOP fraction) when no compensation found.
-      const pfBase     = pfBaseMap.get(emp.id) ?? config.wageCeiling
-      const lopFraction = lopFractionMap.get(emp.id) ?? 1.0
-      const rawWages   = Math.round(pfBase * lopFraction * 100) / 100
-
-      if (pfBaseMap.has(emp.id)) wagesFromPfComponents++
-      else                       wagesFallbackCount++
+      // PF wages — authoritative source priority:
+      //   1. Finalized slip's PF-applicable earnings (already LOP-adjusted) — matches the run.
+      //   2. Fallback: master PF components × linear LOP fraction (no slip yet).
+      //   3. Fallback: statutory wage ceiling × LOP fraction (no compensation).
+      let rawWages: number
+      if (slipPfWagesMap.has(emp.id)) {
+        rawWages = slipPfWagesMap.get(emp.id)!
+        wagesFromSlip++
+      } else {
+        const pfBase      = pfBaseMap.get(emp.id) ?? config.wageCeiling
+        const lopFraction = lopFractionMap.get(emp.id) ?? 1.0
+        rawWages = Math.round(pfBase * lopFraction * 100) / 100
+        if (pfBaseMap.has(emp.id)) wagesFromPfComponents++
+        else                       wagesFallbackCount++
+      }
 
       const isExempt       = eligibility?.is_exempt               ?? false
       const isApplicable   = isExempt ? false : (eligibility?.is_epf_applicable ?? true)
@@ -411,6 +439,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     return reply.send({
       computed_count:          contributions.length,
       // Wage source breakdown for auditability
+      wages_from_slip:          wagesFromSlip,
       wages_from_pf_components: wagesFromPfComponents,
       wages_fallback:           wagesFallbackCount,
       month,
