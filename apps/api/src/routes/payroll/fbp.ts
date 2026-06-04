@@ -164,6 +164,19 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
+  // ── List attachments for a submission (ESS sees own; HR sees all via RLS) ─────
+  fastify.get('/submissions/:id/attachments', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data, error } = await fastify.supabase
+      .from('fbp_bill_attachments')
+      .select('id, file_name, storage_path, mime_type, file_size_bytes, uploaded_at')
+      .eq('tenant_id', req.tenantId)
+      .eq('submission_id', id)
+      .order('uploaded_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
   // ── HR: list submissions ─────────────────────────────────────────────────────
   fastify.get('/submissions', hrAuth, async (req: any, reply) => {
     const qs = z.object({

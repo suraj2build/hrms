@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  computeFbpTaxable, quarterMonths, monthToQuarter, fyStartYear, sumComponentPaid,
+  computeFbpTaxable, quarterMonths, cumulativeMonths, monthToQuarter, fyStartYear, sumComponentPaid,
 } from '../fbp-reconciliation.js'
 
 describe('computeFbpTaxable', () => {
@@ -51,6 +51,22 @@ describe('quarterMonths (Indian FY)', () => {
   })
   it('rejects invalid quarter', () => {
     expect(() => quarterMonths('2026-27', 5)).toThrow()
+  })
+})
+
+describe('cumulativeMonths (YTD)', () => {
+  it('Q1 → 3 months', () => {
+    expect(cumulativeMonths('2026-27', 1)).toEqual(['2026-04', '2026-05', '2026-06'])
+  })
+  it('Q2 → 6 months (Apr–Sep)', () => {
+    expect(cumulativeMonths('2026-27', 2)).toHaveLength(6)
+    expect(cumulativeMonths('2026-27', 2)[5]).toBe('2026-09')
+  })
+  it('Q4 → all 12 months', () => {
+    const ms = cumulativeMonths('2026-27', 4)
+    expect(ms).toHaveLength(12)
+    expect(ms[0]).toBe('2026-04')
+    expect(ms[11]).toBe('2027-03')
   })
 })
 

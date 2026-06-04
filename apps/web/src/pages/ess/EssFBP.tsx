@@ -8,7 +8,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Receipt, Loader2, Plus, Send } from 'lucide-react'
+import { Receipt, Loader2, Plus, Send, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -18,6 +18,8 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
+import { useAuthStore }  from '@/stores/authStore'
+import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
 
 interface RComponent { id: string; name: string; code: string; is_reimbursement?: boolean }
 interface Submission {
@@ -45,11 +47,14 @@ const STATUS_CLS: Record<string, string> = {
 
 export function EssFBP() {
   const qc = useQueryClient()
+  const { profile } = useAuthStore()
   const [fy, setFy] = useState(currentFY())
   const [quarter, setQuarter] = useState(1)
   const [componentId, setComponentId] = useState('')
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
 
   const compQ = useQuery<{ data: RComponent[] }>({
     queryKey: ['ess-fbp-components'],
@@ -67,33 +72,54 @@ export function EssFBP() {
   })
   const submissions = subsQ.data?.data ?? []
 
-  const create = useMutation({
-    mutationFn: (body: object) => api.post('/payroll/fbp/my', body),
-    onSuccess: (res: any) => {
-      // Auto-submit the freshly created draft so HR sees it immediately.
-      const id = res?.data?.id
-      if (id) submitOne.mutate(id)
-      else { toast.success('Bill saved'); reset() }
+  function reset() { setComponentId(''); setAmount(''); setDescription(''); setFiles([]) }
+
+  // Upload each selected bill to storage, then record its metadata on the submission.
+  async function uploadAttachments(submissionId: string) {
+    if (files.length === 0) return
+    if (!profile?.tenant_id || !profile?.employee_id) {
+      toast.error('Profile not linked — cannot attach bills'); return
+    }
+    for (const file of files) {
+      const path = await uploadEmployeeFile(profile.tenant_id, profile.employee_id, 'documents', file)
+      await api.post(`/payroll/fbp/my/${submissionId}/attachments`, {
+        file_name: file.name,
+        storage_path: path,
+        mime_type: file.type || undefined,
+        file_size_bytes: file.size,
+      })
+    }
+  }
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      // 1) create draft → 2) upload + attach bills → 3) submit to HR
+      const res: any = await api.post('/payroll/fbp/my', {
+        salary_component_id: componentId,
+        financial_year: fy,
+        quarter,
+        amount: Number(amount),
+        description: description || undefined,
+      })
+      const id = res?.data?.id as string
+      if (!id) throw new Error('Submission was not created')
+      setUploading(true)
+      try { await uploadAttachments(id) } finally { setUploading(false) }
+      await api.post(`/payroll/fbp/my/${id}/submit`, {})
     },
-    onError: (e: Error) => toast.error('Failed to save', { description: e.message }),
-  })
-  const submitOne = useMutation({
-    mutationFn: (id: string) => api.post(`/payroll/fbp/my/${id}/submit`, {}),
-    onSuccess: () => { toast.success('Bill submitted to HR'); reset(); qc.invalidateQueries({ queryKey: ['ess-fbp-my'] }) },
-    onError: (e: Error) => toast.error('Submit failed', { description: e.message }),
+    onSuccess: () => {
+      toast.success('Bill submitted to HR')
+      reset()
+      qc.invalidateQueries({ queryKey: ['ess-fbp-my'] })
+    },
+    onError: (e: Error) => { setUploading(false); toast.error('Submit failed', { description: e.message }) },
   })
 
-  function reset() { setComponentId(''); setAmount(''); setDescription('') }
   function handleSubmit() {
     if (!componentId || !amount || Number(amount) <= 0) { toast.error('Pick a component and enter an amount'); return }
-    create.mutate({
-      salary_component_id: componentId,
-      financial_year: fy,
-      quarter,
-      amount: Number(amount),
-      description: description || undefined,
-    })
+    submit.mutate()
   }
+  const busy = submit.isPending || uploading
 
   return (
     <PageContainer>
@@ -142,14 +168,33 @@ export function EssFBP() {
           </div>
         )}
         {components.length > 0 && (
-          <div className="mt-4">
-            <Button size="sm" onClick={handleSubmit} disabled={create.isPending || submitOne.isPending}>
-              {(create.isPending || submitOne.isPending)
-                ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                : <Send className="h-4 w-4 mr-1.5" />}
-              Submit Bill
-            </Button>
-          </div>
+          <>
+            {/* Bill attachments */}
+            <div className="mt-4 space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <Paperclip className="h-3.5 w-3.5" /> Attach bills (PDF / image)
+              </label>
+              <input
+                type="file" multiple accept="image/*,application/pdf"
+                onChange={e => setFiles(Array.from(e.target.files ?? []))}
+                className="block text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium hover:file:bg-muted/70"
+              />
+              {files.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {files.length} file{files.length !== 1 ? 's' : ''} selected: {files.map(f => f.name).join(', ')}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4">
+              <Button size="sm" onClick={handleSubmit} disabled={busy}>
+                {busy
+                  ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  : <Send className="h-4 w-4 mr-1.5" />}
+                {uploading ? 'Uploading bills…' : 'Submit Bill'}
+              </Button>
+            </div>
+          </>
         )}
       </SectionCard>
 

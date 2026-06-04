@@ -14,7 +14,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  computeFbpTaxable, quarterMonths, sumComponentPaid,
+  computeFbpTaxable, cumulativeMonths, sumComponentPaid,
 } from './fbp-reconciliation.js'
 
 export interface ReconciliationRow {
@@ -32,12 +32,11 @@ export interface ReconciliationRow {
 }
 
 /**
- * Compute + persist the quarter's reconciliation for every reimbursement
- * component and every employee who was paid one. Returns the rows. Rows already
- * 'locked' are returned as-is and never overwritten.
- *
- * Exemption limit handling: exemption_limit_annual is prorated to the quarter
- * (÷4) as the per-quarter exempt cap.
+ * Compute + persist the reconciliation cumulatively (YEAR-TO-DATE through the
+ * given quarter) for every reimbursement component and every employee paid one.
+ * Stored paid/proof/taxable are YTD figures; the exempt cap is the FULL annual
+ * exemption limit applied against YTD bills. Rows already 'locked' are returned
+ * as-is and never overwritten.
  */
 export async function computeQuarterReconciliation(
   supabase: SupabaseClient,
@@ -54,9 +53,10 @@ export async function computeQuarterReconciliation(
   if (compErr) throw new Error(`fbp: failed to load components: ${compErr.message}`)
   if (!comps || comps.length === 0) return []
 
-  const months = quarterMonths(financialYear, quarter)
+  // YTD: all months from the FY start through the end of this quarter.
+  const months = cumulativeMonths(financialYear, quarter)
 
-  // 2. Finalized payslips for the quarter.
+  // 2. Finalized payslips across the YTD window.
   const { data: slips, error: slipErr } = await supabase
     .from('payroll_slips')
     .select('employee_id, component_breakdown, month')
@@ -73,13 +73,13 @@ export async function computeQuarterReconciliation(
     slipsByEmp.set(s.employee_id, arr)
   }
 
-  // 3. Approved bills for the quarter, summed per (employee, component).
+  // 3. Approved bills YTD (quarters 1..Q), summed per (employee, component).
   const { data: bills, error: billErr } = await supabase
     .from('fbp_bill_submissions')
     .select('employee_id, salary_component_id, amount, approved_amount')
     .eq('tenant_id', tenantId)
     .eq('financial_year', financialYear)
-    .eq('quarter', quarter)
+    .lte('quarter', quarter)
     .eq('status', 'approved')
   if (billErr) throw new Error(`fbp: failed to load bills: ${billErr.message}`)
 
@@ -115,9 +115,9 @@ export async function computeQuarterReconciliation(
       const key = `${emp}:${comp.id}`
       const prior = existingByKey.get(key)
 
-      // Per-quarter exempt cap = annual limit ÷ 4.
+      // YTD exempt cap = the FULL annual exemption limit (applied against YTD bills).
       const quarterLimit = comp.exemption_limit_annual != null
-        ? Number(comp.exemption_limit_annual) / 4
+        ? Number(comp.exemption_limit_annual)
         : null
 
       if (prior?.status === 'locked') {
@@ -162,9 +162,11 @@ export async function computeQuarterReconciliation(
 }
 
 /**
- * Sum of LOCKED reconciled taxable for an employee across a financial year —
- * the FBP add-back fed into TaxComputationInput.deductions.otherIncome.
- * Only locked rows count, so TDS reflects HR-confirmed figures only.
+ * FBP taxable add-back for an employee for the year, fed into TDS gross.
+ *
+ * Reconciliation is cumulative (YTD), so each component's taxable is taken from
+ * its LATEST locked quarter (not summed across quarters — that would double
+ * count). Summed across components. Only locked rows count.
  */
 export async function fetchFbpTaxableForEmployee(
   supabase: SupabaseClient,
@@ -174,13 +176,23 @@ export async function fetchFbpTaxableForEmployee(
 ): Promise<number> {
   const { data, error } = await supabase
     .from('fbp_reconciliations')
-    .select('taxable_amount')
+    .select('salary_component_id, quarter, taxable_amount')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('financial_year', financialYear)
     .eq('status', 'locked')
   if (error) return 0
-  const total = (data ?? []).reduce((s: number, r: any) => s + Number(r.taxable_amount ?? 0), 0)
+
+  // Per component, keep the highest locked quarter's (cumulative) taxable.
+  const latestByComp = new Map<string, { quarter: number; taxable: number }>()
+  for (const r of (data ?? []) as any[]) {
+    const cur = latestByComp.get(r.salary_component_id)
+    if (!cur || r.quarter > cur.quarter) {
+      latestByComp.set(r.salary_component_id, { quarter: r.quarter, taxable: Number(r.taxable_amount ?? 0) })
+    }
+  }
+  let total = 0
+  for (const v of latestByComp.values()) total += v.taxable
   return Math.round(total * 100) / 100
 }
 

@@ -77,6 +77,16 @@ export function quarterMonths(financialYear: string, quarter: number): string[] 
   })
 }
 
+/**
+ * All 'YYYY-MM' months from the start of the FY through the END of `quarter`
+ * (cumulative / year-to-date). ('2026-27', 2) → Apr..Sep (6 months).
+ */
+export function cumulativeMonths(financialYear: string, quarter: number): string[] {
+  const out: string[] = []
+  for (let q = 1; q <= quarter; q++) out.push(...quarterMonths(financialYear, q))
+  return out
+}
+
 /** Which FY quarter (1-4) a 'YYYY-MM' month belongs to. */
 export function monthToQuarter(month: string): number {
   const m = Number(month.split('-')[1])

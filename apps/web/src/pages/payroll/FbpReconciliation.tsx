@@ -11,7 +11,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Landmark, Loader2, ShieldAlert, Check, X, Lock, RefreshCw, Receipt,
+  Landmark, Loader2, ShieldAlert, Check, X, Lock, RefreshCw, Receipt, Paperclip,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -23,6 +23,7 @@ import { Input }         from '@/components/ui/input'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
+import { getSignedUrl }  from '@/lib/supabase-storage'
 import { cn }            from '@/lib/utils'
 
 interface ReconRow {
@@ -102,6 +103,21 @@ export function FbpReconciliation() {
     onError: (e: Error) => toast.error('Lock failed', { description: e.message }),
   })
 
+  // Open each uploaded bill for a submission in a new tab via a short-lived signed URL.
+  async function viewBills(submissionId: string) {
+    try {
+      const res: any = await api.get(`/payroll/fbp/submissions/${submissionId}/attachments`)
+      const atts = res?.data ?? []
+      if (atts.length === 0) { toast.info('No bills attached to this submission'); return }
+      for (const a of atts) {
+        const url = await getSignedUrl(a.storage_path)
+        window.open(url, '_blank', 'noopener')
+      }
+    } catch (e: any) {
+      toast.error('Could not open bills', { description: e?.message })
+    }
+  }
+
   if (!isAdmin) {
     return (
       <PageContainer><SectionCard>
@@ -117,7 +133,7 @@ export function FbpReconciliation() {
     <PageContainer>
       <PageHeader
         title="FBP Reconciliation"
-        subtitle="Reconcile flexible-benefit allowances paid vs bills submitted — the shortfall becomes taxable and flows to TDS when locked."
+        subtitle="Year-to-date reconciliation of flexible-benefit allowances paid vs bills submitted — the shortfall becomes taxable and flows to TDS when locked."
         actions={
           <div className="flex items-center gap-2">
             <Input value={fy} onChange={e => setFy(e.target.value)} className="h-8 w-24 text-xs" placeholder="2026-27" />
@@ -154,6 +170,9 @@ export function FbpReconciliation() {
                   <p className="text-xs text-muted-foreground">{inr(s.amount)} claimed{s.description ? ` · ${s.description}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => viewBills(s.id)}>
+                    <Paperclip className="h-3 w-3 mr-1" /> Bills
+                  </Button>
                   <Button size="sm" className="h-7 text-xs" disabled={approve.isPending}
                     onClick={() => approve.mutate({ id: s.id, amount: s.amount })}>
                     <Check className="h-3 w-3 mr-1" /> Approve {inr(s.amount)}
@@ -199,9 +218,9 @@ export function FbpReconciliation() {
                 <tr className="border-b border-border text-left text-muted-foreground text-xs">
                   <th className="px-3 pb-2 font-medium">Employee</th>
                   <th className="px-3 pb-2 font-medium">Component</th>
-                  <th className="px-3 pb-2 font-medium text-right">Paid</th>
-                  <th className="px-3 pb-2 font-medium text-right">Bills</th>
-                  <th className="px-3 pb-2 font-medium text-right">Taxable</th>
+                  <th className="px-3 pb-2 font-medium text-right">Paid (YTD)</th>
+                  <th className="px-3 pb-2 font-medium text-right">Bills (YTD)</th>
+                  <th className="px-3 pb-2 font-medium text-right">Taxable (YTD)</th>
                   <th className="px-3 pb-2 font-medium text-right">Status</th>
                 </tr>
               </thead>
