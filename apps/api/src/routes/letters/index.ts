@@ -38,6 +38,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import Handlebars from 'handlebars'
+import { STANDARD_LETTER_TEMPLATES } from '../../lib/standard-letter-templates.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
@@ -282,6 +283,32 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     }
 
     return reply.status(201).send({ data: tmpl })
+  })
+
+  // POST /letters/templates/seed-standard — load best-practice template library
+  // Idempotent: existing codes (UNIQUE tenant_id,code) are preserved.
+  fastify.post('/letters/templates/seed-standard', hrAdminAuth, async (req, reply) => {
+    const { tenantId, userId } = req as any
+    const { data: emp } = await supabase
+      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+    const createdBy = emp?.id ?? null
+
+    const rows = STANDARD_LETTER_TEMPLATES.map(t => ({
+      tenant_id: tenantId,
+      name: t.name, code: t.code, category: t.category, letter_type: t.letter_type,
+      subject_template: t.subject_template, body_html: t.body_html, variables: t.variables,
+      requires_approval: t.requires_approval, approval_levels: t.approval_levels,
+      is_active: true, created_by: createdBy, updated_by: createdBy,
+    }))
+
+    const { data, error } = await supabase
+      .from('letter_templates')
+      .upsert(rows, { onConflict: 'tenant_id,code', ignoreDuplicates: true })
+      .select('id')
+    if (error) return reply.status(500).send({ error: error.message })
+
+    const created = (data as Array<{ id: string }> | null)?.length ?? 0
+    return reply.status(201).send({ data: { created, skipped: rows.length - created, total: rows.length } })
   })
 
   // PUT /letters/templates/:id

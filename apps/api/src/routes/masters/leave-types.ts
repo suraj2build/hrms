@@ -12,6 +12,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { STANDARD_LEAVE_TYPES } from '../../lib/standard-leave-types.js'
 
 const schema = z.object({
   name:              z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
@@ -51,6 +52,37 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send({ data: data ?? [] })
+  })
+
+  // ── POST /masters/leave-types/seed-standard ───────────────────────────────────
+  // Load the best-practice standard leave-type set. Idempotent — existing names
+  // (UNIQUE tenant_id,name) are preserved.
+  fastify.post('/seed-standard', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
+    const rows = STANDARD_LEAVE_TYPES.map(t => ({
+      tenant_id:         req.tenantId,
+      name:              t.name,
+      is_paid:           t.is_paid,
+      allow_sandwich:    t.allow_sandwich,
+      allow_half_day:    t.allow_half_day,
+      allow_hourly:      t.allow_hourly,
+      max_hours_per_day: t.max_hours_per_day,
+      is_active:         true,
+    }))
+
+    const { data, error } = await fastify.supabase
+      .from('leave_types')
+      .upsert(rows, { onConflict: 'tenant_id,name', ignoreDuplicates: true })
+      .select('id')
+
+    if (error) {
+      req.log.error({ err: error }, 'leave type seed failed')
+      return reply.code(500).send({ error: 'SEED_FAILED', message: error.message })
+    }
+
+    const created = (data as Array<{ id: string }> | null)?.length ?? 0
+    return reply.code(201).send({ data: { created, skipped: rows.length - created, total: rows.length } })
   })
 
   // ── POST /masters/leave-types ─────────────────────────────────────────────────

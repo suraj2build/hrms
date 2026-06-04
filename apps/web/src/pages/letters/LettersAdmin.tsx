@@ -15,7 +15,7 @@ import {
   FileText, Plus, Search, Eye, CheckCircle2, XCircle,
   Send, RefreshCw, ChevronRight,
   BookOpen, Wand2, ClipboardList, Star, Inbox,
-  AlertTriangle, Clock, Check, BadgeCheck, MoreHorizontal,
+  AlertTriangle, Clock, Check, BadgeCheck, MoreHorizontal, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -807,6 +807,20 @@ export function LettersAdmin() {
     onError: (e: Error) => toast.error('Failed to update template status', { description: e.message }),
   })
 
+  const seedTemplates = useMutation<{ data: { created: number; skipped: number } }, Error>({
+    mutationFn: () => api.post('/letters/templates/seed-standard', {}),
+    onSuccess: (res) => {
+      const { created, skipped } = res.data
+      toast.success('Standard letter templates loaded', {
+        description: created > 0
+          ? `${created} added${skipped > 0 ? `, ${skipped} already existed` : ''}. Edit wording/branding as needed.`
+          : 'All standard templates already exist.',
+      })
+      qc.invalidateQueries({ queryKey: ['letter-templates'] })
+    },
+    onError: (e: Error) => toast.error('Failed to load standard templates', { description: e.message }),
+  })
+
   // ── All Letters ────────────────────────────────────────────────────────────
   const [letterStatus, setLetterStatus] = useState('all')
   const { data: lettersData, isLoading: lettersLoading, refetch: refetchLetters } = useQuery({
@@ -905,6 +919,14 @@ export function LettersAdmin() {
               </div>
               <Button variant="outline" size="sm" onClick={() => refetchTmpl()}>
                 <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => seedTemplates.mutate()}
+                disabled={seedTemplates.isPending}
+                title="Load the best-practice standard letter templates (idempotent)">
+                {seedTemplates.isPending
+                  ? <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                Load Standard Library
               </Button>
               <Button size="sm" onClick={() => setEditTmpl(null)}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />

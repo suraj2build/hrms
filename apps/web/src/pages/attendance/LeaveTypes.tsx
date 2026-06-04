@@ -15,7 +15,7 @@ import { useState }                              from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen, Plus, Pencil, Trash2, ShieldAlert,
-  CheckCircle2, AlertCircle, Loader2, X,
+  CheckCircle2, AlertCircle, Loader2, X, Download,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -150,6 +150,20 @@ export function LeaveTypes() {
     onError: (e: Error) => toast.error('Failed to save leave type', { description: e.message }),
   })
 
+  const seedMutation = useMutation<{ data: { created: number; skipped: number } }, Error>({
+    mutationFn: () => api.post('/masters/leave-types/seed-standard', {}),
+    onSuccess: (res) => {
+      const { created, skipped } = res.data
+      toast.success('Standard leave types loaded', {
+        description: created > 0
+          ? `${created} added${skipped > 0 ? `, ${skipped} already existed` : ''}. Set quotas in Leave Policies.`
+          : 'All standard leave types already exist.',
+      })
+      qc.invalidateQueries({ queryKey: ['leave-types'] })
+    },
+    onError: (e: Error) => toast.error('Failed to load standard leave types', { description: e.message }),
+  })
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/masters/leave-types/${id}`),
     onSuccess: (resp: any) => {
@@ -236,6 +250,16 @@ export function LeaveTypes() {
       <PageHeader
         title="Leave Types"
         subtitle="Configure the leave categories available for your employees"
+        actions={isAdmin ? (
+          <Button size="sm" variant="outline" onClick={() => seedMutation.mutate()}
+            disabled={seedMutation.isPending}
+            title="Load the best-practice standard leave types (idempotent — won't duplicate)">
+            {seedMutation.isPending
+              ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              : <Download className="h-4 w-4 mr-1.5" />}
+            Load Standard Library
+          </Button>
+        ) : undefined}
       />
 
       {!isAdmin && (

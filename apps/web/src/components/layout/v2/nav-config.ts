@@ -237,6 +237,7 @@ export const DOMAINS: Domain[] = [
         label: 'Operations',
         items: [
           { id: 'att-center',     label: 'Ops Center',    route: '/admin/attendance/center',           icon: Activity      },
+          { id: 'att-workspace',  label: 'Attendance Workspace', route: '/admin/attendance-workspace', icon: Activity      },
           { id: 'att-upload',     label: 'Punch Intake',  route: '/admin/attendance/upload-workspace', icon: Upload        },
           { id: 'muster',         label: 'Muster Roll',   route: '/admin/attendance/muster',           icon: BookOpen      },
           { id: 'muster-upload',  label: 'Muster Upload', route: '/admin/attendance/muster-upload',    icon: FileUp        },
