@@ -985,6 +985,25 @@ export function EmployeeProfile() {
   const [orgDlgOpen, setOrgDlgOpen] = useState(false)
   const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', rotation_policy_id: '', work_location_id: '', cost_center_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
 
+  // After a shift/roster/rotation/site change, attendance for already-computed
+  // days is NOT auto-recomputed. Offer to recompute from the change's effective
+  // date through today so the new assignment takes effect immediately.
+  function promptRecompute(fromDate: string, label = 'assignment') {
+    if (!id || !fromDate) return
+    const today = new Date().toISOString().slice(0, 10)
+    const from  = fromDate > today ? today : fromDate
+    if (!window.confirm(
+      `${label.charAt(0).toUpperCase() + label.slice(1)} updated, effective ${fmtDate(fromDate)}.\n\n` +
+      `Recompute this employee's attendance from ${fmtDate(from)} to today so the new ${label} drives attendance & payroll?`,
+    )) return
+    api.post('/attendance/recompute', { employee_id: id, from_date: from, to_date: today })
+      .then((r: any) => {
+        toast.success('Attendance recomputed', { description: `${r?.rows_upserted ?? 0} day(s) updated for the new ${label}.` })
+        qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      })
+      .catch((e: any) => toast.error('Recompute failed', { description: (e as Error)?.message }))
+  }
+
   const orgMutation = useMutation({
     mutationFn: (body: typeof orgForm) =>
       api.post(`/employees/${id}/org-context`, {
@@ -996,7 +1015,11 @@ export function EmployeeProfile() {
         effective_from:     body.effective_from,
         reason:             body.reason             || null,
       }),
-    onSuccess: () => { setOrgDlgOpen(false); refetchOrgCtx(); qc.invalidateQueries({ queryKey: ['job-current', id] }); toast.success('Organisation context updated') },
+    onSuccess: (_d, body) => {
+      setOrgDlgOpen(false); refetchOrgCtx(); qc.invalidateQueries({ queryKey: ['job-current', id] })
+      toast.success('Organisation context updated')
+      promptRecompute(body.effective_from, 'roster / rotation')
+    },
     onError:   (e: Error) => toast.error('Failed to update org context', { description: e.message }),
   })
 
@@ -1130,11 +1153,12 @@ export function EmployeeProfile() {
   const shiftAssignMutation = useMutation({
     mutationFn: ({ shift_id, effective_from }: { shift_id: string; effective_from: string }) =>
       api.post('/masters/employee-shifts/assign', { employee_id: id, shift_id, effective_from }),
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['shift-history', id] })
       setAssignTarget(null)
       toast.success('Shift assigned')
+      promptRecompute(vars.effective_from, 'shift')
     },
     onError: (e: Error) => toast.error('Shift assignment failed', { description: e.message }),
   })
@@ -1538,11 +1562,10 @@ export function EmployeeProfile() {
     ],
     employment:    [
       { key: 'workforce',       label: 'Workforce',        icon: LayoutGrid    },
-      { key: 'shift-schedule',  label: 'Shift & Schedule', icon: CalendarClock },
+      { key: 'shift-schedule',  label: 'Shift & Roster',   icon: CalendarClock },
       { key: 'position-history', label: 'Position History', icon: History      },
       { key: 'prev-employment', label: 'Prev. Employment', icon: Building2     },
       { key: 'separation',      label: 'Separation',       icon: LogOut        },
-      { key: 'organization',    label: 'Organization',     icon: Landmark      },
     ],
     compensation:  [
       { key: 'compensation', label: 'Compensation',  icon: DollarSign },
@@ -2701,8 +2724,9 @@ export function EmployeeProfile() {
             </Card>
           )}
 
-          {/* EMPLOYMENT › Organization */}
-          {subTab === 'organization' && (
+          {/* EMPLOYMENT › Site / Roster / Rotation — shown under the Shift & Roster tab
+              (and still reachable via the legacy ?tab=organization deep-link). */}
+          {(subTab === 'organization' || subTab === 'shift-schedule') && (
             <div className="space-y-4">
               <Card>
                 <CardHeader className="pb-3">
