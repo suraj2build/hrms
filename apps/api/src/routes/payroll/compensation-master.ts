@@ -15,6 +15,7 @@ import {
   listComponents, createComponent, updateComponent, deleteComponent,
   listStructures, createStructure, updateStructure,
   listStructureComponents, addStructureComponent, removeStructureComponent,
+  cloneStructure,
 } from '../../lib/salary-config-store.js'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
@@ -84,6 +85,15 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
     const r = await updateStructure(fastify.supabase, req.tenantId, req.params.id, req.body)
     if (r.error) return reply.code(r.status).send(r.error)
     return reply.send({ data: r.data })
+  })
+
+  // ── POST /payroll/compensation/structures/:id/clone ───────────────────────────
+  // Create a new salary group from an existing one, copying every component +
+  // its per-structure rule. Body: { name, code }.
+  fastify.post('/structures/:id/clone', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const r = await cloneStructure(fastify.supabase, req.tenantId, req.params.id, req.body)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.code(201).send({ data: r.data })
   })
 
   // ── GET /payroll/compensation/structures/:id/components ───────────────────────

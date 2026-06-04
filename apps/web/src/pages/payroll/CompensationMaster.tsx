@@ -24,7 +24,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Landmark, Plus, Pencil, Loader2, ShieldAlert,
-  ChevronRight, Check, X, Settings2, TrendingUp, TrendingDown, Building2, Trash2,
+  ChevronRight, Check, X, Settings2, TrendingUp, TrendingDown, Building2, Trash2, Copy,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -75,6 +75,8 @@ interface SalaryComponent {
   code:           string
   component_type: ComponentType
   is_active:      boolean
+  default_calculation_type: CalcType | null
+  default_value:            number | null
 }
 
 interface CtcPreviewComponent {
@@ -161,6 +163,8 @@ export function CompensationMaster() {
   const [showAddDialog, setShowAddDialog]     = useState(false)
   const [addForm, setAddForm]                 = useState<AddComponentForm>(EMPTY_ADD_FORM)
   const [previewCtc, setPreviewCtc]           = useState('1200000')
+  const [cloneSource, setCloneSource]         = useState<SalaryStructure | null>(null)
+  const [cloneForm, setCloneForm]             = useState({ name: '', code: '' })
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -226,6 +230,27 @@ export function CompensationMaster() {
     onSuccess: () => { invalidateComponents(); invalidateStructures(); toast.success('Component removed') },
     onError: (e: Error) => toast.error('Error', { description: e.message }),
   })
+
+  const cloneMutation = useMutation<{ data: { id: string } }, Error, { id: string; body: object }>({
+    mutationFn: ({ id, body }) => api.post(`/payroll/compensation/structures/${id}/clone`, body),
+    onSuccess: (res) => {
+      invalidateStructures()
+      setCloneSource(null)
+      setCloneForm({ name: '', code: '' })
+      if (res?.data?.id) setSelectedId(res.data.id)
+      toast.success('Salary group cloned')
+    },
+    onError: (e: Error) => toast.error('Clone failed', { description: e.message }),
+  })
+
+  function startClone(s: SalaryStructure) {
+    setCloneSource(s)
+    setCloneForm({ name: `${s.name} (Copy)`, code: `${s.code}_COPY` })
+  }
+  function handleClone() {
+    if (!cloneSource || !cloneForm.name || !cloneForm.code) return
+    cloneMutation.mutate({ id: cloneSource.id, body: { name: cloneForm.name, code: cloneForm.code } })
+  }
 
   const previewMutation = useMutation<{ data: CtcPreview }, Error, { ctc_annual: number }>({
     mutationFn: (body) => api.post(`/payroll/compensation/structures/${selectedId}/preview`, body),
@@ -354,6 +379,39 @@ export function CompensationMaster() {
         </SectionCard>
       )}
 
+      {/* ── Clone panel ───────────────────────────────────────────────────── */}
+      {cloneSource && (
+        <SectionCard className="mb-4" icon={<Copy className="h-4 w-4 text-muted-foreground" />}
+          title={`Clone "${cloneSource.name}" into a new salary group`}
+          description="Copies every component and its rule. Edit afterwards as needed.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">New Name *</label>
+              <Input value={cloneForm.name}
+                onChange={e => setCloneForm(p => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. Manager CTC" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">New Code *</label>
+              <Input value={cloneForm.code}
+                onChange={e => setCloneForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                className="font-mono" placeholder="e.g. MGR_CTC" />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <Button size="sm" onClick={handleClone}
+              disabled={cloneMutation.isPending || !cloneForm.name || !cloneForm.code}>
+              {cloneMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              <Copy className="h-3.5 w-3.5 mr-1.5" /> Clone Group
+            </Button>
+            <Button size="sm" variant="ghost"
+              onClick={() => { setCloneSource(null); setCloneForm({ name: '', code: '' }) }}>
+              Cancel
+            </Button>
+          </div>
+        </SectionCard>
+      )}
+
       {/* ── Two-panel layout ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
@@ -408,9 +466,17 @@ export function CompensationMaster() {
                     <div className="flex items-center gap-1">
                       <button
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
+                        title="Edit structure"
                         onClick={e => { e.stopPropagation(); startEditStructure(s) }}
                       >
                         <Pencil className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                      <button
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
+                        title="Clone as new salary group"
+                        onClick={e => { e.stopPropagation(); startClone(s) }}
+                      >
+                        <Copy className="h-3 w-3 text-muted-foreground" />
                       </button>
                       <ChevronRight className={cn(
                         'h-4 w-4 text-muted-foreground/40 transition-transform',
@@ -460,7 +526,17 @@ export function CompensationMaster() {
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-muted-foreground">Component *</label>
                       <select value={addForm.salary_component_id}
-                        onChange={e => setAddForm(p => ({ ...p, salary_component_id: e.target.value }))}
+                        onChange={e => {
+                          const picked = availableComponents.find(c => c.id === e.target.value)
+                          // Pre-fill the rule from the component's suggested default
+                          // so groups aren't reconfigured from scratch each time.
+                          setAddForm(p => ({
+                            ...p,
+                            salary_component_id: e.target.value,
+                            calculation_type: picked?.default_calculation_type ?? p.calculation_type,
+                            default_value: picked?.default_value != null ? String(picked.default_value) : p.default_value,
+                          }))
+                        }}
                         className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50">
                         <option value="">Select component…</option>
                         {availableComponents.map(c => (

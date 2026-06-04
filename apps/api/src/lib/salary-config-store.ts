@@ -26,6 +26,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 // ── Schemas (the one true contract) ──────────────────────────────────────────────
 
+const CALC_TYPES = ['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross'] as const
+
 export const componentCreateSchema = z.object({
   name:               z.string().min(1, 'Name is required').max(200),
   code:               z.string().min(1, 'Code is required').max(50),
@@ -40,6 +42,9 @@ export const componentCreateSchema = z.object({
   is_basic:           z.boolean().optional(),
   affects_pf:         z.boolean().optional(),
   affects_nlc:        z.boolean().optional(),
+  // Suggested rule — pre-fills the structure builder when this component is added
+  default_calculation_type: z.enum(CALC_TYPES).nullable().optional(),
+  default_value:            z.number().min(0).nullable().optional(),
   description:        z.string().optional(),
   display_order:      z.number().int().optional().default(0),
   is_active:          z.boolean().optional().default(true),
@@ -264,14 +269,50 @@ export async function listStructureComponents(
   return ok(data ?? [])
 }
 
+/** Add schema where the rule is OPTIONAL — falls back to the component's default. */
+const addStructureComponentSchema = z.object({
+  salary_component_id: z.string().uuid('Invalid component ID'),
+  calculation_type:    z.enum(CALC_TYPES).optional(),
+  default_value:       z.number().min(0, 'Value must be >= 0').optional(),
+  sequence:            z.number().int().optional().default(0),
+  is_active:           z.boolean().optional().default(true),
+})
+
 export async function addStructureComponent(
   supabase: SupabaseClient, tenantId: string, structureId: string, body: unknown,
 ): Promise<StoreResult> {
-  const parsed = structureComponentSchema.safeParse(body)
+  const parsed = addStructureComponentSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
+
+  let { calculation_type, default_value } = parsed.data
+
+  // Fall back to the component's suggested default rule when the caller omits it.
+  if (calculation_type == null || default_value == null) {
+    const { data: comp } = await supabase
+      .from('salary_components')
+      .select('default_calculation_type, default_value')
+      .eq('id', parsed.data.salary_component_id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    calculation_type = calculation_type ?? (comp?.default_calculation_type ?? undefined)
+    default_value    = default_value    ?? (comp?.default_value != null ? Number(comp.default_value) : undefined)
+  }
+
+  if (calculation_type == null || default_value == null) {
+    return fail(400, 'NO_RULE', 'No calculation rule supplied and the component has no default rule configured')
+  }
+
   const { data, error } = await supabase
     .from('salary_structure_components')
-    .insert({ ...parsed.data, salary_structure_id: structureId, tenant_id: tenantId })
+    .insert({
+      salary_component_id: parsed.data.salary_component_id,
+      calculation_type,
+      default_value,
+      sequence:            parsed.data.sequence,
+      is_active:           parsed.data.is_active,
+      salary_structure_id: structureId,
+      tenant_id:           tenantId,
+    })
     .select('*, salary_components(*)')
     .single()
   if (error) {
@@ -279,6 +320,59 @@ export async function addStructureComponent(
     return dbFail(error)
   }
   return ok(data, 201)
+}
+
+/**
+ * Clone a salary structure (group) into a new one, copying every component +
+ * its per-structure rule. Lets admins build a new group from an existing one
+ * instead of configuring from scratch.
+ */
+export async function cloneStructure(
+  supabase: SupabaseClient, tenantId: string, sourceId: string, body: unknown,
+): Promise<StoreResult> {
+  const parsed = structureSchema.pick({ name: true, code: true }).safeParse(body)
+  if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid structure')
+
+  // Verify the source belongs to the tenant.
+  const { data: source, error: srcErr } = await supabase
+    .from('salary_structures')
+    .select('id, description')
+    .eq('id', sourceId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (srcErr) return dbFail(srcErr)
+  if (!source) return fail(404, 'NOT_FOUND', 'Source structure not found')
+
+  // Create the new structure header.
+  const { data: created, error: createErr } = await supabase
+    .from('salary_structures')
+    .insert({ tenant_id: tenantId, name: parsed.data.name, code: parsed.data.code, description: source.description, is_active: true })
+    .select()
+    .single()
+  if (createErr) {
+    if (createErr.code === '23505') return fail(409, 'DUPLICATE_CODE', 'A structure with this code already exists')
+    return dbFail(createErr)
+  }
+
+  // Copy the component rows.
+  const { data: srcComps, error: compErr } = await supabase
+    .from('salary_structure_components')
+    .select('salary_component_id, calculation_type, default_value, sequence, is_active')
+    .eq('salary_structure_id', sourceId)
+    .eq('tenant_id', tenantId)
+  if (compErr) return dbFail(compErr)
+
+  if (srcComps && srcComps.length > 0) {
+    const rows = srcComps.map((c: any) => ({ ...c, salary_structure_id: created.id, tenant_id: tenantId }))
+    const { error: insErr } = await supabase.from('salary_structure_components').insert(rows)
+    if (insErr) {
+      // Roll back the header so a half-cloned structure isn't left behind.
+      await supabase.from('salary_structures').delete().eq('id', created.id).eq('tenant_id', tenantId)
+      return dbFail(insErr)
+    }
+  }
+
+  return ok({ ...created, copied_components: srcComps?.length ?? 0 }, 201)
 }
 
 export async function updateStructureComponent(

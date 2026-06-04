@@ -33,6 +33,14 @@ import { toast }         from 'sonner'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ComponentType = 'earning' | 'deduction' | 'employer_contribution'
+type CalcType = 'fixed' | 'pct_of_basic' | 'pct_of_ctc' | 'pct_of_gross'
+
+const CALC_LABELS: Record<CalcType, string> = {
+  fixed:        'Fixed (₹/month)',
+  pct_of_basic: '% of Basic',
+  pct_of_ctc:   '% of CTC',
+  pct_of_gross: '% of Gross',
+}
 
 interface SalaryComponent {
   id:                   string
@@ -47,6 +55,8 @@ interface SalaryComponent {
   is_variable:          boolean
   is_active:            boolean
   display_order:        number
+  default_calculation_type: CalcType | null
+  default_value:            number | null
   created_at:           string
 }
 
@@ -60,12 +70,15 @@ interface ComponentForm {
   is_pt_applicable:  boolean
   is_lwf_applicable: boolean
   is_variable:       boolean
+  default_calculation_type: CalcType | ''
+  default_value:            string
 }
 
 const EMPTY_FORM: ComponentForm = {
   name: '', code: '', component_type: 'earning',
   is_taxable: true, is_pf_applicable: false, is_esi_applicable: false,
   is_pt_applicable: false, is_lwf_applicable: false, is_variable: false,
+  default_calculation_type: '', default_value: '',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -150,14 +163,23 @@ export function SalaryComponents() {
       is_taxable: c.is_taxable, is_pf_applicable: c.is_pf_applicable,
       is_esi_applicable: c.is_esi_applicable, is_pt_applicable: c.is_pt_applicable,
       is_lwf_applicable: c.is_lwf_applicable, is_variable: c.is_variable,
+      default_calculation_type: c.default_calculation_type ?? '',
+      default_value:            c.default_value != null ? String(c.default_value) : '',
     })
     setEditId(c.id)
     setShowForm(true)
   }
 
   function handleSubmit() {
-    if (editId) updateMutation.mutate({ id: editId, body: form })
-    else        createMutation.mutate(form)
+    // Serialize the suggested default rule (both fields together, or both null).
+    const hasRule = form.default_calculation_type !== '' && form.default_value !== ''
+    const body = {
+      ...form,
+      default_calculation_type: hasRule ? form.default_calculation_type : null,
+      default_value:            hasRule ? Number(form.default_value) : null,
+    }
+    if (editId) updateMutation.mutate({ id: editId, body })
+    else        createMutation.mutate(body)
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending
@@ -228,6 +250,31 @@ export function SalaryComponents() {
                 <option value="employer_contribution">Employer Contribution</option>
               </select>
             </div>
+
+            {/* Suggested default rule — pre-fills the structure builder */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Default Rule <span className="text-muted-foreground/60">(optional)</span>
+              </label>
+              <select value={form.default_calculation_type}
+                onChange={e => setForm(p => ({ ...p, default_calculation_type: e.target.value as CalcType | '' }))}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground outline-none focus:ring-1 ring-primary/50">
+                <option value="">No suggestion</option>
+                {(Object.keys(CALC_LABELS) as CalcType[]).map(k => (
+                  <option key={k} value={k}>{CALC_LABELS[k]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Default {form.default_calculation_type === 'fixed' ? 'Amount (₹/mo)' : 'Value (%)'}
+              </label>
+              <Input type="number" min={0} value={form.default_value}
+                disabled={form.default_calculation_type === ''}
+                onChange={e => setForm(p => ({ ...p, default_value: e.target.value }))}
+                placeholder={form.default_calculation_type === '' ? '—' : '0'} />
+            </div>
+
             <div className="flex flex-col gap-2 pt-1 sm:col-span-2 lg:col-span-1">
               <label className="text-xs font-medium text-muted-foreground">Compliance Flags</label>
               {[
