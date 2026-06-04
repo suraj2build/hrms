@@ -43,6 +43,17 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         })
       }
 
+      // A profile without a tenant (e.g. a platform-owner account, or a row
+      // provisioned with a null tenant_id) must NOT fall through with an empty
+      // tenantId — that produces confusing 500s (invalid-uuid / not-null) on
+      // every tenant-scoped write. Fail clearly instead.
+      if (!profile.tenant_id) {
+        return reply.code(403).send({
+          error: 'NO_TENANT',
+          message: 'This account is not linked to a tenant workspace.',
+        })
+      }
+
       request.tenantId = profile.tenant_id
       request.userRole = profile.role
     } catch {

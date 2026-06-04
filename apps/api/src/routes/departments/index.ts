@@ -65,6 +65,8 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     const parsed = deptSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
 
+    if (!req.tenantId) return reply.code(403).send({ error: 'NO_TENANT', message: 'No tenant context' })
+
     const code = parsed.data.code?.trim() ||
       await generateUniqueCode(fastify.supabase, 'departments', req.tenantId, parsed.data.name)
 
@@ -73,7 +75,13 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .insert({ ...parsed.data, code, tenant_id: req.tenantId })
       .select().single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) {
+      req.log.error({ err: error, tenant_id: req.tenantId, code }, 'department create failed')
+      if (error.code === '23505') {
+        return reply.code(409).send({ error: 'DUPLICATE', message: `A department with code "${code}" already exists` })
+      }
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
     return reply.code(201).send(data)
   })
 
