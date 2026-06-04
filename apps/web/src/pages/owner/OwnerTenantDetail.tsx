@@ -67,6 +67,10 @@ export function OwnerTenantDetail() {
   const [showAdminPwd, setShowAdminPwd]   = useState(false)
   // Reset password state — stores the result { email, temp_password } to display once
   const [resetResult, setResetResult]     = useState<{ email: string; temp_password: string } | null>(null)
+  // Reset-password dialog: which admin + the (optional) manually-typed password
+  const [resetAdminId, setResetAdminId]   = useState<string | null>(null)
+  const [resetPwd, setResetPwd]           = useState('')
+  const [showResetPwd, setShowResetPwd]   = useState(false)
   const [copiedPwd, setCopiedPwd]         = useState(false)
 
   const { data, isLoading } = useQuery<{ data: TenantDetail }>({
@@ -108,11 +112,17 @@ export function OwnerTenantDetail() {
   })
 
   const resetPasswordMut = useMutation({
-    mutationFn: (adminId: string) =>
-      ownerApi.post<{ data: { email: string; temp_password: string } }>(`/owner/tenants/${id}/admins/${adminId}/reset-password`, {}),
+    // password omitted/empty → backend auto-generates a strong temp password.
+    mutationFn: ({ adminId, password }: { adminId: string; password?: string }) =>
+      ownerApi.post<{ data: { email: string; temp_password: string } }>(
+        `/owner/tenants/${id}/admins/${adminId}/reset-password`,
+        password && password.trim().length >= 8 ? { password: password.trim() } : {},
+      ),
     onSuccess: (res: any) => {
       setResetResult(res.data)
       setCopiedPwd(false)
+      setResetAdminId(null)
+      setResetPwd('')
     },
     onError: (e: any) => toast.error(e.message),
   })
@@ -449,7 +459,7 @@ export function OwnerTenantDetail() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => resetPasswordMut.mutate(a.id)}
+                          onClick={() => { setResetAdminId(a.id); setResetPwd(''); setShowResetPwd(false) }}
                           disabled={resetPasswordMut.isPending}
                           className="h-6 px-2 text-[10px] text-slate-500 hover:text-amber-300 hover:bg-amber-500/10 gap-1"
                           title="Reset password"
@@ -480,6 +490,66 @@ export function OwnerTenantDetail() {
           </table>
         )}
       </div>
+
+      {/* ── Reset Password Dialog ─────────────────────────────────────────────── */}
+      <Dialog open={!!resetAdminId} onOpenChange={open => { if (!open) { setResetAdminId(null); setResetPwd(''); setShowResetPwd(false) } }}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-amber-400" />
+              Reset Admin Password
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-xs text-slate-400">
+              Enter a new password, or leave blank to auto-generate a strong one.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">New Password</label>
+              <div className="flex gap-1.5">
+                <div className="relative flex-1">
+                  <Input
+                    type={showResetPwd ? 'text' : 'password'}
+                    placeholder="Min 8 chars (blank = auto-generate)"
+                    value={resetPwd}
+                    onChange={e => setResetPwd(e.target.value)}
+                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm pr-8"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPwd(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    {showResetPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setResetPwd(generatePassword()); setShowResetPwd(true) }}
+                  className="h-8 border-slate-700 text-slate-400 hover:text-white gap-1 px-2"
+                >
+                  <RefreshCw className="h-3 w-3" /> Generate
+                </Button>
+              </div>
+              {resetPwd && resetPwd.trim().length > 0 && resetPwd.trim().length < 8 && (
+                <p className="text-[10px] text-red-400">Password must be at least 8 characters.</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              size="sm"
+              onClick={() => resetAdminId && resetPasswordMut.mutate({ adminId: resetAdminId, password: resetPwd })}
+              disabled={resetPasswordMut.isPending || (resetPwd.trim().length > 0 && resetPwd.trim().length < 8)}
+              className="bg-amber-500 hover:bg-amber-600 text-slate-900"
+            >
+              {resetPasswordMut.isPending ? 'Resetting…' : (resetPwd.trim() ? 'Set Password' : 'Auto-Generate & Reset')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Add Admin Dialog ──────────────────────────────────────────────────── */}
       <Dialog open={addAdminOpen} onOpenChange={open => { setAddAdminOpen(open); if (!open) { setAdminForm({ name: '', email: '', password: '', role: 'super_admin' }); setShowAdminPwd(false) } }}>
