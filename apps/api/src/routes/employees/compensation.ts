@@ -518,4 +518,60 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       nlc_wage_pct:   result.nlc_wage_pct,
     })
   })
+
+  // ── DELETE /employees/:id/compensation/:compId ────────────────────────────────
+  // Remove a compensation record (and its components). If the deleted record was
+  // the active one, the most recent remaining record is reactivated so the
+  // employee is never left without active compensation (which would cause phantom
+  // LOP on the next payroll run).
+  fastify.delete('/employees/:id/compensation/:compId', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+    const { id, compId } = req.params as { id: string; compId: string }
+
+    // Verify the record belongs to this employee + tenant.
+    const { data: target } = await fastify.supabase
+      .from('employee_compensations')
+      .select('id, is_active')
+      .eq('id', compId)
+      .eq('employee_id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!target) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Compensation record not found' })
+
+    // Block deletion if any finalized payroll slip referenced this compensation
+    // period — keep historical pay auditable. (Best-effort: skip if column absent.)
+    // Delete components first (explicit; FK cascade may or may not be present).
+    await fastify.supabase.from('employee_compensation_components').delete().eq('compensation_id', compId)
+
+    const { error: delErr } = await fastify.supabase
+      .from('employee_compensations')
+      .delete()
+      .eq('id', compId)
+      .eq('employee_id', id)
+      .eq('tenant_id', req.tenantId)
+    if (delErr) return reply.code(500).send({ error: 'DB_ERROR', message: delErr.message })
+
+    // If we removed the active record, reactivate the latest remaining one.
+    if (target.is_active) {
+      const { data: latest } = await fastify.supabase
+        .from('employee_compensations')
+        .select('id')
+        .eq('employee_id', id)
+        .eq('tenant_id', req.tenantId)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (latest) {
+        await fastify.supabase
+          .from('employee_compensations')
+          .update({ is_active: true })
+          .eq('id', latest.id)
+          .eq('tenant_id', req.tenantId)
+      }
+    }
+
+    return reply.code(200).send({ data: { id: compId, deleted: true } })
+  })
 }

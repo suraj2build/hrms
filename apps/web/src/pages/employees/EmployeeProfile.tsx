@@ -926,6 +926,16 @@ export function EmployeeProfile() {
     staleTime: 120_000,
   })
 
+  const deleteCompMutation = useMutation({
+    mutationFn: (compId: string) => api.delete(`/employees/${id}/compensation/${compId}`),
+    onSuccess: () => {
+      toast.success('Compensation record deleted')
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['compensation-history', id] })
+    },
+    onError: (e: any) => toast.error('Delete failed', { description: (e as Error)?.message }),
+  })
+
   const setupCompMutation = useMutation({
     mutationFn: () => api.post(`/employees/${id}/compensation`, {
       ...(setupCompForm.salary_structure_id ? { salary_structure_id: setupCompForm.salary_structure_id } : {}),
@@ -3124,8 +3134,8 @@ export function EmployeeProfile() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="border-b border-border">
-                          {['Effective From', 'To', 'Annual CTC', 'Monthly CTC', 'Status'].map(h => (
-                            <th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>
+                          {['Effective From', 'To', 'Annual CTC', 'Monthly CTC', 'Status', ...(isAdmin ? [''] : [])].map((h, i) => (
+                            <th key={h || `act-${i}`} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -3141,6 +3151,22 @@ export function EmployeeProfile() {
                                 ? <Badge variant="success" className="rounded-full text-[9px]">Active</Badge>
                                 : <Badge variant="secondary" className="rounded-full text-[9px]">Closed</Badge>}
                             </td>
+                            {isAdmin && (
+                              <td className="px-4 py-2 text-right">
+                                <Button
+                                  size="sm" variant="ghost"
+                                  className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                  title="Delete compensation record"
+                                  disabled={deleteCompMutation.isPending}
+                                  onClick={() => {
+                                    if (window.confirm(`Delete the compensation record effective ${fmtDate(h.effective_from)} (CTC ${fmtMoney(h.ctc_annual)})?${h.is_active ? '\n\nThis is the ACTIVE record — the most recent remaining record will become active.' : ''}\n\nThis cannot be undone.`))
+                                      deleteCompMutation.mutate(h.id)
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
