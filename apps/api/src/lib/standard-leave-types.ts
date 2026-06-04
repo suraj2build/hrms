@@ -30,4 +30,5 @@ export const STANDARD_LEAVE_TYPES: StandardLeaveType[] = [
   { name: 'Bereavement Leave', is_paid: true, allow_sandwich: false, allow_half_day: false, allow_hourly: false, max_hours_per_day: null, note: 'BL — death in immediate family; few days.' },
   { name: 'Compensatory Off',  is_paid: true, allow_sandwich: false, allow_half_day: true,  allow_hourly: false, max_hours_per_day: null, note: 'CO — credited for working a weekly-off/holiday (auto comp-off feeds this).' },
   { name: 'Special Leave',     is_paid: true, allow_sandwich: false, allow_half_day: true,  allow_hourly: false, max_hours_per_day: null, note: 'SPL — discretionary / marriage / exam etc.' },
+  { name: 'Leave Without Pay', is_paid: false, allow_sandwich: true, allow_half_day: true,  allow_hourly: false, max_hours_per_day: null, note: 'LWP / LOP — unpaid leave; days are not paid (drives loss-of-pay).' },
 ]

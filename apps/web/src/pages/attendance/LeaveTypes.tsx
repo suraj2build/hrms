@@ -311,13 +311,26 @@ export function LeaveTypes() {
                 <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
               </div>
             ) : leaveTypes.length === 0 ? (
-              <div className="p-10 text-center space-y-1">
+              <div className="p-10 text-center space-y-3">
                 <BookOpen className="h-8 w-8 mx-auto text-muted-foreground/30" />
                 <p className="text-sm text-muted-foreground">No leave types yet.</p>
                 {isAdmin && (
-                  <p className="text-xs text-muted-foreground">
-                    Click "New Type" to create your first leave category.
-                  </p>
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Load the best-practice standard library in one click, or create your own with "New Type".
+                    </p>
+                    <Button
+                      size="sm"
+                      onClick={() => seedMutation.mutate()}
+                      disabled={seedMutation.isPending}
+                      className="gap-1.5"
+                    >
+                      {seedMutation.isPending
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <Download className="h-4 w-4" />}
+                      Load Standard Library
+                    </Button>
+                  </>
                 )}
               </div>
             ) : (
