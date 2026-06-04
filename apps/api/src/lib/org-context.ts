@@ -33,8 +33,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 /** Minimal applicability fields on a holiday row (no date needed for single-date checks). */
 export interface HolidayApplicability {
-  site_id:     string | null
-  location_id: string | null
+  site_id:           string | null
+  location_id:       string | null
+  holiday_group_id?: string | null
 }
 
 /** Full holiday row with date — used in date-range queries (leave engine). */
@@ -55,6 +56,8 @@ export interface EmployeeOrgContext {
   emp_roster_weekly_off:          number[]
   /** weekly_off_days from the site's default_roster ([] when none). */
   site_default_roster_weekly_off: number[]
+  /** Holiday group the employee's site observes (sites.holiday_group_id). null = all-India only. */
+  site_holiday_group_id:          string | null
   /**
    * The site-level default rotation policy id (sites.default_rotation_policy_id).
    * Used by the rotation engine to determine which shift applies per working condition.
@@ -104,12 +107,14 @@ export function getWeeklyOffDays(
  */
 export function isHolidayForEmployee(
   holidays: HolidayApplicability[],
-  ctx:      Pick<EmployeeOrgContext, 'site_id' | 'work_location_id'>,
+  ctx:      Pick<EmployeeOrgContext, 'site_id' | 'work_location_id' | 'site_holiday_group_id'>,
 ): boolean {
   return holidays.some((h) => {
-    if (!h.site_id && !h.location_id)                                    return true  // global
+    // Global = no site, no location, no group scoping.
+    if (!h.site_id && !h.location_id && !h.holiday_group_id)             return true  // all-India
     if (ctx.site_id          && h.site_id    === ctx.site_id)            return true  // site
     if (ctx.work_location_id && h.location_id === ctx.work_location_id)  return true  // location
+    if (ctx.site_holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id) return true  // group
     return false
   })
 }
@@ -124,18 +129,20 @@ export function isHolidayForEmployee(
  */
 export function getHolidayDates(
   holidays: HolidayRowWithDate[],
-  ctx:      Pick<EmployeeOrgContext, 'site_id' | 'work_location_id'>,
+  ctx:      Pick<EmployeeOrgContext, 'site_id' | 'work_location_id' | 'site_holiday_group_id'>,
 ): Set<string> {
-  // Separate by applicability tier
-  const globals   = holidays.filter((h) => !h.site_id && !h.location_id)
+  // Separate by applicability tier (priority: location > site > group > global)
+  const globals   = holidays.filter((h) => !h.site_id && !h.location_id && !h.holiday_group_id)
+  const groupHols = holidays.filter((h) => h.holiday_group_id != null && h.holiday_group_id === ctx.site_holiday_group_id)
   const siteHols  = holidays.filter((h) => h.site_id    !== null && h.site_id    === ctx.site_id)
   const locHols   = holidays.filter((h) => h.location_id !== null && h.location_id === ctx.work_location_id)
 
   // Fill map in ascending priority (lower-priority first, higher overwrites)
   const byDate = new Map<string, HolidayRowWithDate>()
-  for (const h of globals)  byDate.set(h.date, h)
-  for (const h of siteHols) byDate.set(h.date, h)   // overrides global for same date
-  for (const h of locHols)  byDate.set(h.date, h)   // overrides site+global for same date
+  for (const h of globals)   byDate.set(h.date, h)
+  for (const h of groupHols) byDate.set(h.date, h)   // group overrides global for same date
+  for (const h of siteHols)  byDate.set(h.date, h)   // site overrides group+global
+  for (const h of locHols)   byDate.set(h.date, h)   // location overrides all
 
   return new Set(byDate.keys())
 }
@@ -281,12 +288,13 @@ export async function resolveEmployeeOrgContextBatch(
     default_roster_id:           string | null
     default_rotation_policy_id:  string | null
     default_shift_id:            string | null
+    holiday_group_id:            string | null
   }>()
 
   if (uniqueSiteIds.length > 0) {
     const { data: siteRows } = await supabase
       .from('sites')
-      .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id')
+      .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
       .eq('tenant_id', tenantId)
       .in('id', uniqueSiteIds)
     for (const s of (siteRows ?? []) as {
@@ -295,12 +303,14 @@ export async function resolveEmployeeOrgContextBatch(
       default_roster_id:            string | null
       default_rotation_policy_id:   string | null
       default_shift_id:             string | null
+      holiday_group_id:             string | null
     }[]) {
       siteDetailMap.set(s.id, {
         timezone:                   s.timezone                   ?? DEFAULT_TZ,
         default_roster_id:          s.default_roster_id          ?? null,
         default_rotation_policy_id: s.default_rotation_policy_id ?? null,
         default_shift_id:           s.default_shift_id           ?? null,
+        holiday_group_id:           s.holiday_group_id           ?? null,
       })
     }
   }
@@ -334,6 +344,7 @@ export async function resolveEmployeeOrgContextBatch(
       site_timezone:                   site?.timezone ?? DEFAULT_TZ,
       emp_roster_weekly_off:           org.roster_id ? (rosterWOMap.get(org.roster_id) ?? []) : [],
       site_default_roster_weekly_off:  siteDefR       ? (rosterWOMap.get(siteDefR)     ?? []) : [],
+      site_holiday_group_id:           site?.holiday_group_id ?? null,
       site_default_rotation_policy_id: site?.default_rotation_policy_id ?? null,
       site_default_shift_id:           site?.default_shift_id ?? null,  // deprecated
     })
@@ -359,6 +370,7 @@ export async function resolveEmployeeOrgContext(
     site_timezone:                   DEFAULT_TZ,
     emp_roster_weekly_off:           [],
     site_default_roster_weekly_off:  [],
+    site_holiday_group_id:           null,
     site_default_rotation_policy_id: null,
     site_default_shift_id:           null,
   }

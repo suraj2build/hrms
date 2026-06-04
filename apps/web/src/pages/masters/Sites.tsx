@@ -48,6 +48,7 @@ interface Site {
   default_roster_id:            string | null
   default_rotation_policy_id:   string | null
   default_leave_policy_id:      string | null
+  holiday_group_id:             string | null
   created_at:                   string
 }
 
@@ -64,6 +65,7 @@ interface WorkLocation {
 interface Roster          { id: string; name: string }
 interface RotationPolicy  { id: string; name: string }
 interface LeavePolicy     { id: string; name: string }
+interface HolidayGroup    { id: string; name: string; state_code: string | null; is_active: boolean }
 
 const EMPTY_FORM = {
   name:                       '',
@@ -72,6 +74,7 @@ const EMPTY_FORM = {
   default_roster_id:          '',
   default_rotation_policy_id: '',
   default_leave_policy_id:    '',
+  holiday_group_id:           '',
 }
 
 // ── Nested work location row ───────────────────────────────────────────────────
@@ -324,12 +327,18 @@ export function Sites() {
     queryFn:  () => api.get('/masters/work-locations'),
     staleTime: 60_000,
   })
+  const { data: holidayGroupData } = useQuery<{ data: HolidayGroup[] }>({
+    queryKey: ['holiday-groups'],
+    queryFn:  () => api.get('/masters/holiday-groups'),
+    staleTime: 120_000,
+  })
 
   const sites            = sitesData?.data         ?? []
   const rosters          = rostersData?.data       ?? []
   const rotationPolicies = rotationData?.data      ?? []
   const leavePolicies    = leavePolicyData?.data   ?? []
   const workLocs         = workLocData?.data       ?? []
+  const holidayGroups    = (holidayGroupData?.data ?? []).filter(g => g.is_active)
 
   /** site_id → [locations] */
   const locsBySite = useMemo(() => {
@@ -370,6 +379,7 @@ export function Sites() {
       default_roster_id:          s.default_roster_id ?? '',
       default_rotation_policy_id: s.default_rotation_policy_id ?? '',
       default_leave_policy_id:    s.default_leave_policy_id ?? '',
+      holiday_group_id:           s.holiday_group_id ?? '',
     })
     setErr('')
     setDlgOpen(true)
@@ -384,6 +394,7 @@ export function Sites() {
         default_roster_id:          body.default_roster_id          || null,
         default_rotation_policy_id: body.default_rotation_policy_id || null,
         default_leave_policy_id:    body.default_leave_policy_id    || null,
+        holiday_group_id:           body.holiday_group_id           || null,
       }
       return editSite
         ? api.put(`/masters/sites/${editSite.id}`, payload)
@@ -591,6 +602,23 @@ export function Sites() {
                 >
                   <option value="">— None (use tenant default) —</option>
                   {leavePolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                  <CalendarDays className="h-3 w-3" />
+                  Holiday Group
+                  <span className="text-muted-foreground/50">(regional holiday calendar)</span>
+                </label>
+                <select
+                  value={form.holiday_group_id}
+                  onChange={e => setForm(p => ({ ...p, holiday_group_id: e.target.value }))}
+                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                >
+                  <option value="">— All-India holidays only —</option>
+                  {holidayGroups.map(g => (
+                    <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
+                  ))}
                 </select>
               </div>
             </div>

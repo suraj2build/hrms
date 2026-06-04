@@ -371,7 +371,7 @@ export async function countWorkingDaysForEmployee(
 
   const { data: rawHolidays, error: holErr } = await supabase
     .from('holiday_calendar')
-    .select('date, name, is_optional, site_id, location_id')
+    .select('date, name, is_optional, site_id, location_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .eq('is_optional', false)
     .gte('date', firstDay)

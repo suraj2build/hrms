@@ -11,6 +11,7 @@ import documentTypesRoutes          from './document-types.js'
 import identityTypesRoutes          from './identity-types.js'
 import relationshipTypesRoutes      from './relationship-types.js'
 import holidaysRoutes               from './holidays.js'
+import holidayGroupsRoutes          from './holiday-groups.js'
 import leaveTypesRoutes             from './leave-types.js'
 import leavePoliciesRoutes          from './leave-policies.js'
 // ── Leave Policy Engine (migration 054) ──────────────────────────────────────
@@ -45,6 +46,7 @@ export default async function mastersRoutes(fastify: FastifyInstance) {
   fastify.register(identityTypesRoutes,     { prefix: '/identity-types' })
   fastify.register(relationshipTypesRoutes, { prefix: '/relationship-types' })
   fastify.register(holidaysRoutes,          { prefix: '/holidays' })
+  fastify.register(holidayGroupsRoutes,     { prefix: '/holiday-groups' })
   fastify.register(leaveTypesRoutes,        { prefix: '/leave-types' })
   fastify.register(leavePoliciesRoutes,     { prefix: '/leave-policies' })
 

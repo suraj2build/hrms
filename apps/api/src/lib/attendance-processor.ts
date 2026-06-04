@@ -482,7 +482,7 @@ export async function processAttendanceForDate(
   // unaffected (we never create absence rows for them regardless).
   const { data: holidayRows, error: holidayError } = await supabase
     .from('holiday_calendar')
-    .select('name, is_optional, location_id, site_id')
+    .select('name, is_optional, location_id, site_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .eq('date', date)
 
@@ -756,6 +756,7 @@ export async function processAttendanceForDate(
       site_id: null, roster_id: null, work_location_id: null,
       site_timezone: 'Asia/Kolkata',
       emp_roster_weekly_off: [], site_default_roster_weekly_off: [],
+      site_holiday_group_id: null,
       site_default_rotation_policy_id: null,
       site_default_shift_id: null,
     } satisfies EmployeeOrgContext

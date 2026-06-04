@@ -750,37 +750,34 @@ async function fetchApprovedLeave(
 async function fetchHoliday(
   supabase:   SupabaseClient,
   tenantId:   string,
-  employeeId: string,
   date:       string,
+  ctx:        { site_id: string | null; work_location_id: string | null; site_holiday_group_id: string | null },
 ): Promise<{ name: string; is_optional: boolean } | null> {
   const { data: holidays } = await supabase
     .from('holiday_calendar')
-    .select('name, is_optional, location_id')
+    .select('name, is_optional, site_id, location_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .eq('date', date)
 
   if (!holidays?.length) return null
 
-  const hols = holidays as Array<{ name: string; is_optional: boolean; location_id: string | null }>
+  const hols = holidays as Array<{
+    name: string; is_optional: boolean
+    site_id: string | null; location_id: string | null; holiday_group_id: string | null
+  }>
 
-  // Global holidays (location_id = null) apply to everyone
-  const global = hols.find((h) => h.location_id === null)
-  if (global) return { name: global.name, is_optional: global.is_optional }
+  // Applicability priority: location > site > holiday-group > global (all-India).
+  const loc = hols.find((h) => h.location_id && h.location_id === ctx.work_location_id)
+  if (loc) return { name: loc.name, is_optional: loc.is_optional }
 
-  // Location-specific: check employee's current work location
-  const { data: jobRow } = await supabase
-    .from('job_history')
-    .select('work_location_id')
-    .eq('tenant_id', tenantId)
-    .eq('employee_id', employeeId)
-    .eq('is_current', true)
-    .maybeSingle()
+  const site = hols.find((h) => h.site_id && h.site_id === ctx.site_id)
+  if (site) return { name: site.name, is_optional: site.is_optional }
 
-  const workLocationId = (jobRow as { work_location_id: string | null } | null)?.work_location_id
-  if (!workLocationId) return null
+  const grp = hols.find((h) => h.holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id)
+  if (grp) return { name: grp.name, is_optional: grp.is_optional }
 
-  const locSpecific = hols.find((h) => h.location_id === workLocationId)
-  return locSpecific ? { name: locSpecific.name, is_optional: locSpecific.is_optional } : null
+  const global = hols.find((h) => !h.site_id && !h.location_id && !h.holiday_group_id)
+  return global ? { name: global.name, is_optional: global.is_optional } : null
 }
 
 // ── computeDay ────────────────────────────────────────────────────────────────
@@ -836,7 +833,7 @@ export async function computeDay(
   const [punches, approvedLeave, holiday] = await Promise.all([
     fetchPunches(supabase, tenant_id, employee_id, date, shift, tz),
     fetchApprovedLeave(supabase, tenant_id, employee_id, date),
-    fetchHoliday(supabase, tenant_id, employee_id, date),
+    fetchHoliday(supabase, tenant_id, date, orgCtx),
   ])
 
   const shiftDurationMin = shift?.durationMin  ?? DEFAULT_DURATION_MIN

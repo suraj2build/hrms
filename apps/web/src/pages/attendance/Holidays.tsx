@@ -37,7 +37,16 @@ interface Holiday {
   date:        string
   name:        string
   is_optional: boolean
+  holiday_group_id: string | null
   created_at:  string
+}
+
+interface HolidayGroup {
+  id:         string
+  name:       string
+  code:       string | null
+  state_code: string | null
+  is_active:  boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,7 +93,9 @@ export function Holidays() {
   const [newDate,       setNewDate]       = useState(todayStr())
   const [newName,       setNewName]       = useState('')
   const [newOptional,   setNewOptional]   = useState(false)
+  const [newGroupId,    setNewGroupId]    = useState('')   // '' = All-India
   const [formError,     setFormError]     = useState<string | null>(null)
+  const [newGroupName,  setNewGroupName]  = useState('')
 
   // ── Two-step delete confirmation ───────────────────────────────────────────
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -100,8 +111,28 @@ export function Holidays() {
 
   const holidays = data?.data ?? []
 
+  // ── Holiday groups ───────────────────────────────────────────────────────────
+  const { data: groupData } = useQuery<{ data: HolidayGroup[] }>({
+    queryKey: ['holiday-groups'],
+    queryFn:  () => api.get('/masters/holiday-groups'),
+    staleTime: 120_000,
+  })
+  const groups = groupData?.data ?? []
+  const groupName = (id: string | null) => id ? (groups.find(g => g.id === id)?.name ?? 'Group') : 'All-India'
+
+  const addGroupMutation = useMutation<unknown, Error, { name: string }>({
+    mutationFn: (body) => api.post('/masters/holiday-groups', body),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['holiday-groups'] }); setNewGroupName(''); toast.success('Holiday group added') },
+    onError: (e) => toast.error('Failed to add group', { description: e.message }),
+  })
+  const deleteGroupMutation = useMutation<void, Error, string>({
+    mutationFn: (id) => api.delete(`/masters/holiday-groups/${id}`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['holiday-groups'] }); queryClient.invalidateQueries({ queryKey }); toast.success('Holiday group removed') },
+    onError: (e) => toast.error('Failed to remove group', { description: e.message }),
+  })
+
   // ── Mutations ──────────────────────────────────────────────────────────────
-  const addMutation = useMutation<Holiday, Error, { date: string; name: string; is_optional: boolean }>({
+  const addMutation = useMutation<Holiday, Error, { date: string; name: string; is_optional: boolean; holiday_group_id: string | null }>({
     mutationFn: (body) => api.post<Holiday>('/masters/holidays', body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
@@ -144,7 +175,7 @@ export function Holidays() {
     const trimmed = newName.trim()
     if (!trimmed) { setFormError('Name is required'); return }
     if (!newDate) { setFormError('Date is required'); return }
-    addMutation.mutate({ date: newDate, name: trimmed, is_optional: newOptional })
+    addMutation.mutate({ date: newDate, name: trimmed, is_optional: newOptional, holiday_group_id: newGroupId || null })
   }
 
   // ── Non-admin guard ────────────────────────────────────────────────────────
@@ -227,6 +258,21 @@ export function Holidays() {
               </div>
             </FormRow>
 
+            <FormField label="Applies to" htmlFor="holiday-group">
+              <select
+                id="holiday-group"
+                value={newGroupId}
+                onChange={(e) => setNewGroupId(e.target.value)}
+                disabled={addMutation.isPending}
+                className="flex h-9 w-full sm:w-72 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="">All-India (everyone)</option>
+                {groups.filter(g => g.is_active).map(g => (
+                  <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
+                ))}
+              </select>
+            </FormField>
+
             {/* Error */}
             {formError && (
               <p className="text-xs text-destructive">{formError}</p>
@@ -244,6 +290,48 @@ export function Holidays() {
             </Button>
           </div>
         </SectionCard>
+
+        {/* ── Holiday Groups (regional applicability) ────────────────────── */}
+        {isAdmin && (
+          <SectionCard
+            title="Holiday Groups"
+            icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />}
+          >
+            <p className="text-xs text-muted-foreground mb-3">
+              Regional calendars (e.g. a state or branch). Assign a group to a Site (Setup → Sites);
+              holidays tagged to that group then apply only to employees at those sites. Holidays left
+              as “All-India” apply to everyone.
+            </p>
+            <div className="flex items-center gap-2 mb-3">
+              <Input
+                placeholder="New group (e.g. Maharashtra)"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                className="h-8 text-sm w-64"
+                onKeyDown={(e) => { if (e.key === 'Enter' && newGroupName.trim()) addGroupMutation.mutate({ name: newGroupName.trim() }) }}
+              />
+              <Button size="sm" disabled={!newGroupName.trim() || addGroupMutation.isPending}
+                onClick={() => addGroupMutation.mutate({ name: newGroupName.trim() })}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Add Group
+              </Button>
+            </div>
+            {groups.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No holiday groups yet — all holidays are All-India.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {groups.map(g => (
+                  <span key={g.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs">
+                    {g.name}{g.state_code ? ` · ${g.state_code}` : ''}
+                    <button className="text-muted-foreground hover:text-destructive"
+                      title="Delete group" onClick={() => deleteGroupMutation.mutate(g.id)}>
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        )}
 
         {/* ── Holiday list ───────────────────────────────────────────────── */}
         <SectionCard
@@ -301,7 +389,7 @@ export function Holidays() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    {['Date', 'Name', 'Type', ''].map((h, i) => (
+                    {['Date', 'Name', 'Type', 'Applies to', ''].map((h, i) => (
                       <th
                         key={h || `col-${i}`}
                         className={`px-4 py-3 text-xs font-semibold text-muted-foreground text-left last:text-right`}
@@ -339,6 +427,16 @@ export function Holidays() {
                             className="rounded-full text-xs"
                           >
                             {h.is_optional ? 'Optional' : 'Public'}
+                          </Badge>
+                        </td>
+
+                        {/* Applies to (holiday group) */}
+                        <td className="px-4 py-3">
+                          <Badge
+                            variant={h.holiday_group_id ? 'outline' : 'secondary'}
+                            className="rounded-full text-xs"
+                          >
+                            {groupName(h.holiday_group_id)}
                           </Badge>
                         </td>
 

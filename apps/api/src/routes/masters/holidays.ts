@@ -28,6 +28,8 @@ const createSchema = z.object({
   is_optional: z.boolean().optional().default(false),
   site_id:     z.string().uuid().optional().nullable(),
   location_id: z.string().uuid().optional().nullable(),
+  // Holiday group applicability (NULL = all-India / applies to everyone)
+  holiday_group_id: z.string().uuid().optional().nullable(),
 })
 
 const querySchema = z.object({
@@ -47,7 +49,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
     let query = fastify.supabase
       .from('holiday_calendar')
-      .select('id, date, name, is_optional, site_id, location_id, created_at')
+      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
       .eq('tenant_id', req.tenantId)
       .order('date', { ascending: true })
 
@@ -82,7 +84,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('holiday_calendar')
       .insert({ ...parsed.data, tenant_id: req.tenantId })
-      .select('id, date, name, is_optional, site_id, location_id, created_at')
+      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
       .single()
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })

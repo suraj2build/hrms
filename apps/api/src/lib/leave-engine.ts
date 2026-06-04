@@ -148,7 +148,7 @@ export async function computeWorkingLeaveDays(
   // ── Fetch applicable holidays in the date range ─────────────────────────────
   const { data: rawHolidays } = await supabase
     .from('holiday_calendar')
-    .select('date, name, is_optional, site_id, location_id')
+    .select('date, name, is_optional, site_id, location_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .gte('date', from)
     .lte('date', to)
