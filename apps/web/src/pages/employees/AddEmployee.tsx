@@ -39,6 +39,7 @@ const step2Schema = z.object({
   department_id:    z.string().optional(),
   designation_id:   z.string().optional(),
   grade_id:         z.string().optional(),
+  manager_id:       z.string().optional(),
   site_id:          z.string().optional(),
   roster_id:        z.string().optional(),
   work_location_id: z.string().optional(),
@@ -79,6 +80,12 @@ export function AddEmployee() {
   const { data: rostersData }    = useQuery<{ data: Roster[] }>({ queryKey: ['rosters'],        queryFn: () => api.get('/masters/rosters'),        staleTime: 60_000 })
   const { data: workLocsData }   = useQuery<{ data: WorkLocation[] }>({ queryKey: ['work-locations'], queryFn: () => api.get('/masters/work-locations'), staleTime: 60_000 })
   const { data: costCentersData }= useQuery<{ data: CostCenter[] }>({ queryKey: ['cost-centers'],   queryFn: () => api.get('/masters/cost-centers'),  staleTime: 60_000 })
+  // Active employees → reporting-manager candidates
+  const { data: managersData }   = useQuery<{ data: Array<{ id: string; first_name: string; last_name: string; employee_code: string }> }>({
+    queryKey: ['employees-manager-options'],
+    queryFn:  () => api.get('/employees?limit=500'),
+    staleTime: 60_000,
+  })
 
   const form1 = useForm<Step1>({ resolver: zodResolver(step1Schema), mode: 'onChange' })
   const form2 = useForm<Step2>({ resolver: zodResolver(step2Schema), mode: 'onChange' })
@@ -96,6 +103,7 @@ export function AddEmployee() {
         department_id:   step2Data.department_id   || undefined,
         designation_id:  step2Data.designation_id  || undefined,
         grade_id:        step2Data.grade_id        || undefined,
+        manager_id:      step2Data.manager_id      || undefined,
         site_id:          step2Data.site_id          || undefined,
         roster_id:        (step2Data.roster_id && step2Data.roster_id !== '__none__')
                             ? step2Data.roster_id : undefined,
@@ -280,6 +288,17 @@ export function AddEmployee() {
                     <SelectTrigger id="grade_id"><SelectValue placeholder="Select grade" /></SelectTrigger>
                     <SelectContent>
                       {grades?.data?.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Reporting Manager" htmlFor="manager_id">
+                  <Select onValueChange={(v) => form2.setValue('manager_id', v)}>
+                    <SelectTrigger id="manager_id"><SelectValue placeholder="Select reporting manager (optional)" /></SelectTrigger>
+                    <SelectContent>
+                      {(managersData?.data ?? []).map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.first_name} {m.last_name} #{m.employee_code}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FormField>
