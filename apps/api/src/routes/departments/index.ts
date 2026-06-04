@@ -70,9 +70,14 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     const code = parsed.data.code?.trim() ||
       await generateUniqueCode(fastify.supabase, 'departments', req.tenantId, parsed.data.name)
 
+    // Some environments have a NOT-NULL `slug` column on departments — derive a
+    // URL-safe slug from the name (fallback to the code) so the insert satisfies it.
+    const slug = (parsed.data.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60))
+      || code.toLowerCase()
+
     const { data, error } = await fastify.supabase
       .from('departments')
-      .insert({ ...parsed.data, code, tenant_id: req.tenantId })
+      .insert({ ...parsed.data, code, slug, tenant_id: req.tenantId })
       .select().single()
 
     if (error) {
