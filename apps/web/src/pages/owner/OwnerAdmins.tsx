@@ -62,7 +62,7 @@ export function OwnerAdmins() {
           <p className="text-sm text-slate-500">{admins.length} admin{admins.length !== 1 ? 's' : ''}</p>
         </div>
         {isOwner() && (
-          <Button onClick={() => setInviteOpen(true)} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900 gap-1.5">
+          <Button onClick={() => setInviteOpen(true)} className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 gap-1.5">
             <Plus className="h-4 w-4" /> Invite Admin
           </Button>
         )}
@@ -73,14 +73,16 @@ export function OwnerAdmins() {
           <div key={i} className="h-16 bg-slate-100 animate-pulse rounded-xl" />
         ))}
         {admins.map(a => (
-          <div key={a.id} className={`rounded-xl border p-4 flex items-center gap-4 ${
-            a.is_active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-white/50 opacity-60'
+          <div key={a.id} className={`rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4 flex items-center gap-4 ${
+            a.is_active ? '' : 'opacity-60'
           }`}>
             {/* Avatar */}
-            <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-              a.role === 'owner' ? 'bg-[#1E5BA8]' : 'bg-slate-100'
+            <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm ${
+              a.role === 'owner'
+                ? 'bg-gradient-to-br from-indigo-500 to-teal-500'
+                : 'bg-gradient-to-br from-slate-400 to-slate-600'
             }`}>
-              <span className="text-sm font-bold text-[#0D9488]">{a.name.charAt(0).toUpperCase()}</span>
+              <span className="text-sm font-bold text-white">{a.name.charAt(0).toUpperCase()}</span>
             </div>
 
             {/* Info */}
@@ -160,7 +162,7 @@ export function OwnerAdmins() {
             <Button
               onClick={() => inviteMut.mutate()}
               disabled={!form.name.trim() || !form.email.trim() || inviteMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900"
+              className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
             >
               {inviteMut.isPending ? 'Sending…' : 'Send Invitation'}
             </Button>

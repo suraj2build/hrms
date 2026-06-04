@@ -85,7 +85,7 @@ export function OwnerApiKeys() {
           <h1 className="text-xl font-bold text-slate-900">API Keys</h1>
           <p className="text-sm text-slate-500">{keys.filter(k => k.is_active).length} active keys</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900 gap-1.5">
+        <Button onClick={() => setCreateOpen(true)} className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 gap-1.5">
           <Plus className="h-4 w-4" /> Generate Key
         </Button>
       </div>
@@ -202,7 +202,7 @@ export function OwnerApiKeys() {
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.tenant_id || !form.name || form.scopes.length === 0 || createMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900"
+              className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
             >
               {createMut.isPending ? 'Generating…' : 'Generate Key'}
             </Button>
@@ -240,7 +240,7 @@ export function OwnerApiKeys() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setNewKey(null); setShowKey(false) }} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900">
+            <Button onClick={() => { setNewKey(null); setShowKey(false) }} className="bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20">
               I've saved it
             </Button>
           </DialogFooter>
