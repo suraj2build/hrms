@@ -13,6 +13,7 @@ import {
   resolveEmployeeOrgContext,
   getWeeklyOffDays,
   getHolidayDates,
+  getLocalDayOfWeek,
   type HolidayRowWithDate,
 } from './org-context.js'
 
@@ -177,7 +178,9 @@ export async function computeWorkingLeaveDays(
       excludedHolidays++
       continue
     }
-    const dow = new Date(`${d}T12:00:00.000Z`).getUTCDay()
+    // Resolve day-of-week in the SITE timezone (matches payroll/attendance engines)
+    // rather than raw UTC, so tz-boundary dates don't land on the wrong day.
+    const dow = getLocalDayOfWeek(d, orgCtx.site_timezone)
     if (weeklyOffDays.includes(dow)) {
       excludedWeeklyOffs++
       continue

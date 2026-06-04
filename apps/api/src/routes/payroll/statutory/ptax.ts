@@ -323,6 +323,19 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const { month, financial_year } = parsed.data
     const monthDate = `${month}-01`
 
+    // Guard: statutory contributions must be computed from a FINALIZED payroll run.
+    {
+      const { data: runRow } = await fastify.supabase
+        .from('payroll_runs').select('status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
+      const st = (runRow as any)?.status
+      if (st !== 'finalized' && st !== 'partial_failed') {
+        return reply.code(409).send({
+          error: 'RUN_NOT_FINALIZED',
+          message: `Finalize the ${month} payroll run before computing Professional Tax (current: ${st ?? 'no run'}).`,
+        })
+      }
+    }
+
     // Calendar month for frequency checks (1–12)
     const calendarMonth = parseInt(month.split('-')[1], 10)
 

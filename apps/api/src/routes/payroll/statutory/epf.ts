@@ -182,6 +182,20 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     const { month } = parsed.data
     const monthDate = `${month}-01`
 
+    // Guard: statutory contributions must be computed from a FINALIZED payroll run,
+    // never from mutable draft numbers.
+    {
+      const { data: runRow } = await fastify.supabase
+        .from('payroll_runs').select('status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
+      const st = (runRow as any)?.status
+      if (st !== 'finalized' && st !== 'partial_failed') {
+        return reply.code(409).send({
+          error: 'RUN_NOT_FINALIZED',
+          message: `Finalize the ${month} payroll run before computing EPF contributions (current: ${st ?? 'no run'}).`,
+        })
+      }
+    }
+
     // ── EPF config (effective-date-guarded, most recent row) ──────────────────
     const { data: configRow, error: configErr } = await fastify.supabase
       .from('epf_config')
