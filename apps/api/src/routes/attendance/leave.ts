@@ -15,7 +15,10 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { writeAuditLogs } from '../../lib/attendance-processor.js'
-import { expandDateRange, shiftDate, validateBalance, computeWorkingLeaveDays } from '../../lib/leave-engine.js'
+import {
+  expandDateRange, shiftDate, validateBalance, computeWorkingLeaveDays,
+  resolveLeaveDayFraction, type LeaveSession,
+} from '../../lib/leave-engine.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction, logBulkAction } from '../../lib/audit-service.js'
@@ -30,6 +33,8 @@ const applySchema = z.object({
   from_date:     z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
   to_date:       z.string().regex(dateRe, 'to_date must be YYYY-MM-DD'),
   reason:        z.string().max(500).optional(),
+  /** Half-day session. Hourly leave is not yet supported on this endpoint. */
+  session:       z.enum(['full_day', 'first_half', 'second_half']).optional().default('full_day'),
 })
 
 /**
@@ -159,9 +164,31 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       })
     }
 
-    const { from_date, to_date } = parsed.data
+    const { from_date, to_date, session } = parsed.data
     if (from_date > to_date) {
       return reply.code(400).send({ error: 'INVALID_DATES', message: 'from_date must be ≤ to_date' })
+    }
+
+    // Half-day validation: must be a single day and the leave type must allow it.
+    if (session !== 'full_day') {
+      if (from_date !== to_date) {
+        return reply.code(400).send({
+          error:   'INVALID_HALF_DAY',
+          message: 'A half-day leave must be for a single date (from_date = to_date)',
+        })
+      }
+      const { data: lt } = await fastify.supabase
+        .from('leave_types')
+        .select('allow_half_day')
+        .eq('id', parsed.data.leave_type_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!lt?.allow_half_day) {
+        return reply.code(422).send({
+          error:   'HALF_DAY_NOT_ALLOWED',
+          message: 'This leave type does not permit half-day leave',
+        })
+      }
     }
 
     // Resolve employee_id
@@ -188,6 +215,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         from_date,
         to_date,
         reason:        parsed.data.reason ?? null,
+        session,
       })
       .select('id, from_date, to_date, status, created_at')
       .single()
@@ -271,7 +299,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
     const { data: app, error: fetchError } = await fastify.supabase
       .from('leave_applications')
-      .select('id, tenant_id, employee_id, leave_type_id, from_date, to_date, status')
+      .select('id, tenant_id, employee_id, leave_type_id, from_date, to_date, status, session')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
@@ -294,12 +322,15 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // for BOTH paid and unpaid leave. Used for balance deduction AND for the
     // attendance_daily write, so a leave span never overwrites a holiday /
     // weekly-off day (which would wrongly turn a paid rest day into LOP).
+    const leaveSession = (app.session as LeaveSession | null) ?? 'full_day'
+    const isHalfDay    = leaveSession !== 'full_day'
     const workingDays = await computeWorkingLeaveDays(
       fastify.supabase,
       app.tenant_id   as string,
       app.employee_id as string,
       app.from_date   as string,
       app.to_date     as string,
+      { halfDay: isHalfDay },
     )
 
     // Pre-approve balance check (paid leave only)
@@ -344,34 +375,49 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const leaveDates = workingDays.counted_dates && workingDays.counted_dates.length > 0
       ? workingDays.counted_dates
       : expandDateRange(app.from_date as string, app.to_date as string)
-    const isPaid        = lt?.is_paid ?? false
-    const dayFractionV  = isPaid ? 1.0 : 0.0
+    const isPaid = lt?.is_paid ?? false
 
-    // Fetch pre-existing statuses for audit comparison (one query for all dates)
+    // Fetch pre-existing status + fraction so a half-day leave can MERGE with a
+    // half-day present already recorded for the date (0.5 worked + 0.5 leave → 1.0)
+    // rather than overwriting it.
     const { data: existingRows } = await fastify.supabase
       .from('attendance_daily')
-      .select('date, status')
+      .select('date, status, day_fraction')
       .eq('tenant_id', app.tenant_id)
       .eq('employee_id', app.employee_id)
       .in('date', leaveDates)
 
-    const existingStatusMap = new Map<string, string>(
-      (existingRows ?? []).map((r: { date: string; status: string }) => [r.date, r.status])
-    )
+    const existingStatusMap   = new Map<string, string>()
+    const existingFractionMap = new Map<string, number>()
+    for (const r of (existingRows ?? []) as Array<{ date: string; status: string; day_fraction: number | null }>) {
+      existingStatusMap.set(r.date, r.status)
+      if (r.day_fraction !== null) existingFractionMap.set(r.date, r.day_fraction)
+    }
 
-    const dailyRows = leaveDates.map((d) => ({
-      tenant_id:            app.tenant_id,
-      employee_id:          app.employee_id,
-      date:                 d,
-      status:               'leave',
-      work_hours:           0,
-      late_minutes:         0,
-      overtime_minutes:     0,
-      worked_on_weekly_off: false,
-      worked_on_holiday:    false,
-      is_payable:           isPaid,
-      day_fraction:         dayFractionV,
-    }))
+    const dailyRows = leaveDates.map((d) => {
+      const resolved = resolveLeaveDayFraction({
+        session:           leaveSession,
+        isPaid,
+        existingStatus:    existingStatusMap.get(d) ?? null,
+        existingFraction:  existingFractionMap.get(d) ?? null,
+      })
+      return {
+        tenant_id:            app.tenant_id,
+        employee_id:          app.employee_id,
+        date:                 d,
+        status:               resolved.status,
+        work_hours:           0,
+        late_minutes:         0,
+        overtime_minutes:     0,
+        worked_on_weekly_off: false,
+        worked_on_holiday:    false,
+        is_payable:           resolved.is_payable,
+        day_fraction:         resolved.day_fraction,
+        // Mark as leave-approval origin so the engine recompute never silently
+        // overwrites this intentional human decision back to a punch-derived status.
+        computed_source:      'leave_approval',
+      }
+    })
 
     const { error: dailyError } = await fastify.supabase
       .from('attendance_daily')
@@ -381,14 +427,16 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       req.log.warn({ err: dailyError }, 'leave daily upsert failed — approval committed')
     }
 
-    // Write audit log for each leave day
+    // Write audit log for each leave day (after_status reflects the resolved
+    // status, which may be 'half_day'/'present' for a merged half-day leave).
+    const resolvedStatusByDate = new Map<string, string>(dailyRows.map(r => [r.date as string, r.status as string]))
     const auditChanges = leaveDates
-      .filter((d) => existingStatusMap.get(d) !== 'leave')
+      .filter((d) => existingStatusMap.get(d) !== resolvedStatusByDate.get(d))
       .map((d) => ({
         employee_id:   app.employee_id as string,
         date:          d,
         before_status: existingStatusMap.get(d) ?? null,
-        after_status:  'leave',
+        after_status:  resolvedStatusByDate.get(d) ?? 'leave',
       }))
     await writeAuditLogs(
       fastify.supabase,

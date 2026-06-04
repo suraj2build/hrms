@@ -55,6 +55,7 @@ import { resolveEmployeeOrgContext, getWeeklyOffDays } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
+import { resolveLeaveDayFraction }                      from './leave-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -846,21 +847,31 @@ export async function computeDay(
 
   // ── Priority chain ─────────────────────────────────────────────────────────
 
-  // 1. Approved leave → LEAVE
+  // 1. Approved leave → LEAVE (session-aware)
   if (approvedLeave) {
     const { is_paid, half_day } = approvedLeave
+    // For a HALF-DAY leave, the other half of the day may have been worked.
+    // Treat the presence of punches as the worked half so the day merges to a
+    // full payable day (0.5 leave + 0.5 worked) instead of losing the worked
+    // half. For a full-day leave this is a no-op. resolveLeaveDayFraction also
+    // fixes unpaid half-day handling (0.5 unpaid leave alone → 0 payable).
+    const resolved = resolveLeaveDayFraction({
+      session:        half_day ? 'first_half' : 'full_day',
+      isPaid:         is_paid,
+      existingStatus: half_day && punches.length > 0 ? 'present' : null,
+    })
     return {
       tenant_id, employee_id, date,
-      status:               'leave',
+      status:               resolved.status,
       work_hours:           0,
       late_minutes:         0,
       overtime_minutes:     0,
-      is_payable:           is_paid,
-      day_fraction:         half_day ? 0.5 : (is_paid ? 1.0 : 0.0),
+      is_payable:           resolved.is_payable,
+      day_fraction:         resolved.day_fraction,
       worked_on_weekly_off: false,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
-      reason:               `Approved leave on ${date}`,
+      reason:               half_day ? `Approved half-day leave on ${date}` : `Approved leave on ${date}`,
       meta:                 { punchesCount: punches.length, hasUnpunchedOut: false },
     }
   }

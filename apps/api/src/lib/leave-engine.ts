@@ -200,6 +200,61 @@ export async function computeWorkingLeaveDays(
   }
 }
 
+// ── Half-day / session leave resolution ─────────────────────────────────────
+
+export interface LeaveDayResolution {
+  status:       'leave' | 'half_day' | 'present'
+  day_fraction: number
+  is_payable:   boolean
+}
+
+/**
+ * Resolve the attendance_daily values for ONE leave day, honoring half-day
+ * sessions and merging with any attendance already recorded for that date.
+ *
+ * Model (each day = 1.0):
+ *   - leavePortion   = 0.5 for first_half/second_half, else 1.0
+ *   - leavePayable   = leavePortion when the leave type is paid, else 0
+ *   - workedPortion  = the part of the day the employee actually worked, taken
+ *                      from the existing attendance row (only meaningful for a
+ *                      half-day leave, where the other half may be worked)
+ *   - day_fraction   = min(1, leavePayable + workedPortion)
+ *
+ * Examples:
+ *   full paid leave                      → 1.0 payable (status 'leave')
+ *   full unpaid leave                    → 0.0 (→ 1.0 LOP)
+ *   half paid leave, worked other half   → 1.0 payable (status 'present')
+ *   half paid leave, didn't work         → 0.5 payable, 0.5 LOP ('half_day')
+ *   half unpaid leave, worked other half → 0.5 payable, 0.5 LOP ('half_day')
+ */
+export function resolveLeaveDayFraction(opts: {
+  session:           LeaveSession
+  isPaid:            boolean
+  existingStatus?:   string | null
+  existingFraction?: number | null
+}): LeaveDayResolution {
+  const isHalf       = opts.session !== 'full_day'
+  const leavePortion = isHalf ? 0.5 : 1.0
+  const leavePayable = opts.isPaid ? leavePortion : 0
+
+  let workedPortion = 0
+  if (isHalf) {
+    const s = opts.existingStatus
+    if (s === 'present' || s === 'late') {
+      workedPortion = 0.5
+    } else if (s === 'half_day') {
+      workedPortion = Math.min(0.5, opts.existingFraction ?? 0.5)
+    }
+  }
+
+  const day_fraction = Math.min(1.0, Math.round((leavePayable + workedPortion) * 100) / 100)
+  const status = !isHalf
+    ? 'leave'
+    : (day_fraction >= 1.0 ? 'present' : 'half_day')
+
+  return { status, day_fraction, is_payable: day_fraction > 0 }
+}
+
 // ── Balance validation ─────────────────────────────────────────────────────
 
 export interface BalanceCheckResult {
