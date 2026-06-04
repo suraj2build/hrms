@@ -16,7 +16,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Layers, Plus, Pencil, Trash2, Loader2, ShieldAlert,
-  TrendingUp, TrendingDown, Building2,
+  TrendingUp, TrendingDown, Building2, Download,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -149,6 +149,20 @@ export function SalaryComponents() {
     onError: (e: Error) => { toast.error('Failed to delete component', { description: e.message }) },
   })
 
+  const seedMutation = useMutation<{ data: { created: number; skipped: number; total: number } }, Error>({
+    mutationFn: () => api.post('/payroll/compensation/components/seed-standard', {}),
+    onSuccess: (res) => {
+      const { created, skipped } = res.data
+      toast.success('Standard library loaded', {
+        description: created > 0
+          ? `${created} component(s) added${skipped > 0 ? `, ${skipped} already existed` : ''}.`
+          : 'All standard components already exist — nothing to add.',
+      })
+      invalidate()
+    },
+    onError: (e: Error) => { toast.error('Failed to load standard library', { description: e.message }) },
+  })
+
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   function resetForm() {
@@ -217,9 +231,19 @@ export function SalaryComponents() {
         title="Salary Components"
         subtitle="Define the building blocks used in salary structures — earnings, deductions, and employer contributions"
         actions={
-          <Button size="sm" onClick={() => { resetForm(); setShowForm(v => !v) }}>
-            <Plus className="h-4 w-4 mr-1.5" /> Add Component
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => seedMutation.mutate()}
+              disabled={seedMutation.isPending}
+              title="Load the best-practice standard component library (idempotent — won't duplicate)">
+              {seedMutation.isPending
+                ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                : <Download className="h-4 w-4 mr-1.5" />}
+              Load Standard Library
+            </Button>
+            <Button size="sm" onClick={() => { resetForm(); setShowForm(v => !v) }}>
+              <Plus className="h-4 w-4 mr-1.5" /> Add Component
+            </Button>
+          </div>
         }
       />
 
@@ -332,9 +356,17 @@ export function SalaryComponents() {
             <Layers className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
               {(components ?? []).length === 0
-                ? 'No salary components yet. Create your first component above.'
+                ? 'No salary components yet. Load the best-practice standard library to get started in one click — then edit as needed.'
                 : 'No components match the current filter.'}
             </p>
+            {(components ?? []).length === 0 && (
+              <Button size="sm" onClick={() => seedMutation.mutate()} disabled={seedMutation.isPending}>
+                {seedMutation.isPending
+                  ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  : <Download className="h-4 w-4 mr-1.5" />}
+                Load Standard Library
+              </Button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">

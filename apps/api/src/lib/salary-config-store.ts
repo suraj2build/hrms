@@ -23,6 +23,7 @@
 
 import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { STANDARD_SALARY_COMPONENTS } from './standard-salary-components.js'
 
 // ── Schemas (the one true contract) ──────────────────────────────────────────────
 
@@ -137,6 +138,25 @@ export async function updateComponent(
   if (error) return dbFail(error)
   if (!data) return fail(404, 'NOT_FOUND', 'Salary component not found')
   return ok(data)
+}
+
+/**
+ * Seed the tenant's component library with the best-practice standard set.
+ * Idempotent: existing codes are left untouched (ON CONFLICT DO NOTHING via
+ * ignoreDuplicates), so it is safe to call repeatedly and never overwrites a
+ * tenant's edits.
+ */
+export async function seedStandardComponents(
+  supabase: SupabaseClient, tenantId: string,
+): Promise<StoreResult> {
+  const rows = STANDARD_SALARY_COMPONENTS.map(s => ({ ...s, tenant_id: tenantId, is_active: true }))
+  const { data, error } = await supabase
+    .from('salary_components')
+    .upsert(rows, { onConflict: 'tenant_id,code', ignoreDuplicates: true })
+    .select('id')
+  if (error) return dbFail(error)
+  const created = (data as Array<{ id: string }> | null)?.length ?? 0
+  return ok({ created, skipped: rows.length - created, total: rows.length }, 201)
 }
 
 /** Soft-delete when referenced by a structure; hard-delete otherwise. */

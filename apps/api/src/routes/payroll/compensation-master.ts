@@ -15,7 +15,7 @@ import {
   listComponents, createComponent, updateComponent, deleteComponent,
   listStructures, createStructure, updateStructure,
   listStructureComponents, addStructureComponent, removeStructureComponent,
-  cloneStructure,
+  cloneStructure, seedStandardComponents,
 } from '../../lib/salary-config-store.js'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
@@ -64,6 +64,15 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
     if (r.error) return reply.code(r.status).send(r.error)
     if (r.status === 204) return reply.code(204).send()
     return reply.send(r.data)   // soft-delete → { message }
+  })
+
+  // ── POST /payroll/compensation/components/seed-standard ───────────────────────
+  // Load the best-practice standard component library for this tenant.
+  // Idempotent — existing codes are preserved.
+  fastify.post('/components/seed-standard', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const r = await seedStandardComponents(fastify.supabase, req.tenantId)
+    if (r.error) return reply.code(r.status).send(r.error)
+    return reply.code(201).send({ data: r.data })
   })
 
   // ── GET /payroll/compensation/structures ──────────────────────────────────────
