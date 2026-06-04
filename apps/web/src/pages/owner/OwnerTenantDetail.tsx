@@ -179,7 +179,7 @@ export function OwnerTenantDetail() {
 
   if (isLoading) return (
     <div className="p-6 space-y-4">
-      {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-10 bg-slate-800 rounded-lg animate-pulse" />)}
+      {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}
     </div>
   )
   if (!t) return <div className="p-6 text-slate-500">Tenant not found</div>
@@ -187,32 +187,32 @@ export function OwnerTenantDetail() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       {/* Back */}
-      <button onClick={() => navigate('/owner/tenants')} className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+      <button onClick={() => navigate('/owner/tenants')} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
         <ArrowLeft className="h-4 w-4" /> Back to Tenants
       </button>
 
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">{t.name}</h1>
+          <h1 className="text-xl font-bold text-slate-900">{t.name}</h1>
           <div className="flex items-center gap-3 mt-1">
             <span className="text-sm text-slate-500">{t.slug}</span>
             <span className={`text-xs font-semibold uppercase ${STATUS_COLOR[t.status]}`}>{t.status}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full border ${
-              t.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300 bg-purple-500/10' : 'border-slate-700 text-slate-400'
+              t.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300 bg-purple-500/10' : 'border-slate-200 text-slate-500'
             }`}>{t.plan}</span>
           </div>
         </div>
         {isOwner() && (
           <div className="flex gap-2">
             {!editing && (
-              <Button onClick={startEdit} variant="outline" size="sm" className="border-slate-700 text-slate-300 gap-1">
+              <Button onClick={startEdit} variant="outline" size="sm" className="border-slate-200 text-slate-700 gap-1">
                 <Edit2 className="h-3.5 w-3.5" /> Edit
               </Button>
             )}
-            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs">Activate</Button>}
+            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-slate-900 text-xs">Activate</Button>}
             {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" variant="outline" className="border-red-500/40 text-red-400 text-xs">Suspend</Button>}
-            {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" variant="ghost"   className="text-slate-600 hover:text-slate-400 text-xs">Cancel</Button>}
+            {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" variant="ghost"   className="text-slate-400 hover:text-slate-500 text-xs">Cancel</Button>}
             <Button onClick={deleteTenant} size="sm" variant="outline" className="border-red-600/50 text-red-400 hover:bg-red-600/10 text-xs gap-1">
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
@@ -222,15 +222,15 @@ export function OwnerTenantDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Details card */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">Details</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Details</h2>
             {editing && (
               <div className="flex gap-1.5">
-                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white h-7 text-xs gap-1">
+                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900 h-7 text-xs gap-1">
                   <Save className="h-3 w-3" /> Save
                 </Button>
-                <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-slate-400 h-7 text-xs gap-1">
+                <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-slate-500 h-7 text-xs gap-1">
                   <X className="h-3 w-3" /> Cancel
                 </Button>
               </div>
@@ -245,21 +245,21 @@ export function OwnerTenantDetail() {
                 { key: 'notes',             label: 'Notes', type: 'text' },
               ].map(({ key, label, type }) => (
                 <div key={key} className="space-y-1">
-                  <label className="text-xs text-slate-400">{label}</label>
+                  <label className="text-xs text-slate-500">{label}</label>
                   <Input
                     type={type}
                     value={editForm[key] ?? ''}
                     onChange={e => setEditForm((f: any) => ({ ...f, [key]: e.target.value }))}
-                    className="bg-slate-800 border-slate-700 text-white h-8 text-sm"
+                    className="bg-slate-100 border-slate-200 text-slate-900 h-8 text-sm"
                   />
                 </div>
               ))}
               <div className="space-y-1">
-                <label className="text-xs text-slate-400">Plan</label>
+                <label className="text-xs text-slate-500">Plan</label>
                 <select
                   value={editForm.plan}
                   onChange={e => setEditForm((f: any) => ({ ...f, plan: e.target.value }))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-1.5 text-sm text-slate-900"
                 >
                   <option value="standard">Standard</option>
                   <option value="enterprise">Enterprise</option>
@@ -280,7 +280,7 @@ export function OwnerTenantDetail() {
               ].map(({ label, value }) => (
                 <div key={label} className="flex gap-2">
                   <dt className="w-32 flex-shrink-0 text-slate-500">{label}</dt>
-                  <dd className="text-slate-200 break-all">{value}</dd>
+                  <dd className="text-slate-800 break-all">{value}</dd>
                 </div>
               ))}
             </dl>
@@ -289,21 +289,21 @@ export function OwnerTenantDetail() {
 
         {/* License management */}
         {isOwner() && (
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
-            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
               <Award className="h-4 w-4 text-[#0D9488]" /> License Management
             </h2>
             <div className="space-y-2">
-              <label className="text-xs text-slate-400">Issue license for</label>
+              <label className="text-xs text-slate-500">Issue license for</label>
               <div className="flex gap-2">
                 <select
                   value={licenseMonths}
                   onChange={e => setLicenseMonths(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-white flex-1"
+                  className="bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-900 flex-1"
                 >
                   {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
-                <Button onClick={issueLicense} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white">
+                <Button onClick={issueLicense} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900">
                   Issue License
                 </Button>
               </div>
@@ -317,24 +317,24 @@ export function OwnerTenantDetail() {
 
       {/* Billing snapshots */}
       {t.billing_snapshots.length > 0 && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-800">
-            <h2 className="text-sm font-semibold text-white">Billing History</h2>
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200">
+            <h2 className="text-sm font-semibold text-slate-900">Billing History</h2>
           </div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-900/50">
+            <thead className="bg-white/50">
               <tr>
                 {['Month', 'Employees', 'Rate / emp', 'Amount Due', 'Plan'].map(h => (
                   <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-slate-100">
               {t.billing_snapshots.map(b => (
-                <tr key={b.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-2.5 text-slate-300 font-mono text-[12px]">{b.snapshot_month}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{b.employee_count}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{fmtCurrency(b.per_employee_rate)}</td>
+                <tr key={b.id} className="hover:bg-slate-100/30">
+                  <td className="px-4 py-2.5 text-slate-700 font-mono text-[12px]">{b.snapshot_month}</td>
+                  <td className="px-4 py-2.5 text-slate-700">{b.employee_count}</td>
+                  <td className="px-4 py-2.5 text-slate-700">{fmtCurrency(b.per_employee_rate)}</td>
                   <td className="px-4 py-2.5 text-emerald-300 font-semibold">{fmtCurrency(b.amount_due)}</td>
                   <td className="px-4 py-2.5 text-slate-500 text-[11px]">{b.plan}</td>
                 </tr>
@@ -346,33 +346,33 @@ export function OwnerTenantDetail() {
 
       {/* API keys */}
       {t.api_keys.length > 0 && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-800">
-            <h2 className="text-sm font-semibold text-white">API Keys</h2>
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200">
+            <h2 className="text-sm font-semibold text-slate-900">API Keys</h2>
           </div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-900/50">
+            <thead className="bg-white/50">
               <tr>
                 {['Name', 'Key Prefix', 'Scopes', 'Last Used', 'Status'].map(h => (
                   <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-slate-100">
               {t.api_keys.map(k => (
-                <tr key={k.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-2.5 text-slate-300">{k.name}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-slate-400">{k.key_prefix}…</td>
+                <tr key={k.id} className="hover:bg-slate-100/30">
+                  <td className="px-4 py-2.5 text-slate-700">{k.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-slate-500">{k.key_prefix}…</td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap gap-1">
                       {k.scopes.map(s => (
-                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">{s}</span>
+                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{s}</span>
                       ))}
                     </div>
                   </td>
                   <td className="px-4 py-2.5 text-[12px] text-slate-500">{fmtDate(k.last_used_at)}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-emerald-400' : 'text-slate-400'}`}>
                       {k.is_active ? 'Active' : 'Revoked'}
                     </span>
                   </td>
@@ -384,18 +384,18 @@ export function OwnerTenantDetail() {
       )}
 
       {/* ── Tenant Admins ──────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-[#0D9488]" />
-            <h2 className="text-sm font-semibold text-white">Tenant Admin Accounts</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Tenant Admin Accounts</h2>
             <span className="text-[11px] text-slate-500">({admins.length})</span>
           </div>
           {isOwner() && (
             <Button
               size="sm"
               onClick={() => setAddAdminOpen(true)}
-              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white h-7 text-xs gap-1"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900 h-7 text-xs gap-1"
             >
               <UserPlus className="h-3 w-3" /> Add Admin
             </Button>
@@ -410,37 +410,37 @@ export function OwnerTenantDetail() {
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-900/50">
+            <thead className="bg-white/50">
               <tr>
                 {['Name', 'Email', 'Role', 'Created', 'Status', ''].map(h => (
                   <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-slate-100">
               {admins.map(a => {
                 const displayName = a.full_name || a.email || 'Unknown'
                 const roleLabel: Record<string, string> = {
                   super_admin: 'Admin', hr_admin: 'HR Admin', manager: 'Manager',
                 }
                 return (
-                <tr key={a.id} className="hover:bg-slate-800/30">
+                <tr key={a.id} className="hover:bg-slate-100/30">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       <div className="h-6 w-6 rounded-full bg-[#1E5BA8] flex items-center justify-center flex-shrink-0">
-                        <span className="text-[10px] font-bold text-[#5EEAD4]">{displayName.charAt(0).toUpperCase()}</span>
+                        <span className="text-[10px] font-bold text-[#0D9488]">{displayName.charAt(0).toUpperCase()}</span>
                       </div>
-                      <span className="text-[13px] text-slate-200 font-medium">{displayName}</span>
+                      <span className="text-[13px] text-slate-800 font-medium">{displayName}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 text-[12px] text-slate-400">{a.email ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-[12px] text-slate-500">{a.email ?? '—'}</td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
                       a.role === 'super_admin'
-                        ? 'border-[#0D9488]/40 text-[#5EEAD4] bg-[#0D9488]/10'
+                        ? 'border-[#0D9488]/40 text-[#0D9488] bg-[#0D9488]/10'
                         : a.role === 'hr_admin'
                         ? 'border-sky-500/40 text-sky-300 bg-sky-500/10'
-                        : 'border-slate-700 text-slate-400 bg-slate-800'
+                        : 'border-slate-200 text-slate-500 bg-slate-100'
                     }`}>
                       {roleLabel[a.role] ?? a.role}
                     </span>
@@ -493,7 +493,7 @@ export function OwnerTenantDetail() {
 
       {/* ── Reset Password Dialog ─────────────────────────────────────────────── */}
       <Dialog open={!!resetAdminId} onOpenChange={open => { if (!open) { setResetAdminId(null); setResetPwd(''); setShowResetPwd(false) } }}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-4 w-4 text-amber-400" />
@@ -501,11 +501,11 @@ export function OwnerTenantDetail() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               Enter a new password, or leave blank to auto-generate a strong one.
             </p>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">New Password</label>
+              <label className="text-xs font-medium text-slate-700">New Password</label>
               <div className="flex gap-1.5">
                 <div className="relative flex-1">
                   <Input
@@ -513,12 +513,12 @@ export function OwnerTenantDetail() {
                     placeholder="Min 8 chars (blank = auto-generate)"
                     value={resetPwd}
                     onChange={e => setResetPwd(e.target.value)}
-                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm pr-8"
+                    className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm pr-8"
                   />
                   <button
                     type="button"
                     onClick={() => setShowResetPwd(v => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
                   >
                     {showResetPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                   </button>
@@ -528,7 +528,7 @@ export function OwnerTenantDetail() {
                   variant="outline"
                   size="sm"
                   onClick={() => { setResetPwd(generatePassword()); setShowResetPwd(true) }}
-                  className="h-8 border-slate-700 text-slate-400 hover:text-white gap-1 px-2"
+                  className="h-8 border-slate-200 text-slate-500 hover:text-slate-900 gap-1 px-2"
                 >
                   <RefreshCw className="h-3 w-3" /> Generate
                 </Button>
@@ -553,7 +553,7 @@ export function OwnerTenantDetail() {
 
       {/* ── Add Admin Dialog ──────────────────────────────────────────────────── */}
       <Dialog open={addAdminOpen} onOpenChange={open => { setAddAdminOpen(open); if (!open) { setAdminForm({ name: '', email: '', password: '', role: 'super_admin' }); setShowAdminPwd(false) } }}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="h-4 w-4 text-[#0D9488]" />
@@ -566,28 +566,28 @@ export function OwnerTenantDetail() {
             </p>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Full Name *</label>
+              <label className="text-xs font-medium text-slate-700">Full Name *</label>
               <Input
                 placeholder="John Smith"
                 value={adminForm.name}
                 onChange={e => setAdminForm(f => ({ ...f, name: e.target.value }))}
-                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm"
+                className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Email *</label>
+              <label className="text-xs font-medium text-slate-700">Email *</label>
               <Input
                 type="email"
                 placeholder="admin@company.com"
                 value={adminForm.email}
                 onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
-                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm"
+                className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Temporary Password *</label>
+              <label className="text-xs font-medium text-slate-700">Temporary Password *</label>
               <div className="flex gap-1.5">
                 <div className="relative flex-1">
                   <Input
@@ -595,12 +595,12 @@ export function OwnerTenantDetail() {
                     placeholder="Min 8 characters"
                     value={adminForm.password}
                     onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))}
-                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 h-8 text-sm pr-8"
+                    className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm pr-8"
                   />
                   <button
                     type="button"
                     onClick={() => setShowAdminPwd(v => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
                   >
                     {showAdminPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                   </button>
@@ -610,7 +610,7 @@ export function OwnerTenantDetail() {
                   variant="outline"
                   size="sm"
                   onClick={() => { setAdminForm(f => ({ ...f, password: generatePassword() })); setShowAdminPwd(true) }}
-                  className="h-8 border-slate-700 text-slate-400 hover:text-white gap-1 px-2"
+                  className="h-8 border-slate-200 text-slate-500 hover:text-slate-900 gap-1 px-2"
                 >
                   <RefreshCw className="h-3 w-3" /> Generate
                 </Button>
@@ -618,11 +618,11 @@ export function OwnerTenantDetail() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">Role</label>
+              <label className="text-xs font-medium text-slate-700">Role</label>
               <select
                 value={adminForm.role}
                 onChange={e => setAdminForm(f => ({ ...f, role: e.target.value }))}
-                className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white"
+                className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-1.5 text-sm text-slate-900"
               >
                 <option value="super_admin">Admin (full access)</option>
                 <option value="hr_admin">HR Admin</option>
@@ -638,11 +638,11 @@ export function OwnerTenantDetail() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setAddAdminOpen(false)} className="text-slate-400">Cancel</Button>
+            <Button variant="ghost" onClick={() => setAddAdminOpen(false)} className="text-slate-500">Cancel</Button>
             <Button
               onClick={() => addAdminMut.mutate()}
               disabled={!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim() || addAdminMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900"
             >
               {addAdminMut.isPending ? 'Creating…' : 'Create Admin'}
             </Button>
@@ -652,7 +652,7 @@ export function OwnerTenantDetail() {
 
       {/* ── Reset Password Result Dialog ─────────────────────────────────────── */}
       <Dialog open={!!resetResult} onOpenChange={open => { if (!open) setResetResult(null) }}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-sm">
+        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-4 w-4 text-amber-400" />
@@ -661,12 +661,12 @@ export function OwnerTenantDetail() {
           </DialogHeader>
           {resetResult && (
             <div className="space-y-3 py-1">
-              <p className="text-xs text-slate-400">New temporary password for <span className="text-white">{resetResult.email}</span>:</p>
-              <div className="flex items-center gap-2 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2">
+              <p className="text-xs text-slate-500">New temporary password for <span className="text-slate-900">{resetResult.email}</span>:</p>
+              <div className="flex items-center gap-2 rounded-lg bg-slate-100 border border-slate-200 px-3 py-2">
                 <code className="flex-1 font-mono text-sm text-amber-200 select-all">{resetResult.temp_password}</code>
                 <button
                   onClick={() => copyPassword(resetResult.temp_password)}
-                  className="text-slate-500 hover:text-slate-200 transition-colors"
+                  className="text-slate-500 hover:text-slate-800 transition-colors"
                 >
                   {copiedPwd ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
                 </button>
@@ -675,7 +675,7 @@ export function OwnerTenantDetail() {
             </div>
           )}
           <DialogFooter>
-            <Button onClick={() => setResetResult(null)} className="bg-slate-700 hover:bg-slate-600 text-white">
+            <Button onClick={() => setResetResult(null)} className="bg-slate-200 hover:bg-slate-300 text-slate-900">
               Done
             </Button>
           </DialogFooter>

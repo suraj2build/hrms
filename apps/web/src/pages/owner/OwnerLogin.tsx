@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Eye, EyeOff } from 'lucide-react'
+import { Loader2, Eye, EyeOff, ShieldCheck } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
 import { toast } from 'sonner'
 import { ownerSupabase }  from '@/lib/supabase/ownerClient'
@@ -11,7 +11,6 @@ import { ownerApi }       from '@/lib/api/ownerApi'
 import { useOwnerStore }  from '@/stores/ownerStore'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
-import { Card, CardContent } from '@/components/ui/card'
 import type { PlatformAdmin } from '@/stores/ownerStore'
 
 const schema = z.object({
@@ -57,65 +56,72 @@ export function OwnerLogin() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-      <div className="w-full max-w-sm space-y-6">
+    <div className="relative min-h-screen flex items-center justify-center p-4 text-slate-900 antialiased overflow-hidden">
+      {/* Ambient backdrop */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-slate-50" />
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(110%_110%_at_0%_0%,rgba(13,148,136,0.14),transparent_45%),radial-gradient(110%_110%_at_100%_0%,rgba(79,70,229,0.12),transparent_45%),radial-gradient(130%_130%_at_50%_100%,rgba(56,189,248,0.10),transparent_50%)]" />
+      {/* Faint grid */}
+      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.4] [background-image:linear-gradient(to_right,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.04)_1px,transparent_1px)] [background-size:38px_38px]" />
+
+      <div className="w-full max-w-sm space-y-7">
         {/* Branding */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center mb-4">
-            <LogoMark size={48} />
+          <div className="inline-grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-teal-500 to-indigo-600 shadow-xl shadow-teal-500/25 mb-5">
+            <LogoMark size={30} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Platform Owner</h1>
-          <p className="text-sm text-slate-400 mt-1">Sign in to the owner control panel</p>
+          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-slate-900 to-slate-600 bg-clip-text text-transparent">
+            Control Center
+          </h1>
+          <p className="text-sm text-slate-500 mt-1.5">Platform owner — sign in to continue</p>
         </div>
 
-        <Card className="border-slate-800 bg-slate-900">
-          <CardContent className="pt-6">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-300">Email</label>
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 backdrop-blur-xl p-6 shadow-xl shadow-slate-900/5">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">Email</label>
+              <Input
+                type="email"
+                placeholder="owner@platform.local"
+                className="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-teal-500/30"
+                {...register('email')}
+              />
+              {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">Password</label>
+              <div className="relative">
                 <Input
-                  type="email"
-                  placeholder="owner@platform.local"
-                  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
-                  {...register('email')}
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  className="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 pr-10 focus-visible:ring-teal-500/30"
+                  {...register('password')}
                 />
-                {errors.email && <p className="text-xs text-red-400">{errors.email.message}</p>}
+                <button
+                  type="button"
+                  onClick={() => setShowPw(!showPw)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
+              {errors.password && <p className="text-xs text-red-500">{errors.password.message}</p>}
+            </div>
 
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-300">Password</label>
-                <div className="relative">
-                  <Input
-                    type={showPw ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 pr-10"
-                    {...register('password')}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw(!showPw)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
-                  >
-                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                {errors.password && <p className="text-xs text-red-400">{errors.password.message}</p>}
-              </div>
+            <Button
+              type="submit"
+              className="w-full bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white shadow-lg shadow-teal-500/20 border-0"
+              disabled={isSubmitting}
+            >
+              {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Sign in to Control Center
+            </Button>
+          </form>
+        </div>
 
-              <Button
-                type="submit"
-                className="w-full bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
-                disabled={isSubmitting}
-              >
-                {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Sign in to Owner Panel
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <p className="text-center text-xs text-slate-600">
-          This portal is restricted to platform administrators only.
+        <p className="flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          Restricted to platform administrators only.
         </p>
       </div>
     </div>

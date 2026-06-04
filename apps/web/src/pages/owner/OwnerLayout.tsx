@@ -73,57 +73,71 @@ export function OwnerLayout() {
   // Don't render child routes until session is resolved — avoids 401 spam
   if (!admin) return null
   if (!tokenReady) return (
-    <div className="flex h-screen items-center justify-center bg-slate-950">
-      <div className="h-5 w-5 rounded-full border-2 border-[#0D9488] border-t-transparent animate-spin" />
+    <div className="flex h-screen items-center justify-center bg-slate-50">
+      <div className="h-5 w-5 rounded-full border-2 border-teal-500 border-t-transparent animate-spin" />
     </div>
   )
 
   return (
-    <div className="flex h-screen bg-slate-950 text-white overflow-hidden">
+    <div className="relative flex h-screen overflow-hidden text-slate-900 antialiased">
+      {/* ── Ambient backdrop — soft gradient mesh for the "control room" feel ── */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-slate-50" />
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(13,148,136,0.10),transparent_45%),radial-gradient(120%_120%_at_100%_0%,rgba(79,70,229,0.08),transparent_45%),radial-gradient(140%_140%_at_100%_100%,rgba(56,189,248,0.07),transparent_50%)]" />
+
       {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
-      <aside className="w-56 flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900">
+      <aside className="w-60 flex-shrink-0 flex flex-col border-r border-slate-200/70 bg-white/70 backdrop-blur-xl">
         {/* Logo */}
-        <div className="h-14 flex items-center gap-2.5 px-4 border-b border-slate-800">
-          <LogoMark size={28} />
+        <div className="h-16 flex items-center gap-3 px-5 border-b border-slate-200/70">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-teal-500 to-indigo-600 shadow-lg shadow-teal-500/20">
+            <LogoMark size={20} className="text-white" />
+          </div>
           <div className="min-w-0">
-            <p className="text-[13px] font-semibold truncate">Owner Panel</p>
-            <p className="text-[10px] text-slate-500 truncate">Platform Control</p>
+            <p className="text-[13px] font-semibold tracking-tight truncate">Control Center</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400 truncate">Platform Owner</p>
           </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+          <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Operations</p>
           {navItems.map(({ to, label, icon: Icon, badge }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors',
+                  'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200',
                   isActive
-                    ? 'bg-[#0D9488]/20 text-[#5EEAD4] font-medium'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800',
+                    ? 'bg-gradient-to-r from-teal-500/10 to-indigo-500/10 text-teal-700 font-semibold shadow-sm ring-1 ring-teal-500/15'
+                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100/70',
                 )
               }
             >
-              <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1 truncate">{label}</span>
-              {badge && pendingCount > 0 && (
-                <span className="h-5 min-w-5 px-1 rounded-full bg-amber-500 text-[10px] font-bold text-black flex items-center justify-center">
-                  {pendingCount > 99 ? '99+' : pendingCount}
-                </span>
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-teal-500 to-indigo-500" />
+                  )}
+                  <Icon className={cn('h-[18px] w-[18px] flex-shrink-0 transition-colors', isActive ? 'text-teal-600' : 'text-slate-400 group-hover:text-slate-600')} />
+                  <span className="flex-1 truncate">{label}</span>
+                  {badge && pendingCount > 0 && (
+                    <span className="h-5 min-w-5 px-1.5 rounded-full bg-amber-400 text-[10px] font-bold text-amber-950 flex items-center justify-center shadow-sm">
+                      {pendingCount > 99 ? '99+' : pendingCount}
+                    </span>
+                  )}
+                </>
               )}
             </NavLink>
           ))}
         </nav>
 
         {/* Open HRMS app */}
-        <div className="px-2 pb-2">
+        <div className="px-3 pb-2">
           <a
             href="/login"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-[#5EEAD4] hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-teal-700 hover:bg-slate-100/70 transition-colors"
           >
             <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
             <span>Open Emvora App</span>
@@ -131,30 +145,30 @@ export function OwnerLayout() {
         </div>
 
         {/* Bottom: admin info + logout */}
-        <div className="border-t border-slate-800 p-3 space-y-1">
-          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
-            <div className="h-7 w-7 rounded-full bg-[#1E5BA8] flex items-center justify-center flex-shrink-0">
-              <span className="text-[11px] font-bold text-[#5EEAD4]">
+        <div className="border-t border-slate-200/70 p-3">
+          <div className="flex items-center gap-3 rounded-xl bg-slate-50/80 px-3 py-2.5 ring-1 ring-slate-200/60">
+            <div className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-teal-500 flex-shrink-0 shadow-sm">
+              <span className="text-[11px] font-bold text-white">
                 {admin.name.charAt(0).toUpperCase()}
               </span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-medium truncate">{admin.name}</p>
-              <p className="text-[10px] text-slate-500 capitalize">{admin.role}</p>
+              <p className="text-[12px] font-semibold truncate text-slate-800">{admin.name}</p>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 capitalize">{admin.role}</p>
             </div>
+            <button
+              onClick={handleLogout}
+              className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-sm text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            <span className="text-xs">Sign out</span>
-          </button>
         </div>
       </aside>
 
       {/* ── Main content ────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto bg-slate-950">
+      <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
     </div>

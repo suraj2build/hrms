@@ -47,21 +47,22 @@ function StatCard({
   color?: 'indigo' | 'green' | 'amber' | 'red' | 'slate'
 }) {
   const colorMap = {
-    indigo: 'bg-[#0D9488]/20 text-[#0D9488]',
-    green:  'bg-emerald-600/20 text-emerald-400',
-    amber:  'bg-amber-600/20 text-amber-400',
-    red:    'bg-red-600/20 text-red-400',
-    slate:  'bg-slate-700 text-slate-400',
+    indigo: { ring: 'ring-teal-500/15',  icon: 'bg-gradient-to-br from-teal-500 to-indigo-600 text-white',  glow: 'before:bg-teal-500/10' },
+    green:  { ring: 'ring-emerald-500/15', icon: 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white', glow: 'before:bg-emerald-500/10' },
+    amber:  { ring: 'ring-amber-500/20',  icon: 'bg-gradient-to-br from-amber-400 to-orange-500 text-white', glow: 'before:bg-amber-500/10' },
+    red:    { ring: 'ring-red-500/15',    icon: 'bg-gradient-to-br from-red-500 to-rose-600 text-white',     glow: 'before:bg-red-500/10' },
+    slate:  { ring: 'ring-slate-300/40',  icon: 'bg-gradient-to-br from-slate-500 to-slate-700 text-white',  glow: 'before:bg-slate-400/10' },
   }
+  const c = colorMap[color]
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-start gap-3">
-      <div className={`h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 ${colorMap[color]}`}>
-        <Icon className="h-4.5 w-4.5" />
+    <div className={`group relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 backdrop-blur-xl p-4 flex items-start gap-3.5 shadow-sm ring-1 ${c.ring} transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 before:absolute before:-right-6 before:-top-6 before:h-20 before:w-20 before:rounded-full before:blur-2xl ${c.glow}`}>
+      <div className={`relative h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${c.icon}`}>
+        <Icon className="h-5 w-5" />
       </div>
-      <div>
-        <p className="text-[11px] text-slate-500 uppercase tracking-wide">{label}</p>
-        <p className="text-2xl font-bold text-white mt-0.5">{value}</p>
-        {sub && <p className="text-[11px] text-slate-500 mt-0.5">{sub}</p>}
+      <div className="relative min-w-0">
+        <p className="text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.12em]">{label}</p>
+        <p className="text-[26px] leading-tight font-bold text-slate-900 mt-0.5 tabular-nums">{value}</p>
+        {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
       </div>
     </div>
   )
@@ -103,19 +104,28 @@ export function OwnerDashboard() {
   const d = data?.data
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-9">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-white">
-          Welcome, {admin?.name}
-        </h1>
-        <p className="text-sm text-slate-500 mt-0.5">Platform overview</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            Welcome back, {admin?.name?.split(' ')[0] ?? 'Owner'}
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">Live platform overview · auto-refreshing</p>
+        </div>
+        <div className="hidden sm:flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm backdrop-blur">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          All systems operational
+        </div>
       </div>
 
       {isLoading && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-xl bg-slate-800 animate-pulse" />
+            <div key={i} className="h-24 rounded-2xl bg-white/60 ring-1 ring-slate-200/60 animate-pulse" />
           ))}
         </div>
       )}
@@ -124,7 +134,7 @@ export function OwnerDashboard() {
         <>
           {/* Tenant stats */}
           <section>
-            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Tenants</h2>
+            <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.16em] mb-3">Tenants</h2>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard icon={Building2}    label="Total"     value={d.tenants.total}     color="slate" />
               <StatCard icon={CheckCircle2} label="Active"    value={d.tenants.active}    color="green" />
@@ -135,7 +145,7 @@ export function OwnerDashboard() {
 
           {/* Platform stats */}
           <section>
-            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Platform</h2>
+            <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.16em] mb-3">Platform</h2>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 icon={AlertTriangle}
@@ -152,15 +162,15 @@ export function OwnerDashboard() {
 
           {/* Quick actions */}
           {d.requests.pending > 0 && (
-            <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+            <section className="relative overflow-hidden rounded-2xl border border-amber-300/60 bg-gradient-to-r from-amber-50 to-white p-4 shadow-sm">
               <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle className="h-4 w-4 text-amber-400" />
-                <span className="text-sm font-semibold text-amber-300">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <span className="text-sm font-semibold text-amber-700">
                   {d.requests.pending} signup request{d.requests.pending !== 1 ? 's' : ''} awaiting review
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Go to <a href="/owner/requests" className="text-[#0D9488] hover:underline">Requests</a> to approve or reject.
+              <p className="text-xs text-slate-500">
+                Go to <Link to="/owner/requests" className="font-medium text-teal-700 hover:underline">Requests</Link> to approve or reject.
               </p>
             </section>
           )}
@@ -171,41 +181,41 @@ export function OwnerDashboard() {
       {healthRows.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tenant Running Status</h2>
-            <Link to="/owner/tenants" className="text-[11px] text-[#0D9488] hover:underline flex items-center gap-0.5">
+            <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.16em]">Tenant Running Status</h2>
+            <Link to="/owner/tenants" className="text-[11px] font-medium text-teal-700 hover:text-teal-800 flex items-center gap-0.5">
               View all <ChevronRight className="h-3 w-3" />
             </Link>
           </div>
-          <div className="rounded-xl border border-slate-800 overflow-hidden">
+          <div className="rounded-2xl border border-slate-200/70 bg-white/70 backdrop-blur-xl overflow-hidden shadow-sm">
             <table className="w-full text-sm">
-              <thead className="bg-slate-900 border-b border-slate-800">
+              <thead className="bg-slate-50/80 border-b border-slate-200/70">
                 <tr>
                   {['Tenant', 'Status', 'Employees', 'Active Users', 'Last Login', 'Last Payroll'].map(h => (
-                    <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                    <th key={h} className="text-left text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.1em] px-4 py-3">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-slate-100">
                 {healthRows.map(row => {
                   const t = row.tenant!
                   const STATUS_DOT: Record<string, string> = {
-                    active:    'bg-emerald-400',
-                    trial:     'bg-amber-400',
-                    suspended: 'bg-red-400',
-                    expired:   'bg-orange-400',
-                    cancelled: 'bg-slate-600',
+                    active:    'bg-emerald-500',
+                    trial:     'bg-amber-500',
+                    suspended: 'bg-red-500',
+                    expired:   'bg-orange-500',
+                    cancelled: 'bg-slate-400',
                   }
                   const payrollColor: Record<string, string> = {
-                    finalized:  'text-emerald-400',
-                    processing: 'text-amber-400',
-                    draft:      'text-slate-500',
+                    finalized:  'text-emerald-600',
+                    processing: 'text-amber-600',
+                    draft:      'text-slate-400',
                   }
                   return (
-                    <tr key={row.tenant_id} className="hover:bg-slate-800/40">
+                    <tr key={row.tenant_id} className="transition-colors hover:bg-teal-50/40">
                       <td className="px-4 py-3">
                         <Link
                           to={`/owner/tenants/${t.id}`}
-                          className="font-medium text-white text-[13px] hover:text-[#5EEAD4] transition-colors"
+                          className="font-semibold text-slate-800 text-[13px] hover:text-teal-700 transition-colors"
                           onClick={e => e.stopPropagation()}
                         >
                           {t.name}
@@ -213,20 +223,20 @@ export function OwnerDashboard() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[t.status] ?? 'bg-slate-600'}`} />
-                          <span className="text-[11px] text-slate-400 capitalize">{t.status}</span>
+                          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[t.status] ?? 'bg-slate-400'}`} />
+                          <span className="text-[11px] text-slate-500 capitalize">{t.status}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-[12px] text-slate-300">
-                          <Users2 className="h-3 w-3 text-slate-500" />
+                        <div className="flex items-center gap-1.5 text-[12px] text-slate-600">
+                          <Users2 className="h-3 w-3 text-slate-400" />
                           {row.employee_count}
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-[12px]">
-                          <span className={`h-1.5 w-1.5 rounded-full ${row.active_users > 0 ? 'bg-emerald-400' : 'bg-slate-700'}`} />
-                          <span className={row.active_users > 0 ? 'text-emerald-400' : 'text-slate-600'}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${row.active_users > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                          <span className={row.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-slate-400'}>
                             {row.active_users}
                           </span>
                         </div>
@@ -237,13 +247,13 @@ export function OwnerDashboard() {
                       <td className="px-4 py-3">
                         {row.last_payroll_run ? (
                           <div>
-                            <span className="text-[12px] text-slate-300">{row.last_payroll_run.month}</span>
-                            <span className={`ml-1.5 text-[10px] font-medium ${payrollColor[row.last_payroll_run.status] ?? 'text-slate-500'}`}>
+                            <span className="text-[12px] text-slate-600">{row.last_payroll_run.month}</span>
+                            <span className={`ml-1.5 text-[10px] font-semibold ${payrollColor[row.last_payroll_run.status] ?? 'text-slate-400'}`}>
                               {row.last_payroll_run.status}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-slate-600 text-[12px]">—</span>
+                          <span className="text-slate-300 text-[12px]">—</span>
                         )}
                       </td>
                     </tr>

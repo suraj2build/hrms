@@ -58,11 +58,11 @@ export function OwnerAdmins() {
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Platform Admins</h1>
+          <h1 className="text-xl font-bold text-slate-900">Platform Admins</h1>
           <p className="text-sm text-slate-500">{admins.length} admin{admins.length !== 1 ? 's' : ''}</p>
         </div>
         {isOwner() && (
-          <Button onClick={() => setInviteOpen(true)} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white gap-1.5">
+          <Button onClick={() => setInviteOpen(true)} className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900 gap-1.5">
             <Plus className="h-4 w-4" /> Invite Admin
           </Button>
         )}
@@ -70,37 +70,37 @@ export function OwnerAdmins() {
 
       <div className="space-y-3">
         {isLoading && Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="h-16 bg-slate-800 animate-pulse rounded-xl" />
+          <div key={i} className="h-16 bg-slate-100 animate-pulse rounded-xl" />
         ))}
         {admins.map(a => (
           <div key={a.id} className={`rounded-xl border p-4 flex items-center gap-4 ${
-            a.is_active ? 'border-slate-800 bg-slate-900' : 'border-slate-800 bg-slate-900/50 opacity-60'
+            a.is_active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-white/50 opacity-60'
           }`}>
             {/* Avatar */}
             <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-              a.role === 'owner' ? 'bg-[#1E5BA8]' : 'bg-slate-800'
+              a.role === 'owner' ? 'bg-[#1E5BA8]' : 'bg-slate-100'
             }`}>
-              <span className="text-sm font-bold text-[#5EEAD4]">{a.name.charAt(0).toUpperCase()}</span>
+              <span className="text-sm font-bold text-[#0D9488]">{a.name.charAt(0).toUpperCase()}</span>
             </div>
 
             {/* Info */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <p className="font-semibold text-white text-[14px] truncate">{a.name}</p>
+                <p className="font-semibold text-slate-900 text-[14px] truncate">{a.name}</p>
                 {a.id === me?.id && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#0D9488]/20 border border-[#0D9488]/30 text-[#5EEAD4]">you</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#0D9488]/20 border border-[#0D9488]/30 text-[#0D9488]">you</span>
                 )}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 ${
                   a.role === 'owner'
                     ? 'border-purple-500/40 text-purple-300 bg-purple-500/10'
-                    : 'border-slate-700 text-slate-400'
+                    : 'border-slate-200 text-slate-500'
                 }`}>
                   {a.role === 'owner' ? <Crown className="h-2.5 w-2.5" /> : <Shield className="h-2.5 w-2.5" />}
                   {a.role}
                 </span>
               </div>
               <p className="text-[12px] text-slate-500 truncate">{a.email}</p>
-              <p className="text-[11px] text-slate-600">Last login: {fmtDate(a.last_login_at)}</p>
+              <p className="text-[11px] text-slate-400">Last login: {fmtDate(a.last_login_at)}</p>
             </div>
 
             {/* Actions */}
@@ -122,7 +122,7 @@ export function OwnerAdmins() {
 
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-sm">
+        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
           <DialogHeader><DialogTitle>Invite Platform Admin</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             {[
@@ -130,22 +130,22 @@ export function OwnerAdmins() {
               { key: 'email', label: 'Email *',     type: 'email', placeholder: 'jane@platform.local' },
             ].map(({ key, label, type, placeholder }) => (
               <div key={key} className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-300">{label}</label>
+                <label className="text-sm font-medium text-slate-700">{label}</label>
                 <Input
                   type={type}
                   placeholder={placeholder}
                   value={(form as any)[key]}
                   onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+                  className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400"
                 />
               </div>
             ))}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-300">Role</label>
+              <label className="text-sm font-medium text-slate-700">Role</label>
               <select
                 value={form.role}
                 onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-                className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-white"
+                className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-900"
               >
                 <option value="admin">Admin — can manage tenants & keys</option>
                 <option value="owner">Owner — full access including other admins</option>
@@ -156,11 +156,11 @@ export function OwnerAdmins() {
             </p>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setInviteOpen(false)} className="text-slate-400">Cancel</Button>
+            <Button variant="ghost" onClick={() => setInviteOpen(false)} className="text-slate-500">Cancel</Button>
             <Button
               onClick={() => inviteMut.mutate()}
               disabled={!form.name.trim() || !form.email.trim() || inviteMut.isPending}
-              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-white"
+              className="bg-[#0D9488] hover:bg-[#1E5BA8] text-slate-900"
             >
               {inviteMut.isPending ? 'Sending…' : 'Send Invitation'}
             </Button>

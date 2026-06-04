@@ -46,21 +46,21 @@ export function OwnerBilling() {
   return (
     <div className="p-6 space-y-5">
       <div>
-        <h1 className="text-xl font-bold text-white">Billing</h1>
+        <h1 className="text-xl font-bold text-slate-900">Billing</h1>
         <p className="text-sm text-slate-500">Payroll-triggered billing snapshots</p>
       </div>
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
           <CreditCard className="h-8 w-8 text-emerald-400 flex-shrink-0" />
           <div>
             <p className="text-[11px] text-slate-500 uppercase tracking-wide">Total (filtered)</p>
-            <p className="text-xl font-bold text-white">{fmtCurrency(totalAmount)}</p>
+            <p className="text-xl font-bold text-slate-900">{fmtCurrency(totalAmount)}</p>
           </div>
         </div>
         {monthSummary.map(([month, amount]) => (
-          <div key={month} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+          <div key={month} className="rounded-xl border border-slate-200 bg-white p-3">
             <p className="text-[11px] text-slate-500 font-mono">{month}</p>
             <p className="text-base font-semibold text-emerald-300 mt-0.5">{fmtCurrency(amount)}</p>
           </div>
@@ -72,7 +72,7 @@ export function OwnerBilling() {
         <select
           value={tenantFilt}
           onChange={e => setTenantFilt(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white min-w-[160px]"
+          className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-900 min-w-[160px]"
         >
           <option value="">All Tenants</option>
           {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -81,42 +81,42 @@ export function OwnerBilling() {
           type="month"
           value={monthFilt}
           onChange={e => setMonthFilt(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+          className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-900"
         />
         {(tenantFilt || monthFilt) && (
-          <button onClick={() => { setTenantFilt(''); setMonthFilt('') }} className="text-xs text-slate-400 hover:text-slate-200 px-2">
+          <button onClick={() => { setTenantFilt(''); setMonthFilt('') }} className="text-xs text-slate-500 hover:text-slate-800 px-2">
             Clear
           </button>
         )}
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-900 border-b border-slate-800">
+          <thead className="bg-white border-b border-slate-200">
             <tr>
               {['Month', 'Tenant', 'Employees', 'Rate', 'Amount Due', 'Plan'].map(h => (
                 <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-slate-100">
             {isLoading && Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 w-full bg-slate-800 animate-pulse rounded" /></td></tr>
+              <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 w-full bg-slate-100 animate-pulse rounded" /></td></tr>
             ))}
             {!isLoading && rows.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No billing records yet. They appear automatically after payroll finalization.</td></tr>
             )}
             {rows.map(r => (
-              <tr key={r.id} className="hover:bg-slate-800/30">
-                <td className="px-4 py-2.5 font-mono text-[12px] text-slate-300">{r.snapshot_month}</td>
-                <td className="px-4 py-2.5 text-[13px] text-slate-200">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
-                <td className="px-4 py-2.5 text-slate-300">{r.employee_count}</td>
-                <td className="px-4 py-2.5 text-slate-400">{fmtCurrency(r.per_employee_rate)}</td>
+              <tr key={r.id} className="hover:bg-slate-100/30">
+                <td className="px-4 py-2.5 font-mono text-[12px] text-slate-700">{r.snapshot_month}</td>
+                <td className="px-4 py-2.5 text-[13px] text-slate-800">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
+                <td className="px-4 py-2.5 text-slate-700">{r.employee_count}</td>
+                <td className="px-4 py-2.5 text-slate-500">{fmtCurrency(r.per_employee_rate)}</td>
                 <td className="px-4 py-2.5 font-semibold text-emerald-300">{fmtCurrency(r.amount_due)}</td>
                 <td className="px-4 py-2.5">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300' : 'border-slate-700 text-slate-400'
+                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-300' : 'border-slate-200 text-slate-500'
                   }`}>
                     {r.plan}
                   </span>

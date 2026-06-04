@@ -72,7 +72,7 @@ export function OwnerRequests() {
   return (
     <div className="p-6 space-y-5">
       <div>
-        <h1 className="text-xl font-bold text-white">Signup Requests</h1>
+        <h1 className="text-xl font-bold text-slate-900">Signup Requests</h1>
         <p className="text-sm text-slate-500">{data?.meta?.total ?? 0} total requests</p>
       </div>
 
@@ -83,7 +83,7 @@ export function OwnerRequests() {
             key={s}
             onClick={() => setStatusFilt(s)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              statusFilt === s ? 'bg-[#0D9488] text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              statusFilt === s ? 'bg-[#0D9488] text-slate-900' : 'bg-slate-100 text-slate-500 hover:text-slate-800'
             }`}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -94,23 +94,23 @@ export function OwnerRequests() {
       {/* Cards */}
       <div className="space-y-3">
         {isLoading && Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="h-28 bg-slate-800 animate-pulse rounded-xl" />
+          <div key={i} className="h-28 bg-slate-100 animate-pulse rounded-xl" />
         ))}
         {!isLoading && requests.length === 0 && (
-          <div className="rounded-xl border border-slate-800 p-8 text-center text-slate-500">
+          <div className="rounded-xl border border-slate-200 p-8 text-center text-slate-500">
             No {statusFilt || ''} requests
           </div>
         )}
         {requests.map(r => (
-          <div key={r.id} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <div key={r.id} className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3 min-w-0">
-                <div className="h-9 w-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
-                  <Building2 className="h-4 w-4 text-slate-400" />
+                <div className="h-9 w-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
+                  <Building2 className="h-4 w-4 text-slate-500" />
                 </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-white text-[14px]">{r.company_name}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-[12px] text-slate-400">
+                  <p className="font-semibold text-slate-900 text-[14px]">{r.company_name}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-[12px] text-slate-500">
                     <span className="flex items-center gap-1"><Users className="h-3 w-3" />{r.contact_name}</span>
                     <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{r.contact_email}</span>
                     {r.industry   && <span>{r.industry}</span>}
@@ -130,7 +130,7 @@ export function OwnerRequests() {
 
               <div className="flex items-center gap-2 flex-shrink-0">
                 <div className="text-right">
-                  <p className="text-[10px] text-slate-600">{fmtDate(r.created_at)}</p>
+                  <p className="text-[10px] text-slate-400">{fmtDate(r.created_at)}</p>
                   <span className={`text-[11px] font-medium ${
                     r.status === 'pending' ? 'text-amber-400' : r.status === 'approved' ? 'text-emerald-400' : 'text-red-400'
                   }`}>
@@ -143,7 +143,7 @@ export function OwnerRequests() {
                     <Button
                       onClick={() => { setApproveId(r.id); setApproveForm({ plan: 'standard', per_employee_rate: '' }) }}
                       size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white h-7 text-xs gap-1"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-slate-900 h-7 text-xs gap-1"
                     >
                       <Check className="h-3 w-3" /> Approve
                     </Button>
@@ -165,37 +165,37 @@ export function OwnerRequests() {
 
       {/* Approve dialog */}
       <Dialog open={!!approveId} onOpenChange={() => setApproveId(null)}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-sm">
+        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
           <DialogHeader><DialogTitle>Approve & Create Tenant</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-300">Plan</label>
+              <label className="text-sm font-medium text-slate-700">Plan</label>
               <select
                 value={approveForm.plan}
                 onChange={e => setApproveForm(f => ({ ...f, plan: e.target.value }))}
-                className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-white"
+                className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-900"
               >
                 <option value="standard">Standard</option>
                 <option value="enterprise">Enterprise</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-300">Per-Employee Rate (₹)</label>
+              <label className="text-sm font-medium text-slate-700">Per-Employee Rate (₹)</label>
               <Input
                 type="number"
                 placeholder="299"
                 value={approveForm.per_employee_rate}
                 onChange={e => setApproveForm(f => ({ ...f, per_employee_rate: e.target.value }))}
-                className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+                className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setApproveId(null)} className="text-slate-400">Cancel</Button>
+            <Button variant="ghost" onClick={() => setApproveId(null)} className="text-slate-500">Cancel</Button>
             <Button
               onClick={() => approveId && approveMut.mutate(approveId)}
               disabled={approveMut.isPending}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white"
+              className="bg-emerald-600 hover:bg-emerald-500 text-slate-900"
             >
               {approveMut.isPending ? 'Creating…' : 'Approve & Create'}
             </Button>
@@ -205,23 +205,23 @@ export function OwnerRequests() {
 
       {/* Reject dialog */}
       <Dialog open={!!rejectId} onOpenChange={() => setRejectId(null)}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-sm">
+        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
           <DialogHeader><DialogTitle>Reject Request</DialogTitle></DialogHeader>
           <div className="space-y-1.5 py-2">
-            <label className="text-sm font-medium text-slate-300">Reason *</label>
+            <label className="text-sm font-medium text-slate-700">Reason *</label>
             <Input
               placeholder="Not a good fit at this time"
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
-              className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+              className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400"
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRejectId(null)} className="text-slate-400">Cancel</Button>
+            <Button variant="ghost" onClick={() => setRejectId(null)} className="text-slate-500">Cancel</Button>
             <Button
               onClick={() => rejectId && rejectMut.mutate(rejectId)}
               disabled={!rejectReason.trim() || rejectMut.isPending}
-              className="bg-red-600 hover:bg-red-500 text-white"
+              className="bg-red-600 hover:bg-red-500 text-slate-900"
             >
               {rejectMut.isPending ? 'Rejecting…' : 'Reject'}
             </Button>
