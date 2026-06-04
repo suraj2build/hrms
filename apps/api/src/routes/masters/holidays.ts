@@ -20,6 +20,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { CENTRAL_HOLIDAYS_BY_YEAR, SUPPORTED_HOLIDAY_YEARS } from '../../lib/standard-holidays.js'
 
 const createSchema = z.object({
   date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
@@ -86,6 +87,49 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.code(201).send(data)
+  })
+
+  // ── POST /masters/holidays/seed-standard ──────────────────────────────────
+  // Load the Government of India CENTRAL gazetted holidays for the given year(s)
+  // (default 2026 & 2027). Idempotent — existing dates (UNIQUE tenant_id,date)
+  // are preserved. Seeded as global (holiday_group_id NULL → applies to all).
+  fastify.post('/seed-standard', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
+    }
+
+    const bodySchema = z.object({
+      years: z.array(z.number().int()).optional(),
+    })
+    const parsed = bodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+    }
+
+    const years = (parsed.data.years && parsed.data.years.length > 0)
+      ? parsed.data.years.filter(y => SUPPORTED_HOLIDAY_YEARS.includes(y))
+      : SUPPORTED_HOLIDAY_YEARS
+
+    const rows = years.flatMap(y => (CENTRAL_HOLIDAYS_BY_YEAR[y] ?? []).map(h => ({
+      tenant_id:   req.tenantId,
+      date:        h.date,
+      name:        h.name,
+      is_optional: false,
+    })))
+
+    if (rows.length === 0) {
+      return reply.send({ data: { created: 0, skipped: 0, total: 0, years } })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('holiday_calendar')
+      .upsert(rows, { onConflict: 'tenant_id,date', ignoreDuplicates: true })
+      .select('id')
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    const created = (data as Array<{ id: string }> | null)?.length ?? 0
+    return reply.code(201).send({ data: { created, skipped: rows.length - created, total: rows.length, years } })
   })
 
   // ── DELETE /masters/holidays/:id ──────────────────────────────────────────

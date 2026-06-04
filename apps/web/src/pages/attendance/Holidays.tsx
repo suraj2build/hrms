@@ -114,6 +114,20 @@ export function Holidays() {
     onError: (err) => { setFormError(err.message ?? 'Failed to add holiday'); toast.error('Failed to add holiday', { description: err.message }) },
   })
 
+  const seedMutation = useMutation<{ data: { created: number; skipped: number; years: number[] } }, Error>({
+    mutationFn: () => api.post('/masters/holidays/seed-standard', {}),
+    onSuccess: (res) => {
+      const { created, skipped, years } = res.data
+      queryClient.invalidateQueries({ queryKey })
+      toast.success('Government holidays loaded', {
+        description: created > 0
+          ? `${created} central holiday(s) added for ${years.join(' & ')}${skipped > 0 ? `, ${skipped} already existed` : ''}. Verify festival dates vs the official gazette.`
+          : 'Central holidays already loaded for these years.',
+      })
+    },
+    onError: (e: Error) => toast.error('Failed to load government holidays', { description: e.message }),
+  })
+
   const deleteMutation = useMutation<void, Error, string>({
     mutationFn: (id) => api.delete<void>(`/masters/holidays/${id}`),
     onSuccess: () => {
@@ -157,6 +171,16 @@ export function Holidays() {
       <PageHeader
         title="Holiday Calendar"
         subtitle="Public and optional holidays affect attendance status during processing"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => seedMutation.mutate()}
+            disabled={seedMutation.isPending}
+            title="Load Government of India central gazetted holidays (2026 & 2027)">
+            {seedMutation.isPending
+              ? <RefreshCw className="h-4 w-4 mr-1.5 animate-spin" />
+              : <CalendarDays className="h-4 w-4 mr-1.5" />}
+            Load Govt Holidays
+          </Button>
+        }
       />
 
       <div className="space-y-6">
