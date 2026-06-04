@@ -200,18 +200,30 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
-    // Mirror site + roster + rotation policy to employees table for quick lookups.
-    // rotation_policy_id is only written when explicitly provided (undefined =
-    // leave as-is, null = clear → fall back to the site default rotation policy).
-    await fastify.supabase
+    // Mirror site + roster to employees table for quick lookups (core columns —
+    // always present). Must not be coupled with rotation_policy_id, whose column
+    // may be absent on un-migrated environments; a failure there must not block
+    // the site/roster save.
+    const { error: mirrorErr } = await fastify.supabase
       .from('employees')
-      .update({
-        site_id:   site_id   ?? null,
-        roster_id: roster_id ?? null,
-        ...(rotation_policy_id !== undefined ? { rotation_policy_id: rotation_policy_id ?? null } : {}),
-      })
+      .update({ site_id: site_id ?? null, roster_id: roster_id ?? null })
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
+    if (mirrorErr) return reply.code(500).send({ error: 'DB_ERROR', message: mirrorErr.message })
+
+    // Rotation policy — separate, best-effort. undefined = leave as-is;
+    // null = clear (inherit site default). If the column doesn't exist on this
+    // environment, log and continue rather than failing the whole assignment.
+    if (rotation_policy_id !== undefined) {
+      const { error: rotErr } = await fastify.supabase
+        .from('employees')
+        .update({ rotation_policy_id: rotation_policy_id ?? null })
+        .eq('id', employeeId)
+        .eq('tenant_id', req.tenantId)
+      if (rotErr) {
+        req.log.warn({ err: rotErr, employeeId }, 'org-context: rotation_policy_id update failed (column may be missing — run migration)')
+      }
+    }
 
     // Mirror work_location + cost_center to current job_history row
     if (work_location_id !== undefined || cost_center_id !== undefined) {

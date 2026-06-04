@@ -1016,7 +1016,9 @@ export function EmployeeProfile() {
         reason:             body.reason             || null,
       }),
     onSuccess: (_d, body) => {
-      setOrgDlgOpen(false); refetchOrgCtx(); qc.invalidateQueries({ queryKey: ['job-current', id] })
+      setOrgDlgOpen(false); refetchOrgCtx()
+      qc.invalidateQueries({ queryKey: ['job-current', id] })
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })   // refresh the Job Info card too
       toast.success('Organisation context updated')
       promptRecompute(body.effective_from, 'roster / rotation')
     },
