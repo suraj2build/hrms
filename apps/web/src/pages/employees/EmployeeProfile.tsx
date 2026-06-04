@@ -2311,74 +2311,77 @@ export function EmployeeProfile() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {!job
-                    ? <EmptySection icon={LayoutGrid} title="No job assignment" subtitle="Add a position record to set the workforce assignment." />
-                    : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <AssignableField
-                          label="Department"
-                          value={job.departments?.name}
-                          futureValue={futureJobRecord?.departments?.name}
-                          futureDate={futureJobRecord?.effective_from}
-                          onAssign={() => openAssign('department')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Designation"
-                          value={job.designations?.name}
-                          futureValue={futureJobRecord?.designations?.name}
-                          futureDate={futureJobRecord?.effective_from}
-                          onAssign={() => openAssign('designation')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Grade / Band"
-                          value={job.grades ? `${job.grades.name} (${job.grades.code})` : null}
-                          futureValue={futureJobRecord?.grades ? `${futureJobRecord.grades.name} (${futureJobRecord.grades.code})` : null}
-                          futureDate={futureJobRecord?.effective_from}
-                          onAssign={() => openAssign('grade')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Employment Type"
-                          value={job.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : null}
-                          futureValue={futureJobRecord?.employment_type}
-                          futureDate={futureJobRecord?.effective_from}
-                          onAssign={() => openAssign('employment_type')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Reporting Manager"
-                          value={job.manager ? `${job.manager.first_name} ${job.manager.last_name} #${job.manager.employee_code}` : null}
-                          futureValue={futureJobRecord?.manager ? `${futureJobRecord.manager.first_name} ${futureJobRecord.manager.last_name}` : null}
-                          futureDate={futureJobRecord?.effective_from}
-                          onAssign={() => openAssign('manager')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Work Location"
-                          value={job.work_locations ? `${job.work_locations.name}${job.work_locations.city ? ` · ${job.work_locations.city}` : ''}` : null}
-                          onAssign={() => openAssign('work_location')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Cost Center"
-                          value={job.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : null}
-                          onAssign={() => openAssign('cost_center')}
-                          canAssign={isAdmin}
-                        />
-                        <AssignableField
-                          label="Shift"
-                          value={job.shifts ? `${job.shifts.name}${job.shifts.start_time ? ` (${job.shifts.start_time}–${job.shifts.end_time})` : ''}` : null}
-                          onAssign={() => openAssign('shift')}
-                          canAssign={isAdmin}
-                        />
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Assigned Since</p>
-                          <p className="text-sm font-medium">{fmtDate(job.effective_from)}</p>
-                        </div>
+                  {!job && (
+                    <p className="text-xs text-muted-foreground mb-3">
+                      No position record yet — use the Assign buttons below to set the department, manager, shift, etc. (this creates the first position record).
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <AssignableField
+                      label="Department"
+                      value={job?.departments?.name}
+                      futureValue={futureJobRecord?.departments?.name}
+                      futureDate={futureJobRecord?.effective_from}
+                      onAssign={() => openAssign('department')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Designation"
+                      value={job?.designations?.name}
+                      futureValue={futureJobRecord?.designations?.name}
+                      futureDate={futureJobRecord?.effective_from}
+                      onAssign={() => openAssign('designation')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Grade / Band"
+                      value={job?.grades ? `${job.grades.name} (${job.grades.code})` : null}
+                      futureValue={futureJobRecord?.grades ? `${futureJobRecord.grades.name} (${futureJobRecord.grades.code})` : null}
+                      futureDate={futureJobRecord?.effective_from}
+                      onAssign={() => openAssign('grade')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Employment Type"
+                      value={job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : null}
+                      futureValue={futureJobRecord?.employment_type}
+                      futureDate={futureJobRecord?.effective_from}
+                      onAssign={() => openAssign('employment_type')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Reporting Manager"
+                      value={job?.manager ? `${job.manager.first_name} ${job.manager.last_name} #${job.manager.employee_code}` : null}
+                      futureValue={futureJobRecord?.manager ? `${futureJobRecord.manager.first_name} ${futureJobRecord.manager.last_name}` : null}
+                      futureDate={futureJobRecord?.effective_from}
+                      onAssign={() => openAssign('manager')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Work Location"
+                      value={job?.work_locations ? `${job.work_locations.name}${job.work_locations.city ? ` · ${job.work_locations.city}` : ''}` : null}
+                      onAssign={() => openAssign('work_location')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Cost Center"
+                      value={job?.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : null}
+                      onAssign={() => openAssign('cost_center')}
+                      canAssign={isAdmin}
+                    />
+                    <AssignableField
+                      label="Shift"
+                      value={job?.shifts ? `${job.shifts.name}${job.shifts.start_time ? ` (${job.shifts.start_time}–${job.shifts.end_time})` : ''}` : null}
+                      onAssign={() => openAssign('shift')}
+                      canAssign={isAdmin}
+                    />
+                    {job && (
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-0.5">Assigned Since</p>
+                        <p className="text-sm font-medium">{fmtDate(job.effective_from)}</p>
                       </div>
                     )}
+                  </div>
                 </CardContent>
               </Card>
 
