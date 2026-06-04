@@ -932,11 +932,12 @@ export function EmployeeProfile() {
       ctc_annual:     Number(setupCompForm.ctc_annual),
       effective_from: setupCompForm.effective_from,
       components: setupCompForm.components
-        .filter(c => c.salary_component_id && c.value)
+        // keep balance rows even though they carry no value (it's the residual)
+        .filter(c => c.salary_component_id && (c.value || c.calculation_type === 'balance'))
         .map(c => ({
           salary_component_id: c.salary_component_id,
           calculation_type:    c.calculation_type,
-          value:               Number(c.value),
+          value:               c.calculation_type === 'balance' ? 0 : Number(c.value),
         })),
     }),
     onSuccess: () => {
@@ -3270,11 +3271,14 @@ export function EmployeeProfile() {
                         <option value="fixed">Fixed ₹/yr</option>
                         <option value="pct_of_ctc">% of CTC</option>
                         <option value="pct_of_basic">% of Basic</option>
+                        <option value="pct_of_gross">% of Gross</option>
+                        <option value="balance">Balance (residual)</option>
                       </select>
                       <Input
                         type="number"
-                        placeholder={row.calculation_type === 'fixed' ? '₹/yr' : '%'}
-                        value={row.value}
+                        placeholder={row.calculation_type === 'balance' ? 'auto' : row.calculation_type === 'fixed' ? '₹/yr' : '%'}
+                        value={row.calculation_type === 'balance' ? '' : row.value}
+                        disabled={row.calculation_type === 'balance'}
                         onChange={e => setSetupCompForm(p => {
                           const cs = [...p.components]; cs[i] = { ...cs[i], value: e.target.value }; return { ...p, components: cs }
                         })}

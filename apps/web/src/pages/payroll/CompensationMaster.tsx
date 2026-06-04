@@ -40,7 +40,7 @@ import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type CalcType     = 'fixed' | 'pct_of_basic' | 'pct_of_ctc' | 'pct_of_gross'
+type CalcType     = 'fixed' | 'pct_of_basic' | 'pct_of_ctc' | 'pct_of_gross' | 'balance'
 type ComponentType = 'earning' | 'deduction' | 'employer_contribution'
 
 interface SalaryStructure {
@@ -134,11 +134,13 @@ const CALC_LABELS: Record<CalcType, string> = {
   pct_of_basic: '% of Basic',
   pct_of_ctc:   '% of CTC',
   pct_of_gross: '% of Gross',
+  balance:      'Balance (residual of CTC)',
 }
 
 function CalcBadge({ type, value }: { type: CalcType; value: number }) {
-  const label = type === 'fixed'
-    ? `₹${value.toLocaleString('en-IN')}/mo`
+  const label =
+    type === 'balance' ? 'Balance · residual of CTC'
+    : type === 'fixed' ? `₹${value.toLocaleString('en-IN')}/mo`
     : `${value}% of ${type === 'pct_of_basic' ? 'Basic' : type === 'pct_of_ctc' ? 'CTC' : 'Gross'}`
   return <span className="text-xs text-muted-foreground font-mono">{label}</span>
 }
@@ -566,9 +568,12 @@ export function CompensationMaster() {
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-muted-foreground">
-                        Default Value {addForm.calculation_type === 'fixed' ? '(₹/month)' : '(%)'}
+                        Default Value {addForm.calculation_type === 'fixed' ? '(₹/month)' : addForm.calculation_type === 'balance' ? '(auto)' : '(%)'}
                       </label>
-                      <Input type="number" min={0} value={addForm.default_value}
+                      <Input type="number" min={0}
+                        value={addForm.calculation_type === 'balance' ? '' : addForm.default_value}
+                        disabled={addForm.calculation_type === 'balance'}
+                        placeholder={addForm.calculation_type === 'balance' ? 'Residual of CTC' : undefined}
                         onChange={e => setAddForm(p => ({ ...p, default_value: e.target.value }))}
                         className="h-8 text-xs" />
                     </div>

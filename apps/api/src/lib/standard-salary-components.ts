@@ -76,8 +76,9 @@ export const STANDARD_SALARY_COMPONENTS: StandardComponent[] = [
       default_calculation_type: 'fixed', default_value: 1667 }),
   c({ code: 'SPECIAL', name: 'Special Allowance', component_type: 'earning', display_order: 60,
       is_esi_applicable: true,
-      // No default rule — this is the residual that balances earnings to CTC.
-      default_calculation_type: null, default_value: null }),
+      // The residual that balances earnings to CTC — engine computes it as
+      // CTC − all other earnings − employer contributions.
+      default_calculation_type: 'balance', default_value: 0 }),
 
   // ── Deductions ────────────────────────────────────────────────────────────
   c({ code: 'PF_EMPLOYEE', name: 'Provident Fund (Employee)', component_type: 'deduction', display_order: 70,
