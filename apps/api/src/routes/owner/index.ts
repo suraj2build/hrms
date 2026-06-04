@@ -63,6 +63,52 @@ function generateApiKey(): { key: string; prefix: string; hash: string } {
   return { key, prefix, hash }
 }
 
+/**
+ * Recursively delete every object under a tenant's storage prefix.
+ *
+ * All uploaded files (employee photos/documents/contracts, company logo,
+ * FBP bills, onboarding docs) live in the 'employee-files' bucket under the
+ * path `{tenantId}/...`. Supabase's list() is NOT recursive — it returns one
+ * folder level at a time (folders surface as entries with id === null) — so we
+ * walk the tree and batch-remove the leaf files. Best-effort: callers ignore
+ * failures so a storage hiccup never blocks the DB delete.
+ *
+ * @returns the number of objects removed.
+ */
+async function purgeTenantStorage(supabase: any, tenantId: string): Promise<number> {
+  const BUCKET = 'employee-files'
+  const filePaths: string[] = []
+  const stack: string[] = [tenantId]   // start at the tenant root prefix
+
+  while (stack.length > 0) {
+    const prefix = stack.pop() as string
+    let offset = 0
+    // Page through this folder level.
+    for (;;) {
+      const { data: items, error } = await supabase.storage
+        .from(BUCKET)
+        .list(prefix, { limit: 100, offset })
+      if (error || !items || items.length === 0) break
+      for (const item of items) {
+        const full = `${prefix}/${item.name}`
+        if (item.id === null || item.id === undefined) stack.push(full)  // sub-folder
+        else                                            filePaths.push(full) // file
+      }
+      if (items.length < 100) break
+      offset += items.length
+    }
+  }
+
+  let removed = 0
+  // Remove in batches (the API accepts an array of paths).
+  for (let i = 0; i < filePaths.length; i += 100) {
+    const batch = filePaths.slice(i, i + 100)
+    const { error } = await supabase.storage.from(BUCKET).remove(batch)
+    if (!error) removed += batch.length
+  }
+  return removed
+}
+
 /** Slugify a company name */
 function slugify(name: string): string {
   return name
@@ -365,9 +411,19 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       } catch { /* ignore — auth user may be shared or already gone */ }
     }
 
+    // Best-effort: purge the tenant's uploaded files from storage. The DB
+    // cascade removes the metadata rows but not the binary objects, which would
+    // otherwise be orphaned in the bucket. Never fail the request on this.
+    let filesDeleted = 0
+    try {
+      filesDeleted = await purgeTenantStorage(fastify.supabase, id)
+    } catch (e: any) {
+      req.log.warn({ err: e, tenant_id: id }, 'owner: tenant storage purge failed (orphaned files may remain)')
+    }
+
     return reply.send({
       data: { id, deleted: true },
-      message: `Tenant "${tenant.name}" deleted. ${authDeleted} login account(s) removed.`,
+      message: `Tenant "${tenant.name}" deleted. ${authDeleted} login account(s) and ${filesDeleted} file(s) removed.`,
     })
   })
 
