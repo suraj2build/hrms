@@ -46,6 +46,9 @@ export const componentCreateSchema = z.object({
   // Suggested rule — pre-fills the structure builder when this component is added
   default_calculation_type: z.enum(CALC_TYPES).nullable().optional(),
   default_value:            z.number().min(0).nullable().optional(),
+  // FBP: paid monthly, reconciled quarterly against bills; shortfall is taxable
+  is_reimbursement:         z.boolean().optional(),
+  exemption_limit_annual:   z.number().min(0).nullable().optional(),
   description:        z.string().optional(),
   display_order:      z.number().int().optional().default(0),
   is_active:          z.boolean().optional().default(true),
