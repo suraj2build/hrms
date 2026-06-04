@@ -835,9 +835,12 @@ export function EssCompensation() {
   }, [slips, selectedMonth])
 
   // Active compensation (CTC structure) — always loaded
-  const { data: compData, isLoading: compLoading, isError: compError } = useQuery<{ data: ActiveComp }>({
+  // Active compensation with its raw component breakdown (incl. employer
+  // contributions + nested salary_components). This endpoint returns the active
+  // record(s) with employee_compensation_components — the shape this tab renders.
+  const { data: compData, isLoading: compLoading, isError: compError } = useQuery<{ data: ActiveComp[] }>({
     queryKey:  ['ess-comp-active', employeeId],
-    queryFn:   () => api.get(`/employees/${employeeId}/compensation`),
+    queryFn:   () => api.get(`/payroll/compensation/employee/${employeeId}`),
     enabled:   !!employeeId,
     staleTime: 300_000,
   })
@@ -871,11 +874,19 @@ export function EssCompensation() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const comp       = compData?.data
+  // Endpoint returns active record(s) — take the most recent active one.
+  const comp       = Array.isArray(compData?.data) ? compData!.data[0] : (compData?.data as ActiveComp | undefined)
   const revisions  = revData?.data ?? []
-  const components = comp?.employee_compensation_components ?? []
-  const earnings   = components.filter(c => c.salary_components?.component_type === 'earning')
-  const deductions = components.filter(c => c.salary_components?.component_type === 'deduction')
+  const components  = comp?.employee_compensation_components ?? []
+  const earnings    = components.filter(c => c.salary_components?.component_type === 'earning')
+  const deductions  = components.filter(c => c.salary_components?.component_type === 'deduction')
+  const empContribs = components.filter(c => c.salary_components?.component_type === 'employer_contribution')
+  const sumMonthly  = (arr: typeof components) => arr.reduce((s, c) => s + (c.computed_monthly ?? 0), 0)
+  const grossMonthly    = sumMonthly(earnings)
+  const employerMonthly = sumMonthly(empContribs)
+  const dedMonthly      = sumMonthly(deductions)
+  const ctcMonthlyCalc  = Math.round((grossMonthly + employerMonthly) * 100) / 100
+  const netMonthly      = Math.round((grossMonthly - dedMonthly) * 100) / 100
 
   const chartData = (trendData?.data ?? []).map(s => ({
     month: fmtMonthShort(s.month),
@@ -1087,8 +1098,9 @@ export function EssCompensation() {
             ) : (
               <div className="space-y-4">
                 {[
-                  { label: 'Earnings',   items: earnings   },
-                  { label: 'Deductions', items: deductions },
+                  { label: 'Earnings',                items: earnings   },
+                  { label: 'Deductions',              items: deductions },
+                  { label: 'Employer Contributions',  items: empContribs },
                 ].filter(g => g.items.length > 0).map(({ label, items }) => (
                   <div key={label}>
                     <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">{label}</p>
@@ -1096,7 +1108,7 @@ export function EssCompensation() {
                       {items.sort((a, b) => a.sequence - b.sequence).map(c => (
                         <div key={c.id}
                           className={cn('flex items-center justify-between px-3 py-2 rounded-md text-sm',
-                            label === 'Deductions' ? 'bg-destructive/5' : 'bg-muted/30')}>
+                            label === 'Deductions' ? 'bg-destructive/5' : label === 'Employer Contributions' ? 'bg-muted/20' : 'bg-muted/30')}>
                           <div>
                             <span className="font-medium text-foreground">{c.salary_components?.name}</span>
                             {c.salary_components?.is_taxable && (
@@ -1105,7 +1117,7 @@ export function EssCompensation() {
                           </div>
                           <div className="text-right">
                             <p className={cn('font-semibold tabular-nums',
-                              label === 'Deductions' ? 'text-destructive' : 'text-success')}>
+                              label === 'Deductions' ? 'text-destructive' : label === 'Employer Contributions' ? 'text-muted-foreground' : 'text-success')}>
                               {label === 'Deductions' ? '-' : ''}{fmtCompact(c.computed_monthly)}<span className="text-xs text-muted-foreground">/mo</span>
                             </p>
                             <p className="text-[10px] text-muted-foreground tabular-nums">
@@ -1117,6 +1129,32 @@ export function EssCompensation() {
                     </div>
                   </div>
                 ))}
+
+                {/* CTC reconciliation footer */}
+                <div className="pt-3 border-t border-border space-y-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Gross Earnings</span>
+                    <span className="font-semibold tabular-nums">{fmtCompact(grossMonthly)}/mo</span>
+                  </div>
+                  {empContribs.length > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Employer Contributions</span>
+                      <span className="tabular-nums text-muted-foreground">{fmtCompact(employerMonthly)}/mo</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-sm rounded-md bg-primary/5 px-3 py-2">
+                    <span className="font-bold uppercase tracking-wide text-primary text-xs">Total CTC</span>
+                    <div className="text-right">
+                      <p className="font-bold tabular-nums">{fmtCompact(ctcMonthlyCalc)}/mo</p>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">{fmtCompact(comp?.ctc_annual)}/yr</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Net Take-Home</span>
+                    <span className="font-semibold tabular-nums text-success">{fmtCompact(netMonthly)}/mo</span>
+                  </div>
+                </div>
+
                 {comp?.effective_from && (
                   <p className="text-[10px] text-muted-foreground pt-3 border-t border-border">
                     Effective from {fmtDate(comp.effective_from)}
