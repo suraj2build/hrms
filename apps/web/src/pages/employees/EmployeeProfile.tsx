@@ -1152,7 +1152,7 @@ export function EmployeeProfile() {
         compensation: { section: 'compensation', subTab: 'compensation' },
         documents:    { section: 'documents',    subTab: 'docs'         },
         separation:   { section: 'employment',   subTab: 'separation'   },
-        payroll:      { section: 'compensation', subTab: 'payroll-ctx'  },
+        payroll:      { section: 'compensation', subTab: 'compensation' },
       }
       const mapped = TAB_MAP[tabParam]
       if (mapped) {
@@ -1525,7 +1525,6 @@ export function EmployeeProfile() {
     compensation:  [
       { key: 'compensation', label: 'Compensation',  icon: DollarSign },
       { key: 'bank',         label: 'Bank & Statutory', icon: Landmark },
-      { key: 'payroll-ctx',  label: 'Payroll Context', icon: Banknote  },
       { key: 'contracts',    label: 'Contracts',      icon: FileText   },
     ],
     documents:     [{ key: 'documents', label: 'Documents', icon: Files }, { key: 'passport-visa', label: 'Passport & Visa', icon: Globe }],
@@ -3629,9 +3628,9 @@ export function EmployeeProfile() {
           )}
 
           {/* ─────────────────────────────────────────────────────────────────
-              COMPENSATION › Payroll Context
+              COMPENSATION › Revisions & history (merged into the Compensation tab)
           ──────────────────────────────────────────────────────────────────── */}
-          {subTab === 'payroll-ctx' && (
+          {subTab === 'compensation' && (
             <div className="space-y-4">
 
               {/* ── Pending revision banner ── */}
@@ -3669,62 +3668,6 @@ export function EmployeeProfile() {
                   ))}
                 </div>
               )}
-
-              {/* CTC snapshot */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                      <Banknote className="h-4 w-4 text-muted-foreground" />
-                      Compensation Snapshot
-                    </CardTitle>
-                    {isAdmin && comp && (
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
-                        onClick={() => setRevisionOpen(true)}
-                      >
-                        <TrendingUp className="h-3 w-3" />
-                        Initiate Revision
-                      </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {!comp
-                    ? <EmptySection icon={Banknote} title="No compensation on record" />
-                    : (
-                      <Grid2>
-                        <KV label="Annual CTC"    value={fmtMoney(comp.ctc_annual)} />
-                        <KV label="Monthly CTC"   value={fmtMoney(comp.ctc_monthly)} />
-                        <KV label="Net Take-Home" value={comp.totals ? fmtMoney(comp.totals.net_monthly) + '/mo' : undefined} />
-                        <KV label="Salary Structure" value={comp.structure?.name} />
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Bank Verified</p>
-                          {bs?.account_number_masked
-                            ? <div className="flex items-center gap-1.5">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-                                <span className="text-sm font-medium text-success">Bank on record</span>
-                              </div>
-                            : <div className="flex items-center gap-1.5">
-                                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                                <span className="text-sm text-warning">No bank details</span>
-                              </div>}
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">PAN Status</p>
-                          {bs?.pan
-                            ? <div className="flex items-center gap-1.5">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-                                <span className="text-sm font-medium">{bs.pan}</span>
-                              </div>
-                            : <div className="flex items-center gap-1.5">
-                                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                                <span className="text-sm text-warning">PAN not on file</span>
-                              </div>}
-                        </div>
-                      </Grid2>
-                    )}
-                </CardContent>
-              </Card>
 
               {/* Salary revision history — admin only */}
               {isAdmin && (
