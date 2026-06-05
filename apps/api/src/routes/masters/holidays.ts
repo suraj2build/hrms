@@ -134,6 +134,37 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data: { created, skipped: rows.length - created, total: rows.length, years } })
   })
 
+  // ── PATCH /masters/holidays/:id ───────────────────────────────────────────
+  // Edit an existing holiday (date / name / optional flag / group / site).
+  fastify.patch('/:id', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
+    }
+
+    const parsed = createSchema.partial().safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'No fields to update' })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('holiday_calendar')
+      .update(parsed.data)
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
+      .single()
+
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A holiday already exists on that date' })
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday not found' })
+    return reply.send(data)
+  })
+
   // ── DELETE /masters/holidays/:id ──────────────────────────────────────────
   fastify.delete('/:id', auth, async (req: any, reply) => {
     if (!['super_admin', 'hr_admin'].includes(req.userRole)) {

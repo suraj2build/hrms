@@ -17,7 +17,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CalendarDays, Plus, Trash2, Loader2, WifiOff, RefreshCw, ShieldAlert } from 'lucide-react'
+import { CalendarDays, Plus, Trash2, Loader2, WifiOff, RefreshCw, ShieldAlert, Pencil, Check, X } from 'lucide-react'
 
 import { PageContainer }      from '@/components/layout/PageContainer'
 import { PageHeader }         from '@/components/layout/PageHeader'
@@ -100,6 +100,29 @@ export function Holidays() {
   // ── Two-step delete confirmation ───────────────────────────────────────────
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
+  // ── Inline edit state (holiday row) ──────────────────────────────────────────
+  const [editingId,    setEditingId]    = useState<string | null>(null)
+  const [editDate,     setEditDate]     = useState('')
+  const [editName,     setEditName]     = useState('')
+  const [editOptional, setEditOptional] = useState(false)
+  const [editGroupId,  setEditGroupId]  = useState('')
+
+  // ── Inline edit state (holiday group) ────────────────────────────────────────
+  const [editGroupRowId, setEditGroupRowId] = useState<string | null>(null)
+  const [editGroupNameVal,  setEditGroupNameVal]  = useState('')
+  const [editGroupStateVal, setEditGroupStateVal] = useState('')
+  const [newGroupState,     setNewGroupState]     = useState('')
+
+  function startEdit(h: Holiday) {
+    setEditingId(h.id)
+    setEditDate(h.date.slice(0, 10))
+    setEditName(h.name)
+    setEditOptional(h.is_optional)
+    setEditGroupId(h.holiday_group_id ?? '')
+    setPendingDelete(null)
+  }
+  function cancelEdit() { setEditingId(null) }
+
   // ── Query ──────────────────────────────────────────────────────────────────
   const queryKey = ['holidays', year]
 
@@ -120,9 +143,9 @@ export function Holidays() {
   const groups = groupData?.data ?? []
   const groupName = (id: string | null) => id ? (groups.find(g => g.id === id)?.name ?? 'Group') : 'All-India'
 
-  const addGroupMutation = useMutation<unknown, Error, { name: string }>({
+  const addGroupMutation = useMutation<unknown, Error, { name: string; state_code: string | null }>({
     mutationFn: (body) => api.post('/masters/holiday-groups', body),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['holiday-groups'] }); setNewGroupName(''); toast.success('Holiday group added') },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['holiday-groups'] }); setNewGroupName(''); setNewGroupState(''); toast.success('Holiday group added') },
     onError: (e) => toast.error('Failed to add group', { description: e.message }),
   })
   const deleteGroupMutation = useMutation<void, Error, string>({
@@ -168,6 +191,33 @@ export function Holidays() {
     },
     onError: (e) => { setPendingDelete(null); toast.error('Failed to remove holiday', { description: (e as Error).message }) },
   })
+
+  const editMutation = useMutation<Holiday, Error, { id: string; body: { date: string; name: string; is_optional: boolean; holiday_group_id: string | null } }>({
+    mutationFn: ({ id, body }) => api.patch<Holiday>(`/masters/holidays/${id}`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey })
+      setEditingId(null)
+      toast.success('Holiday updated')
+    },
+    onError: (e) => toast.error('Failed to update holiday', { description: e.message }),
+  })
+
+  const editGroupMutation = useMutation<unknown, Error, { id: string; body: { name: string; state_code: string | null } }>({
+    mutationFn: ({ id, body }) => api.put(`/masters/holiday-groups/${id}`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['holiday-groups'] })
+      queryClient.invalidateQueries({ queryKey })
+      setEditGroupRowId(null)
+      toast.success('Holiday group updated')
+    },
+    onError: (e) => toast.error('Failed to update group', { description: e.message }),
+  })
+
+  function saveEdit() {
+    const trimmed = editName.trim()
+    if (!trimmed || !editDate) { toast.error('Date and name are required'); return }
+    editMutation.mutate({ id: editingId!, body: { date: editDate, name: trimmed, is_optional: editOptional, holiday_group_id: editGroupId || null } })
+  }
 
   // ── Form submit ────────────────────────────────────────────────────────────
   function handleAdd() {
@@ -307,11 +357,17 @@ export function Holidays() {
                 placeholder="New group (e.g. Maharashtra)"
                 value={newGroupName}
                 onChange={(e) => setNewGroupName(e.target.value)}
-                className="h-8 text-sm w-64"
-                onKeyDown={(e) => { if (e.key === 'Enter' && newGroupName.trim()) addGroupMutation.mutate({ name: newGroupName.trim() }) }}
+                className="h-8 text-sm w-56"
+                onKeyDown={(e) => { if (e.key === 'Enter' && newGroupName.trim()) addGroupMutation.mutate({ name: newGroupName.trim(), state_code: newGroupState.trim() || null }) }}
+              />
+              <Input
+                placeholder="State code (e.g. MH)"
+                value={newGroupState}
+                onChange={(e) => setNewGroupState(e.target.value.toUpperCase().slice(0, 10))}
+                className="h-8 text-sm w-32"
               />
               <Button size="sm" disabled={!newGroupName.trim() || addGroupMutation.isPending}
-                onClick={() => addGroupMutation.mutate({ name: newGroupName.trim() })}>
+                onClick={() => addGroupMutation.mutate({ name: newGroupName.trim(), state_code: newGroupState.trim() || null })}>
                 <Plus className="h-3.5 w-3.5 mr-1" /> Add Group
               </Button>
             </div>
@@ -319,9 +375,28 @@ export function Holidays() {
               <p className="text-xs text-muted-foreground">No holiday groups yet — all holidays are All-India.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {groups.map(g => (
+                {groups.map(g => editGroupRowId === g.id ? (
+                  <span key={g.id} className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-muted/30 px-2 py-1 text-xs">
+                    <Input value={editGroupNameVal} onChange={(e) => setEditGroupNameVal(e.target.value)}
+                      className="h-6 text-xs w-36" placeholder="Name" />
+                    <Input value={editGroupStateVal} onChange={(e) => setEditGroupStateVal(e.target.value.toUpperCase().slice(0, 10))}
+                      className="h-6 text-xs w-20" placeholder="State" />
+                    <button className="text-success hover:text-success/80" title="Save"
+                      onClick={() => { if (editGroupNameVal.trim()) editGroupMutation.mutate({ id: g.id, body: { name: editGroupNameVal.trim(), state_code: editGroupStateVal.trim() || null } }) }}>
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                    <button className="text-muted-foreground hover:text-foreground" title="Cancel"
+                      onClick={() => setEditGroupRowId(null)}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ) : (
                   <span key={g.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs">
                     {g.name}{g.state_code ? ` · ${g.state_code}` : ''}
+                    <button className="text-muted-foreground hover:text-primary"
+                      title="Edit group" onClick={() => { setEditGroupRowId(g.id); setEditGroupNameVal(g.name); setEditGroupStateVal(g.state_code ?? '') }}>
+                      <Pencil className="h-3 w-3" />
+                    </button>
                     <button className="text-muted-foreground hover:text-destructive"
                       title="Delete group" onClick={() => deleteGroupMutation.mutate(g.id)}>
                       <Trash2 className="h-3 w-3" />
@@ -403,6 +478,51 @@ export function Holidays() {
                   {holidays.map((h) => {
                     const isConfirming = pendingDelete === h.id
                     const isDeleting   = deleteMutation.isPending && pendingDelete === h.id
+                    const isEditing    = editingId === h.id
+
+                    if (isEditing) {
+                      return (
+                        <tr key={h.id} className="border-b border-border last:border-0 bg-primary/5">
+                          <td className="px-4 py-3">
+                            <DateInput value={editDate} onChange={setEditDate} disabled={editMutation.isPending} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <Input value={editName} onChange={(e) => setEditName(e.target.value)}
+                              className="h-8 text-sm" disabled={editMutation.isPending}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveEdit() }} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                              <input type="checkbox" className="rounded border-border accent-primary"
+                                checked={editOptional} onChange={(e) => setEditOptional(e.target.checked)}
+                                disabled={editMutation.isPending} />
+                              Optional
+                            </label>
+                          </td>
+                          <td className="px-4 py-3">
+                            <select value={editGroupId} onChange={(e) => setEditGroupId(e.target.value)}
+                              disabled={editMutation.isPending}
+                              className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50">
+                              <option value="">All-India (everyone)</option>
+                              {groups.filter(g => g.is_active).map(g => (
+                                <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button size="sm" className="h-7 text-xs" disabled={editMutation.isPending} onClick={saveEdit}>
+                                {editMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Check className="h-3 w-3 mr-1" />Save</>}
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 text-xs" disabled={editMutation.isPending} onClick={cancelEdit}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    }
+
                     return (
                       <tr
                         key={h.id}
@@ -440,18 +560,29 @@ export function Holidays() {
                           </Badge>
                         </td>
 
-                        {/* Delete / Confirm */}
+                        {/* Edit / Delete / Confirm */}
                         <td className="px-4 py-3 text-right">
                           {!isConfirming && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                              onClick={() => setPendingDelete(h.id)}
-                              title="Delete holiday"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-0.5">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-primary"
+                                onClick={() => startEdit(h)}
+                                title="Edit holiday"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={() => setPendingDelete(h.id)}
+                                title="Delete holiday"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           )}
 
                           {isConfirming && (
