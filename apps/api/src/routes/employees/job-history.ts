@@ -102,7 +102,21 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('effective_from', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    if (error) {
+      // Embed failure (a FK column/relationship missing on a drifted DB) must not
+      // break the whole profile. Fall back to the raw rows (no joined names) so
+      // the page still loads; run migration 223 to restore the embeds.
+      req.log.warn({ err: error, employeeId: req.params.id }, 'job-history embed failed — serving raw rows (run migration 223)')
+      const { data: raw, error: rawErr } = await fastify.supabase
+        .from('job_history')
+        .select('*')
+        .eq('employee_id', req.params.id)
+        .eq('tenant_id', req.tenantId)
+        .order('effective_from', { ascending: false })
+      if (rawErr) return reply.code(500).send({ error: 'DB_ERROR', message: rawErr.message })
+      return reply.send({ data: raw ?? [] })
+    }
     return reply.send({ data })
   })
 
