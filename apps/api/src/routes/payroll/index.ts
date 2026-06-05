@@ -2272,7 +2272,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         action:       'freeze',
         frozen_by:    req.userId,
         frozen_at:    new Date().toISOString(),
-        reason:       reason ?? `Frozen via Resolution Center for run ${id}`,
+        reason:       reason ?? `Frozen (no reason given) — ${run.month}`,
       })
 
     if (freezeErr) {
@@ -2528,12 +2528,33 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (updateErr) return reply.code(500).send({ error: 'DB_ERROR', message: updateErr.message })
 
+    // If the month was frozen, also lift the freeze so the period is actually
+    // runnable again — otherwise the freeze guard blocks the re-run and the
+    // "Reopen" break-glass flow silently does nothing. Reopening a frozen period
+    // is a super_admin action.
+    const freezeState = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    let unfrozen = false
+    if (freezeState.frozen) {
+      if (req.userRole !== 'super_admin') {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may reopen a frozen payroll month' })
+      }
+      const { error: unErr } = await fastify.supabase
+        .from('payroll_freeze_log')
+        .update({ action: 'unfreeze', unfrozen_by: req.userId, unfrozen_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId)
+        .eq('freeze_month', run.month)
+        .eq('action', 'freeze')
+        .is('unfrozen_at', null)
+      if (unErr) return reply.code(500).send({ error: 'DB_ERROR', message: `Reset to draft but failed to unfreeze month: ${unErr.message}` })
+      unfrozen = true
+    }
+
     await logRunEvent(fastify.supabase, req.log, {
       tenant_id: tenantId, run_id: id, event_type: 'run_rolled_back',
-      month: run.month, payload: { reason: reason ?? null, rolled_back_by: req.userId },
+      month: run.month, payload: { reason: reason ?? null, rolled_back_by: req.userId, unfrozen },
     })
 
-    return reply.send({ message: 'Run rolled back to draft', run_id: id })
+    return reply.send({ message: unfrozen ? 'Period reopened (unfrozen) and reset to draft' : 'Run rolled back to draft', run_id: id, unfrozen })
   })
 
   // ── GET /payroll/forensics ────────────────────────────────────────────────────

@@ -2029,7 +2029,7 @@ export function PayrollRuns() {
   // ── Reopen run (frozen → reopened) ───────────────────────────────────────────
   const reopenMutation = useMutation({
     mutationFn: ({ runId, reason }: { runId: string; reason: string }) =>
-      api.post(`/payroll/runs/${runId}/reopen`, { reason }),
+      api.post(`/payroll/runs/${runId}/rollback`, { reason }),
     onSuccess: () => {
       setActiveReopenRun(null)
       setReopenReason('')
