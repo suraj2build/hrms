@@ -143,11 +143,40 @@ export async function fetchFullProfile(
   // wave1Raw[1] and [2] are timed wrappers — unwrap them
   const job_query_ms:          number = wave1Raw[1].ms
   const comp_query_ms:         number = wave1Raw[2].ms
-  const jobRow:            any   = wave1Raw[1].data
+  let   jobRow:            any   = wave1Raw[1].data
   const compensation:      any   = wave1Raw[2].data
   const addresses:         any[] = wave1Raw[3].data ?? []
   const emergencyContacts: any[] = wave1Raw[4].data ?? []
   const bankStatutory:     any   = wave1Raw[5].data
+
+  // ── 2b. Job-row embed fallback ─────────────────────────────────────────────
+  // On a drifted DB a missing FK relationship (or a missing column like
+  // shifts.code) makes the embedded job_history select error → jobRow = null,
+  // and a freshly-saved position silently fails to appear. Recover by fetching
+  // the raw current row and resolving the lookup names with simple by-id queries
+  // so the Job Details card always reflects what was saved.
+  if (wave1Raw[1].error || !jobRow) {
+    const { data: rawJob } = await sb
+      .from('job_history')
+      .select('id, employment_type, effective_from, effective_to, reason_for_change, manager_id, department_id, designation_id, grade_id, work_location_id, cost_center_id, shift_id')
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', tenantId)
+      .eq('is_current', true)
+      .maybeSingle()
+    if (rawJob) {
+      const lk = async (table: string, idVal: string | null, cols: string) =>
+        idVal ? (await sb.from(table).select(cols).eq('id', idVal).maybeSingle()).data : null
+      const [dep, des, grd, wl, cc, sh] = await Promise.all([
+        lk('departments',    rawJob.department_id,    'id, name, code'),
+        lk('designations',   rawJob.designation_id,   'id, name'),
+        lk('grades',         rawJob.grade_id,         'id, name, code'),
+        lk('work_locations', rawJob.work_location_id, 'id, name, city'),
+        lk('cost_centers',   rawJob.cost_center_id,   'id, name, code'),
+        lk('shifts',         rawJob.shift_id,         'id, name'),
+      ])
+      jobRow = { ...rawJob, departments: dep, designations: des, grades: grd, work_locations: wl, cost_centers: cc, shifts: sh }
+    }
+  }
 
   // ── 3. Wave 2 — depends on wave-1; components skipped in light mode ────────
   const wave2Start = Date.now()
