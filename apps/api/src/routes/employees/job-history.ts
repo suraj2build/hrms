@@ -140,6 +140,20 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
+    // Supersede the prior current row BEFORE inserting. A DB trigger is supposed
+    // to auto-close the previous current entry, but on drifted DBs it may be
+    // absent — then the new is_current=true row collides with
+    // uidx_job_history_one_current (500). Closing it here makes the insert safe
+    // regardless of whether the trigger exists.
+    if (parsed.data.is_current !== false) {
+      await fastify.supabase
+        .from('job_history')
+        .update({ is_current: false })
+        .eq('employee_id', req.params.id)
+        .eq('tenant_id', req.tenantId)
+        .eq('is_current', true)
+    }
+
     // Insert + return the RAW row (no FK embeds). Embedding here previously made
     // "Add Position" 500 whenever a job_history FK relationship was missing on a
     // drifted DB — even though the row inserted fine. The client refetches the
