@@ -247,9 +247,14 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       }
     }
 
-    // Mirror work_location + cost_center to current job_history row
+    // Mirror work_location + cost_center to the current job_history row. These
+    // fields live on job_history, NOT on the org assignment — so if there is no
+    // current job row the update affects nothing. Surface that (and any error)
+    // in the response instead of silently reporting success, so the client can
+    // tell the user to set Job Details first.
+    let job_mirror: { applied: boolean; reason?: string } | undefined
     if (work_location_id !== undefined || cost_center_id !== undefined) {
-      await fastify.supabase
+      const { data: mirrored, error: mirrorJobErr } = await fastify.supabase
         .from('job_history')
         .update({
           ...(work_location_id !== undefined ? { work_location_id: work_location_id ?? null } : {}),
@@ -258,8 +263,17 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
         .eq('employee_id', employeeId)
         .eq('tenant_id',   req.tenantId)
         .eq('is_current',  true)
+        .select('id')
+      if (mirrorJobErr) {
+        job_mirror = { applied: false, reason: mirrorJobErr.message }
+      } else if (!mirrored || mirrored.length === 0) {
+        job_mirror = { applied: false, reason: 'No current job record — set Job Details first to store work location / cost center.' }
+        req.log.warn({ employeeId }, 'org-context: work_location/cost_center not stored — no current job_history row')
+      } else {
+        job_mirror = { applied: true }
+      }
     }
 
-    return reply.code(201).send({ data: newRow })
+    return reply.code(201).send({ data: newRow, job_mirror })
   })
 }

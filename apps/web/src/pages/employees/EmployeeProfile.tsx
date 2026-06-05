@@ -23,6 +23,7 @@ import {
   AlertTriangle, CheckCircle2, Banknote, TrendingUp,
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy,
   ChevronDown, Info, RefreshCw, Package, Brain,
+  Phone, Fingerprint, Home,
 } from 'lucide-react'
 import { Employee360Tab } from '@/pages/intelligence/Employee360Tab'
 import {
@@ -588,6 +589,8 @@ export function EmployeeProfile() {
   const job  = fpData?.job_info
   const comp = fpData?.compensation
   const bs   = fpData?.bank_statutory
+  const addresses: any[]          = (fpData as any)?.addresses ?? []
+  const emergencyContacts: any[]  = (fpData as any)?.emergency_contacts ?? []
 
   // ── Lazy queries ───────────────────────────────────────────────────────────
   const { data: jobHistoryData } = useQuery<{ data: any[] }>({
@@ -674,6 +677,14 @@ export function EmployeeProfile() {
   const { data: relTypesData } = useQuery<{ data: any[] }>({
     queryKey: ['relationship-types'], queryFn: () => api.get('/masters/relationship-types'),
     enabled: !!id && visited.has('relationships'), staleTime: 5 * 60_000,
+  })
+  const { data: identityData } = useQuery<{ data: any[] }>({
+    queryKey: ['identity', id], queryFn: () => api.get(`/employees/${id}/identity`),
+    enabled: !!id && visited.has('documents'), staleTime: 30_000,
+  })
+  const { data: identityTypesData } = useQuery<{ data: any[] }>({
+    queryKey: ['identity-types'], queryFn: () => api.get('/masters/identity-types'),
+    enabled: !!id && visited.has('documents'), staleTime: 5 * 60_000,
   })
   const { data: accessCardsData } = useQuery<{ data: any[] }>({
     queryKey: ['access-cards', id], queryFn: () => api.get(`/employees/${id}/access-cards`),
@@ -1009,21 +1020,34 @@ export function EmployeeProfile() {
   }
 
   const orgMutation = useMutation({
-    mutationFn: (body: typeof orgForm) =>
-      api.post(`/employees/${id}/org-context`, {
+    mutationFn: (body: typeof orgForm) => {
+      const payload: Record<string, unknown> = {
         site_id:            body.site_id            || null,
         roster_id:          body.roster_id          || null,
         rotation_policy_id: body.rotation_policy_id || null,
-        work_location_id:   body.work_location_id   || null,
-        cost_center_id:     body.cost_center_id     || null,
         effective_from:     body.effective_from,
         reason:             body.reason             || null,
-      }),
-    onSuccess: (_d, body) => {
+      }
+      // Work Location / Cost Center live on the job_history row and are only
+      // OPTIONALLY editable from this site/roster dialog. Send them only when a
+      // value is selected — omitting blanks means "leave unchanged" so a
+      // site/roster-only save can't silently clear them. (Clear them from the
+      // Job Details editor instead.)
+      if (body.work_location_id) payload.work_location_id = body.work_location_id
+      if (body.cost_center_id)   payload.cost_center_id   = body.cost_center_id
+      return api.post(`/employees/${id}/org-context`, payload)
+    },
+    onSuccess: (_d: any, body) => {
       setOrgDlgOpen(false); refetchOrgCtx()
       qc.invalidateQueries({ queryKey: ['job-current', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })   // refresh the Job Info card too
-      toast.success('Organisation context updated')
+      // The API reports whether work-location / cost-center actually persisted
+      // (they need a current job_history row). Warn instead of a false success.
+      if (_d?.job_mirror && _d.job_mirror.applied === false) {
+        toast.warning('Site & roster saved', { description: _d.job_mirror.reason ?? 'Work location / cost center were not stored.' })
+      } else {
+        toast.success('Organisation context updated')
+      }
       promptRecompute(body.effective_from, 'roster / rotation')
     },
     onError:   (e: Error) => toast.error('Failed to update org context', { description: e.message }),
@@ -1306,6 +1330,48 @@ export function EmployeeProfile() {
     mutationFn: (pvId: string) => api.delete(`/employees/${id}/passport-visa/${pvId}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['passport-visa', id] }); toast.success('Record deleted') },
     onError:   (e: Error) => toast.error('Failed to delete record', { description: e.message }),
+  })
+
+  // ── Addresses ────────────────────────────────────────────────────────────────
+  const [addrOpen, setAddrOpen] = useState(false)
+  const [addrForm, setAddrForm] = useState<any>({})
+  const addrMutation = useMutation({
+    mutationFn: (d: any) => api.post(`/employees/${id}/addresses`, d),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setAddrOpen(false); toast.success('Address saved') },
+    onError:   (e: Error) => toast.error('Failed to save address', { description: e.message }),
+  })
+  const delAddrMutation = useMutation({
+    mutationFn: (addrId: string) => api.delete(`/employees/${id}/addresses/${addrId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); toast.success('Address removed') },
+    onError:   (e: Error) => toast.error('Failed to remove address', { description: e.message }),
+  })
+
+  // ── Emergency contacts ─────────────────────────────────────────────────────
+  const [emOpen, setEmOpen] = useState(false)
+  const [emForm, setEmForm] = useState<any>({})
+  const emMutation = useMutation({
+    mutationFn: (d: any) => api.post(`/employees/${id}/emergency-contacts`, d),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setEmOpen(false); toast.success('Emergency contact saved') },
+    onError:   (e: Error) => toast.error('Failed to save contact', { description: e.message }),
+  })
+  const delEmMutation = useMutation({
+    mutationFn: (cid: string) => api.delete(`/employees/${id}/emergency-contacts/${cid}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); toast.success('Contact removed') },
+    onError:   (e: Error) => toast.error('Failed to remove contact', { description: e.message }),
+  })
+
+  // ── Identity documents ─────────────────────────────────────────────────────
+  const [idOpen, setIdOpen] = useState(false)
+  const [idForm, setIdForm] = useState<any>({})
+  const idMutation = useMutation({
+    mutationFn: (d: any) => api.post(`/employees/${id}/identity`, d),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['identity', id] }); setIdOpen(false); toast.success('Identity record saved') },
+    onError:   (e: Error) => toast.error('Failed to save identity', { description: e.message }),
+  })
+  const delIdMutation = useMutation({
+    mutationFn: (iid: string) => api.delete(`/employees/${id}/identity/${iid}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['identity', id] }); toast.success('Identity record removed') },
+    onError:   (e: Error) => toast.error('Failed to remove identity', { description: e.message }),
   })
 
   // ── Family ─────────────────────────────────────────────────────────────────
@@ -1623,6 +1689,8 @@ export function EmployeeProfile() {
     core:          [
       { key: 'profile',    label: 'Profile',        icon: User       },
       { key: 'personal',   label: 'Personal Info',  icon: UserCircle },
+      { key: 'addresses',  label: 'Addresses',      icon: Home       },
+      { key: 'emergency',  label: 'Emergency',      icon: Phone      },
       { key: 'jobinfo',    label: 'Job Info',        icon: Briefcase  },
       { key: 'onboarding',      label: 'Onboarding',       icon: GraduationCap },
       { key: 'important-dates', label: 'Important Dates',   icon: CalendarClock },
@@ -1641,7 +1709,7 @@ export function EmployeeProfile() {
       { key: 'bank',         label: 'Bank & Statutory', icon: Landmark },
       { key: 'contracts',    label: 'Contracts',      icon: FileText   },
     ],
-    documents:     [{ key: 'documents', label: 'Documents', icon: Files }, { key: 'passport-visa', label: 'Passport & Visa', icon: Globe }],
+    documents:     [{ key: 'documents', label: 'Documents', icon: Files }, { key: 'identity', label: 'Identity', icon: Fingerprint }, { key: 'passport-visa', label: 'Passport & Visa', icon: Globe }],
     relationships: [{ key: 'family', label: 'Family', icon: Users }, { key: 'nomination', label: 'Nomination', icon: Award }],
     assets:        [{ key: 'access-card', label: 'Access Card', icon: CreditCard }],
   }
@@ -1885,6 +1953,100 @@ export function EmployeeProfile() {
                   )}
               </CardContent>
             </Card>
+          )}
+
+          {/* CORE › Addresses */}
+          {subTab === 'addresses' && (
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setAddrForm({ address_type: 'current', country: 'India' }); setAddrOpen(true) }}>
+                    <Plus className="h-3.5 w-3.5" />Add Address
+                  </Button>
+                </div>
+              )}
+              {!addresses.length
+                ? <Card><CardContent className="pt-6"><EmptySection icon={Home} title="No addresses on record" subtitle={isAdmin ? 'Click Add Address to record one.' : undefined} /></CardContent></Card>
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{addresses.map((a: any) => (
+                    <Card key={a.id}>
+                      <CardContent className="pt-4 pb-4">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <Badge variant="outline" className="rounded-full text-[9px] capitalize mb-1.5">{a.address_type}</Badge>
+                            <p className="text-sm font-medium">{a.line1}{a.line2 ? `, ${a.line2}` : ''}</p>
+                            <p className="text-xs text-muted-foreground">{[a.city, a.state, a.pincode].filter(Boolean).join(', ')}</p>
+                            <p className="text-xs text-muted-foreground">{a.country}</p>
+                          </div>
+                          {isAdmin && (
+                            <div className="flex gap-1">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setAddrForm({ ...a }); setAddrOpen(true) }}><Edit2 className="h-3.5 w-3.5" /></Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delAddrMutation.mutate(a.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}</div>}
+            </div>
+          )}
+
+          {/* CORE › Emergency Contacts */}
+          {subTab === 'emergency' && (
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setEmForm({ is_primary: false }); setEmOpen(true) }}>
+                    <Plus className="h-3.5 w-3.5" />Add Contact
+                  </Button>
+                </div>
+              )}
+              {!emergencyContacts.length
+                ? <Card><CardContent className="pt-6"><EmptySection icon={Phone} title="No emergency contacts" subtitle={isAdmin ? 'Click Add Contact to record one.' : undefined} /></CardContent></Card>
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{emergencyContacts.map((c: any) => (
+                    <Card key={c.id}>
+                      <CardContent className="pt-4 pb-4 flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">{c.name} {c.is_primary && <Badge variant="outline" className="rounded-full text-[9px] ml-1">Primary</Badge>}</p>
+                          {c.relationship && <p className="text-xs text-muted-foreground capitalize">{c.relationship}</p>}
+                          <p className="text-xs text-muted-foreground">{c.phone}{c.alternate_phone ? ` · ${c.alternate_phone}` : ''}</p>
+                          {c.email && <p className="text-xs text-muted-foreground">{c.email}</p>}
+                        </div>
+                        {isAdmin && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delEmMutation.mutate(c.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}</div>}
+            </div>
+          )}
+
+          {/* DOCUMENTS › Identity */}
+          {subTab === 'identity' && (
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setIdForm({}); setIdOpen(true) }}>
+                    <Plus className="h-3.5 w-3.5" />Add Identity Document
+                  </Button>
+                </div>
+              )}
+              {!(identityData?.data?.length)
+                ? <Card><CardContent className="pt-6"><EmptySection icon={Fingerprint} title="No identity documents" subtitle={isAdmin ? 'Click Add Identity Document to record one.' : undefined} /></CardContent></Card>
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{identityData!.data.map((it: any) => (
+                    <Card key={it.id}>
+                      <CardContent className="pt-4 pb-4 flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">{it.identity_types?.name ?? 'Identity'}</p>
+                          <p className="text-xs font-mono text-muted-foreground">{it.identity_number}</p>
+                          {(it.issued_by || it.expiry_date) && <p className="text-xs text-muted-foreground">{[it.issued_by, it.expiry_date ? `exp ${fmtDate(it.expiry_date)}` : null].filter(Boolean).join(' · ')}</p>}
+                        </div>
+                        {isAdmin && (
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delIdMutation.mutate(it.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}</div>}
+            </div>
           )}
 
           {/* CORE › Job Info — single clean read-only snapshot */}
@@ -4067,9 +4229,11 @@ export function EmployeeProfile() {
           {/* RELATIONSHIPS › Family */}
           {subTab === 'family' && (
             <div className="space-y-3">
-              <div className="flex justify-end">
-                <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setFamForm({}); setAddFamOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Member</Button>
-              </div>
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setFamForm({}); setAddFamOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Member</Button>
+                </div>
+              )}
               {!(familyData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Users} title="No family members" /></CardContent></Card>
                 : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{familyData!.data.map((fm: any) => (
@@ -4081,7 +4245,7 @@ export function EmployeeProfile() {
                           {fm.dob && <p className="text-xs text-muted-foreground">{fmtDate(fm.dob)}</p>}
                           {fm.is_dependent && <Badge variant="outline" className="rounded-full text-[9px] mt-1">Dependent</Badge>}
                         </div>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delFamMutation.mutate(fm.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        {isAdmin && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delFamMutation.mutate(fm.id)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                       </CardContent>
                     </Card>
                   ))}</div>}
@@ -4306,6 +4470,87 @@ export function EmployeeProfile() {
             <Button variant="outline" size="sm" onClick={()=>setAddJobOpen(false)}>Cancel</Button>
             <Button size="sm" onClick={()=>addJobMutation.mutate(jobForm)} disabled={addJobMutation.isPending || !jobForm.effective_from}>
               {addJobMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add / Edit Address */}
+      <Dialog open={addrOpen} onOpenChange={setAddrOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{addrForm.id ? 'Edit Address' : 'Add Address'}</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Type</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={addrForm.address_type ?? 'current'} onChange={e=>setAddrForm((p:any)=>({...p,address_type:e.target.value}))}>
+                {[['current','Current'],['permanent','Permanent'],['correspondence','Correspondence']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div><Label className="text-xs">Pincode</Label><Input className="mt-1 h-8 text-xs" value={addrForm.pincode??''} onChange={e=>setAddrForm((p:any)=>({...p,pincode:e.target.value}))}/></div>
+            <div className="col-span-2"><Label className="text-xs">Address Line 1</Label><Input className="mt-1 h-8 text-xs" value={addrForm.line1??''} onChange={e=>setAddrForm((p:any)=>({...p,line1:e.target.value}))}/></div>
+            <div className="col-span-2"><Label className="text-xs">Address Line 2</Label><Input className="mt-1 h-8 text-xs" value={addrForm.line2??''} onChange={e=>setAddrForm((p:any)=>({...p,line2:e.target.value}))}/></div>
+            <div><Label className="text-xs">City</Label><Input className="mt-1 h-8 text-xs" value={addrForm.city??''} onChange={e=>setAddrForm((p:any)=>({...p,city:e.target.value}))}/></div>
+            <div><Label className="text-xs">State</Label><Input className="mt-1 h-8 text-xs" value={addrForm.state??''} onChange={e=>setAddrForm((p:any)=>({...p,state:e.target.value}))}/></div>
+            <div><Label className="text-xs">Country</Label><Input className="mt-1 h-8 text-xs" value={addrForm.country??'India'} onChange={e=>setAddrForm((p:any)=>({...p,country:e.target.value}))}/></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={()=>setAddrOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={addrMutation.isPending || !addrForm.line1 || !addrForm.city || !addrForm.state} onClick={()=>addrMutation.mutate(addrForm)}>
+              {addrMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Emergency Contact */}
+      <Dialog open={emOpen} onOpenChange={setEmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Add Emergency Contact</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={emForm.name??''} onChange={e=>setEmForm((p:any)=>({...p,name:e.target.value}))}/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Relationship</Label><Input className="mt-1 h-8 text-xs" value={emForm.relationship??''} onChange={e=>setEmForm((p:any)=>({...p,relationship:e.target.value}))}/></div>
+              <div><Label className="text-xs">Phone</Label><Input className="mt-1 h-8 text-xs" value={emForm.phone??''} onChange={e=>setEmForm((p:any)=>({...p,phone:e.target.value}))}/></div>
+              <div><Label className="text-xs">Alternate Phone</Label><Input className="mt-1 h-8 text-xs" value={emForm.alternate_phone??''} onChange={e=>setEmForm((p:any)=>({...p,alternate_phone:e.target.value}))}/></div>
+              <div><Label className="text-xs">Email</Label><Input className="mt-1 h-8 text-xs" value={emForm.email??''} onChange={e=>setEmForm((p:any)=>({...p,email:e.target.value}))}/></div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="em_primary" checked={!!emForm.is_primary} onChange={e=>setEmForm((p:any)=>({...p,is_primary:e.target.checked}))} className="rounded" />
+              <Label htmlFor="em_primary" className="text-xs">Primary contact</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={()=>setEmOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={emMutation.isPending || !emForm.name || !emForm.phone} onClick={()=>emMutation.mutate(emForm)}>
+              {emMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Identity Document */}
+      <Dialog open={idOpen} onOpenChange={setIdOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Add Identity Document</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Identity Type</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={idForm.identity_type_id??''} onChange={e=>setIdForm((p:any)=>({...p,identity_type_id:e.target.value}))}>
+                <option value="">Select type…</option>
+                {(identityTypesData?.data ?? []).map((t:any)=><option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              {!(identityTypesData?.data?.length) && <p className="text-[10px] text-warning mt-1">No identity types configured. Add them under Masters first.</p>}
+            </div>
+            <div><Label className="text-xs">Identity Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={idForm.identity_number??''} onChange={e=>setIdForm((p:any)=>({...p,identity_number:e.target.value}))}/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Issued By</Label><Input className="mt-1 h-8 text-xs" value={idForm.issued_by??''} onChange={e=>setIdForm((p:any)=>({...p,issued_by:e.target.value}))}/></div>
+              <div><Label className="text-xs">Expiry Date</Label><DateInput className="mt-1 h-8 text-xs" value={idForm.expiry_date??''} onChange={v=>setIdForm((p:any)=>({...p,expiry_date:v}))}/></div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={()=>setIdOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={idMutation.isPending || !idForm.identity_type_id || !idForm.identity_number} onClick={()=>idMutation.mutate(idForm)}>
+              {idMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -34,7 +34,7 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/employees/:id/access-cards', auth, async (req: any, reply) => {
+  fastify.post('/employees/:id/access-cards', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.safeParse(req.body)
