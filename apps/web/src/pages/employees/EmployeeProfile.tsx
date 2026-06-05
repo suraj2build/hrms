@@ -1672,20 +1672,14 @@ export function EmployeeProfile() {
 
   const SUB_TABS: Record<Section, Array<{ key: string; label: string; icon: React.ElementType }>> = {
     core:          [
-      { key: 'profile',    label: 'Profile',        icon: User       },
-      { key: 'personal',   label: 'Personal Info',  icon: UserCircle },
-      { key: 'addresses',  label: 'Addresses',      icon: Home       },
-      { key: 'emergency',  label: 'Emergency',      icon: Phone      },
-      { key: 'jobinfo',    label: 'Job Info',        icon: Briefcase  },
-      { key: 'onboarding',      label: 'Onboarding',       icon: GraduationCap },
-      { key: 'important-dates', label: 'Important Dates',   icon: CalendarClock },
-      { key: 'insights',   label: 'Insights',       icon: Brain      },
+      { key: 'profile',    label: 'Overview',       icon: User       },
+      { key: 'personal',   label: 'Personal',       icon: UserCircle },
+      { key: 'onboarding', label: 'Onboarding',     icon: GraduationCap },
       ...(isAdmin ? [{ key: 'account', label: 'User Account', icon: KeyRound }] : []),
     ],
     employment:    [
-      { key: 'workforce',       label: 'Workforce',        icon: LayoutGrid    },
+      { key: 'workforce',       label: 'Job & Position',   icon: LayoutGrid    },
       { key: 'shift-schedule',  label: 'Shift & Roster',   icon: CalendarClock },
-      { key: 'position-history', label: 'Position History', icon: History      },
       { key: 'prev-employment', label: 'Prev. Employment', icon: Building2     },
       { key: 'separation',      label: 'Separation',       icon: LogOut        },
     ],
@@ -1694,8 +1688,8 @@ export function EmployeeProfile() {
       { key: 'bank',         label: 'Bank & Statutory', icon: Landmark },
       { key: 'contracts',    label: 'Contracts',      icon: FileText   },
     ],
-    documents:     [{ key: 'documents', label: 'Documents', icon: Files }, { key: 'identity', label: 'Identity', icon: Fingerprint }, { key: 'passport-visa', label: 'Passport & Visa', icon: Globe }],
-    relationships: [{ key: 'family', label: 'Family', icon: Users }, { key: 'nomination', label: 'Nomination', icon: Award }],
+    documents:     [{ key: 'documents', label: 'Documents', icon: Files }],
+    relationships: [{ key: 'family', label: 'Family & Nominees', icon: Users }],
     assets:        [{ key: 'access-card', label: 'Access Card', icon: CreditCard }],
   }
 
@@ -1941,7 +1935,8 @@ export function EmployeeProfile() {
           )}
 
           {/* CORE › Addresses */}
-          {subTab === 'addresses' && (
+          {/* Merged into the Personal tab */}
+          {subTab === 'personal' && (
             <div className="space-y-3">
               {isAdmin && (
                 <div className="flex justify-end">
@@ -1976,7 +1971,8 @@ export function EmployeeProfile() {
           )}
 
           {/* CORE › Emergency Contacts */}
-          {subTab === 'emergency' && (
+          {/* Merged into the Personal tab */}
+          {subTab === 'personal' && (
             <div className="space-y-3">
               {isAdmin && (
                 <div className="flex justify-end">
@@ -2006,7 +2002,8 @@ export function EmployeeProfile() {
           )}
 
           {/* DOCUMENTS › Identity */}
-          {subTab === 'identity' && (
+          {/* Merged into the Documents tab */}
+          {subTab === 'documents' && (
             <div className="space-y-3">
               {isAdmin && (
                 <div className="flex justify-end">
@@ -2366,11 +2363,13 @@ export function EmployeeProfile() {
           {/* ─────────────────────────────────────────────────────────────────
               CORE › Important Dates
           ──────────────────────────────────────────────────────────────────── */}
-          {subTab === 'insights' && id && (
+          {/* Merged into the Overview (profile) tab */}
+          {subTab === 'profile' && id && (
             <Employee360Tab employeeId={id} />
           )}
 
-          {subTab === 'important-dates' && (
+          {/* Merged into the Personal tab */}
+          {subTab === 'personal' && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -2760,7 +2759,8 @@ export function EmployeeProfile() {
           )}
 
           {/* EMPLOYMENT › Position History */}
-          {subTab === 'position-history' && (
+          {/* Merged into the Workforce tab */}
+          {subTab === 'workforce' && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -4078,7 +4078,8 @@ export function EmployeeProfile() {
           )}
 
           {/* DOCUMENTS › Passport & Visa */}
-          {subTab === 'passport-visa' && (
+          {/* Merged into the Documents tab */}
+          {subTab === 'documents' && (
             <div className="space-y-4">
               {isAdmin && (
                 <div className="flex justify-end gap-2">
@@ -4142,7 +4143,8 @@ export function EmployeeProfile() {
           )}
 
           {/* RELATIONSHIPS › Nomination */}
-          {subTab === 'nomination' && (
+          {/* Merged into the Family tab */}
+          {subTab === 'family' && (
             <div className="space-y-4">
               {(['pf', 'gratuity', 'esi', 'superannuation'] as const).map(scheme => {
                 const schemeNoms = (nominationsData?.data ?? []).filter((n: any) => n.scheme === scheme)
