@@ -129,6 +129,10 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
+    // Insert + return the RAW row (no FK embeds). Embedding here previously made
+    // "Add Position" 500 whenever a job_history FK relationship was missing on a
+    // drifted DB — even though the row inserted fine. The client refetches the
+    // full profile after success, so the embedded names aren't needed here.
     const { data, error } = await fastify.supabase
       .from('job_history')
       .insert({
@@ -137,16 +141,7 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
         tenant_id:   req.tenantId,
         created_by:  req.userId,
       })
-      .select(`
-        *,
-        departments(id, name),
-        designations(id, name),
-        grades(id, name, code),
-        work_locations(id, name),
-        cost_centers(id, name),
-        shifts(id, name),
-        manager:manager_id(id, first_name, last_name, employee_code)
-      `)
+      .select('*')
       .single()
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 

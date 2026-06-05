@@ -298,6 +298,8 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
   fastify.get('/employees/:id/assets', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
+    // Resilient: a missing assets/asset_categories relationship on a drifted DB
+    // must not break the whole profile — degrade to an empty list instead of 500.
     const { data: assigned, error: aErr } = await fastify.supabase
       .from('assets')
       .select('id, asset_code, name, serial_number, status, category_id, asset_categories ( name )')
@@ -305,7 +307,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('assigned_to', id)
       .eq('status', 'assigned')
       .order('asset_code')
-    if (aErr) return reply.code(500).send({ error: 'DB_ERROR', message: aErr.message })
+    if (aErr) req.log.warn({ err: aErr, employeeId: id }, 'assets list query failed — returning empty')
 
     const { data: history, error: hErr } = await fastify.supabase
       .from('employee_asset_ledger')
@@ -313,7 +315,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', id)
       .order('created_at', { ascending: false })
-    if (hErr) return reply.code(500).send({ error: 'DB_ERROR', message: hErr.message })
+    if (hErr) req.log.warn({ err: hErr, employeeId: id }, 'asset ledger query failed — returning empty')
 
     return reply.send({
       data: {
