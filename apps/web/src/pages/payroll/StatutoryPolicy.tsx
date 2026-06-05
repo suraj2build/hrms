@@ -128,6 +128,28 @@ export function StatutoryPolicy() {
     onError: (e: any) => toast.error(e?.message ?? 'Failed to save policy'),
   })
 
+  // ── Payroll statutory settings (TDS enable + default regime) ────────────────
+  const [tdsForm, setTdsForm] = useState<{ tds_enabled: boolean; tds_default_regime: 'old' | 'new' }>({
+    tds_enabled: false, tds_default_regime: 'new',
+  })
+  const { data: govData } = useQuery<{ data: { tds_enabled?: boolean; tds_default_regime?: 'old' | 'new' } | null }>({
+    queryKey: ['payroll-statutory-settings'],
+    queryFn:  () => api.get('/payroll/statutory/governance/settings'),
+    staleTime: 60_000,
+  })
+  useEffect(() => {
+    const s = govData?.data
+    if (s) setTdsForm({ tds_enabled: !!s.tds_enabled, tds_default_regime: (s.tds_default_regime ?? 'new') })
+  }, [govData])
+  const saveTds = useMutation({
+    mutationFn: (body: object) => api.put('/payroll/statutory/governance/settings', body),
+    onSuccess: () => {
+      toast.success('TDS settings saved')
+      qc.invalidateQueries({ queryKey: ['payroll-statutory-settings'] })
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Failed to save TDS settings'),
+  })
+
   function handleSave() {
     const empRate = Number(form.pf_employee_rate)
     const erRate  = Number(form.pf_employer_rate)
@@ -238,6 +260,47 @@ export function StatutoryPolicy() {
         <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5">
           <Info className="h-3 w-3" />
           Statutory default: 12% / 12% on Basic, capped at ₹15,000/month (EPF Act ceiling).
+        </p>
+      </SectionCard>
+
+      {/* TDS (Income Tax) — payroll statutory settings */}
+      <SectionCard
+        title="TDS (Income Tax)"
+        description="Master switch for TDS in the payroll run. When ON, TDS is computed on projected annual income — no employee declaration is required (new regime + ₹50,000 standard deduction by default)."
+        icon={<Scale className="h-4 w-4 text-muted-foreground" />}
+      >
+        <ToggleRow
+          label="Enable TDS"
+          hint="When off, the payroll run skips TDS entirely. Already-finalized cycles keep their immutable snapshot — re-run them to apply."
+          checked={tdsForm.tds_enabled}
+          disabled={!isAdmin}
+          onChange={v => setTdsForm(f => ({ ...f, tds_enabled: v }))}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="tds-regime">Default tax regime</Label>
+            <select
+              id="tds-regime"
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-1 ring-primary/50"
+              value={tdsForm.tds_default_regime}
+              disabled={!isAdmin}
+              onChange={e => setTdsForm(f => ({ ...f, tds_default_regime: e.target.value as 'old' | 'new' }))}
+            >
+              <option value="new">New regime (default — no declarations needed)</option>
+              <option value="old">Old regime (uses approved declarations)</option>
+            </select>
+          </div>
+          <div className="flex items-end justify-end">
+            <Button onClick={() => saveTds.mutate(tdsForm)} disabled={!isAdmin || saveTds.isPending}>
+              {saveTds.isPending
+                ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…</>
+                : <><Save className="h-4 w-4 mr-2" /> Save TDS Settings</>}
+            </Button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5">
+          <Info className="h-3 w-3" />
+          TDS is mandatory once projected annual tax exceeds the rebate threshold (≈₹7L taxable on the new regime). Below that, TDS is correctly ₹0.
         </p>
       </SectionCard>
 
