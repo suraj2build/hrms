@@ -154,11 +154,11 @@ function fmtCurrency(n: number): string {
   }).format(n)
 }
 
-/** Compact: ₹12.5L / ₹52.3K / ₹850 */
+/** Compact: ₹12.50L / ₹52.3K / ₹850. (1 lakh = 1,00,000.) */
 function fmtCompact(n: number | null | undefined): string {
   if (n == null) return '—'
-  if (n >= 10_00_000) return `₹${(n / 10_00_000).toFixed(2)}L`
-  if (n >= 1_000)     return `₹${(n / 1_000).toFixed(1)}K`
+  if (n >= 1_00_000) return `₹${(n / 1_00_000).toFixed(2)}L`
+  if (n >= 1_000)    return `₹${(n / 1_000).toFixed(1)}K`
   return `₹${Math.round(n)}`
 }
 
@@ -1032,7 +1032,7 @@ export function EssCompensation() {
               <div>
                 <p className="text-xs text-muted-foreground">Annual CTC</p>
                 <p className="text-2xl font-bold text-foreground tabular-nums">
-                  {compLoading ? '…' : fmtCompact(comp?.ctc_annual)}
+                  {compLoading ? '…' : fmtCurrency(ctcMonthlyCalc > 0 ? ctcMonthlyCalc * 12 : (comp?.ctc_annual ?? 0))}
                 </p>
               </div>
             </div>
@@ -1043,7 +1043,7 @@ export function EssCompensation() {
               <div>
                 <p className="text-xs text-muted-foreground">Monthly CTC</p>
                 <p className="text-2xl font-bold text-success tabular-nums">
-                  {compLoading ? '…' : fmtCompact(comp?.ctc_monthly)}
+                  {compLoading ? '…' : fmtCurrency(ctcMonthlyCalc > 0 ? ctcMonthlyCalc : (comp?.ctc_monthly ?? 0))}
                 </p>
                 {comp?.salary_structures?.name && (
                   <p className="text-[11px] text-muted-foreground mt-0.5">{comp.salary_structures.name}</p>

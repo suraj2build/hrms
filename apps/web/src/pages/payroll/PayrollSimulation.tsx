@@ -98,7 +98,7 @@ function uid() { return String(++_uid) }
 
 function fmt(n: number | null | undefined) {
   if (n == null) return '—'
-  if (Math.abs(n) >= 10_00_000) return `₹${(n / 10_00_000).toFixed(2)}L`
+  if (Math.abs(n) >= 10_00_000) return `₹${(n / 1_00_000).toFixed(2)}L`
   if (Math.abs(n) >= 1_000) return `₹${Math.round(n / 1_000)}K`
   return `₹${Math.round(n)}`
 }

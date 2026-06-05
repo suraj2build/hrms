@@ -85,7 +85,7 @@ interface ForecastResponse {
 
 function fmt(n: number | null | undefined) {
   if (n == null) return '—'
-  if (n >= 10_00_000) return `₹${(n / 10_00_000).toFixed(2)}L`
+  if (n >= 10_00_000) return `₹${(n / 1_00_000).toFixed(2)}L`
   if (n >= 1_000) return `₹${Math.round(n / 1_000)}K`
   return `₹${Math.round(n)}`
 }
