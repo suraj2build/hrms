@@ -213,6 +213,14 @@ function buildSlipRow(
   result:   PayrollSlipResult,
   month:    string,
 ): Record<string, unknown> {
+  // TDS amount lives as a 'TDS' line in the component breakdown — mirror it into
+  // the tds_deducted column so the IT Statement / TDS Recovery / YTD pages
+  // (which read payroll_slips.tds_deducted) reflect what was actually deducted.
+  const tds_deducted = round2fn(
+    (result.component_breakdown ?? [])
+      .filter((c: any) => /^TDS$/i.test(c.code))
+      .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0),
+  )
   return {
     tenant_id:              tenantId,
     run_id:                 runId,
@@ -229,6 +237,7 @@ function buildSlipRow(
     net_pay:                result.net_pay,
     employer_contributions: result.employer_contributions,
     component_breakdown:    result.component_breakdown,
+    tds_deducted,
     status:                 'draft',
     warning:                result.warning ?? null,
   }
@@ -1409,6 +1418,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
                 net_pay:               freshSlip.net_pay,
                 employer_contributions:freshSlip.employer_contributions,
                 component_breakdown:   freshSlip.component_breakdown,
+                tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
+                  .filter((c: any) => /^TDS$/i.test(c.code))
+                  .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
               })
               .eq('run_id', id)
               .eq('employee_id', employeeId)
