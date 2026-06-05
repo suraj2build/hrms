@@ -2765,9 +2765,11 @@ export function EmployeeProfile() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-semibold">Position History</CardTitle>
-                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setJobForm({ employment_type: 'permanent', effective_from: new Date().toISOString().slice(0,10), is_current: true }); setAddJobOpen(true) }}>
-                    <Plus className="h-3.5 w-3.5" />Add Record
-                  </Button>
+                  {isAdmin && (
+                    <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setJobForm({ employment_type: 'permanent', effective_from: new Date().toISOString().slice(0,10), is_current: true }); setAddJobOpen(true) }}>
+                      <Plus className="h-3.5 w-3.5" />Add Record
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -2798,9 +2800,11 @@ export function EmployeeProfile() {
           {/* EMPLOYMENT › Previous Employment */}
           {subTab === 'prev-employment' && (
             <div className="space-y-3">
-              <div className="flex justify-end">
-                <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setPrevForm({}); setAddPrevOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Employment</Button>
-              </div>
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setPrevForm({}); setAddPrevOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Employment</Button>
+                </div>
+              )}
               {!(prevEmpData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Building2} title="No previous employment records" /></CardContent></Card>
                 : prevEmpData!.data.map((pe: any) => (
@@ -3856,95 +3860,9 @@ export function EmployeeProfile() {
                   rendered once at the top of the first Compensation block above.
                   Rendering it again duplicated the banner on the same tab. */}
 
-              {/* Salary revision history — admin only */}
-              {isAdmin && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                      Salary Revision History
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    {!(payrollRevisionsData?.data?.length)
-                      ? <div className="px-6 pb-6"><EmptySection icon={TrendingUp} title="No revisions recorded" subtitle="Compensation revisions will appear here once logged." /></div>
-                      : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b border-border">
-                                {['Effective From', 'Previous CTC', 'Revised CTC', 'Status', 'Reason'].map(h => (
-                                  <th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {payrollRevisionsData!.data.map((r: any) => (
-                                <tr key={r.id} className="border-b border-border/50 hover:bg-muted/20">
-                                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.effective_date)}</td>
-                                  <td className="px-4 py-2 tabular-nums">{r.before_ctc_annual ? fmtMoney(r.before_ctc_annual) : '—'}</td>
-                                  <td className="px-4 py-2 tabular-nums font-medium">{r.new_ctc_annual ? fmtMoney(r.new_ctc_annual) : '—'}</td>
-                                  <td className="px-4 py-2">
-                                    <Badge
-                                      variant={r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'destructive' : 'secondary'}
-                                      className="rounded-full text-[9px] capitalize"
-                                    >
-                                      {r.status ?? '—'}
-                                    </Badge>
-                                  </td>
-                                  <td className="px-4 py-2 text-muted-foreground max-w-[160px] truncate">{r.reason ?? '—'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* ── Compensation History Timeline ── */}
-              {isAdmin && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                      <History className="h-4 w-4 text-muted-foreground" />
-                      Compensation History
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    {!(compensationHistoryData?.data?.length)
-                      ? <div className="px-6 pb-6"><EmptySection icon={History} title="No history" subtitle="Past compensation records will appear here." /></div>
-                      : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b border-border">
-                                {['Effective From', 'Annual CTC', 'Monthly CTC', 'Status'].map(h => (
-                                  <th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {compensationHistoryData!.data.map((row: any) => (
-                                <tr key={row.id} className={cn('border-b border-border/50', row.is_active && 'bg-success/4')}>
-                                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(row.effective_from)}</td>
-                                  <td className="px-4 py-2 tabular-nums font-medium">{fmtMoney(row.ctc_annual)}</td>
-                                  <td className="px-4 py-2 tabular-nums">{fmtMoney(row.ctc_monthly)}</td>
-                                  <td className="px-4 py-2">
-                                    {row.is_active
-                                      ? <Badge variant="success" className="rounded-full text-[9px]">Active</Badge>
-                                      : <Badge variant="secondary" className="rounded-full text-[9px]">Closed</Badge>}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                  </CardContent>
-                </Card>
-              )}
+              {/* Revision History & Compensation History are rendered once in the
+                  primary Compensation block above — removed here to end the
+                  duplicate-render (they previously appeared twice on this tab). */}
 
               {/* ── Compliance Intelligence panel ── */}
               {id && <IntelligencePanel employeeId={id} isAdmin={isAdmin} />}
