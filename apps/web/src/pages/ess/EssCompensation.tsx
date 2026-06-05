@@ -154,12 +154,11 @@ function fmtCurrency(n: number): string {
   }).format(n)
 }
 
-/** Compact: ₹12.50L / ₹52.3K / ₹850. (1 lakh = 1,00,000.) */
+/** Full Indian currency (₹12,00,000). Was compact (K/L) — switched to full per
+ *  UAT feedback so salary-structure rates and totals read in plain rupees. */
 function fmtCompact(n: number | null | undefined): string {
   if (n == null) return '—'
-  if (n >= 1_00_000) return `₹${(n / 1_00_000).toFixed(2)}L`
-  if (n >= 1_000)    return `₹${(n / 1_000).toFixed(1)}K`
-  return `₹${Math.round(n)}`
+  return fmtCurrency(n)
 }
 
 function fmtMonth(m: string): string {
