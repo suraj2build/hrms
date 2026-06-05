@@ -1063,6 +1063,10 @@ export function EmployeeProfile() {
   }
 
   // ── Master data for assignment dialogs (lazy — loads only when dialog opens) ─
+  // Job Details editor open-state — declared here because the master-list queries
+  // below gate their `enabled` on it.
+  const [addJobOpen, setAddJobOpen] = useState(false)
+
   const { data: deptListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['departments'], queryFn: () => api.get('/departments'),
     enabled: !!id, staleTime: 300_000,
@@ -1073,7 +1077,7 @@ export function EmployeeProfile() {
   })
   const { data: gradeListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['grades'], queryFn: () => api.get('/grades'),
-    enabled: assignTarget === 'grade', staleTime: 300_000,
+    enabled: assignTarget === 'grade' || addJobOpen, staleTime: 300_000,
   })
   const { data: ccListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['masters-cost-centers'], queryFn: () => api.get('/masters/cost-centers'),
@@ -1090,7 +1094,7 @@ export function EmployeeProfile() {
   const { data: managerListData } = useQuery<{ data: any[]; total: number }>({
     queryKey: ['employees-active-list'],
     queryFn: () => api.get('/employees?status=active&limit=500'),
-    enabled: assignTarget === 'manager', staleTime: 120_000,
+    enabled: assignTarget === 'manager' || addJobOpen, staleTime: 120_000,
   })
 
   const EMPLOYMENT_TYPES = ['permanent', 'contract', 'intern', 'probation', 'consultant'] as const
@@ -1232,13 +1236,42 @@ export function EmployeeProfile() {
   })
 
   // ── Job history ────────────────────────────────────────────────────────────
-  const [addJobOpen, setAddJobOpen] = useState(false)
+  // (addJobOpen is declared earlier — it's referenced by the master-list queries)
   const [jobForm, setJobForm]       = useState<any>({})
   const addJobMutation = useMutation({
     mutationFn: (d: any) => api.post(`/employees/${id}/job-history`, d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['job-history-all', id] }); qc.invalidateQueries({ queryKey: ['employee-full', id] }); setAddJobOpen(false); toast.success('Position added') },
-    onError:   () => toast.error('Failed to add position'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['job-history-all', id] })
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      setAddJobOpen(false)
+      toast.success(job ? 'Job details revised' : 'Job details saved')
+    },
+    onError:   (e: Error) => toast.error('Failed to save job details', { description: e.message }),
   })
+
+  // Open the unified Job Details editor. With an existing record it pre-fills the
+  // current values and defaults effective_from to today (a change creates an
+  // effective-dated REVISION). With no record it starts blank, effective from the
+  // joining date (a plain CREATION — no revision noise).
+  function openJobEditor() {
+    const today = new Date().toISOString().slice(0, 10)
+    setJobForm(job ? {
+      employment_type:   job.employment_type        ?? 'permanent',
+      department_id:     job.departments?.id         ?? null,
+      designation_id:    job.designations?.id        ?? null,
+      grade_id:          job.grades?.id              ?? null,
+      manager_id:        job.manager?.id             ?? null,
+      work_location_id:  job.work_locations?.id      ?? null,
+      cost_center_id:    job.cost_center?.id         ?? null,
+      effective_from:    today,
+      reason_for_change: '',
+    } : {
+      employment_type:   'permanent',
+      effective_from:    (emp as any)?.joining_date  ?? today,
+      reason_for_change: 'Initial',
+    })
+    setAddJobOpen(true)
+  }
 
   // ── Previous employment ────────────────────────────────────────────────────
   const [addPrevOpen, setAddPrevOpen] = useState(false)
@@ -2305,83 +2338,42 @@ export function EmployeeProfile() {
             <div className="space-y-4">
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <LayoutGrid className="h-4 w-4 text-muted-foreground" />
-                    Workforce Assignment
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <LayoutGrid className="h-4 w-4 text-muted-foreground" />
+                      Job Details
+                    </CardTitle>
+                    {isAdmin && (
+                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={openJobEditor}>
+                        <Pencil className="h-3.5 w-3.5" />{job ? 'Edit Job Details' : 'Set Job Details'}
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {!job && (
                     <p className="text-xs text-muted-foreground mb-3">
-                      No position record yet — use the Assign buttons below to set the department, manager, shift, etc. (this creates the first position record).
+                      No job details set yet. Click <span className="font-medium text-foreground">Set Job Details</span> to fill department, designation, grade, manager, location, cost center and employment type in one form.
                     </p>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <AssignableField
-                      label="Department"
-                      value={job?.departments?.name}
-                      futureValue={futureJobRecord?.departments?.name}
-                      futureDate={futureJobRecord?.effective_from}
-                      onAssign={() => openAssign('department')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Designation"
-                      value={job?.designations?.name}
-                      futureValue={futureJobRecord?.designations?.name}
-                      futureDate={futureJobRecord?.effective_from}
-                      onAssign={() => openAssign('designation')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Grade / Band"
-                      value={job?.grades ? `${job.grades.name} (${job.grades.code})` : null}
-                      futureValue={futureJobRecord?.grades ? `${futureJobRecord.grades.name} (${futureJobRecord.grades.code})` : null}
-                      futureDate={futureJobRecord?.effective_from}
-                      onAssign={() => openAssign('grade')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Employment Type"
-                      value={job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : null}
-                      futureValue={futureJobRecord?.employment_type}
-                      futureDate={futureJobRecord?.effective_from}
-                      onAssign={() => openAssign('employment_type')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Reporting Manager"
-                      value={job?.manager ? `${job.manager.first_name} ${job.manager.last_name} #${job.manager.employee_code}` : null}
-                      futureValue={futureJobRecord?.manager ? `${futureJobRecord.manager.first_name} ${futureJobRecord.manager.last_name}` : null}
-                      futureDate={futureJobRecord?.effective_from}
-                      onAssign={() => openAssign('manager')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Work Location"
-                      value={job?.work_locations ? `${job.work_locations.name}${job.work_locations.city ? ` · ${job.work_locations.city}` : ''}` : null}
-                      onAssign={() => openAssign('work_location')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Cost Center"
-                      value={job?.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : null}
-                      onAssign={() => openAssign('cost_center')}
-                      canAssign={isAdmin}
-                    />
-                    <AssignableField
-                      label="Shift"
-                      value={job?.shifts ? `${job.shifts.name}${job.shifts.start_time ? ` (${job.shifts.start_time}–${job.shifts.end_time})` : ''}` : null}
-                      onAssign={() => openAssign('shift')}
-                      canAssign={isAdmin}
-                    />
-                    {job && (
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-0.5">Assigned Since</p>
-                        <p className="text-sm font-medium">{fmtDate(job.effective_from)}</p>
-                      </div>
-                    )}
-                  </div>
+                  <Grid2>
+                    <KV label="Department"      value={job?.departments?.name} />
+                    <KV label="Designation"     value={job?.designations?.name} />
+                    <KV label="Grade / Band"    value={job?.grades ? `${job.grades.name} (${job.grades.code})` : undefined} />
+                    <KV label="Employment Type" value={job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : undefined} />
+                    <KV label="Reporting Manager" value={job?.manager ? `${job.manager.first_name} ${job.manager.last_name} #${job.manager.employee_code}` : undefined} />
+                    <KV label="Work Location"   value={job?.work_locations ? `${job.work_locations.name}${job.work_locations.city ? ` · ${job.work_locations.city}` : ''}` : undefined} />
+                    <KV label="Cost Center"     value={job?.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : undefined} />
+                    {job && <KV label="Effective Since" value={fmtDate(job.effective_from)} />}
+                  </Grid2>
+                  {futureJobRecord && (
+                    <p className="mt-3 text-[11px] text-amber-600">
+                      Pending change effective {fmtDate(futureJobRecord.effective_from)}.
+                    </p>
+                  )}
+                  <p className="mt-3 text-[10px] text-muted-foreground">
+                    Shift, roster &amp; rotation are managed on the <button className="underline hover:text-foreground" onClick={() => setSubTab('shift-schedule')}>Shift &amp; Roster</button> tab. Editing here records an effective-dated revision (see Position History).
+                  </p>
                 </CardContent>
               </Card>
 
@@ -4243,11 +4235,16 @@ export function EmployeeProfile() {
 
       {/* ── Dialogs ── */}
 
-      {/* Add Job History */}
+      {/* Job Details — create (first) or effective-dated revision */}
       <Dialog open={addJobOpen} onOpenChange={setAddJobOpen}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Add Position Record</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{job ? 'Edit Job Details' : 'Set Job Details'}</DialogTitle></DialogHeader>
           <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            {job && (
+              <p className="text-[11px] text-muted-foreground">
+                Saving with a new effective date records an effective-dated revision (the previous values are kept in Position History).
+              </p>
+            )}
             {/* Employment Type */}
             <div>
               <Label className="text-xs">Employment Type</Label>
@@ -4263,12 +4260,29 @@ export function EmployeeProfile() {
                 {(deptListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
-            {/* Designation */}
+            {/* Designation + Grade */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Designation</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.designation_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,designation_id:e.target.value||null}))}>
+                  <option value="">— None —</option>
+                  {(desigListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs">Grade / Band</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.grade_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,grade_id:e.target.value||null}))}>
+                  <option value="">— None —</option>
+                  {(gradeListData?.data ?? []).map((g:any)=><option key={g.id} value={g.id}>{g.name} ({g.code})</option>)}
+                </select>
+              </div>
+            </div>
+            {/* Reporting Manager */}
             <div>
-              <Label className="text-xs">Designation</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.designation_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,designation_id:e.target.value||null}))}>
+              <Label className="text-xs">Reporting Manager</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.manager_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,manager_id:e.target.value||null}))}>
                 <option value="">— None —</option>
-                {(desigListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+                {(managerListData?.data ?? []).filter((m:any)=>m.id!==id).map((m:any)=><option key={m.id} value={m.id}>{m.first_name} {m.last_name} #{m.employee_code}</option>)}
               </select>
             </div>
             {/* Work Location + Cost Center */}
