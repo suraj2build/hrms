@@ -2280,6 +2280,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'FREEZE_FAILED', message: 'Failed to freeze payroll month' })
     }
 
+    // Reflect the freeze on the run status so ALL views (Run Console, Payroll
+    // Runs) show 'frozen' consistently — not just the freeze-log banner.
+    await fastify.supabase
+      .from('payroll_runs')
+      .update({ status: 'frozen' })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
     await logRunEvent(fastify.supabase, req.log, {
       tenant_id:  tenantId, run_id: id,
       event_type: 'payroll_run_frozen',
@@ -2732,6 +2740,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('action', 'freeze')
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    // Revert the run status from 'frozen' back to 'finalized' so views are
+    // consistent (mirrors the freeze action that sets status='frozen').
+    await fastify.supabase
+      .from('payroll_runs')
+      .update({ status: 'finalized' })
+      .eq('tenant_id', tenantId)
+      .eq('month', month)
+      .eq('status', 'frozen')
+
     return reply.send({ message: `${month} unfrozen`, month })
   })
 
