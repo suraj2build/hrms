@@ -86,6 +86,8 @@ interface RosterData {
   standing:  StandingRow[]
   /** Rotation-resolved master shift per employee per day: { empId: { 'YYYY-MM-DD': shiftId } } */
   master_by_day?: Record<string, Record<string, string>>
+  /** Weekly-off (rest) days per employee per day, incl. alternate Saturdays. */
+  rest_by_day?: Record<string, Record<string, boolean>>
 }
 
 // ── Roster template types ─────────────────────────────────────────────────────
@@ -208,6 +210,7 @@ function fmtTime(t: string | null) {
 interface RosterCellProps {
   shift:      Shift | null
   isOverride: boolean
+  isRest?:    boolean
   shifts:     Shift[]
   onAssign:   (shiftId: string) => void
   onClear:    () => void
@@ -215,7 +218,7 @@ interface RosterCellProps {
   readOnly?:  boolean
 }
 
-function RosterCell({ shift, isOverride, shifts, onAssign, onClear, loading, readOnly = false }: RosterCellProps) {
+function RosterCell({ shift, isOverride, isRest = false, shifts, onAssign, onClear, loading, readOnly = false }: RosterCellProps) {
   const [open, setOpen] = useState(false)
   const selectRef = useRef<HTMLSelectElement>(null)
 
@@ -244,8 +247,9 @@ function RosterCell({ shift, isOverride, shifts, onAssign, onClear, loading, rea
   if (readOnly) {
     if (!shift) {
       return (
-        <div className="w-[52px] h-[30px] rounded border border-dashed border-border text-muted-foreground/30 text-[10px] flex items-center justify-center">
-          —
+        <div className={cn('w-[52px] h-[30px] rounded border border-dashed border-border text-[10px] flex items-center justify-center',
+          isRest ? 'text-muted-foreground/60 bg-muted/20' : 'text-muted-foreground/30')}>
+          {isRest ? 'Off' : '—'}
         </div>
       )
     }
@@ -287,11 +291,12 @@ function RosterCell({ shift, isOverride, shifts, onAssign, onClear, loading, rea
     return (
       <button
         type="button"
-        title="Click to assign shift"
+        title={isRest ? 'Weekly off (per roster) — click to assign a shift for this day' : 'Click to assign shift'}
         onClick={handleClick}
-        className="w-[52px] h-[30px] rounded border border-dashed border-border text-muted-foreground/40 hover:border-primary/40 hover:text-primary transition-colors text-[10px] flex items-center justify-center"
+        className={cn('w-[52px] h-[30px] rounded border border-dashed border-border transition-colors text-[10px] flex items-center justify-center',
+          isRest ? 'text-muted-foreground/60 bg-muted/20 hover:border-primary/40 hover:text-primary' : 'text-muted-foreground/40 hover:border-primary/40 hover:text-primary')}
       >
-        +
+        {isRest ? 'Off' : '+'}
       </button>
     )
   }
@@ -392,8 +397,10 @@ export function ShiftRoster() {
   )
   // Rotation-resolved master shift per employee/day (roster-based employees).
   const masterByDay = data?.master_by_day ?? {}
+  const restByDay   = data?.rest_by_day ?? {}
   const masterShiftFor = (empId: string, date: string): string | undefined =>
     standingMap.get(empId) ?? masterByDay[empId]?.[date]
+  const isRestDay = (empId: string, date: string): boolean => !!restByDay[empId]?.[date]
   const shiftMap = new Map<string, Shift>(
     (data?.shifts ?? []).map((s) => [s.id, s])
   )
@@ -1330,6 +1337,7 @@ export function ShiftRoster() {
                                   <RosterCell
                                     shift={shift}
                                     isOverride={isOverride}
+                                    isRest={!shift && isRestDay(emp.id, d)}
                                     shifts={shifts}
                                     loading={isBusy}
                                     readOnly={periodLocked}

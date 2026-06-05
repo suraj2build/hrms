@@ -25,6 +25,7 @@ import { logBulkAction } from '../../lib/audit-service.js'
 import { eventService } from '../../lib/event-service.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { resolveRotationCondition, dayOfWeekToCondition } from '../../lib/rotation-engine.js'
+import { computeWeeklyOffStatus } from '../../lib/roster-calendar-engine.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -100,7 +101,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
     ] = await Promise.all([
       fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code, rotation_policy_id, sites(default_rotation_policy_id)')
+        .select('id, first_name, last_name, employee_code, rotation_policy_id, roster_id, sites(default_rotation_policy_id, default_roster_id)')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'active')
         .order('employee_code'),
@@ -172,20 +173,52 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       return c
     }
 
+    // Weekly-off rules (incl. alternate-Saturday-off) per roster — so off days
+    // show as REST, not as a working shift or a false staffing gap.
+    const effRosterOf = (e: any): string | null =>
+      e.roster_id ?? e.sites?.default_roster_id ?? null
+    const rosterIds = [...new Set(((employees ?? []) as any[]).map(effRosterOf).filter(Boolean))] as string[]
+    const [{ data: woRules }, { data: rosterRows }] = await Promise.all([
+      rosterIds.length
+        ? fastify.supabase.from('roster_weekly_off_rules').select('*')
+            .eq('tenant_id', req.tenantId).in('roster_id', rosterIds)
+            .lte('effective_from', toDate).or(`effective_to.is.null,effective_to.gte.${fromDate}`)
+        : Promise.resolve({ data: [] as any[] }),
+      rosterIds.length
+        ? fastify.supabase.from('rosters').select('id, pattern_json').eq('tenant_id', req.tenantId).in('id', rosterIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+    const rulesByRoster = new Map<string, any[]>()
+    for (const r of (woRules ?? []) as any[]) {
+      const arr = rulesByRoster.get(r.roster_id) ?? []
+      arr.push(r); rulesByRoster.set(r.roster_id, arr)
+    }
+    const legacyByRoster = new Map<string, number[]>(
+      ((rosterRows ?? []) as any[]).map((r) => [r.id, (r.pattern_json?.weekly_off_days ?? []) as number[]])
+    )
+
     const masterByDay: Record<string, Record<string, string>> = {}
+    const restByDay: Record<string, Record<string, boolean>> = {}
     for (const e of (employees ?? []) as any[]) {
       const effPolicy: string | null =
         e.rotation_policy_id ?? e.sites?.default_rotation_policy_id ?? null
       const conds = await condsFor(effPolicy)
-      if (!conds) continue
+      const effRoster = effRosterOf(e)
+      const rules  = effRoster ? (rulesByRoster.get(effRoster) ?? []) : []
+      const legacy = effRoster ? (legacyByRoster.get(effRoster) ?? []) : []
       const perDay: Record<string, string> = {}
+      const restDays: Record<string, boolean> = {}
       for (const date of monthDays) {
+        const wo = computeWeeklyOffStatus(new Date(`${date}T00:00:00`), rules as any, legacy)
+        if (wo.is_weekly_off) { restDays[date] = true; continue }   // off → no shift
+        if (!conds) continue
         const dow = new Date(`${date}T00:00:00`).getDay()
         const cond = dayOfWeekToCondition(dow)
         const sid = cond ? conds[cond] : null
         if (sid) perDay[date] = sid
       }
-      if (Object.keys(perDay).length) masterByDay[e.id] = perDay
+      if (Object.keys(perDay).length)   masterByDay[e.id] = perDay
+      if (Object.keys(restDays).length) restByDay[e.id]  = restDays
     }
 
     return reply.send({
@@ -200,6 +233,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       roster: roster ?? [],
       standing: standing ?? [],
       master_by_day: masterByDay,
+      rest_by_day:   restByDay,
     })
   })
 
