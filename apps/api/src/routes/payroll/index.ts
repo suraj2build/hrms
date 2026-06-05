@@ -1205,6 +1205,30 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Attendance-closure gate: payroll may RUN on open attendance, but may only be
+    // FINALIZED after the attendance period for the month is locked (closed). This
+    // enforces the policy that attendance must be frozen before payroll is sealed.
+    // Override with force_finalize (+ override_reason). Resilient to a missing
+    // attendance_period_locks table (drift): if the lookup errors, the gate is
+    // skipped rather than blocking finalize.
+    if (!force_finalize) {
+      const { data: attLock, error: attErr } = await fastify.supabase
+        .from('attendance_period_locks')
+        .select('state')
+        .eq('tenant_id', tenantId)
+        .eq('period_month', run.month)
+        .maybeSingle()
+      if (!attErr) {
+        const attState = (attLock as any)?.state ?? 'OPEN'
+        if (attState === 'OPEN') {
+          return reply.code(423).send({
+            error: 'ATTENDANCE_NOT_LOCKED',
+            message: `Attendance for ${run.month} is still open. Lock (close) the attendance period before finalizing payroll — running payroll is allowed, but finalize requires attendance closure. (Admins can override with force_finalize + a reason.)`,
+          })
+        }
+      }
+    }
+
     // ── Attendance completeness gate ────────────────────────────────────────────
     //
     // Employees without any attendance_daily rows for the run month received full

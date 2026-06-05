@@ -270,7 +270,7 @@ export function CompOff() {
                                 <div className="text-[10px] text-muted-foreground">#{req.employees.employee_code}</div>
                               </div>
                             ) : (
-                              <span className="text-muted-foreground text-xs">{req.employee_id.slice(0, 8)}…</span>
+                              <span className="text-muted-foreground text-xs">{(req.employee_id ?? '').slice(0, 8)}…</span>
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-xs">{fmt(req.worked_date)}</td>

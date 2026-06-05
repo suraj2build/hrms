@@ -235,6 +235,18 @@ export function LeaveAccrualAdmin() {
     onError: (e) => toast.error('Failed', { description: (e as Error).message }),
   })
 
+  // Manual accrual run (other than the scheduler) — credits the given month now.
+  const [accrualPeriod, setAccrualPeriod] = useState(() => new Date().toISOString().slice(0, 7))
+  const runAccrualMutation = useMutation({
+    mutationFn: (period: string) => api.post('/leave/accrual/run', { period }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accrual-runs'] })
+      qc.invalidateQueries({ queryKey: ['leave-balance'] })
+      toast.success('Accrual run complete', { description: `Credited leave for ${accrualPeriod}` })
+    },
+    onError: (e) => toast.error('Accrual run failed', { description: (e as Error).message }),
+  })
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function openCreateRule() {
@@ -331,13 +343,30 @@ export function LeaveAccrualAdmin() {
             <p className="text-muted-foreground">Monthly credits, carry-forward and expiry are fully scheduler-driven.</p>
           </div>
         </div>
-        <Button
-          size="sm" variant="outline" className="h-8 text-xs gap-1.5 shrink-0"
-          onClick={() => navigate('/admin/leave-jobs')}
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          Engine Status
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Manual accrual run — alternative to the scheduler */}
+          <input
+            type="month"
+            value={accrualPeriod}
+            onChange={e => setAccrualPeriod(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50"
+          />
+          <Button
+            size="sm" className="h-8 text-xs gap-1.5"
+            disabled={runAccrualMutation.isPending || !accrualPeriod}
+            onClick={() => runAccrualMutation.mutate(accrualPeriod)}
+          >
+            {runAccrualMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
+            Run Accrual Now
+          </Button>
+          <Button
+            size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+            onClick={() => navigate('/admin/leave-jobs')}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Engine Status
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="rules">
