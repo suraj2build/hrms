@@ -1,22 +1,29 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { optStr, optEnum } from '../../lib/zod-form.js'
+
+// clearable*: a field the user can blank out to CLEAR it. '' or null → null so
+// the upsert writes null (erases the value). A field simply OMITTED from the
+// body stays untouched (Zod drops absent optional keys). This is what lets the
+// Bank form clear PAN/IFSC/etc. instead of silently keeping the old value.
+const clearableStr = z.preprocess((v) => (v === '' || v === null ? null : v), z.string().nullable().optional())
+const clearableEnum = <T extends [string, ...string[]]>(vals: T) =>
+  z.preprocess((v) => (v === '' || v === null ? null : v), z.enum(vals).nullable().optional())
 
 const schema = z.object({
-  bank_name:      optStr,
-  account_number: optStr,
-  ifsc_code:      optStr,
-  branch_name:    optStr,
-  account_type:   optEnum(['savings','current','salary']),
-  pan_number:     optStr,
-  aadhaar_number: optStr,
-  uan_number:     optStr,
-  pf_number:      optStr,
-  esi_number:     optStr,
-  pt_applicable:  z.boolean().optional().default(false),
-  lwf_applicable: z.boolean().optional().default(false),
-  tax_regime:     z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['old','new']).optional().default('new')),
+  bank_name:      clearableStr,
+  account_number: clearableStr,
+  ifsc_code:      clearableStr,
+  branch_name:    clearableStr,
+  account_type:   clearableEnum(['savings','current','salary']),
+  pan_number:     clearableStr,
+  aadhaar_number: clearableStr,
+  uan_number:     clearableStr,
+  pf_number:      clearableStr,
+  esi_number:     clearableStr,
+  pt_applicable:  z.boolean().optional(),
+  lwf_applicable: z.boolean().optional(),
+  tax_regime:     z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['old','new']).optional()),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {

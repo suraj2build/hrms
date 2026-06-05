@@ -1365,22 +1365,49 @@ export function EmployeeProfile() {
     esi_number: '', pt_applicable: false, lwf_applicable: false,
     tax_regime: 'new' as 'old' | 'new',
   })
+  // Open the editor with the WHOLE form reset from saved data (not merged), so
+  // both the Bank and Statutory edit buttons show a faithful snapshot and never
+  // carry stale values or default flags between edits. Masked fields
+  // (account_number, aadhaar) load blank — blank means "keep unchanged".
+  function openBankEditor() {
+    setBankForm({
+      bank_name:      bs?.bank_name    ?? '',
+      account_number: '',
+      ifsc_code:      bs?.ifsc         ?? '',
+      branch_name:    bs?.branch       ?? '',
+      account_type:   (bs?.account_type ?? '') as any,
+      pan_number:     bs?.pan          ?? '',
+      aadhaar_number: '',
+      uan_number:     bs?.uan          ?? '',
+      pf_number:      bs?.pf_number    ?? '',
+      esi_number:     bs?.esi_number   ?? '',
+      pt_applicable:  bs?.pt_applicable  ?? false,
+      lwf_applicable: bs?.lwf_applicable ?? false,
+      tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
+    })
+    setEditBankOpen(true)
+  }
   const bankMutation = useMutation({
     mutationFn: () => {
-      const body: Record<string, unknown> = {}
-      if (bankForm.bank_name)      body.bank_name      = bankForm.bank_name
-      if (bankForm.account_number) body.account_number = bankForm.account_number
-      if (bankForm.ifsc_code)      body.ifsc_code      = bankForm.ifsc_code
-      if (bankForm.branch_name)    body.branch_name    = bankForm.branch_name
-      if (bankForm.account_type)   body.account_type   = bankForm.account_type
-      if (bankForm.pan_number)     body.pan_number     = bankForm.pan_number
-      if (bankForm.aadhaar_number) body.aadhaar_number = bankForm.aadhaar_number
-      if (bankForm.uan_number)     body.uan_number     = bankForm.uan_number
-      if (bankForm.pf_number)      body.pf_number      = bankForm.pf_number
-      if (bankForm.esi_number)     body.esi_number     = bankForm.esi_number
-      body.pt_applicable  = bankForm.pt_applicable
-      body.lwf_applicable = bankForm.lwf_applicable
-      body.tax_regime     = bankForm.tax_regime
+      // A blanked clearable field sends null → the API erases it. Masked fields
+      // (account_number, aadhaar) are sent ONLY when the admin typed a new value,
+      // so leaving them blank keeps the existing (masked) value untouched.
+      const clr = (v: string) => (v && v.trim() !== '' ? v.trim() : null)
+      const body: Record<string, unknown> = {
+        bank_name:      clr(bankForm.bank_name),
+        ifsc_code:      clr(bankForm.ifsc_code),
+        branch_name:    clr(bankForm.branch_name),
+        account_type:   bankForm.account_type || null,
+        pan_number:     clr(bankForm.pan_number),
+        uan_number:     clr(bankForm.uan_number),
+        pf_number:      clr(bankForm.pf_number),
+        esi_number:     clr(bankForm.esi_number),
+        pt_applicable:  bankForm.pt_applicable,
+        lwf_applicable: bankForm.lwf_applicable,
+        tax_regime:     bankForm.tax_regime,
+      }
+      if (bankForm.account_number.trim()) body.account_number = bankForm.account_number.trim()
+      if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
       return api.put(`/employees/${id}/bank-statutory`, body)
     },
     onSuccess: () => {
@@ -2610,7 +2637,7 @@ export function EmployeeProfile() {
                               <td className="px-4 py-2">{row.departments?.name ?? '—'}</td>
                               <td className="px-4 py-2">{row.designations?.name ?? '—'}</td>
                               <td className="px-4 py-2">{row.work_locations?.name ?? '—'}</td>
-                              <td className="px-4 py-2">{row.cost_center?.name ?? '—'}</td>
+                              <td className="px-4 py-2">{row.cost_centers?.name ?? '—'}</td>
                               <td className="px-4 py-2">{row.manager ? `${row.manager.first_name} ${row.manager.last_name}` : '—'}</td>
                               <td className="px-4 py-2 whitespace-nowrap">{fmtDate(row.effective_from)}</td>
                               <td className="px-4 py-2 whitespace-nowrap">{row.is_current ? <Badge variant="success" className="rounded-full text-[9px]">Current</Badge> : fmtDate(row.effective_to)}</td>
@@ -3490,20 +3517,8 @@ export function EmployeeProfile() {
                     <CardTitle className="text-sm font-semibold">Bank Details</CardTitle>
                     {isAdmin && (
                       <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
-                        onClick={() => {
-                          setBankForm(f => ({
-                            ...f,
-                            bank_name:    bs?.bank_name    ?? '',
-                            ifsc_code:    bs?.ifsc         ?? '',
-                            branch_name:  bs?.branch       ?? '',
-                            account_type: (bs?.account_type ?? '') as any,
-                            // account_number & aadhaar are masked — leave blank for re-entry
-                            account_number: '',
-                            aadhaar_number: '',
-                          }))
-                          setEditBankOpen(true)
-                        }}>
-                        <Edit2 className="h-3.5 w-3.5" />Edit
+                        onClick={openBankEditor}>
+                        <Edit2 className="h-3.5 w-3.5" />{bs ? 'Edit' : 'Add'}
                       </Button>
                     )}
                   </div>
@@ -3526,21 +3541,8 @@ export function EmployeeProfile() {
                     <CardTitle className="text-sm font-semibold">Statutory</CardTitle>
                     {isAdmin && (
                       <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
-                        onClick={() => {
-                          setBankForm(f => ({
-                            ...f,
-                            pan_number:     bs?.pan        ?? '',
-                            uan_number:     bs?.uan        ?? '',
-                            pf_number:      bs?.pf_number  ?? '',
-                            esi_number:     bs?.esi_number ?? '',
-                            pt_applicable:  bs?.pt_applicable  ?? false,
-                            lwf_applicable: bs?.lwf_applicable ?? false,
-                            tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
-                            aadhaar_number: '',
-                          }))
-                          setEditBankOpen(true)
-                        }}>
-                        <Edit2 className="h-3.5 w-3.5" />Edit
+                        onClick={openBankEditor}>
+                        <Edit2 className="h-3.5 w-3.5" />{bs ? 'Edit' : 'Add'}
                       </Button>
                     )}
                   </div>

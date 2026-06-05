@@ -1,20 +1,26 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { optStr, optDate, optEnum } from '../../lib/zod-form.js'
+import { optStr } from '../../lib/zod-form.js'
 
-// Unselected dropdowns arrive as '' AND cleared fields arrive as null from the
-// form — the shared helpers coerce both → undefined so optional fields validate
-// instead of rejecting the whole save with a 400.
+// clearable*: blanking a field ('' or null) writes null so it is actually
+// CLEARED on save (not silently left at the old value). A field OMITTED from
+// the body stays untouched (Zod drops absent optional keys). profile_photo is
+// kept omit-only (managed by the photo upload), so a personal-info edit never
+// erases the avatar.
+const clearableStr = z.preprocess((v) => (v === '' || v === null ? null : v), z.string().nullable().optional())
+const clearableEnum = <T extends [string, ...string[]]>(vals: T) =>
+  z.preprocess((v) => (v === '' || v === null ? null : v), z.enum(vals).nullable().optional())
+
 const schema = z.object({
-  gender:                 optEnum(['male','female','other']),
-  dob:                    optDate,
-  marital_status:         optEnum(['single','married','divorced','widowed']),
-  blood_group:            optStr,
-  nationality:            z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().optional().default('Indian')),
-  religion:               optStr,
-  caste_category:         optEnum(['general','obc','sc','st','ews']),
-  physically_handicapped: z.boolean().optional().default(false),
+  gender:                 clearableEnum(['male','female','other']),
+  dob:                    clearableStr,
+  marital_status:         clearableEnum(['single','married','divorced','widowed']),
+  blood_group:            clearableStr,
+  nationality:            clearableStr,
+  religion:               clearableStr,
+  caste_category:         clearableEnum(['general','obc','sc','st','ews']),
+  physically_handicapped: z.boolean().optional(),
   profile_photo:          optStr,
 })
 
