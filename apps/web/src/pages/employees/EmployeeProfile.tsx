@@ -2906,9 +2906,11 @@ export function EmployeeProfile() {
             </Card>
           )}
 
-          {/* EMPLOYMENT › Site / Roster / Rotation — shown under the Shift & Roster tab
-              (and still reachable via the legacy ?tab=organization deep-link). */}
-          {(subTab === 'organization' || subTab === 'shift-schedule') && (
+          {/* EMPLOYMENT › Site / Roster / Rotation — managed on the Workforce tab
+              (single source). This block is no longer shown on Shift & Roster to
+              avoid the duplicate editing surface; only the legacy
+              ?tab=organization deep-link still renders it. */}
+          {subTab === 'organization' && (
             <div className="space-y-4">
               <Card>
                 <CardHeader className="pb-3">
