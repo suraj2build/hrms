@@ -359,6 +359,18 @@ export function EPFManagement() {
     staleTime: 60_000,
   })
 
+  // ── Manual contribution compute (also runs automatically on payroll finalize) ──
+  const [computeMonth, setComputeMonth] = useState(todayYM)
+  const computeMutation = useMutation({
+    mutationFn: (month: string) => api.post('/payroll/statutory/epf/contributions/compute', { month }),
+    onSuccess: (_d, month) => {
+      qc.invalidateQueries({ queryKey: ['epf-contributions'] })
+      refetchContrib()
+      toast.success('EPF contributions computed', { description: `Month ${month}` })
+    },
+    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
+  })
+
   // ── Last 6 months (history table) ─────────────────────────────────────────────
   const historyResults = useQueries({
     queries: last6.map(ym => ({
@@ -412,14 +424,31 @@ export function EPFManagement() {
         title="EPF Management"
         subtitle="Configure Provident Fund parameters, enforce wage ceilings, and monitor statutory contributions"
         actions={
-          <Button
-            size="sm" variant="outline" className="h-8 text-xs gap-1.5"
-            onClick={() => { refetchConfig(); refetchContrib() }}
-            disabled={configLoading || contribLoading}
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', (configLoading || contribLoading) && 'animate-spin')} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <input
+              type="month"
+              value={computeMonth}
+              onChange={e => setComputeMonth(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50"
+              title="Month to compute EPF contributions for (run must be finalized)"
+            />
+            <Button
+              size="sm" className="h-8 text-xs gap-1.5"
+              onClick={() => computeMutation.mutate(computeMonth)}
+              disabled={computeMutation.isPending || !computeMonth}
+            >
+              {computeMutation.isPending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Compute Contributions
+            </Button>
+            <Button
+              size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+              onClick={() => { refetchConfig(); refetchContrib() }}
+              disabled={configLoading || contribLoading}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', (configLoading || contribLoading) && 'animate-spin')} />
+              Refresh
+            </Button>
+          </div>
         }
       />
 

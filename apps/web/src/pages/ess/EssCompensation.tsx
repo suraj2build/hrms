@@ -622,6 +622,19 @@ function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined
     }
   }
 
+  // Loss of Pay is booked as a lump deduction (earnings stay at full rate), so it
+  // wouldn't otherwise appear here — surface it as an actual-only deduction so the
+  // actual net is visibly lower than the CTC-rate net when there were LOP days.
+  if ((slipDetail?.lop_amount ?? 0) > 0) {
+    map.set('__LOP__', {
+      code:    'LOP',
+      name:    `Loss of Pay${slipDetail!.lop_days ? ` (${slipDetail!.lop_days} day${slipDetail!.lop_days === 1 ? '' : 's'})` : ''}`,
+      type:    'deduction',
+      ctcRate: null,
+      actual:  slipDetail!.lop_amount,
+    })
+  }
+
   const allRows  = Array.from(map.values())
   const earnings = allRows.filter(r => r.type === 'earning')
   const deductions = allRows.filter(r => r.type === 'deduction')
