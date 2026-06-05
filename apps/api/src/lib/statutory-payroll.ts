@@ -29,7 +29,7 @@ import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engi
 /** Codes of statutory lines that the engines own and therefore replace.
  *  Matched ONLY against deduction / employer_contribution lines — earnings are
  *  never stripped (so a custom earning like "PT Allowance" is safe). */
-const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX)$/i
+const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX)$/i
 
 export interface StatutoryTrace {
   epf:  { applied: boolean; pfWages: number; employee: number; employer: number; reason?: string }
@@ -40,6 +40,24 @@ export interface StatutoryTrace {
 export interface StatutoryApplicationResult {
   slip:  PayrollSlipResult
   trace: StatutoryTrace
+}
+
+/**
+ * Inject a monthly TDS deduction line into an already-statutory-applied slip and
+ * recompute totals/net. Pure — the caller computes monthlyTDS (async DB work).
+ * Removes any pre-existing TDS line first so re-runs are idempotent. A monthlyTDS
+ * of 0 (income below the rebate threshold) leaves the slip unchanged.
+ */
+export function applyTdsToSlip(slip: PayrollSlipResult, monthlyTDS: number): PayrollSlipResult {
+  const m = round2(monthlyTDS)
+  const kept = slip.component_breakdown.filter(c => !/^TDS$/i.test(c.code))
+  const breakdown = m > 0 ? [...kept, mkLine('TDS', 'TDS (Income Tax)', 'deduction', m, 9005)] : kept
+  const deductionBase = round2(
+    breakdown.filter(c => c.component_type === 'deduction').reduce((s, c) => s + c.monthly_amount, 0),
+  )
+  const total_deductions = round2(deductionBase + slip.lop_amount)
+  const net_pay = round2(Math.max(0, slip.gross_pay - total_deductions))
+  return { ...slip, component_breakdown: breakdown, total_deductions, net_pay }
 }
 
 function mkLine(

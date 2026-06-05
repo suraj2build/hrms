@@ -403,8 +403,14 @@ export const DOMAINS: Domain[] = [
       '/admin/payroll/tax-governance',   // exact match for governance pages
       '/admin/payroll/tax-governance-admin',
     ],
-    defaultRoute: '/admin/payroll/statutory/epf',
+    defaultRoute: '/admin/payroll/statutory-dashboard',
     groups: [
+      {
+        label: 'Overview',
+        items: [
+          { id: 'compliance-dashboard', label: 'Dashboard', route: '/admin/payroll/statutory-dashboard', icon: BarChart3 },
+        ],
+      },
       {
         label: 'Statutory Filings',
         items: [

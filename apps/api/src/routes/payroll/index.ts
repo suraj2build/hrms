@@ -29,7 +29,59 @@ import {
   type PayrollSlipResult,
 } from '../../lib/payroll-engine.js'
 import { resolveEmployeeStatutoryParams } from '../../lib/statutory/statutory-governance.js'
-import { applyStatutoryToSlip } from '../../lib/statutory-payroll.js'
+import { applyStatutoryToSlip, applyTdsToSlip } from '../../lib/statutory-payroll.js'
+import { computeTDS } from '../../lib/statutory/tds-engine.js'
+import { round2 as round2fn } from '../../lib/payroll-engine.js'
+
+/** Indian financial year (Apr–Mar) for a YYYY-MM month → e.g. '2026-27'. */
+function financialYearOf(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  const startY = m >= 4 ? y : y - 1
+  return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`
+}
+
+/**
+ * Compute this month's TDS for an employee and inject it into the slip — IF TDS
+ * is enabled in payroll_statutory_settings. No employee declaration is required
+ * (new regime). Annual income is projected as this month's gross × 12; tax is
+ * spread flat across the FY (annualTax / 12). Old regime additionally applies
+ * approved Chapter-VI-A declarations.
+ */
+async function applyTdsForRun(
+  supabase: any, tenantId: string, employeeId: string, month: string,
+  slip: PayrollSlipResult,
+): Promise<PayrollSlipResult> {
+  const { data: s } = await supabase
+    .from('payroll_statutory_settings')
+    .select('tds_enabled, tds_default_regime')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (!s?.tds_enabled) return slip
+
+  const regime = (s.tds_default_regime ?? 'new') as 'old' | 'new'
+  const fy = financialYearOf(month)
+  let totalDeductions = 0
+  if (regime === 'old') {
+    const { data: decls } = await supabase
+      .from('tax_declarations')
+      .select('approved_amount')
+      .eq('tenant_id', tenantId).eq('employee_id', employeeId)
+      .eq('financial_year', fy).eq('status', 'approved')
+    totalDeductions = (decls ?? []).reduce((acc: number, d: any) => acc + (Number(d.approved_amount) || 0), 0)
+  }
+
+  const result = computeTDS(
+    {
+      grossAnnualIncome: round2fn(slip.gross_pay * 12),
+      regime,
+      totalDeductions,
+      alreadyDeducted: 0,
+      remainingMonths: 12,
+    },
+    { financialYear: fy },
+  )
+  return applyTdsToSlip(slip, result.monthlyTDS)
+}
 
 /**
  * Compute a payroll slip with two corrections layered on the base engine:
@@ -74,7 +126,9 @@ async function computeSlipWithStatutory(
   if (!base.component_breakdown.length) return base
   const params   = await resolveEmployeeStatutoryParams(supabase, tenantId, args.employeeId, month)
   const calMonth = Number(month.slice(5, 7))
-  return applyStatutoryToSlip(base, params, calMonth).slip   // spread preserves base.warning
+  const withStat = applyStatutoryToSlip(base, params, calMonth).slip   // spread preserves base.warning
+  // Inject TDS (income tax) if enabled — PF/ESI/PT engines don't cover it.
+  return applyTdsForRun(supabase, tenantId, args.employeeId, month, withStat)
 }
 import {
   validatePayrollSlipPayload,
