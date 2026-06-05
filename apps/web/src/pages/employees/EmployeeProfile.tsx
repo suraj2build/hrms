@@ -615,7 +615,7 @@ export function EmployeeProfile() {
   })
   const { data: contractsData } = useQuery<{ data: any[] }>({
     queryKey: ['contracts', id], queryFn: () => api.get(`/employees/${id}/contracts`),
-    enabled: !!id && visited.has('compensation'), staleTime: 30_000,
+    enabled: !!id && visited.has('documents'), staleTime: 30_000,  // Contracts live under the Documents tab
   })
 
   // ── Statutory eligibility (lazy — bank sub-tab only) ────────────────────────
@@ -1661,15 +1661,6 @@ export function EmployeeProfile() {
 
   const initials = `${emp.first_name?.[0] ?? ''}${emp.last_name?.[0] ?? ''}`.toUpperCase()
 
-  const SECTIONS: Array<{ key: Section; label: string }> = [
-    { key: 'core',          label: 'Core' },
-    { key: 'employment',    label: 'Employment' },
-    { key: 'compensation',  label: 'Compensation' },
-    { key: 'documents',     label: 'Documents' },
-    { key: 'relationships', label: 'Relationships' },
-    { key: 'assets',        label: 'Assets' },
-  ]
-
   const SUB_TABS: Record<Section, Array<{ key: string; label: string; icon: React.ElementType }>> = {
     core:          [
       { key: 'profile',    label: 'Overview',       icon: User       },
@@ -1684,12 +1675,15 @@ export function EmployeeProfile() {
     compensation:  [
       { key: 'compensation', label: 'Compensation',  icon: DollarSign },
       { key: 'bank',         label: 'Bank & Statutory', icon: Landmark },
-      { key: 'contracts',    label: 'Contracts',      icon: FileText   },
     ],
     documents:     [{ key: 'documents', label: 'Documents', icon: Files }],
     relationships: [{ key: 'family', label: 'Family & Nominees', icon: Users }],
     assets:        [{ key: 'access-card', label: 'Access Card', icon: CreditCard }],
   }
+
+  // Single flat tab list (section attached for query-gating via `visited`).
+  const ALL_TABS = (Object.keys(SUB_TABS) as Section[])
+    .flatMap(sec => SUB_TABS[sec].map(t => ({ ...t, section: sec })))
 
   return (
     <div className="flex gap-6 items-start">
@@ -1812,32 +1806,20 @@ export function EmployeeProfile() {
           <span className="text-foreground font-medium">{emp.first_name} {emp.last_name}</span>
         </nav>
 
-        {/* Section chips */}
-        <div className="flex flex-wrap gap-2">
-          {SECTIONS.map(s => (
-            <button
-              key={s.key}
-              onClick={() => changeSection(s.key)}
-              className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
-                section === s.key
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
-              )}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Sub-tab nav */}
-        <div className="flex items-center gap-0 border-b border-border overflow-x-auto">
-          {SUB_TABS[section].map(tab => {
+        {/* Single flat tab bar (replaces the former 2-level section + sub-tab nav) */}
+        <div className="flex items-center gap-0 border-b border-border overflow-x-auto flex-wrap">
+          {ALL_TABS.map(tab => {
             const Icon = tab.icon
             return (
               <button
                 key={tab.key}
-                onClick={() => setSubTab(tab.key)}
+                onClick={() => {
+                  // Set the owning section too so the section-keyed `visited` set
+                  // still gates that section's lazy queries.
+                  setSection(tab.section)
+                  setVisited(v => new Set(v).add(tab.section))
+                  setSubTab(tab.key)
+                }}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
                   subTab === tab.key
@@ -3800,7 +3782,8 @@ export function EmployeeProfile() {
           )}
 
           {/* COMPENSATION › Contracts */}
-          {subTab === 'contracts' && (
+          {/* Merged into the Documents tab */}
+          {subTab === 'documents' && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
