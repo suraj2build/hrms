@@ -1,21 +1,21 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { optStr, optDate, optEnum } from '../../lib/zod-form.js'
 
-// Unselected dropdowns arrive as '' from the form — coerce '' → undefined so
-// optional enum fields validate instead of rejecting the whole save with a 400.
-const emptyToUndef = (v: unknown) => (v === '' ? undefined : v)
-
+// Unselected dropdowns arrive as '' AND cleared fields arrive as null from the
+// form — the shared helpers coerce both → undefined so optional fields validate
+// instead of rejecting the whole save with a 400.
 const schema = z.object({
-  gender:                 z.preprocess(emptyToUndef, z.enum(['male','female','other']).optional()),
-  dob:                    z.preprocess(emptyToUndef, z.string().optional()),
-  marital_status:         z.preprocess(emptyToUndef, z.enum(['single','married','divorced','widowed']).optional()),
-  blood_group:            z.string().optional(),
-  nationality:            z.string().optional().default('Indian'),
-  religion:               z.string().optional(),
-  caste_category:         z.preprocess(emptyToUndef, z.enum(['general','obc','sc','st','ews']).optional()),
+  gender:                 optEnum(['male','female','other']),
+  dob:                    optDate,
+  marital_status:         optEnum(['single','married','divorced','widowed']),
+  blood_group:            optStr,
+  nationality:            z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().optional().default('Indian')),
+  religion:               optStr,
+  caste_category:         optEnum(['general','obc','sc','st','ews']),
   physically_handicapped: z.boolean().optional().default(false),
-  profile_photo:          z.string().optional(),
+  profile_photo:          optStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -67,8 +67,10 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.partial().safeParse(req.body)
-    if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      return reply.code(400).send({ error: 'VALIDATION', message: `${issue.path.join('.') || 'body'}: ${issue.message}` })
+    }
     const { data, error } = await fastify.supabase
       .from('employee_personal_info')
       .upsert(
