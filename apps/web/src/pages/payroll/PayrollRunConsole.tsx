@@ -269,7 +269,7 @@ function PayrollExceptionsDrawer({ run, onClose }: PayrollExceptionsDrawerProps)
 
   const { data, isLoading } = useQuery<SlipListResponse>({
     queryKey: ['payroll-slips-held', run?.id],
-    queryFn:  () => api.get<SlipListResponse>(`/admin/payroll/${run!.id}/slips?status=held&limit=50`),
+    queryFn:  () => api.get<SlipListResponse>(`/payroll/runs/${run!.id}/slips?status=held&limit=50`),
     enabled:  !!run && (run.held_count > 0 || run.warning_count > 0),
   })
 
@@ -392,7 +392,7 @@ function RunDetailPanel({ run }: { run: PayrollRun }) {
   // Lazy: held slips for exceptions section
   const { data: heldSlipsData, isLoading: heldLoading } = useQuery<SlipListResponse>({
     queryKey: ['payroll-held-preview', run.id],
-    queryFn:  () => api.get<SlipListResponse>(`/admin/payroll/${run.id}/slips?status=held&limit=20`),
+    queryFn:  () => api.get<SlipListResponse>(`/payroll/runs/${run.id}/slips?status=held&limit=20`),
     enabled:  run.held_count > 0,
   })
 
@@ -516,7 +516,7 @@ export default function PayrollRunConsole() {
 
   const { data, isLoading } = useQuery<{ data: PayrollRun[] }>({
     queryKey: ['payroll-runs-console'],
-    queryFn:  () => api.get<{ data: PayrollRun[] }>('/admin/payroll'),
+    queryFn:  () => api.get<{ data: PayrollRun[] }>('/payroll/runs'),
   })
 
   const runs     = data?.data ?? []
