@@ -173,30 +173,52 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
     const { site_id, roster_id, rotation_policy_id, work_location_id, cost_center_id, effective_from, reason } = parsed.data
 
-    // Close the current assignment (if any)
+    // Close the current assignment(s). A single unique "one current" index means
+    // any leftover is_current row would block the insert below — so closing must
+    // succeed. Set effective_to to the day before the new effective_from (but
+    // never after it, for a same-day re-edit).
     const prevDay = new Date(`${effective_from}T12:00:00.000Z`)
     prevDay.setUTCDate(prevDay.getUTCDate() - 1)
-    await fastify.supabase
+    const closeTo = prevDay.toISOString().slice(0, 10)
+    const { error: closeErr } = await fastify.supabase
       .from('employee_org_assignments')
-      .update({ effective_to: prevDay.toISOString().slice(0, 10), is_current: false })
+      .update({ effective_to: closeTo, is_current: false })
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
       .eq('is_current', true)
+    if (closeErr) return reply.code(500).send({ error: 'DB_ERROR', message: `Could not close previous assignment: ${closeErr.message}` })
 
-    // Insert new assignment
-    const { data: newRow, error } = await fastify.supabase
+    const newAssignment = {
+      tenant_id:   req.tenantId,
+      employee_id: employeeId,
+      site_id:     site_id   ?? null,
+      roster_id:   roster_id ?? null,
+      effective_from,
+      is_current:  true,
+      reason:      reason    ?? null,
+    }
+
+    // Insert new assignment; if a stale is_current row still blocks the unique
+    // index (23505), hard-close every current row and retry once.
+    let { data: newRow, error } = await fastify.supabase
       .from('employee_org_assignments')
-      .insert({
-        tenant_id:      req.tenantId,
-        employee_id:    employeeId,
-        site_id:        site_id          ?? null,
-        roster_id:      roster_id        ?? null,
-        effective_from,
-        is_current:     true,
-        reason:         reason           ?? null,
-      })
+      .insert(newAssignment)
       .select('id, site_id, roster_id, effective_from, is_current')
       .single()
+
+    if (error && (error as any).code === '23505') {
+      await fastify.supabase
+        .from('employee_org_assignments')
+        .update({ is_current: false })
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', employeeId)
+        .eq('is_current', true)
+      ;({ data: newRow, error } = await fastify.supabase
+        .from('employee_org_assignments')
+        .insert(newAssignment)
+        .select('id, site_id, roster_id, effective_from, is_current')
+        .single())
+    }
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
