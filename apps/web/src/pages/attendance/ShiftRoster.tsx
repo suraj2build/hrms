@@ -23,7 +23,7 @@ import {
   ChevronLeft, ChevronRight, ShieldAlert, Loader2,
   CalendarClock, Users, RefreshCw, Copy, Upload,
   AlertTriangle, CheckCircle2, GitBranch,
-  Flame, BarChart3, TrendingUp,
+  Flame, BarChart3, TrendingUp, Info,
 } from 'lucide-react'
 
 import { PageContainer }    from '@/components/layout/PageContainer'
@@ -711,8 +711,19 @@ export function ShiftRoster() {
       <PageHeader
         breadcrumb={[{ label: 'Shift & Roster', href: '/admin/shift-master' }, { label: 'Roster Planner' }]}
         title="Roster Planner"
-        subtitle="Assign and manage daily shift assignments for your team"
+        subtitle="Date-specific shift overrides — on top of each employee's master assignment"
       />
+
+      {isAdmin && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground flex items-start gap-2">
+          <Info className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+          <span>
+            Cells already reflect each employee's <span className="font-medium text-foreground">master shift</span>
+            {' '}(set on their profile → Shift &amp; Roster). You only need this planner to <span className="font-medium text-foreground">override a specific day</span> —
+            rotating shifts or one-off changes. For a fixed daily shift, nothing needs to be assigned here; the master drives attendance.
+          </span>
+        </div>
+      )}
 
       {!isAdmin && (
         <SectionCard>
