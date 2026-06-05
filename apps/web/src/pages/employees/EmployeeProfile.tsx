@@ -1837,12 +1837,12 @@ export function EmployeeProfile() {
                   ? <EmptySection icon={BookOpen} title="No personal info on record" subtitle="Click Edit to add information" />
                   : (
                     <Grid2>
-                      {([{ label: 'Gender', key: 'gender', opts: ['','Male','Female','Other','Prefer not to say'] }, { label: 'Date of Birth', key: 'dob', type: 'date' }, { label: 'Nationality', key: 'nationality' }, { label: 'Marital Status', key: 'marital_status', opts: ['','Single','Married','Divorced','Widowed'] }, { label: 'Blood Group', key: 'blood_group', opts: ['','A+','A-','B+','B-','AB+','AB-','O+','O-'] }] as Array<{label:string;key:string;type?:string;opts?:string[]}>).map(f => (
+                      {([{ label: 'Gender', key: 'gender', opts: [['',''],['male','Male'],['female','Female'],['other','Other']] }, { label: 'Date of Birth', key: 'dob', type: 'date' }, { label: 'Nationality', key: 'nationality' }, { label: 'Marital Status', key: 'marital_status', opts: [['',''],['single','Single'],['married','Married'],['divorced','Divorced'],['widowed','Widowed']] }, { label: 'Blood Group', key: 'blood_group', opts: [['',''],['A+','A+'],['A-','A-'],['B+','B+'],['B-','B-'],['AB+','AB+'],['AB-','AB-'],['O+','O+'],['O-','O-']] }] as Array<{label:string;key:string;type?:string;opts?:string[][]}>).map(f => (
                         <div key={f.key}>
                           <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
                           {editPI
                             ? f.opts
-                              ? <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={piForm[f.key] ?? ''} onChange={e => setPiForm((p: any) => ({ ...p, [f.key]: e.target.value }))}>{f.opts.map(o => <option key={o} value={o}>{o || '—'}</option>)}</select>
+                              ? <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={piForm[f.key] ?? ''} onChange={e => setPiForm((p: any) => ({ ...p, [f.key]: e.target.value }))}>{f.opts.map(([v,l]) => <option key={v} value={v}>{l || '—'}</option>)}</select>
                               : <Input className="h-7 text-xs" type={f.type ?? 'text'} value={piForm[f.key] ?? ''} onChange={e => setPiForm((p: any) => ({ ...p, [f.key]: e.target.value }))} />
                             : <p className="text-sm font-medium">{fmt((pi as any)?.[f.key])}</p>}
                         </div>
