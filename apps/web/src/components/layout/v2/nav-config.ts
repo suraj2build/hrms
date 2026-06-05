@@ -249,6 +249,7 @@ export const DOMAINS: Domain[] = [
           { id: 'muster-upload',  label: 'Muster Upload', route: '/admin/attendance/muster-upload',    icon: FileUp        },
           { id: 'anomalies',      label: 'Anomalies',     route: '/admin/attendance/anomalies',        icon: AlertTriangle },
           { id: 'regularisation', label: 'Approvals',     route: '/admin/attendance/regularisation',   icon: CheckSquare   },
+          { id: 'att-periods',    label: 'Periods (Lock/Close)', route: '/admin/attendance/periods',   icon: CalendarClock },
         ],
       },
       {
@@ -703,7 +704,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'comp-setup',      label: 'Compensation Setup',  route: '/admin/payroll/setup',             icon: Layers        },
           { id: 'payroll-grps',    label: 'Payroll Groups',      route: '/admin/masters/payroll-groups',    icon: DollarSign    },
-          { id: 'pay-cycles',      label: 'Pay Cycles',          route: '/admin/attendance/periods',        icon: CalendarClock },
+          { id: 'pay-cycles',      label: 'Attendance Periods',  route: '/admin/attendance/periods',        icon: CalendarClock },
           { id: 'payroll-cal',     label: 'Payroll Calendar',    route: '/admin/payroll-readiness',         icon: CalendarDays  },
           { id: 'simulation',      label: 'Simulation',          route: '/admin/payroll/simulation',        icon: FlaskConical  },
         ],
