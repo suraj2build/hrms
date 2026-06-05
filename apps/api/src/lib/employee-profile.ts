@@ -253,15 +253,29 @@ export async function fetchFullProfile(
         effective_from:    jobRow.effective_from,
         effective_to:      jobRow.effective_to      ?? null,
         reason_for_change: jobRow.reason_for_change ?? null,
+        // Expose BOTH singular and plural aliases for each FK relation — different
+        // consumers read different forms (EmployeeProfile + ManagerProfileView use
+        // plural job.departments/…; EssTeam uses singular job.department). Keeping
+        // both avoids the empty-card bug without breaking any caller.
         department:        jobRow.departments       ?? null,
+        departments:       jobRow.departments       ?? null,
         designation:       jobRow.designations      ?? null,
+        designations:      jobRow.designations      ?? null,
         grade:             jobRow.grades            ?? null,
+        grades:            jobRow.grades            ?? null,
         work_location:     jobRow.work_locations    ?? null,
+        work_locations:    jobRow.work_locations    ?? null,
         cost_center:       jobRow.cost_centers      ?? null,
+        cost_centers:      jobRow.cost_centers      ?? null,
         shift:             jobRow.shifts            ?? null,
+        shifts:            jobRow.shifts            ?? null,
         manager: managerRow
           ? {
               id:            managerRow.id,
+              // first_name/last_name for callers that compose the name themselves
+              // (EmployeeProfile Job Details card); full_name for those that don't.
+              first_name:    managerRow.first_name,
+              last_name:     managerRow.last_name,
               full_name:     `${managerRow.first_name} ${managerRow.last_name}`.trim(),
               employee_code: managerRow.employee_code,
             }
