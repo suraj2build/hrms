@@ -2954,8 +2954,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     recon.pt.filed  = (ptaxRows.data?.length ?? 0) > 0
     recon.tds.filed = (tdsRows.data?.length  ?? 0) > 0
 
-    // TDS isn't on the slip; reconcile the projection against itself (informational).
-    if (recon.tds.computed === 0) recon.tds.computed = recon.tds.payable
+    // TDS payable IS the amount deducted on the slips (remitted to the IT dept).
+    // The tds_monthly_projections table is a forecasting aid, not the filing source.
+    // So: if projection rows exist use them; otherwise the slip-deducted TDS is the
+    // payable. Either way TDS should reconcile against what was actually deducted.
+    if (!recon.tds.filed && recon.tds.computed > 0) {
+      recon.tds.payable = recon.tds.computed
+      recon.tds.filed   = true
+    } else if (recon.tds.computed === 0) {
+      recon.tds.computed = recon.tds.payable
+    }
 
     recon.pf.variance  = Math.round((recon.pf.payable  - recon.pf.computed)  * 100) / 100
     recon.esi.variance = Math.round((recon.esi.payable - recon.esi.computed) * 100) / 100

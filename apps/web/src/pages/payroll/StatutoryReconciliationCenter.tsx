@@ -9,11 +9,12 @@
 
 import { useState }                from 'react'
 import { Link }                    from 'react-router-dom'
-import { useQuery }                from '@tanstack/react-query'
+import { useQuery, useMutation }   from '@tanstack/react-query'
+import { toast }                   from 'sonner'
 import {
   Scale, CheckCircle2, AlertTriangle, RefreshCw,
   ChevronRight, FileText, Landmark, Shield,
-  Loader2, BadgeCheck, DollarSign,
+  Loader2, BadgeCheck, DollarSign, Calculator,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -142,15 +143,62 @@ export function StatutoryReconciliationCenter() {
   })
   const recon = reconRaw?.data ?? null
 
+  // Compute the statutory filing tables (EPF / ESI / PT) for the reconciled month.
+  // This populates the "Payable" column and the per-head detail pages, which read
+  // from epf_contributions / esi_contributions / ptax_contributions.
+  const computeMutation = useMutation({
+    mutationFn: async () => {
+      const month = recon?.run.month
+      if (!month) throw new Error('No finalized run to compute for')
+      const heads = [
+        { label: 'EPF', url: '/payroll/statutory/epf/contributions/compute'  },
+        { label: 'ESI', url: '/payroll/statutory/esi/contributions/compute'  },
+        { label: 'PT',  url: '/payroll/statutory/ptax/contributions/compute' },
+      ]
+      const results = await Promise.allSettled(
+        heads.map(h => api.post(h.url, { month })),
+      )
+      const failed = results
+        .map((r, i) => ({ r, label: heads[i].label }))
+        .filter(x => x.r.status === 'rejected')
+        .map(x => x.label)
+      return { month, failed }
+    },
+    onSuccess: ({ month, failed }) => {
+      if (failed.length === 0) {
+        toast.success('Statutory filings computed', { description: `${month} — EPF · ESI · PT populated` })
+      } else {
+        toast.warning('Partial compute', { description: `${month} — failed: ${failed.join(', ')}` })
+      }
+      refetch()
+    },
+    onError: (e: any) => {
+      toast.error('Compute failed', { description: e?.message ?? 'Unable to compute statutory filings' })
+    },
+  })
+
   return (
     <PageContainer>
       <PageHeader
         title="Statutory Reconciliation"
         subtitle="PF · ESI · PT · TDS — reconcile computed, payable, and filed amounts"
         actions={
-          <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isLoading}>
-            <RefreshCw className={cn('h-3.5 w-3.5 mr-1', isLoading && 'animate-spin')} />Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => computeMutation.mutate()}
+              disabled={computeMutation.isPending || !recon}
+              title="Compute EPF / ESI / PT filing amounts for this month and populate the detail pages"
+            >
+              {computeMutation.isPending
+                ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                : <Calculator className="h-3.5 w-3.5 mr-1" />}
+              Compute Filings
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isLoading}>
+              <RefreshCw className={cn('h-3.5 w-3.5 mr-1', isLoading && 'animate-spin')} />Refresh
+            </Button>
+          </div>
         }
       />
 
