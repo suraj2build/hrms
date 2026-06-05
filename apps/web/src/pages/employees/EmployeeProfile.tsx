@@ -201,7 +201,7 @@ function AssignableField({
             onClick={onAssign}
             className="flex-shrink-0 text-[10px] text-muted-foreground hover:text-foreground border border-border hover:border-primary/50 rounded px-1.5 py-0.5 transition-colors"
           >
-            Reassign
+            {value == null || value === '' || value === '—' ? 'Set' : 'Edit'}
           </button>
         )}
       </div>
@@ -671,6 +671,10 @@ export function EmployeeProfile() {
     queryKey: ['nominations', id], queryFn: () => api.get(`/employees/${id}/nominations`),
     enabled: !!id && visited.has('relationships'), staleTime: 30_000,
   })
+  const { data: relTypesData } = useQuery<{ data: any[] }>({
+    queryKey: ['relationship-types'], queryFn: () => api.get('/masters/relationship-types'),
+    enabled: !!id && visited.has('relationships'), staleTime: 5 * 60_000,
+  })
   const { data: accessCardsData } = useQuery<{ data: any[] }>({
     queryKey: ['access-cards', id], queryFn: () => api.get(`/employees/${id}/access-cards`),
     enabled: !!id && visited.has('assets'), staleTime: 30_000,
@@ -1112,15 +1116,18 @@ export function EmployeeProfile() {
   }
 
   // Field → display config
+  // Title verb adapts to whether a value already exists ("Set" when empty, else
+  // "Reassign"/"Change") so an unmaintained field never reads as "Reassign".
+  const _set = (cur: string, verb: string, noun: string) => (cur === '—' ? `Set ${noun}` : `${verb} ${noun}`)
   const ASSIGN_CONFIG: Record<string, { title: string; fieldKey: string; currentLabel: string }> = {
-    department:      { title: 'Reassign Department',      fieldKey: 'department_id',      currentLabel: job?.departments?.name ?? '—'  },
-    designation:     { title: 'Reassign Designation',     fieldKey: 'designation_id',     currentLabel: job?.designations?.name ?? '—' },
-    grade:           { title: 'Reassign Grade / Band',    fieldKey: 'grade_id',           currentLabel: job?.grades ? `${job.grades.name} (${job.grades.code})` : '—' },
-    manager:         { title: 'Reassign Reporting Manager', fieldKey: 'manager_id',       currentLabel: job?.manager ? `${job.manager.first_name} ${job.manager.last_name}` : '—' },
-    cost_center:     { title: 'Reassign Cost Center',     fieldKey: 'cost_center_id',     currentLabel: job?.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : '—' },
-    work_location:   { title: 'Reassign Work Location',   fieldKey: 'work_location_id',   currentLabel: job?.work_locations ? `${job.work_locations.name}` : '—' },
-    employment_type: { title: 'Change Employment Type',   fieldKey: 'employment_type',    currentLabel: job?.employment_type ?? '—' },
-    shift:           { title: 'Apply Shift Override',      fieldKey: 'shift_id',           currentLabel: job?.shifts?.name ?? '—' },
+    department:      (() => { const c = job?.departments?.name ?? '—';                                    return { title: _set(c, 'Reassign', 'Department'),         fieldKey: 'department_id',      currentLabel: c } })(),
+    designation:     (() => { const c = job?.designations?.name ?? '—';                                   return { title: _set(c, 'Reassign', 'Designation'),        fieldKey: 'designation_id',     currentLabel: c } })(),
+    grade:           (() => { const c = job?.grades ? `${job.grades.name} (${job.grades.code})` : '—';    return { title: _set(c, 'Reassign', 'Grade / Band'),       fieldKey: 'grade_id',           currentLabel: c } })(),
+    manager:         (() => { const c = job?.manager ? `${job.manager.first_name} ${job.manager.last_name}` : '—'; return { title: _set(c, 'Reassign', 'Reporting Manager'), fieldKey: 'manager_id',  currentLabel: c } })(),
+    cost_center:     (() => { const c = job?.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : '—'; return { title: _set(c, 'Reassign', 'Cost Center'),    fieldKey: 'cost_center_id',     currentLabel: c } })(),
+    work_location:   (() => { const c = job?.work_locations ? `${job.work_locations.name}` : '—';         return { title: _set(c, 'Reassign', 'Work Location'),      fieldKey: 'work_location_id',   currentLabel: c } })(),
+    employment_type: (() => { const c = job?.employment_type ?? '—';                                      return { title: _set(c, 'Change', 'Employment Type'),      fieldKey: 'employment_type',    currentLabel: c } })(),
+    shift:           (() => { const c = job?.shifts?.name ?? '—';                                         return { title: c === '—' ? 'Apply Shift' : 'Apply Shift Override', fieldKey: 'shift_id',  currentLabel: c } })(),
   }
 
   // ── Job-field assignment (creates new job_history record carrying forward all other values) ─
@@ -1824,7 +1831,7 @@ export function EmployeeProfile() {
                   {!editPI
                     ? <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
                         onClick={() => { setPiForm({ gender: pi?.gender ?? '', dob: pi?.dob?.slice(0,10) ?? '', nationality: pi?.nationality ?? '', marital_status: pi?.marital_status ?? '', blood_group: pi?.blood_group ?? '' }); setEditPI(true) }}>
-                        <Edit2 className="h-3.5 w-3.5" />Edit
+                        <Edit2 className="h-3.5 w-3.5" />{pi ? 'Edit' : 'Add'}
                       </Button>
                     : <div className="flex gap-1">
                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => piMutation.mutate(piForm)} disabled={piMutation.isPending}><Check className="h-3.5 w-3.5 text-success" /></Button>
@@ -4372,7 +4379,24 @@ export function EmployeeProfile() {
           <DialogHeader><DialogTitle>Add Family Member</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={famForm.name??''} onChange={e=>setFamForm((p:any)=>({...p,name:e.target.value}))}/></div>
-            <div><Label className="text-xs">Date of Birth</Label><DateInput className="mt-1 h-8 text-xs" value={famForm.dob??''} onChange={v=>setFamForm((p:any)=>({...p,dob:v}))}/></div>
+            <div>
+              <Label className="text-xs">Relationship</Label>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={famForm.relationship_type_id??''} onChange={e=>setFamForm((p:any)=>({...p,relationship_type_id:e.target.value}))}>
+                <option value="">Select relationship…</option>
+                {(relTypesData?.data ?? []).map((rt:any)=><option key={rt.id} value={rt.id}>{rt.name}</option>)}
+              </select>
+              {!(relTypesData?.data?.length) && <p className="text-[10px] text-warning mt-1">No relationship types configured. Add them under Masters first.</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Date of Birth</Label><DateInput className="mt-1 h-8 text-xs" value={famForm.dob??''} onChange={v=>setFamForm((p:any)=>({...p,dob:v}))}/></div>
+              <div>
+                <Label className="text-xs">Gender</Label>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={famForm.gender??''} onChange={e=>setFamForm((p:any)=>({...p,gender:e.target.value}))}>
+                  {[['',''],['male','Male'],['female','Female'],['other','Other']].map(([v,l])=><option key={v} value={v}>{l||'—'}</option>)}
+                </select>
+              </div>
+            </div>
+            <div><Label className="text-xs">Occupation</Label><Input className="mt-1 h-8 text-xs" value={famForm.occupation??''} onChange={e=>setFamForm((p:any)=>({...p,occupation:e.target.value}))}/></div>
             <div className="flex items-center gap-2">
               <input type="checkbox" id="fam_dep" checked={!!famForm.is_dependent} onChange={e=>setFamForm((p:any)=>({...p,is_dependent:e.target.checked}))} className="rounded" />
               <Label htmlFor="fam_dep" className="text-xs">Dependent</Label>
@@ -4380,7 +4404,7 @@ export function EmployeeProfile() {
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>setAddFamOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={()=>addFamMutation.mutate(famForm)} disabled={addFamMutation.isPending}>
+            <Button size="sm" disabled={addFamMutation.isPending || !famForm.name || !famForm.relationship_type_id} onClick={()=>addFamMutation.mutate(famForm)}>
               {addFamMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
             </Button>
           </DialogFooter>
