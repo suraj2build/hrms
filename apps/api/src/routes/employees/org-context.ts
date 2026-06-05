@@ -151,8 +151,6 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       site_id:            z.string().uuid().nullable().optional(),
       roster_id:          z.string().uuid().nullable().optional(),
       rotation_policy_id: z.string().uuid().nullable().optional(),
-      work_location_id:   z.string().uuid().nullable().optional(),
-      cost_center_id:     z.string().uuid().nullable().optional(),
       effective_from:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       reason:             z.string().max(500).nullable().optional(),
     })
@@ -171,7 +169,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const { site_id, roster_id, rotation_policy_id, work_location_id, cost_center_id, effective_from, reason } = parsed.data
+    const { site_id, roster_id, rotation_policy_id, effective_from, reason } = parsed.data
 
     // Close the current assignment(s). A single unique "one current" index means
     // any leftover is_current row would block the insert below — so closing must
@@ -247,33 +245,12 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       }
     }
 
-    // Mirror work_location + cost_center to the current job_history row. These
-    // fields live on job_history, NOT on the org assignment — so if there is no
-    // current job row the update affects nothing. Surface that (and any error)
-    // in the response instead of silently reporting success, so the client can
-    // tell the user to set Job Details first.
-    let job_mirror: { applied: boolean; reason?: string } | undefined
-    if (work_location_id !== undefined || cost_center_id !== undefined) {
-      const { data: mirrored, error: mirrorJobErr } = await fastify.supabase
-        .from('job_history')
-        .update({
-          ...(work_location_id !== undefined ? { work_location_id: work_location_id ?? null } : {}),
-          ...(cost_center_id   !== undefined ? { cost_center_id:   cost_center_id   ?? null } : {}),
-        })
-        .eq('employee_id', employeeId)
-        .eq('tenant_id',   req.tenantId)
-        .eq('is_current',  true)
-        .select('id')
-      if (mirrorJobErr) {
-        job_mirror = { applied: false, reason: mirrorJobErr.message }
-      } else if (!mirrored || mirrored.length === 0) {
-        job_mirror = { applied: false, reason: 'No current job record — set Job Details first to store work location / cost center.' }
-        req.log.warn({ employeeId }, 'org-context: work_location/cost_center not stored — no current job_history row')
-      } else {
-        job_mirror = { applied: true }
-      }
-    }
+    // NOTE: Work Location & Cost Center are intentionally NOT handled here.
+    // They live on job_history and are managed solely by the Job Details editor
+    // (POST /job-history). Org-context owns only site / roster / rotation — this
+    // single-writer split removes the previous two-route duplication where the
+    // same job fields could be written (and silently cleared) from two places.
 
-    return reply.code(201).send({ data: newRow, job_mirror })
+    return reply.code(201).send({ data: newRow })
   })
 }

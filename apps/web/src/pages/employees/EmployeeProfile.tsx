@@ -998,7 +998,7 @@ export function EmployeeProfile() {
   const orgCtx = orgCtxData?.data
 
   const [orgDlgOpen, setOrgDlgOpen] = useState(false)
-  const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', rotation_policy_id: '', work_location_id: '', cost_center_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
+  const [orgForm, setOrgForm]       = useState({ site_id: '', roster_id: '', rotation_policy_id: '', effective_from: new Date().toISOString().slice(0, 10), reason: '' })
 
   // After a shift/roster/rotation/site change, attendance for already-computed
   // days is NOT auto-recomputed. Offer to recompute from the change's effective
@@ -1020,34 +1020,19 @@ export function EmployeeProfile() {
   }
 
   const orgMutation = useMutation({
-    mutationFn: (body: typeof orgForm) => {
-      const payload: Record<string, unknown> = {
+    mutationFn: (body: typeof orgForm) =>
+      api.post(`/employees/${id}/org-context`, {
         site_id:            body.site_id            || null,
         roster_id:          body.roster_id          || null,
         rotation_policy_id: body.rotation_policy_id || null,
         effective_from:     body.effective_from,
         reason:             body.reason             || null,
-      }
-      // Work Location / Cost Center live on the job_history row and are only
-      // OPTIONALLY editable from this site/roster dialog. Send them only when a
-      // value is selected — omitting blanks means "leave unchanged" so a
-      // site/roster-only save can't silently clear them. (Clear them from the
-      // Job Details editor instead.)
-      if (body.work_location_id) payload.work_location_id = body.work_location_id
-      if (body.cost_center_id)   payload.cost_center_id   = body.cost_center_id
-      return api.post(`/employees/${id}/org-context`, payload)
-    },
+      }),
     onSuccess: (_d: any, body) => {
       setOrgDlgOpen(false); refetchOrgCtx()
       qc.invalidateQueries({ queryKey: ['job-current', id] })
-      qc.invalidateQueries({ queryKey: ['employee-full', id] })   // refresh the Job Info card too
-      // The API reports whether work-location / cost-center actually persisted
-      // (they need a current job_history row). Warn instead of a false success.
-      if (_d?.job_mirror && _d.job_mirror.applied === false) {
-        toast.warning('Site & roster saved', { description: _d.job_mirror.reason ?? 'Work location / cost center were not stored.' })
-      } else {
-        toast.success('Organisation context updated')
-      }
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      toast.success('Organisation context updated')
       promptRecompute(body.effective_from, 'roster / rotation')
     },
     onError:   (e: Error) => toast.error('Failed to update org context', { description: e.message }),
@@ -2591,8 +2576,6 @@ export function EmployeeProfile() {
                               site_id:            orgCtx?.site?.id          ?? '',
                               roster_id:          orgCtx?.roster?.id        ?? '',
                               rotation_policy_id: orgCtx?.rotation_policy_id ?? '',
-                              work_location_id:   job?.work_locations?.id   ?? '',
-                              cost_center_id:     job?.cost_center?.id       ?? '',
                               effective_from:     new Date().toISOString().slice(0, 10),
                               reason:             '',
                             })
@@ -2936,8 +2919,6 @@ export function EmployeeProfile() {
                           site_id:            orgCtx?.site?.id          ?? '',
                           roster_id:          orgCtx?.roster?.id        ?? '',
                           rotation_policy_id: orgCtx?.rotation_policy_id ?? '',
-                          work_location_id:   job?.work_locations?.id   ?? '',
-                          cost_center_id:     job?.cost_center?.id      ?? '',
                           effective_from:     new Date().toISOString().slice(0, 10),
                           reason:             '',
                         })
@@ -3036,22 +3017,10 @@ export function EmployeeProfile() {
                     {sitesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Work Location</label>
-                  <select value={orgForm.work_location_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, work_location_id: e.target.value }))}
-                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                    <option value="">— None —</option>
-                    {(wlListData?.data ?? []).map((w:any) => <option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Cost Center</label>
-                  <select value={orgForm.cost_center_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, cost_center_id: e.target.value }))}
-                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                    <option value="">— None —</option>
-                    {(ccListData?.data ?? []).map((c:any) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
-                  </select>
-                </div>
+                {/* Work Location & Cost Center are managed ONLY in the Job Details
+                    editor (Workforce tab → job_history). They were removed from
+                    this dialog to end the two-route duplication that caused saves
+                    to conflict/clear each other. */}
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Roster</label>
                   <select value={orgForm.roster_id} onChange={(e) => setOrgForm((p) => ({ ...p, roster_id: e.target.value }))}
