@@ -84,6 +84,8 @@ interface RosterData {
   shifts:    Shift[]
   roster:    RosterRow[]
   standing:  StandingRow[]
+  /** Rotation-resolved master shift per employee per day: { empId: { 'YYYY-MM-DD': shiftId } } */
+  master_by_day?: Record<string, Record<string, string>>
 }
 
 // ── Roster template types ─────────────────────────────────────────────────────
@@ -388,6 +390,10 @@ export function ShiftRoster() {
   const standingMap = new Map<string, string>(
     (data?.standing ?? []).map((s) => [s.employee_id, s.shift_id])
   )
+  // Rotation-resolved master shift per employee/day (roster-based employees).
+  const masterByDay = data?.master_by_day ?? {}
+  const masterShiftFor = (empId: string, date: string): string | undefined =>
+    standingMap.get(empId) ?? masterByDay[empId]?.[date]
   const shiftMap = new Map<string, Shift>(
     (data?.shifts ?? []).map((s) => [s.id, s])
   )
@@ -416,7 +422,7 @@ export function ShiftRoster() {
     let assigned = 0
     for (const emp of employees) {
       const rosterRow        = rosterMap.get(`${emp.id}:${d}`)
-      const effectiveShiftId = rosterRow?.shift_id ?? standingMap.get(emp.id)
+      const effectiveShiftId = rosterRow?.shift_id ?? masterShiftFor(emp.id, d)
       if (effectiveShiftId) assigned++
     }
     coverageByDate.set(d, assigned)
@@ -468,7 +474,7 @@ export function ShiftRoster() {
       let maxFrom = ''; let maxTo = ''
       for (const d of days) {
         const rKey  = `${emp.id}:${d}`
-        const hasShift = !!(rosterMap.get(rKey)?.shift_id ?? standingMap.get(emp.id))
+        const hasShift = !!(rosterMap.get(rKey)?.shift_id ?? masterShiftFor(emp.id, d))
         if (hasShift) {
           if (cur === 0) streakStart = d
           cur++
@@ -1304,7 +1310,7 @@ export function ShiftRoster() {
                             {days.map((d) => {
                               const key        = `${emp.id}:${d}`
                               const rosterRow  = rosterMap.get(key)
-                              const effectiveShiftId = rosterRow?.shift_id ?? standingMap.get(emp.id)
+                              const effectiveShiftId = rosterRow?.shift_id ?? masterShiftFor(emp.id, d)
                               const shift      = effectiveShiftId ? (shiftMap.get(effectiveShiftId) ?? null) : null
                               const isOverride = !!rosterRow
                               const isBusy     = actionKey === key

@@ -24,6 +24,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logBulkAction } from '../../lib/audit-service.js'
 import { eventService } from '../../lib/event-service.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
+import { resolveRotationCondition, dayOfWeekToCondition } from '../../lib/rotation-engine.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -99,7 +100,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
     ] = await Promise.all([
       fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code')
+        .select('id, first_name, last_name, employee_code, rotation_policy_id, sites(default_rotation_policy_id)')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'active')
         .order('employee_code'),
@@ -141,9 +142,55 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       (jobRows ?? []).map((j: any) => [j.employee_id as string, j.work_locations ?? null])
     )
 
+    // ── Rotation-resolved master shift per employee per day ────────────────────
+    // Employees on a ROSTER/ROTATION (no fixed standing employee_shifts row) get
+    // their daily master shift from the rotation policy (weekday/saturday/sunday
+    // rules). Resolve each distinct policy's 3 conditions once, then map every day
+    // of the month → its condition → shift. Without this the planner shows blank
+    // cells for roster-based employees even though attendance is driven correctly.
+    const lastDay = new Date(y, m, 0).getDate()
+    const monthDays: string[] = []
+    for (let d = 1; d <= lastDay; d++) monthDays.push(`${month}-${String(d).padStart(2, '0')}`)
+
+    type CondKey = 'weekday_working' | 'saturday_working' | 'sunday_working'
+    const policyConds = new Map<string, Record<CondKey, string | null>>()
+    async function condsFor(policyId: string | null) {
+      if (!policyId) return null
+      const cached = policyConds.get(policyId)
+      if (cached) return cached
+      const [wd, sat, sun] = await Promise.all([
+        resolveRotationCondition(fastify.supabase, policyId, 'weekday_working'),
+        resolveRotationCondition(fastify.supabase, policyId, 'saturday_working'),
+        resolveRotationCondition(fastify.supabase, policyId, 'sunday_working'),
+      ])
+      const c: Record<CondKey, string | null> = {
+        weekday_working:  wd?.shiftId  ?? null,
+        saturday_working: sat?.shiftId ?? null,
+        sunday_working:   sun?.shiftId ?? null,
+      }
+      policyConds.set(policyId, c)
+      return c
+    }
+
+    const masterByDay: Record<string, Record<string, string>> = {}
+    for (const e of (employees ?? []) as any[]) {
+      const effPolicy: string | null =
+        e.rotation_policy_id ?? e.sites?.default_rotation_policy_id ?? null
+      const conds = await condsFor(effPolicy)
+      if (!conds) continue
+      const perDay: Record<string, string> = {}
+      for (const date of monthDays) {
+        const dow = new Date(`${date}T00:00:00`).getDay()
+        const cond = dayOfWeekToCondition(dow)
+        const sid = cond ? conds[cond] : null
+        if (sid) perDay[date] = sid
+      }
+      if (Object.keys(perDay).length) masterByDay[e.id] = perDay
+    }
+
     return reply.send({
       month,
-      employees: (employees ?? []).map((e: { id: string; first_name: string; last_name: string; employee_code: string }) => ({
+      employees: ((employees ?? []) as any[]).map((e) => ({
         id:            e.id,
         employee_code: e.employee_code,
         name:          `${e.first_name} ${e.last_name}`,
@@ -152,6 +199,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       shifts: shifts ?? [],
       roster: roster ?? [],
       standing: standing ?? [],
+      master_by_day: masterByDay,
     })
   })
 
