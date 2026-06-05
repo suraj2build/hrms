@@ -1,15 +1,16 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { optStr, optDate, optUuid } from '../../lib/zod-form.js'
 
 const schema = z.object({
   scheme:               z.enum(['pf','gratuity','esi','superannuation']),
   nominee_name:         z.string().min(1, 'Nominee name is required'),
-  relationship_type_id: z.string().uuid().optional(),
-  dob:                  z.string().optional(),
+  relationship_type_id: optUuid,
+  dob:                  optDate,
   share_percentage:     z.number().positive().max(100, 'Cannot exceed 100%'),
-  address:              z.string().optional(),
+  address:              optStr,
   is_minor:             z.boolean().optional().default(false),
-  guardian_name:        z.string().optional(),
+  guardian_name:        optStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {

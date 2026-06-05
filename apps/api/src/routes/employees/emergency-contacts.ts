@@ -1,13 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { optStr } from '../../lib/zod-form.js'
 
 const schema = z.object({
   name:            z.string().min(1, 'Name is required'),
-  relationship:    z.string().optional(),
+  relationship:    optStr,
   phone:           z.string().min(1, 'Phone is required'),
-  alternate_phone: z.string().optional(),
-  email:           z.string().email().optional(),
-  address:         z.string().optional(),
+  alternate_phone: optStr,
+  email:           z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().email().optional()),
+  address:         optStr,
   is_primary:      z.boolean().optional().default(false),
 })
 

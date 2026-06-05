@@ -1,21 +1,22 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { optStr, optEnum } from '../../lib/zod-form.js'
 
 const schema = z.object({
-  bank_name:      z.string().optional(),
-  account_number: z.string().optional(),
-  ifsc_code:      z.string().optional(),
-  branch_name:    z.string().optional(),
-  account_type:   z.enum(['savings','current','salary']).optional(),
-  pan_number:     z.string().optional(),
-  aadhaar_number: z.string().optional(),
-  uan_number:     z.string().optional(),
-  pf_number:      z.string().optional(),
-  esi_number:     z.string().optional(),
+  bank_name:      optStr,
+  account_number: optStr,
+  ifsc_code:      optStr,
+  branch_name:    optStr,
+  account_type:   optEnum(['savings','current','salary']),
+  pan_number:     optStr,
+  aadhaar_number: optStr,
+  uan_number:     optStr,
+  pf_number:      optStr,
+  esi_number:     optStr,
   pt_applicable:  z.boolean().optional().default(false),
   lwf_applicable: z.boolean().optional().default(false),
-  tax_regime:     z.enum(['old','new']).optional().default('new'),
+  tax_regime:     z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['old','new']).optional().default('new')),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {

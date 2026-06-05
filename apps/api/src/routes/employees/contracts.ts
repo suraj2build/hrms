@@ -1,14 +1,15 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { optStr, optDate } from '../../lib/zod-form.js'
 
 const schema = z.object({
   contract_type: z.enum(['appointment','renewal','amendment','nda','other']),
   start_date:    z.string().min(1, 'Start date is required'),
-  end_date:      z.string().optional(),
-  storage_path:  z.string().optional(),
-  status:        z.enum(['draft','active','expired','terminated']).optional().default('active'),
-  notes:         z.string().optional(),
+  end_date:      optDate,
+  storage_path:  optStr,
+  status:        z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['draft','active','expired','terminated']).optional().default('active')),
+  notes:         optStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {

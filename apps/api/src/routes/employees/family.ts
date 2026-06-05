@@ -1,15 +1,16 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { optStr, optDate, optEnum } from '../../lib/zod-form.js'
 
 const schema = z.object({
   relationship_type_id: z.string().uuid('Invalid relationship type'),
   name:                 z.string().min(1, 'Name is required'),
-  dob:                  z.string().optional(),
-  gender:               z.enum(['male','female','other']).optional(),
+  dob:                  optDate,
+  gender:               optEnum(['male','female','other']),
   is_dependent:         z.boolean().optional().default(false),
   is_nominee:           z.boolean().optional().default(false),
-  occupation:           z.string().optional(),
+  occupation:           optStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
