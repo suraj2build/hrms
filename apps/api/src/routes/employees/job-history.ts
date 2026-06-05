@@ -2,18 +2,29 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
+// Empty/None selections arrive as '' or null from the form — coerce both to
+// undefined so optional uuid fields validate instead of 400-ing the whole save.
+const optUuid = z.preprocess(
+  (v) => (v === '' || v === null ? undefined : v),
+  z.string().uuid().optional(),
+)
+const optStr = z.preprocess(
+  (v) => (v === '' || v === null ? undefined : v),
+  z.string().optional(),
+)
+
 const createJobHistorySchema = z.object({
-  department_id:     z.string().uuid().optional(),
-  designation_id:    z.string().uuid().optional(),
-  grade_id:          z.string().uuid().optional(),
-  work_location_id:  z.string().uuid().optional(),
-  cost_center_id:    z.string().uuid().optional(),
-  shift_id:          z.string().uuid().optional(),
-  manager_id:        z.string().uuid().optional(),
+  department_id:     optUuid,
+  designation_id:    optUuid,
+  grade_id:          optUuid,
+  work_location_id:  optUuid,
+  cost_center_id:    optUuid,
+  shift_id:          optUuid,
+  manager_id:        optUuid,
   employment_type:   z.enum(['permanent','contract','intern','probation','consultant']),
-  confirmation_date: z.string().optional(),
+  confirmation_date: optStr,
   effective_from:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
-  reason_for_change: z.string().optional(),
+  reason_for_change: optStr,
   is_current:        z.boolean().optional().default(true),
 })
 

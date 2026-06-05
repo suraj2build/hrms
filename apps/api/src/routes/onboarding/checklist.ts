@@ -86,8 +86,16 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .order('created_at', { ascending: false })
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to fetch onboarding templates')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      // A missing onboarding_checklist_items relationship / column on a drifted
+      // DB must not 500 the whole onboarding tab — fall back to templates only.
+      fastify.log.warn({ error }, 'onboarding templates embed failed — serving templates without items')
+      const { data: flat, error: flatErr } = await fastify.supabase
+        .from('onboarding_checklist_templates')
+        .select('id, name, description, is_active, created_at')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+      if (flatErr) return reply.code(500).send({ error: 'DB_ERROR', message: flatErr.message })
+      return reply.send({ data: (flat ?? []).map((t: any) => ({ ...t, onboarding_checklist_items: [] })) })
     }
 
     return reply.send({ data: data ?? [] })
