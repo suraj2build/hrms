@@ -1674,13 +1674,11 @@ export function EmployeeProfile() {
     core:          [
       { key: 'profile',    label: 'Overview',       icon: User       },
       { key: 'personal',   label: 'Personal',       icon: UserCircle },
-      { key: 'onboarding', label: 'Onboarding',     icon: GraduationCap },
       ...(isAdmin ? [{ key: 'account', label: 'User Account', icon: KeyRound }] : []),
     ],
     employment:    [
       { key: 'workforce',       label: 'Job & Position',   icon: LayoutGrid    },
       { key: 'shift-schedule',  label: 'Shift & Roster',   icon: CalendarClock },
-      { key: 'prev-employment', label: 'Prev. Employment', icon: Building2     },
       { key: 'separation',      label: 'Separation',       icon: LogOut        },
     ],
     compensation:  [
@@ -2095,7 +2093,8 @@ export function EmployeeProfile() {
           {/* ─────────────────────────────────────────────────────────────────
               CORE › Onboarding Status
           ──────────────────────────────────────────────────────────────────── */}
-          {subTab === 'onboarding' && (
+          {/* Merged into the Overview (profile) tab */}
+          {subTab === 'profile' && (
             <div className="space-y-4">
               {!onboardingStatus
                 ? (
@@ -2798,7 +2797,8 @@ export function EmployeeProfile() {
           )}
 
           {/* EMPLOYMENT › Previous Employment */}
-          {subTab === 'prev-employment' && (
+          {/* Merged into the Job & Position (workforce) tab */}
+          {subTab === 'workforce' && (
             <div className="space-y-3">
               {isAdmin && (
                 <div className="flex justify-end">
