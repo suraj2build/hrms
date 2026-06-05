@@ -1502,6 +1502,37 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // ── Auto-compute statutory contributions (EPF / ESI / PTax) ──────────────
+    // The Compliance filing pages read epf_contributions / esi_contributions /
+    // ptax_contributions, which are populated by the per-scheme compute endpoints
+    // (they require a FINALIZED run). Run them now — internally, reusing the
+    // existing battle-tested handlers via fastify.inject with the caller's auth —
+    // so the Compliance tab populates automatically on finalization. Non-blocking:
+    // a failure here never fails the finalize (operator can recompute manually).
+    {
+      const authHeader = (req.headers as any)?.authorization as string | undefined
+      const computePaths = [
+        '/payroll/statutory/epf/contributions/compute',
+        '/payroll/statutory/esi/contributions/compute',
+        '/payroll/statutory/ptax/contributions/compute',
+      ]
+      for (const url of computePaths) {
+        try {
+          const res = await fastify.inject({
+            method:  'POST',
+            url,
+            headers: authHeader ? { authorization: authHeader } : {},
+            payload: { month: run.month },
+          })
+          if (res.statusCode >= 400) {
+            req.log.warn({ url, status: res.statusCode, body: res.body, run_id: id }, 'auto statutory contribution compute returned error (non-fatal)')
+          }
+        } catch (e: any) {
+          req.log.warn({ url, err: e, run_id: id }, 'auto statutory contribution compute failed (non-fatal)')
+        }
+      }
+    }
+
     // ── Phase 15: auto-create immutable snapshot ─────────────────────────────
     // Build and persist the snapshot AFTER the run is confirmed finalized.
     // Non-fatal: finalization succeeds even if snapshot creation fails (operator
