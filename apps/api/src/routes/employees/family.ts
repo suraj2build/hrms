@@ -20,10 +20,12 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function familyRoutes(fastify: FastifyInstance) {
-  const auth        = { preHandler: [fastify.authenticate] }
+  // Family data is HR-managed in the employee master and not consumed by ESS —
+  // gate read + write to HR admin (previously GET allowed any authenticated user
+  // to read another employee's family records).
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
-  fastify.get('/employees/:id/family', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/family', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { data, error } = await fastify.supabase
