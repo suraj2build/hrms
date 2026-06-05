@@ -250,12 +250,12 @@ function RosterCell({ shift, isOverride, shifts, onAssign, onClear, loading, rea
     const label = shift.code || shift.name.slice(0, 4).toUpperCase()
     return (
       <div
-        title={`${shift.name} · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}`}
+        title={`${shift.name} · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}${isOverride ? ' · day override' : ' · from master'}`}
         className={cn(
           'w-[52px] h-[30px] rounded text-[10px] font-semibold truncate px-1 flex items-center justify-center',
           isOverride
             ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-            : 'bg-muted text-muted-foreground',
+            : 'bg-muted/50 text-foreground/70 border border-dashed border-border',
         )}
       >
         {label}
@@ -298,13 +298,17 @@ function RosterCell({ shift, isOverride, shifts, onAssign, onClear, loading, rea
   return (
     <button
       type="button"
-      title={`${shift.name} · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}\nClick to change`}
+      title={isOverride
+        ? `${shift.name} · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}\nDay override — click to change`
+        : `${shift.name} · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}\nFrom master assignment — click to override for this day`}
       onClick={handleClick}
       className={cn(
         'w-[52px] h-[30px] rounded text-[10px] font-semibold transition-colors truncate px-1',
         isOverride
           ? 'bg-primary/15 text-primary ring-1 ring-primary/30 hover:bg-primary/25'
-          : 'bg-muted text-muted-foreground hover:bg-muted/80',
+          // Master/standing shift: legible, with a dashed ring so it reads as
+          // an inherited default (not a blank cell, not a day-override).
+          : 'bg-muted/50 text-foreground/70 border border-dashed border-border hover:bg-muted',
       )}
     >
       {label}
@@ -1393,19 +1397,19 @@ export function ShiftRoster() {
                 {/* Legend */}
                 <div className="flex flex-wrap gap-4 mt-4 pt-3 border-t border-border text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-7 h-4 rounded bg-primary/15 ring-1 ring-primary/30" />
-                    Override
+                    <span className="inline-block w-7 h-4 rounded bg-muted/50 border border-dashed border-border" />
+                    From master (standing shift)
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-7 h-4 rounded bg-muted" />
-                    Standing
+                    <span className="inline-block w-7 h-4 rounded bg-primary/15 ring-1 ring-primary/30" />
+                    Day override
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="inline-block w-7 h-4 rounded border border-dashed border-border" />
-                    Unassigned
+                    No shift assigned
                   </span>
                   <span className="ml-auto text-[10px]">
-                    Click any cell to assign or change a shift
+                    Cells pre-fill from the employee's master shift — click only to override a specific day
                   </span>
                 </div>
 
