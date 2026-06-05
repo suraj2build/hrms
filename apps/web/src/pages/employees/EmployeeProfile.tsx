@@ -1265,10 +1265,21 @@ export function EmployeeProfile() {
     mutationFn: async (d: any) => {
       // One form writes to TWO backends (single-writer split preserved):
       //   • job fields            → job_history
-      //   • site/roster/rotation  → org-context (only when actually changed, so a
-      //     plain job edit doesn't spawn a redundant org assignment).
+      //   • site/roster/rotation  → org-context
+      // NO-OP GUARD: only write each side when its values actually changed vs the
+      // current record, so re-saving without edits never spawns a duplicate
+      // effective-dated revision / org assignment.
       const { site_id, roster_id, rotation_policy_id, ...jobFields } = d
-      await api.post(`/employees/${id}/job-history`, jobFields)
+      const norm = (v: any) => v ?? null
+      const jobChanged = !job || (
+        norm(jobFields.department_id)    !== norm(job.departments?.id)    ||
+        norm(jobFields.designation_id)   !== norm(job.designations?.id)   ||
+        norm(jobFields.grade_id)         !== norm(job.grades?.id)         ||
+        norm(jobFields.manager_id)       !== norm(job.manager?.id)        ||
+        norm(jobFields.work_location_id) !== norm(job.work_locations?.id) ||
+        norm(jobFields.cost_center_id)   !== norm(job.cost_center?.id)    ||
+        norm(jobFields.employment_type)  !== norm(job.employment_type)
+      )
       const curSite   = orgCtx?.site?.id           ?? ''
       const curRoster = orgCtx?.roster?.id          ?? ''
       const curRot    = orgCtx?.rotation_policy_id  ?? ''
@@ -1276,6 +1287,8 @@ export function EmployeeProfile() {
         (site_id ?? '') !== curSite ||
         (roster_id ?? '') !== curRoster ||
         (rotation_policy_id ?? '') !== curRot
+
+      if (jobChanged) await api.post(`/employees/${id}/job-history`, jobFields)
       if (orgChanged) {
         await api.post(`/employees/${id}/org-context`, {
           site_id:            site_id            || null,
@@ -1285,13 +1298,15 @@ export function EmployeeProfile() {
           reason:             jobFields.reason_for_change || null,
         })
       }
+      return { jobChanged, orgChanged }
     },
-    onSuccess: () => {
+    onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ['job-history-all', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['emp-org-context', id] })
       setAddJobOpen(false)
-      toast.success(job ? 'Job details revised' : 'Job details saved')
+      if (!res?.jobChanged && !res?.orgChanged) toast.message('No changes to save')
+      else toast.success(job ? 'Job details revised' : 'Job details saved')
     },
     onError:   (e: Error) => toast.error('Failed to save job details', { description: e.message }),
   })
@@ -2680,13 +2695,22 @@ export function EmployeeProfile() {
                         : <p className="text-sm text-muted-foreground italic">No date override — policy applies</p>}
                     </div>
                     <div>
+                      <p className="text-xs text-muted-foreground mb-0.5">Roster</p>
+                      {orgCtx?.roster
+                        ? <><p className="text-sm font-medium">{orgCtx.roster.name}</p><p className="text-xs text-muted-foreground">{orgCtx.roster.cycle_days}-day cycle{orgCtx.roster_source === 'site' ? ' · inherited from site' : ''}</p></>
+                        : <p className="text-sm text-muted-foreground italic">No roster</p>}
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-0.5">Rotation Policy</p>
+                      {orgCtx?.rotation_policy
+                        ? <><p className="text-sm font-medium">{orgCtx.rotation_policy.name}</p><p className="text-xs text-muted-foreground">{orgCtx.rotation_source === 'site' ? 'inherited from site' : 'employee-specific'}</p></>
+                        : <p className="text-sm text-muted-foreground italic">None</p>}
+                    </div>
+                    <div>
                       <p className="text-xs text-muted-foreground mb-0.5">Weekly Off</p>
                       <p className="text-sm text-muted-foreground italic">Via roster policy</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-0.5">Attendance Policy</p>
-                      <p className="text-sm text-muted-foreground italic">Site-level default</p>
-                    </div>
+                    <p className="text-[11px] text-muted-foreground col-span-full">Roster &amp; rotation are set in <button className="underline hover:text-foreground" onClick={() => { setSubTab('workforce'); openJobEditor() }}>Edit Job Details</button>.</p>
                   </Grid2>
                 </CardContent>
               </Card>
