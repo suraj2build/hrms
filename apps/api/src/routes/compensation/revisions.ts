@@ -54,20 +54,8 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       limit?: number; offset?: number
     }
 
-    let q = fastify.supabase
-      .from('compensation_revisions')
-      .select(`
-        id, revision_type, effective_date, status, reason, submitted_at, decided_at,
-        before_ctc_annual, new_ctc_annual, delta_amount, delta_pct, retro_months,
-        employees!inner(id, first_name, last_name, employee_code),
-        requested_by_profile:profiles!requested_by(id, full_name),
-        approved_by_profile:profiles!approved_by(id, full_name)
-      `, { count: 'exact' })
-      .eq('tenant_id', req.tenantId)
-      .order('submitted_at', { ascending: false })
-      .range(Number(offset), Number(offset) + Number(limit) - 1)
-
-    // Employees see only their own
+    // Resolve the effective employee filter first (non-admins see only their own).
+    let empFilter: string | undefined
     if (!isAdmin(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
@@ -75,19 +63,53 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (!profile?.employee_id) {
-        return reply.send({ data: [], total: 0 })
-      }
-      q = q.eq('employee_id', profile.employee_id)
+      if (!profile?.employee_id) return reply.send({ data: [], total: 0 })
+      empFilter = profile.employee_id
     } else if (employee_id) {
-      q = q.eq('employee_id', employee_id)
+      empFilter = employee_id
     }
 
-    if (status)        q = q.eq('status', status)
-    if (revision_type) q = q.eq('revision_type', revision_type)
+    const build = (sel: string) => {
+      let q = fastify.supabase
+        .from('compensation_revisions')
+        .select(sel, { count: 'exact' })
+        .eq('tenant_id', req.tenantId)
+        .order('submitted_at', { ascending: false })
+        .range(Number(offset), Number(offset) + Number(limit) - 1)
+      if (empFilter)     q = q.eq('employee_id', empFilter)
+      if (status)        q = q.eq('status', status)
+      if (revision_type) q = q.eq('revision_type', revision_type)
+      return q
+    }
 
-    const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revisions' })
+    const FULL = `
+        id, revision_type, effective_date, status, reason, submitted_at, decided_at,
+        before_ctc_annual, new_ctc_annual, delta_amount, delta_pct, retro_months,
+        employees!inner(id, first_name, last_name, employee_code),
+        requested_by_profile:profiles!requested_by(id, full_name),
+        approved_by_profile:profiles!approved_by(id, full_name)
+      `
+    // Drop the profiles!requested_by/approved_by embeds (FKs may be missing on a
+    // drifted DB → 500) but keep the employee join, which is needed for names.
+    const SAFE = `
+        id, revision_type, effective_date, status, reason, submitted_at, decided_at,
+        before_ctc_annual, new_ctc_annual, delta_amount, delta_pct, retro_months, employee_id,
+        employees!inner(id, first_name, last_name, employee_code)
+      `
+
+    let { data, error, count } = await build(FULL)
+    if (error) {
+      req.log.warn({ err: error }, 'compensation/revisions full embed failed — retrying without profile joins')
+      ;({ data, error, count } = await build(SAFE))
+      if (error) {
+        req.log.warn({ err: error }, 'compensation/revisions employee embed failed — serving raw rows')
+        ;({ data, error, count } = await build(`
+          id, revision_type, effective_date, status, reason, submitted_at, decided_at,
+          before_ctc_annual, new_ctc_annual, delta_amount, delta_pct, retro_months, employee_id
+        `))
+        if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revisions' })
+      }
+    }
 
     const rows = (data ?? []).map((r: any) => ({
       id:             r.id,

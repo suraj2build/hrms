@@ -57,7 +57,13 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) {
+      // Table may be missing on a drifted DB (migration 166 / ensure-migration not
+      // applied). Don't 500 the whole Statutory Policy page — return null so the
+      // UI shows defaults (TDS off). Saving requires the table to exist.
+      req.log.warn({ err: error }, 'payroll_statutory_settings read failed — returning defaults (apply migration to enable saving)')
+      return reply.send({ data: null })
+    }
     return reply.send({ data: data ?? null })
   })
 

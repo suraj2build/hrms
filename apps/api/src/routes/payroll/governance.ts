@@ -28,16 +28,24 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('payroll_freeze_log')
-      .select('*, profiles!frozen_by(id, full_name, email)')
-      .eq('tenant_id', req.tenantId)
-      .order('frozen_at', { ascending: false })
+    const build = (sel: string) => {
+      let q = fastify.supabase
+        .from('payroll_freeze_log')
+        .select(sel)
+        .eq('tenant_id', req.tenantId)
+        .order('frozen_at', { ascending: false })
+      if (parsed.data.month) q = q.eq('freeze_month', parsed.data.month)
+      return q
+    }
 
-    if (parsed.data.month) q = q.eq('freeze_month', parsed.data.month)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    let { data, error } = await build('*, profiles!frozen_by(id, full_name, email)')
+    if (error) {
+      // The profiles!frozen_by FK relationship may be missing on a drifted DB →
+      // PostgREST 500. Fall back to raw rows (no joined name) so the page loads.
+      req.log.warn({ err: error }, 'governance/freeze embed failed — serving raw rows')
+      ;({ data, error } = await build('*'))
+      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    }
     return reply.send({ data: data ?? [] })
   })
 
@@ -199,17 +207,24 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('maker_checker_log')
-      .select('*, profiles!maker_id(id, full_name, email)')
-      .eq('tenant_id', req.tenantId)
-      .order('submitted_at', { ascending: false })
+    const build = (sel: string) => {
+      let q = fastify.supabase
+        .from('maker_checker_log')
+        .select(sel)
+        .eq('tenant_id', req.tenantId)
+        .order('submitted_at', { ascending: false })
+      if (parsed.data.entity_type) q = q.eq('entity_type', parsed.data.entity_type)
+      if (parsed.data.status) q = q.eq('status', parsed.data.status)
+      return q
+    }
 
-    if (parsed.data.entity_type) q = q.eq('entity_type', parsed.data.entity_type)
-    if (parsed.data.status) q = q.eq('status', parsed.data.status)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    let { data, error } = await build('*, profiles!maker_id(id, full_name, email)')
+    if (error) {
+      // profiles!maker_id FK may be missing on a drifted DB → 500. Serve raw rows.
+      req.log.warn({ err: error }, 'governance/maker-checker embed failed — serving raw rows')
+      ;({ data, error } = await build('*'))
+      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    }
     return reply.send({ data: data ?? [] })
   })
 
