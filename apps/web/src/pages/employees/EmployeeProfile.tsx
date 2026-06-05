@@ -3721,41 +3721,9 @@ export function EmployeeProfile() {
           {subTab === 'compensation' && (
             <div className="space-y-4">
 
-              {/* ── Pending revision banner ── */}
-              {isAdmin && pendingRevisions.length > 0 && (
-                <div className="rounded-xl border border-warning/40 bg-warning/5 p-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0" />
-                    <span className="text-sm font-semibold text-warning">
-                      {pendingRevisions.length} pending revision{pendingRevisions.length > 1 ? 's' : ''} awaiting approval
-                    </span>
-                  </div>
-                  {pendingRevisions.map((r: any) => (
-                    <div key={r.id} className="flex items-center justify-between gap-2 bg-background/60 rounded-lg px-3 py-2 text-xs">
-                      <div className="flex-1 min-w-0">
-                        <span className="capitalize font-medium">{(r.revision_type ?? '—').replace(/_/g, ' ')}</span>
-                        <span className="text-muted-foreground mx-1.5">→</span>
-                        <span className="font-semibold tabular-nums">{fmtMoney(r.new_ctc_annual)}</span>
-                        <span className="text-muted-foreground ml-1.5">eff. {fmtDate(r.effective_date)}</span>
-                        {r.reason && <span className="text-muted-foreground ml-1.5 truncate">· {r.reason}</span>}
-                      </div>
-                      <div className="flex gap-1.5 flex-shrink-0">
-                        <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-success border-success/30 hover:bg-success/10"
-                          disabled={approveRevisionMutation.isPending}
-                          onClick={() => approveRevisionMutation.mutate(r.id)}
-                        >
-                          {approveRevisionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Approve'}
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-destructive border-destructive/30 hover:bg-destructive/10"
-                          onClick={() => { setRejectTarget(r.id); setRejectReason('') }}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* Pending-revision banner intentionally omitted here — it is already
+                  rendered once at the top of the first Compensation block above.
+                  Rendering it again duplicated the banner on the same tab. */}
 
               {/* Salary revision history — admin only */}
               {isAdmin && (
@@ -4010,13 +3978,15 @@ export function EmployeeProfile() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-semibold">Documents</CardTitle>
-                  <>
-                    <input ref={docInputRef} type="file" className="hidden"
-                      onChange={e => { const f = e.target.files?.[0]; if (!f) return; setDocFile(f); setDocMeta({ name: f.name.replace(/\.[^.]+$/, ''), doc_type: '' }); setDocMetaOpen(true); e.target.value = '' }} />
-                    <Button size="sm" className="h-7 text-xs gap-1" onClick={() => docInputRef.current?.click()}>
-                      <Plus className="h-3.5 w-3.5" />Upload
-                    </Button>
-                  </>
+                  {isAdmin && (
+                    <>
+                      <input ref={docInputRef} type="file" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (!f) return; setDocFile(f); setDocMeta({ name: f.name.replace(/\.[^.]+$/, ''), doc_type: '' }); setDocMetaOpen(true); e.target.value = '' }} />
+                      <Button size="sm" className="h-7 text-xs gap-1" onClick={() => docInputRef.current?.click()}>
+                        <Plus className="h-3.5 w-3.5" />Upload
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -4043,7 +4013,7 @@ export function EmployeeProfile() {
                               <td className="px-4 py-2">
                                 <div className="flex gap-1">
                                   {d.storage_path && <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openSignedUrl(d.storage_path)}><Files className="h-3 w-3" /></Button>}
-                                  <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => delDocMutation.mutate(d.id)}><Trash2 className="h-3 w-3" /></Button>
+                                  {isAdmin && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => delDocMutation.mutate(d.id)}><Trash2 className="h-3 w-3" /></Button>}
                                 </div>
                               </td>
                             </tr>
@@ -4059,10 +4029,12 @@ export function EmployeeProfile() {
           {/* DOCUMENTS › Passport & Visa */}
           {subTab === 'passport-visa' && (
             <div className="space-y-4">
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'passport' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Passport</Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'visa' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Visa</Button>
-              </div>
+              {isAdmin && (
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'passport' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Passport</Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'visa' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Visa</Button>
+                </div>
+              )}
               {(['passport', 'visa'] as const).map(rt => {
                 const items = (pvData?.data ?? []).filter((p: any) => p.record_type === rt)
                 return (
@@ -4081,7 +4053,7 @@ export function EmployeeProfile() {
                                   <p className="text-xs text-muted-foreground">Expires: {fmtDate(pv.expiry_date)}</p>
                                   {soon && <Badge variant="warning" className="rounded-full text-[9px] mt-1">Expiring soon</Badge>}
                                 </div>
-                                <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delPvMutation.mutate(pv.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                {isAdmin && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => delPvMutation.mutate(pv.id)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                               </div>
                             )
                           })}</div>}
@@ -4105,7 +4077,7 @@ export function EmployeeProfile() {
                       <CardContent className="pt-4 pb-4 flex items-start justify-between">
                         <div>
                           <p className="text-sm font-semibold">{fm.name}</p>
-                          <p className="text-xs text-muted-foreground capitalize">{fm.relationship_type?.name ?? '—'}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{fm.relationship_types?.name ?? '—'}</p>
                           {fm.dob && <p className="text-xs text-muted-foreground">{fmtDate(fm.dob)}</p>}
                           {fm.is_dependent && <Badge variant="outline" className="rounded-full text-[9px] mt-1">Dependent</Badge>}
                         </div>

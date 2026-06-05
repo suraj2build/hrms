@@ -100,6 +100,32 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
   })
 
   /**
+   * GET /trust/scores/employee/:employeeId
+   * Latest employee-type trust score for one employee. Returns { score: null }
+   * (not 404) when no score has been computed yet, so the Insights panel simply
+   * hides the row instead of erroring.
+   */
+  fastify.get('/trust/scores/employee/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const { employeeId } = req.params as { employeeId: string }
+    const tenantId = (req as any).user.tenant_id
+    const { data, error } = await fastify.supabase
+      .from('workforce_trust_scores')
+      .select('id, score, severity, factors, explainability, computed_at')
+      .eq('org_id', tenantId)
+      .eq('entity_id', employeeId)
+      .eq('score_type', 'employee')
+      .maybeSingle()
+    if (error) return reply.status(500).send({ error: error.message })
+    return {
+      score:          data?.score          ?? null,
+      severity:       data?.severity        ?? null,
+      factors:        data?.factors         ?? [],
+      explainability: data?.explainability  ?? null,
+      computed_at:    data?.computed_at      ?? null,
+    }
+  })
+
+  /**
    * GET /trust/regulatory/revisions
    * List compliance revision events (pending or all).
    */
