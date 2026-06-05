@@ -2,14 +2,18 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
+// Unselected dropdowns arrive as '' from the form — coerce '' → undefined so
+// optional enum fields validate instead of rejecting the whole save with a 400.
+const emptyToUndef = (v: unknown) => (v === '' ? undefined : v)
+
 const schema = z.object({
-  gender:                 z.enum(['male','female','other']).optional(),
-  dob:                    z.string().optional(),
-  marital_status:         z.enum(['single','married','divorced','widowed']).optional(),
+  gender:                 z.preprocess(emptyToUndef, z.enum(['male','female','other']).optional()),
+  dob:                    z.preprocess(emptyToUndef, z.string().optional()),
+  marital_status:         z.preprocess(emptyToUndef, z.enum(['single','married','divorced','widowed']).optional()),
   blood_group:            z.string().optional(),
   nationality:            z.string().optional().default('Indian'),
   religion:               z.string().optional(),
-  caste_category:         z.enum(['general','obc','sc','st','ews']).optional(),
+  caste_category:         z.preprocess(emptyToUndef, z.enum(['general','obc','sc','st','ews']).optional()),
   physically_handicapped: z.boolean().optional().default(false),
   profile_photo:          z.string().optional(),
 })
