@@ -18,7 +18,7 @@ import {
   DollarSign, Landmark, FileText, Files, Globe,
   Users, Award, CreditCard, Camera, Loader2,
   BookOpen, Plus, Trash2, Edit2, X, Check, Pencil,
-  AlarmClock, Clock, ChevronLeft, ChevronRight,
+  AlarmClock,
   MapPin, LayoutGrid, CalendarClock, GraduationCap,
   AlertTriangle, CheckCircle2, Banknote, TrendingUp,
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy,
@@ -827,6 +827,13 @@ export function EmployeeProfile() {
     },
     onError: (e: Error) => toast.error('Failed to update account', { description: e.message }),
   })
+  const [resetPwdOpen, setResetPwdOpen]   = useState(false)
+  const [resetPwdValue, setResetPwdValue] = useState('')
+  const resetPwdMutation = useMutation({
+    mutationFn: (new_password: string) => api.post(`/employees/${id}/user-account/reset-password`, { new_password }),
+    onSuccess: () => { setResetPwdOpen(false); toast.success('Password reset') },
+    onError: (e: Error) => toast.error('Failed to reset password', { description: e.message }),
+  })
 
   // ── New: Payroll revisions (lazy, admin only) ──────────────────────────────
   const { data: payrollRevisionsData, refetch: refetchRevisions } = useQuery<{ data: any[] }>({
@@ -1038,22 +1045,26 @@ export function EmployeeProfile() {
     onError:   (e: Error) => toast.error('Failed to update org context', { description: e.message }),
   })
 
+  // Declared here (before the site/roster/rotation list queries) because those
+  // queries enable on `orgDlgOpen || addJobOpen`.
+  const [addJobOpen, setAddJobOpen] = useState(false)
+
   const { data: sitesListData } = useQuery<{ data: { id: string; name: string }[] }>({
     queryKey: ['sites-list'],
     queryFn:  () => api.get('/masters/sites'),
-    enabled:  orgDlgOpen,
+    enabled:  orgDlgOpen || addJobOpen,
     staleTime: 120_000,
   })
   const { data: rostersListData } = useQuery<{ data: { id: string; name: string }[] }>({
     queryKey: ['rosters-list'],
     queryFn:  () => api.get('/masters/rosters'),
-    enabled:  orgDlgOpen,
+    enabled:  orgDlgOpen || addJobOpen,
     staleTime: 120_000,
   })
   const { data: rotationListData } = useQuery<{ data: { id: string; name: string }[] }>({
     queryKey: ['rotation-policies-list'],
     queryFn:  () => api.get('/masters/rotation-policies'),
-    enabled:  orgDlgOpen,
+    enabled:  orgDlgOpen || addJobOpen,
     staleTime: 120_000,
   })
   const sitesList    = sitesListData?.data    ?? []
@@ -1076,10 +1087,6 @@ export function EmployeeProfile() {
   }
 
   // ── Master data for assignment dialogs (lazy — loads only when dialog opens) ─
-  // Job Details editor open-state — declared here because the master-list queries
-  // below gate their `enabled` on it.
-  const [addJobOpen, setAddJobOpen] = useState(false)
-
   const { data: deptListData } = useQuery<{ data: { id: string; name: string; code: string }[] }>({
     queryKey: ['departments'], queryFn: () => api.get('/departments'),
     enabled: !!id, staleTime: 300_000,
@@ -1255,22 +1262,61 @@ export function EmployeeProfile() {
   // (addJobOpen is declared earlier — it's referenced by the master-list queries)
   const [jobForm, setJobForm]       = useState<any>({})
   const addJobMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/job-history`, d),
+    mutationFn: async (d: any) => {
+      // One form writes to TWO backends (single-writer split preserved):
+      //   • job fields            → job_history
+      //   • site/roster/rotation  → org-context (only when actually changed, so a
+      //     plain job edit doesn't spawn a redundant org assignment).
+      const { site_id, roster_id, rotation_policy_id, ...jobFields } = d
+      await api.post(`/employees/${id}/job-history`, jobFields)
+      const curSite   = orgCtx?.site?.id           ?? ''
+      const curRoster = orgCtx?.roster?.id          ?? ''
+      const curRot    = orgCtx?.rotation_policy_id  ?? ''
+      const orgChanged =
+        (site_id ?? '') !== curSite ||
+        (roster_id ?? '') !== curRoster ||
+        (rotation_policy_id ?? '') !== curRot
+      if (orgChanged) {
+        await api.post(`/employees/${id}/org-context`, {
+          site_id:            site_id            || null,
+          roster_id:          roster_id          || null,
+          rotation_policy_id: rotation_policy_id || null,
+          effective_from:     jobFields.effective_from,
+          reason:             jobFields.reason_for_change || null,
+        })
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['job-history-all', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['emp-org-context', id] })
       setAddJobOpen(false)
       toast.success(job ? 'Job details revised' : 'Job details saved')
     },
     onError:   (e: Error) => toast.error('Failed to save job details', { description: e.message }),
   })
+  const delJobMutation = useMutation({
+    mutationFn: (rowId: string) => api.delete(`/employees/${id}/job-history/${rowId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['job-history-all', id] })
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      toast.success('Position record deleted')
+    },
+    onError:   (e: Error) => toast.error('Failed to delete record', { description: e.message }),
+  })
 
   // Open the unified Job Details editor. With an existing record it pre-fills the
   // current values and defaults effective_from to today (a change creates an
   // effective-dated REVISION). With no record it starts blank, effective from the
-  // joining date (a plain CREATION — no revision noise).
+  // joining date (a plain CREATION — no revision noise). Site/roster/rotation are
+  // pre-filled from the current org context so the one form edits everything.
   function openJobEditor() {
     const today = new Date().toISOString().slice(0, 10)
+    const org = {
+      site_id:            orgCtx?.site?.id           ?? '',
+      roster_id:          orgCtx?.roster?.id          ?? '',
+      rotation_policy_id: orgCtx?.rotation_policy_id  ?? '',
+    }
     setJobForm(job ? {
       employment_type:   job.employment_type        ?? 'permanent',
       department_id:     job.departments?.id         ?? null,
@@ -1279,10 +1325,12 @@ export function EmployeeProfile() {
       manager_id:        job.manager?.id             ?? null,
       work_location_id:  job.work_locations?.id      ?? null,
       cost_center_id:    job.cost_center?.id         ?? null,
+      ...org,
       effective_from:    today,
       reason_for_change: '',
     } : {
       employment_type:   'permanent',
+      ...org,
       effective_from:    (emp as any)?.joining_date  ?? today,
       reason_for_change: 'Initial',
     })
@@ -1623,22 +1671,8 @@ export function EmployeeProfile() {
   })
   const rosterToday = rosterTodayData?.data ?? null
 
-  // ── Monthly attendance summary ─────────────────────────────────────────────
-  const [attMonth, setAttMonth] = useState(() => new Date().toISOString().slice(0, 7))
-  const attFrom = `${attMonth}-01`
-  const attTo   = useMemo(() => {
-    const [y, m] = attMonth.split('-').map(Number)
-    return new Date(y, m, 0).toISOString().slice(0, 10)
-  }, [attMonth])
-
-  interface AttSummary { total_days: number; payable_days: number; lop_days: number; present: number; absent: number; late: number }
-  const { data: attResp, isLoading: attLoading } = useQuery<{ summary: AttSummary }>({
-    queryKey: ['employee-attendance-summary', id, attMonth],
-    queryFn:  () => api.get(`/attendance/${id}?from=${attFrom}&to=${attTo}`),
-    enabled:  !!id,
-    staleTime: 60_000,
-  })
-  const attSummary = attResp?.summary
+  // Monthly attendance summary removed from the employee master (lives in the
+  // Attendance module).
 
   // ── Loading guard ──────────────────────────────────────────────────────────
   if (isLoading) {
@@ -2268,6 +2302,14 @@ export function EmployeeProfile() {
                             Reactivate
                           </Button>
                         )}
+                        {(status === 'pending_verification' || status === 'active' || status === 'suspended') && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+                            onClick={() => { setResetPwdValue(''); setResetPwdOpen(true) }}
+                          >
+                            <KeyRound className="h-3 w-3" />
+                            Reset Password
+                          </Button>
+                        )}
                       </div>
                     </div>
 
@@ -2533,7 +2575,7 @@ export function EmployeeProfile() {
                     </p>
                   )}
                   <p className="mt-3 text-[10px] text-muted-foreground">
-                    Shift, roster &amp; rotation are managed on the <button className="underline hover:text-foreground" onClick={() => setSubTab('shift-schedule')}>Shift &amp; Roster</button> tab. Editing here records an effective-dated revision (see Position History).
+                    Site, roster &amp; rotation can be set in <button className="underline hover:text-foreground" onClick={openJobEditor}>Edit Job Details</button> (shown in the Site &amp; Roster Assignment card below); shift overrides live on the <button className="underline hover:text-foreground" onClick={() => setSubTab('shift-schedule')}>Shift &amp; Roster</button> tab. Editing records an effective-dated revision (see Position History).
                   </p>
                 </CardContent>
               </Card>
@@ -2695,47 +2737,8 @@ export function EmployeeProfile() {
                 </CardContent>
               </Card>
 
-              {/* Monthly Attendance — belongs here alongside shift/roster context */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
-                      Attendance — {attMonth}
-                    </CardTitle>
-                    <div className="flex items-center gap-1">
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
-                        const d = new Date(`${attMonth}-01`); d.setMonth(d.getMonth() - 1)
-                        setAttMonth(d.toISOString().slice(0, 7))
-                      }}><ChevronLeft className="h-3.5 w-3.5" /></Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => {
-                        const d = new Date(`${attMonth}-01`); d.setMonth(d.getMonth() + 1)
-                        setAttMonth(d.toISOString().slice(0, 7))
-                      }}><ChevronRight className="h-3.5 w-3.5" /></Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {attLoading
-                    ? <div className="flex items-center gap-1.5 py-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /><span className="text-xs">Loading…</span></div>
-                    : attSummary
-                      ? (
-                        <div className="grid grid-cols-3 gap-3 text-center">
-                          {[
-                            { label: 'Total Days',   value: attSummary.total_days,                          cls: 'text-foreground'    },
-                            { label: 'Payable Days', value: attSummary.payable_days ?? attSummary.present,  cls: 'text-success'       },
-                            { label: 'LOP Days',     value: attSummary.lop_days     ?? attSummary.absent,   cls: 'text-destructive'   },
-                          ].map(({ label, value, cls }) => (
-                            <div key={label} className="p-2 rounded-md bg-muted/40">
-                              <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
-                              <p className={`text-lg font-bold ${cls}`}>{value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                      : <p className="text-xs text-muted-foreground">No attendance data for this month.</p>}
-                </CardContent>
-              </Card>
+              {/* Monthly Attendance summary intentionally NOT shown in the employee
+                  master — attendance lives in the Attendance module. */}
             </div>
           )}
 
@@ -2758,7 +2761,7 @@ export function EmployeeProfile() {
                   ? <div className="px-6 pb-6"><EmptySection icon={History} title="No position history" /></div>
                   : <div className="overflow-x-auto">
                       <table className="w-full text-xs">
-                        <thead><tr className="border-b border-border">{['Dept','Designation','Work Location','Cost Center','Manager','Eff. From','Eff. To'].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>)}</tr></thead>
+                        <thead><tr className="border-b border-border">{['Dept','Designation','Work Location','Cost Center','Manager','Eff. From','Eff. To', ...(isAdmin ? [''] : [])].map((h,i)=><th key={h||`act${i}`} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>)}</tr></thead>
                         <tbody>
                           {jobHistoryData!.data.map((row: any) => (
                             <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20">
@@ -2769,6 +2772,14 @@ export function EmployeeProfile() {
                               <td className="px-4 py-2">{row.manager ? `${row.manager.first_name} ${row.manager.last_name}` : '—'}</td>
                               <td className="px-4 py-2 whitespace-nowrap">{fmtDate(row.effective_from)}</td>
                               <td className="px-4 py-2 whitespace-nowrap">{row.is_current ? <Badge variant="success" className="rounded-full text-[9px]">Current</Badge> : fmtDate(row.effective_to)}</td>
+                              {isAdmin && (
+                                <td className="px-4 py-2 text-right">
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                                    onClick={() => { if (confirm('Delete this position record? This cannot be undone.')) delJobMutation.mutate(row.id) }}>
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -3382,9 +3393,6 @@ export function EmployeeProfile() {
               </Card>
             )}
 
-            {/* F. Intelligence Panel */}
-            {id && <IntelligencePanel employeeId={id} isAdmin={isAdmin} />}
-
             {/* G. Compensation Revision Drawer */}
             <CompensationRevisionDrawer
               revision={drawerRevision}
@@ -3848,9 +3856,6 @@ export function EmployeeProfile() {
               {/* Revision History & Compensation History are rendered once in the
                   primary Compensation block above — removed here to end the
                   duplicate-render (they previously appeared twice on this tab). */}
-
-              {/* ── Compliance Intelligence panel ── */}
-              {id && <IntelligencePanel employeeId={id} isAdmin={isAdmin} />}
 
               {/* ── Initiate Revision dialog ── */}
               {isAdmin && (
@@ -4329,6 +4334,35 @@ export function EmployeeProfile() {
                 </select>
               </div>
             </div>
+            {/* Site / Roster / Rotation — written to org-context on save */}
+            <div className="pt-1 border-t border-border/60">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mt-2 mb-1">Site, Roster &amp; Rotation</p>
+              <div className="space-y-2">
+                <div>
+                  <Label className="text-xs">Site</Label>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.site_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,site_id:e.target.value}))}>
+                    <option value="">— None —</option>
+                    {sitesList.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">Roster</Label>
+                    <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.roster_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,roster_id:e.target.value}))}>
+                      <option value="">— Inherit from site —</option>
+                      {rostersList.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Rotation Policy</Label>
+                    <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.rotation_policy_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,rotation_policy_id:e.target.value}))}>
+                      <option value="">— Inherit from site —</option>
+                      {rotationList.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
             {/* Effective From */}
             <div>
               <Label className="text-xs">Effective From *</Label>
@@ -4344,6 +4378,26 @@ export function EmployeeProfile() {
             <Button variant="outline" size="sm" onClick={()=>setAddJobOpen(false)}>Cancel</Button>
             <Button size="sm" onClick={()=>addJobMutation.mutate(jobForm)} disabled={addJobMutation.isPending || !jobForm.effective_from}>
               {addJobMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Portal Password (admin) */}
+      <Dialog open={resetPwdOpen} onOpenChange={setResetPwdOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Reset Portal Password</DialogTitle></DialogHeader>
+          <div className="space-y-2">
+            <Label className="text-xs">New Password</Label>
+            <Input type="text" className="h-8 text-xs font-mono" placeholder="Min 8 characters"
+              value={resetPwdValue} onChange={e => setResetPwdValue(e.target.value)} />
+            <p className="text-[10px] text-muted-foreground">The employee can change it after signing in. Share it securely.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setResetPwdOpen(false)}>Cancel</Button>
+            <Button size="sm" disabled={resetPwdMutation.isPending || resetPwdValue.trim().length < 8}
+              onClick={() => resetPwdMutation.mutate(resetPwdValue.trim())}>
+              {resetPwdMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Set Password
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -357,4 +357,42 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
 
     return reply.send({ status: action === 'suspend' ? 'suspended' : 'active' })
   })
+
+  // ── POST /employees/:id/user-account/reset-password ────────────────────────
+  // Admin sets a new password for the employee's portal account directly.
+  fastify.post('/employees/:id/user-account/reset-password', auth, async (req, reply) => {
+    const { id }   = req.params as { id: string }
+    const userRole = (req as any).userRole as string
+    const tenantId = (req as any).tenantId as string
+
+    if (!ADMIN_ROLES.includes(userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR Admin access required' })
+    }
+
+    const parsed = z.object({ new_password: z.string().min(8, 'Password must be at least 8 characters') }).safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid password' })
+    }
+
+    const { data: profile, error: profileErr } = await fastify.supabase
+      .from('profiles')
+      .select('id')
+      .eq('employee_id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (profileErr || !profile) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'No user account found for this employee' })
+    }
+
+    const { error: pwErr } = await fastify.supabase.auth.admin.updateUserById(profile.id, {
+      password: parsed.data.new_password,
+    })
+    if (pwErr) {
+      fastify.log.error({ err: pwErr, employeeId: id }, 'user-account: password reset failed')
+      return reply.code(500).send({ error: 'AUTH_ERROR', message: pwErr.message })
+    }
+
+    fastify.log.info({ employeeId: id, profileId: profile.id }, 'user-account: password reset by admin')
+    return reply.send({ status: 'password_reset' })
+  })
 }
