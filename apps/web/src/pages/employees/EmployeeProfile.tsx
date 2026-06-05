@@ -2384,8 +2384,10 @@ export function EmployeeProfile() {
                 </CardContent>
               </Card>
 
-              {/* Org context panel — Site & Roster */}
-              {job && (
+              {/* Org context panel — Site & Roster. Always shown: org context
+                  (site/roster/rotation) is independent of the job_history row, so
+                  it must render — and stay editable — even when no job is set. */}
+              {true && (
                 <Card>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -2823,72 +2825,78 @@ export function EmployeeProfile() {
               )}
 
               {/* Edit Dialog */}
-              <Dialog open={orgDlgOpen} onOpenChange={setOrgDlgOpen}>
-                <DialogContent className="max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle>Update Organisation Assignment</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Site</label>
-                      <select value={orgForm.site_id} onChange={(e) => setOrgForm((p) => ({ ...p, site_id: e.target.value }))}
-                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                        <option value="">— None —</option>
-                        {sitesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Work Location</label>
-                      <select value={orgForm.work_location_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, work_location_id: e.target.value }))}
-                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                        <option value="">— None —</option>
-                        {(wlListData?.data ?? []).map((w:any) => <option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Cost Center</label>
-                      <select value={orgForm.cost_center_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, cost_center_id: e.target.value }))}
-                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                        <option value="">— None —</option>
-                        {(ccListData?.data ?? []).map((c:any) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Roster</label>
-                      <select value={orgForm.roster_id} onChange={(e) => setOrgForm((p) => ({ ...p, roster_id: e.target.value }))}
-                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                        <option value="">— None —</option>
-                        {rostersList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Rotation Policy</label>
-                      <select value={orgForm.rotation_policy_id} onChange={(e) => setOrgForm((p) => ({ ...p, rotation_policy_id: e.target.value }))}
-                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
-                        <option value="">— Inherit from site default —</option>
-                        {rotationList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Effective From *</label>
-                      <DateInput value={orgForm.effective_from} onChange={(v) => setOrgForm((p) => ({ ...p, effective_from: v }))} className="h-8 text-xs" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Reason</label>
-                      <Input value={orgForm.reason} onChange={(e) => setOrgForm((p) => ({ ...p, reason: e.target.value }))} placeholder="Transfer, restructure…" className="h-8 text-xs" />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="ghost" size="sm" onClick={() => setOrgDlgOpen(false)}>Cancel</Button>
-                    <Button size="sm" disabled={orgMutation.isPending || !orgForm.effective_from}
-                      onClick={() => orgMutation.mutate(orgForm)}>
-                      {orgMutation.isPending ? 'Saving…' : 'Save'}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
             </div>
           )}
+
+          {/* Organisation Assignment dialog — rendered at top level (NOT inside a
+              subTab block) so the Reassign buttons on BOTH the Workforce and
+              Shift & Roster tabs can open it. Previously it lived inside the
+              shift-schedule block, so clicking Reassign on Workforce set the open
+              flag but mounted no dialog → "nothing happened". */}
+          <Dialog open={orgDlgOpen} onOpenChange={setOrgDlgOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Update Organisation Assignment</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Site</label>
+                  <select value={orgForm.site_id} onChange={(e) => setOrgForm((p) => ({ ...p, site_id: e.target.value }))}
+                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                    <option value="">— None —</option>
+                    {sitesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Work Location</label>
+                  <select value={orgForm.work_location_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, work_location_id: e.target.value }))}
+                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                    <option value="">— None —</option>
+                    {(wlListData?.data ?? []).map((w:any) => <option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Cost Center</label>
+                  <select value={orgForm.cost_center_id ?? ''} onChange={(e) => setOrgForm((p) => ({ ...p, cost_center_id: e.target.value }))}
+                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                    <option value="">— None —</option>
+                    {(ccListData?.data ?? []).map((c:any) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Roster</label>
+                  <select value={orgForm.roster_id} onChange={(e) => setOrgForm((p) => ({ ...p, roster_id: e.target.value }))}
+                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                    <option value="">— None —</option>
+                    {rostersList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Rotation Policy</label>
+                  <select value={orgForm.rotation_policy_id} onChange={(e) => setOrgForm((p) => ({ ...p, rotation_policy_id: e.target.value }))}
+                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50">
+                    <option value="">— Inherit from site default —</option>
+                    {rotationList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Effective From *</label>
+                  <DateInput value={orgForm.effective_from} onChange={(v) => setOrgForm((p) => ({ ...p, effective_from: v }))} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Reason</label>
+                  <Input value={orgForm.reason} onChange={(e) => setOrgForm((p) => ({ ...p, reason: e.target.value }))} placeholder="Transfer, restructure…" className="h-8 text-xs" />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" size="sm" onClick={() => setOrgDlgOpen(false)}>Cancel</Button>
+                <Button size="sm" disabled={orgMutation.isPending || !orgForm.effective_from}
+                  onClick={() => orgMutation.mutate(orgForm)}>
+                  {orgMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* COMPENSATION › Compensation */}
           {subTab === 'compensation' && (
