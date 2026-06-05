@@ -82,12 +82,16 @@ async function buildITStatement(
     // Payroll slips for the FY
     fastify.supabase
       .from('payroll_slips')
-      .select('period_month, gross_earnings, basic_salary, hra_component, tds_deducted, net_pay')
+      // payroll_slips columns are month / gross_pay / tds_deducted (NOT
+      // period_month / gross_earnings — those never existed, so this query used to
+      // error and the IT statement never populated). HRA is derived from the
+      // stored component_breakdown.
+      .select('month, gross_pay, tds_deducted, net_pay, component_breakdown')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
-      .gte('period_month', fromPeriod)
-      .lte('period_month', toPeriod)
-      .order('period_month', { ascending: true }),
+      .gte('month', fromPeriod)
+      .lte('month', toPeriod)
+      .order('month', { ascending: true }),
 
     // Approved tax declarations
     fastify.supabase
@@ -118,13 +122,19 @@ async function buildITStatement(
   if (!employee) throw new Error('Employee not found')
 
   // ── Aggregate from payroll slips ───────────────────────────────────────────
-  const grossFromSlips = slips.reduce((s, r) => s + (r.gross_earnings ?? 0), 0)
-  const hraFromSlips   = slips.reduce((s, r) => s + (r.hra_component  ?? 0), 0)
-  const tdsYTD         = slips.reduce((s, r) => s + (r.tds_deducted   ?? 0), 0)
+  // Derive HRA paid from the slip's component breakdown (HRA-coded earnings).
+  const hraOf = (slip: any): number =>
+    ((slip?.component_breakdown ?? []) as any[])
+      .filter((c: any) => c?.component_type === 'earning' && /hra|house\s*rent/i.test(`${c?.code ?? ''} ${c?.name ?? ''}`))
+      .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
+
+  const grossFromSlips = slips.reduce((s, r) => s + (r.gross_pay ?? 0), 0)
+  const hraFromSlips   = slips.reduce((s, r) => s + hraOf(r), 0)
+  const tdsYTD         = slips.reduce((s, r) => s + (r.tds_deducted ?? 0), 0)
 
   // Use last slip for monthly gross projection (or average)
   const lastSlip     = slips[slips.length - 1]
-  const monthlyGross = lastSlip?.gross_earnings ?? (grossFromSlips / Math.max(slips.length, 1))
+  const monthlyGross = lastSlip?.gross_pay ?? (grossFromSlips / Math.max(slips.length, 1))
 
   // ── Build gross annual projection ─────────────────────────────────────────
   // For months with no payroll slip yet, project using last known monthly gross
@@ -133,12 +143,12 @@ async function buildITStatement(
   for (let m = 1; m <= 3;  m++) fyMonths.push(`${fyEnd}-${String(m).padStart(2, '0')}`)
 
   const slipMap: Record<string, any> = {}
-  for (const s of slips) slipMap[s.period_month] = s
+  for (const s of slips) slipMap[s.month] = s
 
   let projectedAnnualGross = 0
   for (const month of fyMonths) {
     const slip = slipMap[month]
-    projectedAnnualGross += slip ? (slip.gross_earnings ?? 0) : monthlyGross
+    projectedAnnualGross += slip ? (slip.gross_pay ?? 0) : monthlyGross
   }
 
   // ── Map declarations to deduction categories ───────────────────────────────
@@ -186,7 +196,7 @@ async function buildITStatement(
     const year = monthNum >= 4 ? fyStart : fyEnd
     const key  = `${year}-${String(monthNum).padStart(2, '0')}`
     const slip = slipMap[key]
-    const gross = slip?.gross_earnings ?? 0
+    const gross = slip?.gross_pay ?? 0
     const tds   = slip?.tds_deducted   ?? 0
     cumulativeTds += tds
     return {

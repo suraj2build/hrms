@@ -171,14 +171,14 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     // Load employee's latest payroll slip for gross salary
     const { data: latestSlip } = await fastify.supabase
       .from('payroll_slips')
-      .select('gross_earnings')
+      .select('gross_pay')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .order('period_month', { ascending: false })
+      .order('month', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    const grossMonthly = (latestSlip as any)?.gross_earnings ?? 0
+    const grossMonthly = (latestSlip as any)?.gross_pay ?? 0
     const grossAnnual  = grossMonthly * 12
 
     // Compute tax for each plan
@@ -202,8 +202,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
           .select('tds_deducted')
           .eq('employee_id', employeeId)
           .eq('tenant_id', req.tenantId)
-          .gte('period_month', `${fy.split('-')[0]}-04`)
-          .lte('period_month', `${parseInt(fy.split('-')[0]) + 1}-03`)
+          .gte('month', `${fy.split('-')[0]}-04`)
+          .lte('month', `${parseInt(fy.split('-')[0]) + 1}-03`)
 
         const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
 
@@ -530,14 +530,14 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     // Latest payroll slip for gross salary
     const { data: latestSlip } = await fastify.supabase
       .from('payroll_slips')
-      .select('gross_earnings')
+      .select('gross_pay')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .order('period_month', { ascending: false })
+      .order('month', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    const grossAnnual = ((latestSlip as any)?.gross_earnings ?? 0) * 12
+    const grossAnnual = ((latestSlip as any)?.gross_pay ?? 0) * 12
 
     // TDS already deducted
     const { data: slips } = await fastify.supabase
@@ -545,8 +545,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .select('tds_deducted')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .gte('period_month', `${fy.split('-')[0]}-04`)
-      .lte('period_month', `${parseInt(fy.split('-')[0]) + 1}-03`)
+      .gte('month', `${fy.split('-')[0]}-04`)
+      .lte('month', `${parseInt(fy.split('-')[0]) + 1}-03`)
 
     const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
 
@@ -637,22 +637,22 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     // Compute tax to store projection values
     const { data: latestSlip } = await fastify.supabase
       .from('payroll_slips')
-      .select('gross_earnings')
+      .select('gross_pay')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .order('period_month', { ascending: false })
+      .order('month', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    const grossAnnual = ((latestSlip as any)?.gross_earnings ?? 0) * 12
+    const grossAnnual = ((latestSlip as any)?.gross_pay ?? 0) * 12
 
     const { data: slips } = await fastify.supabase
       .from('payroll_slips')
       .select('tds_deducted')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .gte('period_month', `${fy.split('-')[0]}-04`)
-      .lte('period_month', `${parseInt(fy.split('-')[0]) + 1}-03`)
+      .gte('month', `${fy.split('-')[0]}-04`)
+      .lte('month', `${parseInt(fy.split('-')[0]) + 1}-03`)
 
     const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
 

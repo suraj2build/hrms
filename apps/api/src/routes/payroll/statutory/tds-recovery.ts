@@ -239,8 +239,8 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
         .select('tds_deducted')
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employee_id)
-        .gte('period_month', fyStart)
-        .lte('period_month', fyEnd)
+        .gte('month', fyStart)
+        .lte('month', fyEnd)
         // Only include processed slips for accurate TDS figures
         .in('status', ['processed', 'finalized', 'paid'])
 

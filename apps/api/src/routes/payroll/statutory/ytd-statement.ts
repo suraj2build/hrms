@@ -73,27 +73,17 @@ async function buildYTDStatement(
 
     fastify.supabase
       .from('payroll_slips')
-      .select(`
-        period_month,
-        gross_earnings,
-        basic_salary,
-        hra_component,
-        special_allowance,
-        provident_fund,
-        esi_employee,
-        professional_tax,
-        tds_deducted,
-        net_pay,
-        employer_pf,
-        employer_esi,
-        work_days,
-        payable_days
-      `)
+      // payroll_slips stores month / gross_pay / net_pay / tds_deducted +
+      // component_breakdown (JSON). The per-component figures (basic, hra, pf,
+      // esi, ptax, employer shares) are derived from the breakdown below — the
+      // old flat columns (period_month, gross_earnings, provident_fund, …) never
+      // existed, so this query used to error and YTD never populated.
+      .select('month, gross_pay, net_pay, tds_deducted, total_working_days, payable_days, component_breakdown')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
-      .gte('period_month', fromPeriod)
-      .lte('period_month', toPeriod)
-      .order('period_month', { ascending: true }),
+      .gte('month', fromPeriod)
+      .lte('month', toPeriod)
+      .order('month', { ascending: true }),
   ])
 
   const employee = empResult.data as any
@@ -101,9 +91,19 @@ async function buildYTDStatement(
 
   if (!employee) throw new Error('Employee not found')
 
-  // Index slips by period_month
+  // Sum component_breakdown lines whose code/name matches a pattern.
+  const sumComp = (slip: any, re: RegExp): number =>
+    ((slip?.component_breakdown ?? []) as any[])
+      .filter((c: any) => re.test(`${c?.code ?? ''} ${c?.name ?? ''}`))
+      .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
+  const sumBasic = (slip: any): number =>
+    ((slip?.component_breakdown ?? []) as any[])
+      .filter((c: any) => c?.is_basic || /^basic\b/i.test(`${c?.code ?? ''} ${c?.name ?? ''}`))
+      .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
+
+  // Index slips by month
   const slipMap: Record<string, any> = {}
-  for (const s of slips) slipMap[s.period_month] = s
+  for (const s of slips) slipMap[s.month] = s
 
   // ── Build ordered months ───────────────────────────────────────────────────
   const months = FY_MONTH_ORDER.map((monthNum) => {
@@ -113,23 +113,23 @@ async function buildYTDStatement(
 
     if (!slip) return null  // no payroll run yet for this month
 
-    const basic             = Number(slip.basic_salary        ?? 0)
-    const hra               = Number(slip.hra_component       ?? 0)
-    const specialAllowance  = Number(slip.special_allowance   ?? 0)
-    const gross             = Number(slip.gross_earnings      ?? 0)
+    const basic             = sumBasic(slip)
+    const hra               = sumComp(slip, /hra|house\s*rent/i)
+    const specialAllowance  = sumComp(slip, /special/i)
+    const gross             = Number(slip.gross_pay ?? 0)
     const reimbursements    = Math.max(0, gross - basic - hra - specialAllowance)
 
-    const pfEmployee        = Number(slip.provident_fund  ?? 0)
-    const esiEmployee       = Number(slip.esi_employee    ?? 0)
-    const profTax           = Number(slip.professional_tax ?? 0)
-    const tds               = Number(slip.tds_deducted    ?? 0)
+    const pfEmployee        = sumComp(slip, /^PF_EMPLOYEE$|provident fund \(employee\)/i)
+    const esiEmployee       = sumComp(slip, /^ESI_EMPLOYEE$|esi \(employee\)/i)
+    const profTax           = sumComp(slip, /^PTAX$|professional tax/i)
+    const tds               = Number(slip.tds_deducted ?? 0)
     const totalDeductions   = pfEmployee + esiEmployee + profTax + tds
 
-    const pfEmployer        = Number(slip.employer_pf  ?? 0)
-    const esiEmployer       = Number(slip.employer_esi ?? 0)
+    const pfEmployer        = sumComp(slip, /^PF_EMPLOYER$|provident fund \(employer\)/i)
+    const esiEmployer       = sumComp(slip, /^ESI_EMPLOYER$|esi \(employer\)/i)
 
-    const netPay            = Number(slip.net_pay     ?? 0)
-    const workDays          = Number(slip.work_days   ?? 0)
+    const netPay            = Number(slip.net_pay ?? 0)
+    const workDays          = Number(slip.total_working_days ?? 0)
     const payableDays       = Number(slip.payable_days ?? 0)
 
     return {
