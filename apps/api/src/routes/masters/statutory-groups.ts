@@ -18,6 +18,8 @@ const statutoryGroupSchema = z.object({
   esi_enabled:       z.boolean().default(true),
   pt_enabled:        z.boolean().default(false),
   lwf_enabled:       z.boolean().default(false),
+  // PF wage-ceiling mode (migration 227): capped | actual | default(follow tenant).
+  pf_ceiling_mode:   z.enum(['capped', 'actual', 'default']).default('default'),
   pf_wage_ceiling:   z.number().min(0).optional().nullable(),
   esi_wage_ceiling:  z.number().min(0).optional().nullable(),
   pt_slab_json:      z.string().optional().nullable(),

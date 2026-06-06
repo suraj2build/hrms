@@ -24,6 +24,7 @@ interface StatutoryGroup {
   esi_enabled:      boolean
   pt_enabled:       boolean
   lwf_enabled:      boolean
+  pf_ceiling_mode:  'capped' | 'actual' | 'default'
   pf_wage_ceiling:  number | null
   esi_wage_ceiling: number | null
   is_active:        boolean
@@ -33,6 +34,7 @@ interface StatutoryGroup {
 const EMPTY: Omit<StatutoryGroup, 'id' | 'created_at'> = {
   code: '', name: '', state: '',
   pf_enabled: true, esi_enabled: true, pt_enabled: false, lwf_enabled: false,
+  pf_ceiling_mode: 'default',
   pf_wage_ceiling: null, esi_wage_ceiling: null,
   is_active: true,
 }
@@ -77,6 +79,7 @@ export function StatutoryGroups() {
       esi_enabled:      g.esi_enabled,
       pt_enabled:       g.pt_enabled,
       lwf_enabled:      g.lwf_enabled,
+      pf_ceiling_mode:  g.pf_ceiling_mode ?? 'default',
       pf_wage_ceiling:  g.pf_wage_ceiling,
       esi_wage_ceiling: g.esi_wage_ceiling,
       is_active:        g.is_active,
@@ -252,6 +255,21 @@ export function StatutoryGroups() {
                   className="h-8 text-sm"
                 />
               </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">PF Wage-Ceiling Mode</label>
+              <select
+                value={form.pf_ceiling_mode}
+                onChange={(e) => setForm((p) => ({ ...p, pf_ceiling_mode: e.target.value as 'capped' | 'actual' | 'default' }))}
+                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="default">Follow tenant default</option>
+                <option value="capped">Capped — restrict PF wages to the ceiling</option>
+                <option value="actual">Actual — PF on full wages (no ceiling)</option>
+              </select>
+              <p className="text-[10px] text-muted-foreground">
+                Applies to every employee tagged to this group, unless they have a per-employee override.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
               {([

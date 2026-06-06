@@ -251,17 +251,24 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     // an employee has no group, or the group can't be read, default to APPLICABLE.
     // A group with pf_enabled = false forces the employee's PF to zero.
     const groupIds = [...new Set(empList.map(e => e.statutory_group_id).filter(Boolean))] as string[]
-    const groupPfEnabled = new Map<string, boolean>()
+    const groupPfEnabled    = new Map<string, boolean>()
+    const groupPfCeilingMode = new Map<string, string>()   // 'capped' | 'actual' | 'default'
     if (groupIds.length > 0) {
+      // select '*' so this is resilient even before migration 227 (pf_ceiling_mode) is applied.
       const { data: groups } = await fastify.supabase
         .from('statutory_groups')
-        .select('id, pf_enabled')
+        .select('*')
         .eq('tenant_id', req.tenantId)
         .in('id', groupIds)
-      for (const g of (groups ?? []) as any[]) groupPfEnabled.set(g.id, g.pf_enabled !== false)
+      for (const g of (groups ?? []) as any[]) {
+        groupPfEnabled.set(g.id, g.pf_enabled !== false)
+        groupPfCeilingMode.set(g.id, (g.pf_ceiling_mode as string) ?? 'default')
+      }
     }
     const empPfEnabled = (emp: { statutory_group_id: string | null }) =>
       emp.statutory_group_id ? (groupPfEnabled.get(emp.statutory_group_id) ?? true) : true
+    const empPfCeilingMode = (emp: { statutory_group_id: string | null }) =>
+      emp.statutory_group_id ? (groupPfCeilingMode.get(emp.statutory_group_id) ?? 'default') : 'default'
 
     // ── EPF eligibility overrides (configure-once → persists) ─────────────────
     // Fetch the current active override for each employee — includes UAN,
@@ -426,11 +433,19 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         higherPfPct,
       }
 
-      // Employee-level ceiling override (migration 170: restrict_pf_to_ceiling).
-      // NULL  = follow tenant policy (config.isWageCeilingApplicable).
-      // true  = always cap PF wages to statutory ceiling (even if tenant is unrestricted).
-      // false = never cap PF wages to ceiling (international workers, CXO agreements).
-      const restrictPfToCeiling = eligibility?.restrict_pf_to_ceiling ?? null
+      // PF wage-ceiling resolution — precedence:
+      //   1. Per-employee override (migration 170: restrict_pf_to_ceiling) — wins.
+      //   2. Else the employee's statutory-group pf_ceiling_mode (migration 227):
+      //        capped → true, actual → false, default → follow tenant.
+      //   3. Else NULL → follow tenant policy (config.isWageCeilingApplicable).
+      // true  = always cap PF wages to statutory ceiling. false = never cap (no ceiling).
+      let restrictPfToCeiling: boolean | null = eligibility?.restrict_pf_to_ceiling ?? null
+      if (restrictPfToCeiling === null) {
+        const mode = empPfCeilingMode(emp)
+        if      (mode === 'capped') restrictPfToCeiling = true
+        else if (mode === 'actual') restrictPfToCeiling = false
+        // 'default' → leave null → follow tenant
+      }
       const employeeConfig: EPFConfig =
         restrictPfToCeiling === null
           ? config   // no employee-level override — use tenant policy as-is
