@@ -190,9 +190,10 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       financial_year: z.string().min(1),
       gender: z.enum(['male', 'female', 'other']).optional(),
       monthly_income_from: z.number(),
-      monthly_income_to: z.number().optional(),
+      // blank "to" = open-ended top band → null accepted (not just undefined).
+      monthly_income_to: z.number().nullable().optional(),
       monthly_ptax: z.number(),
-      annual_ptax: z.number().optional(),
+      annual_ptax: z.number().nullable().optional(),
     })
 
     const parsed = schema.safeParse(req.body)
