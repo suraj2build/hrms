@@ -388,21 +388,25 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     }
 
     // ── State resolution ───────────────────────────────────────────────────────
-    // Priority: ptax_state_config (manual) > sites.state_code (auto)
-    const { data: stateConfigs } = await fastify.supabase
-      .from('ptax_state_config')
-      .select('employee_id, state_code')
-      .eq('tenant_id', req.tenantId)
-      .lte('effective_from', monthDate)
-      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
-      .order('effective_from', { ascending: false })
+    // Priority: ptax_state_config (manual) > lwf_state_config (shared work state)
+    //           > sites.state_code (auto). An employee works in one state, so the
+    //           LWF state assignment also drives PT when PT's own isn't set.
+    const [{ data: stateConfigs }, { data: lwfStateConfigs }] = await Promise.all([
+      fastify.supabase.from('ptax_state_config')
+        .select('employee_id, state_code').eq('tenant_id', req.tenantId)
+        .order('effective_from', { ascending: false }),
+      fastify.supabase.from('lwf_state_config')
+        .select('employee_id, state_code').eq('tenant_id', req.tenantId)
+        .order('effective_from', { ascending: false }),
+    ])
 
-    // Map employee_id → most recent manual state override
+    // Map employee_id → most recent manual state override (PT first, else LWF)
     const manualStateMap = new Map<string, string>()
     for (const cfg of (stateConfigs ?? []) as any[]) {
-      if (!manualStateMap.has(cfg.employee_id) && cfg.state_code) {
-        manualStateMap.set(cfg.employee_id, cfg.state_code)
-      }
+      if (!manualStateMap.has(cfg.employee_id) && cfg.state_code) manualStateMap.set(cfg.employee_id, cfg.state_code)
+    }
+    for (const cfg of (lwfStateConfigs ?? []) as any[]) {
+      if (!manualStateMap.has(cfg.employee_id) && cfg.state_code) manualStateMap.set(cfg.employee_id, cfg.state_code)
     }
 
     // ── PTax exemptions ────────────────────────────────────────────────────────
@@ -490,6 +494,8 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     let skippedNoState = 0
     let wagesFromSlip = 0
     let wagesFallback = 0
+    const noSlabStates = new Set<string>()   // states with employees but no slabs
+    let skippedNoSlabs = 0
 
     for (const emp of empList) {
       // Skip exempted employees
@@ -500,7 +506,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       if (!stateCode) { skippedNoState++; continue }
 
       const slabs = slabsByState.get(stateCode) ?? []
-      if (slabs.length === 0) continue  // no slabs configured for this state/FY
+      if (slabs.length === 0) { skippedNoSlabs++; noSlabStates.add(stateCode); continue }  // no slabs for state/FY
 
       // Resolve gross wages
       let grossSalary: number
@@ -537,6 +543,10 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       computed_count:    contributions.length,
       skipped_exempt:    skippedExempt,
       skipped_no_state:  skippedNoState,
+      skipped_no_slabs:  skippedNoSlabs,
+      no_slab_states:    [...noSlabStates],
+      total_active:      empList.length,
+      financial_year,
       wages_from_slip:   wagesFromSlip,
       wages_fallback:    wagesFallback,
       month,

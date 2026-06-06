@@ -94,9 +94,26 @@ export function PTAXManagement() {
   // ── Manual contribution compute (FY auto-derived from month server-side) ──────
   const computeMutation = useMutation({
     mutationFn: (month: string) => api.post('/payroll/statutory/ptax/contributions/compute', { month }),
-    onSuccess: (_d, month) => {
+    onSuccess: (res: any, month) => {
       qc.invalidateQueries({ queryKey: ['ptax-contributions'] })
-      toast.success('P-Tax contributions computed', { description: `Month ${month}` })
+      const d = res?.data ?? res ?? {}
+      const computed = d.computed_count ?? 0
+      // Build a clear diagnostic so it's obvious WHY employees were skipped.
+      const parts: string[] = []
+      if (d.skipped_no_state)  parts.push(`${d.skipped_no_state} no work state`)
+      if (d.skipped_no_slabs)  parts.push(`${d.skipped_no_slabs} no slabs${d.no_slab_states?.length ? ` for ${d.no_slab_states.join('/')}` : ''} (FY ${d.financial_year})`)
+      if (d.skipped_exempt)    parts.push(`${d.skipped_exempt} exempt`)
+      if (computed > 0) {
+        toast.success(`P-Tax computed for ${computed} employee${computed === 1 ? '' : 's'}`, {
+          description: parts.length ? `Skipped: ${parts.join(', ')}` : `Month ${month}`,
+        })
+      } else {
+        toast.warning('P-Tax: 0 employees computed', {
+          description: parts.length
+            ? `Skipped: ${parts.join(', ')}. ${d.skipped_no_slabs ? 'Add slabs for that state below.' : d.skipped_no_state ? 'Set PT/LWF state on the employee or site.' : ''}`
+            : `No active employees / no finalized run for ${month}`,
+        })
+      }
     },
     onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
   })
