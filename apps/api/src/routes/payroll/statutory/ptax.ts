@@ -350,18 +350,30 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Calendar month for frequency checks (1–12)
     const calendarMonth = parseInt(month.split('-')[1], 10)
 
-    // Fetch active employees
+    // Fetch active employees — raw select (no FK embed) to avoid Supabase 500s
+    // when the sites FK constraint name differs from what PostgREST expects.
     const { data: employees, error: empErr } = await fastify.supabase
       .from('employees')
-      .select('id, employee_code, site_id, sites(id, state_code)')
+      .select('id, employee_code, site_id')
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
 
     if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
 
-    // Supabase returns joined tables as arrays (even for many-to-one FK).
-    // Cast to `any[]` and access .sites as a scalar at runtime.
     const empList = (employees ?? []) as any[]
+
+    // Resolve site state_code separately to avoid the FK-embed failure.
+    const siteIds = [...new Set(empList.map(e => e.site_id).filter(Boolean))] as string[]
+    const siteStateMap = new Map<string, string>()
+    if (siteIds.length > 0) {
+      const { data: siteRows } = await fastify.supabase
+        .from('sites')
+        .select('id, state_code')
+        .in('id', siteIds)
+      for (const s of (siteRows ?? []) as any[]) {
+        if (s.state_code) siteStateMap.set(s.id, s.state_code)
+      }
+    }
 
     // ── State resolution ───────────────────────────────────────────────────────
     // Priority: ptax_state_config (manual) > sites.state_code (auto)
@@ -471,10 +483,8 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       // Skip exempted employees
       if (exemptSet.has(emp.id)) { skippedExempt++; continue }
 
-      // Resolve state: manual override → site state_code
-      // emp.sites may be array (Supabase join) or object depending on relation type
-      const empSites = Array.isArray(emp.sites) ? emp.sites[0] : emp.sites
-      const stateCode = manualStateMap.get(emp.id) ?? (empSites?.state_code ?? null)
+      // Resolve state: manual override → site state_code (from siteStateMap)
+      const stateCode = manualStateMap.get(emp.id) ?? (emp.site_id ? siteStateMap.get(emp.site_id) ?? null : null)
       if (!stateCode) { skippedNoState++; continue }
 
       const slabs = slabsByState.get(stateCode) ?? []
