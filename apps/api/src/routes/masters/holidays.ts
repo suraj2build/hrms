@@ -165,6 +165,81 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
+  // ── GET /masters/holidays/group-matrix ────────────────────────────────────
+  // Returns the full holiday × group assignment matrix for a year.
+  // Response: { holidays: Holiday[], groups: Group[], assignments: { holiday_id, group_id }[] }
+  fastify.get('/group-matrix', auth, async (req: any, reply) => {
+    const { year } = (req.query ?? {}) as { year?: string }
+    const y = year ? parseInt(year) : new Date().getFullYear()
+
+    const [hResult, gResult, aResult] = await Promise.all([
+      fastify.supabase
+        .from('holiday_calendar')
+        .select('id, date, name, is_optional, holiday_group_id')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', `${y}-01-01`)
+        .lte('date', `${y}-12-31`)
+        .order('date', { ascending: true }),
+      fastify.supabase
+        .from('roster_holiday_groups')
+        .select('id, name, code, state_code, is_active')
+        .eq('tenant_id', req.tenantId)
+        .order('name', { ascending: true }),
+      fastify.supabase
+        .from('holiday_group_assignments')
+        .select('holiday_id, group_id')
+        .eq('tenant_id', req.tenantId),
+    ])
+
+    return reply.send({
+      holidays:    hResult.data   ?? [],
+      groups:      gResult.data   ?? [],
+      assignments: aResult.data   ?? [],
+    })
+  })
+
+  // ── POST /masters/holidays/group-assignments ───────────────────────────────
+  // Set the complete group assignment for a holiday (replaces existing).
+  // Body: { holiday_id: string, group_ids: string[] }
+  // Also syncs holiday_calendar.holiday_group_id to group_ids[0] for backward compat.
+  fastify.post('/group-assignments', auth, async (req: any, reply) => {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
+    }
+    const schema = z.object({
+      holiday_id: z.string().uuid(),
+      group_ids:  z.array(z.string().uuid()),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+
+    const { holiday_id, group_ids } = parsed.data
+
+    // Delete existing assignments for this holiday, then insert the new set
+    await fastify.supabase
+      .from('holiday_group_assignments')
+      .delete()
+      .eq('holiday_id', holiday_id)
+      .eq('tenant_id', req.tenantId)
+
+    if (group_ids.length > 0) {
+      const rows = group_ids.map(gid => ({ tenant_id: req.tenantId, holiday_id, group_id: gid }))
+      const { error } = await fastify.supabase
+        .from('holiday_group_assignments')
+        .insert(rows)
+      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
+
+    // Sync legacy single-FK for backward compat (first group or NULL)
+    await fastify.supabase
+      .from('holiday_calendar')
+      .update({ holiday_group_id: group_ids[0] ?? null })
+      .eq('id', holiday_id)
+      .eq('tenant_id', req.tenantId)
+
+    return reply.send({ holiday_id, group_ids })
+  })
+
   // ── DELETE /masters/holidays/:id ──────────────────────────────────────────
   fastify.delete('/:id', auth, async (req: any, reply) => {
     if (!['super_admin', 'hr_admin'].includes(req.userRole)) {

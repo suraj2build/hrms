@@ -28,6 +28,8 @@ const schema = z.object({
   pt_state_code:  clearableStr,
   // LWF state code — stored in lwf_state_config (not employee_bank_statutory)
   lwf_state_code: clearableStr,
+  // Direct holiday group tag — stored on employees.holiday_group_id
+  holiday_group_id: clearableStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -71,10 +73,17 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       .from('lwf_state_config').select('state_code')
       .eq('employee_id', req.params.id).eq('tenant_id', req.tenantId)
       .order('effective_from', { ascending: false }).limit(1).maybeSingle()
+    const { data: empRow } = await fastify.supabase
+      .from('employees')
+      .select('holiday_group_id')
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
     return reply.send({ data: {
       ...(data ?? {}),
-      pt_state_code:  (ptRow  as any)?.state_code ?? null,
-      lwf_state_code: (lwfRow as any)?.state_code ?? null,
+      pt_state_code:    (ptRow   as any)?.state_code      ?? null,
+      lwf_state_code:   (lwfRow  as any)?.state_code      ?? null,
+      holiday_group_id: (empRow  as any)?.holiday_group_id ?? null,
     } })
   })
 
@@ -116,6 +125,17 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
           state_code: lwfStateCode, effective_from: today, override_reason: 'Set from employee master',
         })
       }
+    }
+
+    // Write holiday group tag directly on the employees row.
+    const holidayGroupId = (bankPayload as any).holiday_group_id
+    delete (bankPayload as any).holiday_group_id
+    if (holidayGroupId !== undefined) {
+      await fastify.supabase
+        .from('employees')
+        .update({ holiday_group_id: holidayGroupId || null })
+        .eq('id', req.params.id)
+        .eq('tenant_id', req.tenantId)
     }
 
     const { data, error } = await fastify.supabase

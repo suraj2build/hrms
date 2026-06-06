@@ -639,6 +639,15 @@ export function EmployeeProfile() {
   const epfOverride = epfEligData?.data?.[0] ?? null
   const esiEligRow  = esiEligData?.data?.[0] ?? null
 
+  // Holiday groups (for employee holiday calendar group tag)
+  const { data: holidayGroupsData } = useQuery<{ data: any[] }>({
+    queryKey: ['holiday-groups-list'],
+    queryFn:  () => api.get('/masters/holiday-groups'),
+    enabled:  !!id && visited.has('compensation'),
+    staleTime: 5 * 60_000,
+  })
+  const holidayGroups = (holidayGroupsData?.data ?? []).filter((g: any) => g.is_active !== false)
+
   // Derive PF mode for display
   const profilePfMode: PFMode | null = epfOverride
     ? (epfOverride.restrict_pf_to_ceiling === true
@@ -1482,8 +1491,9 @@ export function EmployeeProfile() {
     epf_applicable: true,
     pf_wage_basis: 'default' as 'capped' | 'actual' | 'default',
     esi_applicable: true,
-    pt_state_code:  '',
-    lwf_state_code: '',
+    pt_state_code:    '',
+    lwf_state_code:   '',
+    holiday_group_id: '',
   })
   // Open the editor with the WHOLE form reset from saved data (not merged), so
   // both the Bank and Statutory edit buttons show a faithful snapshot and never
@@ -1513,8 +1523,9 @@ export function EmployeeProfile() {
       // ESI: applicable unless the latest timeline row says false.
       esi_applicable: esiEligRow ? (esiEligRow.is_esi_applicable !== false) : true,
       // PT state: from bank-statutory response (merged from ptax_state_config).
-      pt_state_code:  (bs as any)?.pt_state_code  ?? '',
-      lwf_state_code: (bs as any)?.lwf_state_code ?? '',
+      pt_state_code:    (bs as any)?.pt_state_code    ?? '',
+      lwf_state_code:   (bs as any)?.lwf_state_code   ?? '',
+      holiday_group_id: (bs as any)?.holiday_group_id ?? '',
     })
     setEditBankOpen(true)
   }
@@ -1536,8 +1547,9 @@ export function EmployeeProfile() {
         pt_applicable:  bankForm.pt_applicable,
         lwf_applicable: bankForm.lwf_applicable,
         tax_regime:     bankForm.tax_regime,
-        pt_state_code:  bankForm.pt_state_code  || null,
-        lwf_state_code: bankForm.lwf_state_code || null,
+        pt_state_code:    bankForm.pt_state_code    || null,
+        lwf_state_code:   bankForm.lwf_state_code   || null,
+        holiday_group_id: bankForm.holiday_group_id || null,
       }
       if (bankForm.account_number.trim()) body.account_number = bankForm.account_number.trim()
       if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
@@ -5104,6 +5116,21 @@ export function EmployeeProfile() {
                   ))}
                 </select>
               </div>
+            </div>
+            {/* Holiday group */}
+            <div className="space-y-1 pt-1">
+              <Label className="text-xs font-medium text-muted-foreground">Holiday Calendar Group</Label>
+              <p className="text-[10px] text-muted-foreground">Which holiday group applies to this employee. Overrides the site's group.</p>
+              <select
+                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                value={bankForm.holiday_group_id}
+                onChange={e => setBankForm(f => ({ ...f, holiday_group_id: e.target.value }))}
+              >
+                <option value="">Inherit from site</option>
+                {holidayGroups.map((g: any) => (
+                  <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
+                ))}
+              </select>
             </div>
           </div>
           <DialogFooter>
