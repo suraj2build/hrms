@@ -232,12 +232,16 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // Legacy eligibility overrides from esi_eligibility_timeline
     // Also fetch continuation_until — when set, ESI contributions are forced through
     // the contribution period end even if wages cross the ₹21,000 ceiling mid-period.
+    //
+    // Configure-once → persists: the most recent applicability row with
+    // effective_from <= month wins and keeps applying until superseded. We don't
+    // filter on effective_to (a passed end-date would silently revert the employee
+    // to default and drop their employee-level config). Future rows still excluded.
     const { data: eligibilityRows } = await fastify.supabase
       .from('esi_eligibility_timeline')
       .select('employee_id, is_esi_applicable, continuation_until')
       .eq('tenant_id', req.tenantId)
       .lte('effective_from', monthDate)
-      .or('effective_to.is.null,effective_to.gte.' + monthDate)
       .order('effective_from', { ascending: false })
 
     const eligibilityMap = new Map<string, boolean>()

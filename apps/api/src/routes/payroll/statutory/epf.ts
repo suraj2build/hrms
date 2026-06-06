@@ -246,10 +246,17 @@ export default async function epfRoutes(fastify: FastifyInstance) {
 
     const empList = (employees ?? []) as Array<{ id: string; employee_code: string; first_name: string; last_name: string }>
 
-    // ── EPF eligibility overrides (effective-date-guarded) ────────────────────
+    // ── EPF eligibility overrides (configure-once → persists) ─────────────────
     // Fetch the current active override for each employee — includes UAN,
     // international worker flag, higher PF opt-in (migration 166), and
     // employee-level ceiling restriction (migration 170: restrict_pf_to_ceiling).
+    //
+    // Resolution model: the MOST RECENT override with effective_from <= month wins
+    // and keeps applying to later months until a newer row supersedes it. We do NOT
+    // filter on effective_to here — an override whose nominal end-date has passed
+    // would otherwise be silently dropped, reverting the employee to default and
+    // breaking the operator's expectation that an employee-level config, once set,
+    // keeps applying. Future-dated rows (effective_from > month) are still excluded.
     const { data: eligibilityRows } = await fastify.supabase
       .from('epf_eligibility_overrides')
       .select(
@@ -259,7 +266,6 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       )
       .eq('tenant_id', req.tenantId)
       .lte('effective_from', monthDate)
-      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
       .order('effective_from', { ascending: false })
 
     // Keep only the most recent override per employee
