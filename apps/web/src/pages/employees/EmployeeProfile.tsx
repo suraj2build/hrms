@@ -1482,6 +1482,7 @@ export function EmployeeProfile() {
     epf_applicable: true,
     pf_wage_basis: 'default' as 'capped' | 'actual' | 'default',
     esi_applicable: true,
+    pt_state_code: '',
   })
   // Open the editor with the WHOLE form reset from saved data (not merged), so
   // both the Bank and Statutory edit buttons show a faithful snapshot and never
@@ -1510,6 +1511,8 @@ export function EmployeeProfile() {
                     : 'default',
       // ESI: applicable unless the latest timeline row says false.
       esi_applicable: esiEligRow ? (esiEligRow.is_esi_applicable !== false) : true,
+      // PT state: from bank-statutory response (merged from ptax_state_config).
+      pt_state_code: (bs as any)?.pt_state_code ?? '',
     })
     setEditBankOpen(true)
   }
@@ -1531,6 +1534,7 @@ export function EmployeeProfile() {
         pt_applicable:  bankForm.pt_applicable,
         lwf_applicable: bankForm.lwf_applicable,
         tax_regime:     bankForm.tax_regime,
+        pt_state_code:  bankForm.pt_state_code || null,
       }
       if (bankForm.account_number.trim()) body.account_number = bankForm.account_number.trim()
       if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
@@ -5050,7 +5054,7 @@ export function EmployeeProfile() {
                 <Label className="text-xs">ESI Applicable</Label>
               </div>
             </div>
-            <div className="flex gap-6 pt-1">
+            <div className="flex gap-6 pt-1 items-end">
               <div className="flex items-center gap-2">
                 <Switch checked={bankForm.pt_applicable} onCheckedChange={v=>setBankForm(f=>({...f,pt_applicable:v}))} />
                 <Label className="text-xs">PT Applicable</Label>
@@ -5058,6 +5062,26 @@ export function EmployeeProfile() {
               <div className="flex items-center gap-2">
                 <Switch checked={bankForm.lwf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,lwf_applicable:v}))} />
                 <Label className="text-xs">LWF Applicable</Label>
+              </div>
+              <div className="flex-1">
+                <Label className="text-xs">PT State</Label>
+                <select
+                  className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                  value={bankForm.pt_state_code}
+                  onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}
+                >
+                  <option value="">Auto (from site)</option>
+                  {[
+                    ['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
+                    ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
+                    ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
+                    ['MH','Maharashtra'],['MN','Manipur'],['ML','Meghalaya'],['MZ','Mizoram'],
+                    ['NL','Nagaland'],['OR','Odisha'],['PB','Punjab'],['SK','Sikkim'],
+                    ['TN','Tamil Nadu'],['TS','Telangana'],['TR','Tripura'],['WB','West Bengal'],
+                  ].map(([code, name]) => (
+                    <option key={code} value={code}>{name} ({code})</option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

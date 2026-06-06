@@ -24,6 +24,8 @@ const schema = z.object({
   pt_applicable:  z.boolean().optional(),
   lwf_applicable: z.boolean().optional(),
   tax_regime:     z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['old','new']).optional()),
+  // PT state code — stored in ptax_state_config (not employee_bank_statutory)
+  pt_state_code:  clearableStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -53,7 +55,17 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       .single()
     if (error && error.code !== 'PGRST116')
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? null })
+    // Merge PT state (ptax_state_config latest row) so the employee profile can
+    // show and edit the assigned PT state alongside bank/statutory details.
+    const { data: ptRow } = await fastify.supabase
+      .from('ptax_state_config')
+      .select('state_code')
+      .eq('employee_id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .order('effective_from', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    return reply.send({ data: { ...(data ?? {}), pt_state_code: (ptRow as any)?.state_code ?? null } })
   })
 
   // PUT /employees/:id/bank-statutory  (upsert)
@@ -63,10 +75,37 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    // Extract PT state code — it goes to ptax_state_config, not employee_bank_statutory.
+    const ptStateCode = parsed.data.pt_state_code
+    const bankPayload = { ...parsed.data }
+    delete (bankPayload as any).pt_state_code
+
+    // Write PT state to ptax_state_config (idempotent: delete open rows then insert).
+    if (ptStateCode !== undefined) {
+      await fastify.supabase
+        .from('ptax_state_config')
+        .delete()
+        .eq('employee_id', req.params.id)
+        .eq('tenant_id', req.tenantId)
+        .is('effective_to', null)
+      if (ptStateCode) {
+        await fastify.supabase
+          .from('ptax_state_config')
+          .insert({
+            employee_id:     req.params.id,
+            tenant_id:       req.tenantId,
+            state_code:      ptStateCode,
+            effective_from:  new Date().toISOString().slice(0, 10),
+            override_reason: 'Set from employee master',
+          })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('employee_bank_statutory')
       .upsert(
-        { ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId },
+        { ...bankPayload, employee_id: req.params.id, tenant_id: req.tenantId },
         { onConflict: 'tenant_id,employee_id' }
       )
       .select()

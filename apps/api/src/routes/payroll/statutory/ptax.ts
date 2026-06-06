@@ -258,9 +258,9 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const { employeeId } = req.params as { employeeId: string }
 
     const schema = z.object({
-      state_code: z.string().min(1),
-      effective_from: z.string(),
-      effective_to: z.string().optional(),
+      state_code:      z.string().min(1),
+      effective_from:  z.string().optional(),   // defaults to today if omitted
+      effective_to:    z.string().optional(),
       override_reason: z.string().optional(),
     })
 
@@ -269,14 +269,26 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const effectiveFrom = parsed.data.effective_from || new Date().toISOString().slice(0, 10)
+
+    // Delete existing open-ended rows first so there's only one active config.
+    await fastify.supabase
+      .from('ptax_state_config')
+      .delete()
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', req.tenantId)
+      .is('effective_to', null)
+
     const { data, error } = await fastify.supabase
       .from('ptax_state_config')
-      .upsert({
-        ...parsed.data,
-        employee_id: employeeId,
-        tenant_id: req.tenantId,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'tenant_id,employee_id,effective_from' })
+      .insert({
+        state_code:      parsed.data.state_code,
+        effective_from:  effectiveFrom,
+        effective_to:    parsed.data.effective_to ?? null,
+        override_reason: parsed.data.override_reason ?? 'Set from employee master',
+        employee_id:     employeeId,
+        tenant_id:       req.tenantId,
+      })
       .select()
       .single()
 
