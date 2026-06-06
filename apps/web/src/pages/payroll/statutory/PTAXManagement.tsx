@@ -97,20 +97,23 @@ export function PTAXManagement() {
     onSuccess: (res: any, month) => {
       qc.invalidateQueries({ queryKey: ['ptax-contributions'] })
       const d = res?.data ?? res ?? {}
-      const computed = d.computed_count ?? 0
-      // Build a clear diagnostic so it's obvious WHY employees were skipped.
+      const nonZero = d.computed_nonzero ?? d.computed_count ?? 0
+      // Log the engine trace for the first employee — definitive diagnostic.
+      if (d.sample_trace) console.info('[P-Tax compute trace]', d.sample_trace)
       const parts: string[] = []
       if (d.skipped_no_state)  parts.push(`${d.skipped_no_state} no work state`)
       if (d.skipped_no_slabs)  parts.push(`${d.skipped_no_slabs} no slabs${d.no_slab_states?.length ? ` for ${d.no_slab_states.join('/')}` : ''} (FY ${d.financial_year})`)
+      if (d.computed_zero)     parts.push(`${d.computed_zero} matched but ₹0 (income below slab / frequency month)`)
       if (d.skipped_exempt)    parts.push(`${d.skipped_exempt} exempt`)
-      if (computed > 0) {
-        toast.success(`P-Tax computed for ${computed} employee${computed === 1 ? '' : 's'}`, {
-          description: parts.length ? `Skipped: ${parts.join(', ')}` : `Month ${month}`,
+
+      if (nonZero > 0) {
+        toast.success(`P-Tax computed for ${nonZero} employee${nonZero === 1 ? '' : 's'}`, {
+          description: parts.length ? `Note: ${parts.join(', ')}` : `Month ${month}`,
         })
       } else {
-        toast.warning('P-Tax: 0 employees computed', {
+        toast.warning('P-Tax: nothing deducted', {
           description: parts.length
-            ? `Skipped: ${parts.join(', ')}. ${d.skipped_no_slabs ? 'Add slabs for that state below.' : d.skipped_no_state ? 'Set PT/LWF state on the employee or site.' : ''}`
+            ? `${parts.join(', ')}.${d.skipped_no_slabs ? ' → Add slabs for that state.' : d.computed_zero ? ' → Check slab income bands / this month vs the slab frequency.' : d.skipped_no_state ? ' → Set the work state on the employee or site.' : ''}`
             : `No active employees / no finalized run for ${month}`,
         })
       }

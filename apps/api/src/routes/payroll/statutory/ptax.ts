@@ -494,8 +494,10 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     let skippedNoState = 0
     let wagesFromSlip = 0
     let wagesFallback = 0
+    let computedZero = 0           // slab found but PT resolved to 0 (no income match / freq / ₹0 slab)
     const noSlabStates = new Set<string>()   // states with employees but no slabs
     let skippedNoSlabs = 0
+    let sampleTrace: string[] | null = null  // trace of the first eligible employee, for diagnostics
 
     for (const emp of empList) {
       // Skip exempted employees
@@ -519,6 +521,8 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       }
 
       const result = computePTax(grossSalary, slabs, calendarMonth, stateCode)
+      if (!sampleTrace) sampleTrace = result.traceSteps   // capture first computed employee's trace
+      if (result.ptaxAmount === 0) computedZero++
 
       contributions.push({
         tenant_id:          req.tenantId,
@@ -541,12 +545,15 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
 
     return reply.send({
       computed_count:    contributions.length,
+      computed_zero:     computedZero,
+      computed_nonzero:  contributions.length - computedZero,
       skipped_exempt:    skippedExempt,
       skipped_no_state:  skippedNoState,
       skipped_no_slabs:  skippedNoSlabs,
       no_slab_states:    [...noSlabStates],
       total_active:      empList.length,
       financial_year,
+      sample_trace:      sampleTrace,
       wages_from_slip:   wagesFromSlip,
       wages_fallback:    wagesFallback,
       month,
