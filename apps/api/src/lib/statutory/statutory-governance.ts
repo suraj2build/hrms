@@ -137,14 +137,15 @@ export async function resolveEmployeeStatutoryParams(
       month,
     ),
 
-    // EPF eligibility override — current (no effective_to OR effective_to >= month)
+    // EPF eligibility override — use the LATEST override for this employee regardless
+    // of when it was set. An HR admin setting "Actual (uncapped)" today must apply to
+    // any re-run of a prior month — filtering by effective_from <= monthDate blocks
+    // overrides saved after the payroll period and silently falls back to default.
     supabase
       .from('epf_eligibility_overrides')
       .select('*')
       .eq('employee_id', employeeId)
       .eq('tenant_id', tenantId)
-      .lte('effective_from', monthDate)
-      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
