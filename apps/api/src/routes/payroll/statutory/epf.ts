@@ -188,7 +188,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       const { data: runRow } = await fastify.supabase
         .from('payroll_runs').select('status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
       const st = (runRow as any)?.status
-      if (st !== 'finalized' && st !== 'partial_failed') {
+      if (st !== 'finalized' && st !== 'partial_failed' && st !== 'frozen') {
         return reply.code(409).send({
           error: 'RUN_NOT_FINALIZED',
           message: `Finalize the ${month} payroll run before computing EPF contributions (current: ${st ?? 'no run'}).`,
