@@ -207,7 +207,9 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (configErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch EPF config' })
+    // Non-fatal: if the config row can't be read (table missing / transient), fall
+    // back to the statutory defaults below rather than blocking the whole compute.
+    if (configErr) req.log.warn({ err: configErr, tenant: req.tenantId }, 'EPF config fetch failed — using statutory defaults')
 
     const config: EPFConfig = configRow ? {
       employeeContributionPct: configRow.employee_contribution_pct    ?? 12,

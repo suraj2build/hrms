@@ -191,7 +191,8 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (configErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch ESI config' })
+    // Non-fatal: fall back to statutory defaults below if the config row can't be read.
+    if (configErr) req.log.warn({ err: configErr, tenant: req.tenantId }, 'ESI config fetch failed — using statutory defaults')
 
     const config: ESIConfig = configRow ? {
       employeeContributionPct: configRow.employee_contribution_pct ?? 0.75,
