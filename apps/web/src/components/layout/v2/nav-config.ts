@@ -362,7 +362,7 @@ export const DOMAINS: Domain[] = [
           { id: 'payroll-finalize',   label: 'Finalization', route: '/admin/payroll/finalize',   icon: BadgeCheck },
           { id: 'payroll-payout',     label: 'Payout',      route: '/admin/payroll/payout',      icon: CreditCard  },
           { id: 'payroll-payout-recon', label: 'Payout Reconciliation', route: '/admin/payroll/payout-reconciliation', icon: RotateCcw },
-          { id: 'payroll-statutory-dash', label: 'Statutory Dashboard', route: '/admin/payroll/statutory-dashboard', icon: Landmark },
+          // Statutory Dashboard intentionally lives only under Compliance (was duplicated here).
           { id: 'payroll-accounting', label: 'Accounting',  route: '/admin/payroll/accounting',  icon: BookOpen    },
         ],
       },

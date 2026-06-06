@@ -27,6 +27,7 @@ import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,18 @@ export function PTAXManagement() {
   const qc          = useQueryClient()
 
   const todayYM = new Date().toISOString().slice(0, 7)
+  const [viewMonth] = useStatutoryMonth()   // shared across all Compliance tabs
   const last6   = useMemo(() => getLast6Months(), [])
+
+  // ── Manual contribution compute (FY auto-derived from month server-side) ──────
+  const computeMutation = useMutation({
+    mutationFn: (month: string) => api.post('/payroll/statutory/ptax/contributions/compute', { month }),
+    onSuccess: (_d, month) => {
+      qc.invalidateQueries({ queryKey: ['ptax-contributions'] })
+      toast.success('P-Tax contributions computed', { description: `Month ${month}` })
+    },
+    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
+  })
 
   // UI state
   const [selectedStateCode, setSelectedStateCode] = useState<string>('')
@@ -265,16 +277,28 @@ export function PTAXManagement() {
         title="Professional Tax Management"
         subtitle="Enact state-wise configurations, customise salary-band tax slabs, and monitor P-Tax compliance"
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => { refetchStates(); refetchSlabs() }}
-            disabled={statesLoading || slabsLoading}
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', (statesLoading || slabsLoading) && 'animate-spin')} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <StatutoryMonthPicker />
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => computeMutation.mutate(viewMonth)}
+              disabled={computeMutation.isPending || !viewMonth}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', computeMutation.isPending && 'animate-spin')} />
+              Compute Contributions
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => { refetchStates(); refetchSlabs() }}
+              disabled={statesLoading || slabsLoading}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', (statesLoading || slabsLoading) && 'animate-spin')} />
+              Refresh
+            </Button>
+          </div>
         }
       />
 

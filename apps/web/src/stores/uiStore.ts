@@ -48,6 +48,14 @@ interface UIState {
 
   /** Atomically clears activeRole + both impersonated identities. */
   clearWorkspaceContext: () => void
+
+  // ── Shared statutory/compliance month (session-only) ────────────────────────
+  // null = "use current month". Set by any Compliance page's month picker so the
+  // EPF / ESI / PT / TDS detail pages and the reconciliation view all stay on the
+  // same period (e.g. an operator reviewing a finalized April keeps April across
+  // every statutory tab instead of each page snapping back to the current month).
+  statutoryMonth: string | null
+  setStatutoryMonth: (month: string) => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -94,6 +102,10 @@ export const useUIStore = create<UIState>()(
           impersonatedEmployee: null,
           impersonatedManager:  null,
         }),
+
+      // ── shared statutory month (session-only) ─────────────────────────────────
+      statutoryMonth: null,
+      setStatutoryMonth: (month) => set({ statutoryMonth: month }),
     }),
     {
       name: 'hrms-ui',

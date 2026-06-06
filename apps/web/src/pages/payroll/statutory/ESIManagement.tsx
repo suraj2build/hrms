@@ -33,6 +33,7 @@ import {
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -401,6 +402,7 @@ export function ESIManagement() {
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
   const todayYM = new Date().toISOString().slice(0, 7)
+  const [viewMonth] = useStatutoryMonth()   // shared across all Compliance tabs
   const last6   = useMemo(() => getLast6Months(), [])
   const [showEditConfig, setShowEditConfig] = useState(false)
 
@@ -473,11 +475,22 @@ export function ESIManagement() {
     isLoading: contribLoading,
     refetch: refetchContrib,
   } = useQuery<ESIContribution[]>({
-    queryKey: ['esi-contributions', todayYM],
-    queryFn:  () => api.get(`/payroll/statutory/esi/contributions?month=${todayYM}`)
+    queryKey: ['esi-contributions', viewMonth],
+    queryFn:  () => api.get(`/payroll/statutory/esi/contributions?month=${viewMonth}`)
       .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
     enabled:  isAdmin,
     staleTime: 60_000,
+  })
+
+  // ── Manual contribution compute (also runs automatically on payroll finalize) ──
+  const computeMutation = useMutation({
+    mutationFn: (month: string) => api.post('/payroll/statutory/esi/contributions/compute', { month }),
+    onSuccess: (_d, month) => {
+      qc.invalidateQueries({ queryKey: ['esi-contributions'] })
+      refetchContrib()
+      toast.success('ESI contributions computed', { description: `Month ${month}` })
+    },
+    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
   })
 
   // ── Last 6 months (history table) ─────────────────────────────────────────────
@@ -534,16 +547,28 @@ export function ESIManagement() {
         title="ESI Management"
         subtitle="Administer employee health insurance contributions, ceiling criteria, and state filing compliance"
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => { refetchConfig(); refetchContrib() }}
-            disabled={configLoading || contribLoading}
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', (configLoading || contribLoading) && 'animate-spin')} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <StatutoryMonthPicker />
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => computeMutation.mutate(viewMonth)}
+              disabled={computeMutation.isPending || !viewMonth}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', computeMutation.isPending && 'animate-spin')} />
+              Compute Contributions
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => { refetchConfig(); refetchContrib() }}
+              disabled={configLoading || contribLoading}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', (configLoading || contribLoading) && 'animate-spin')} />
+              Refresh
+            </Button>
+          </div>
         }
       />
 

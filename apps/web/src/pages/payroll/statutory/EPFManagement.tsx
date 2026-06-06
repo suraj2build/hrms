@@ -30,6 +30,7 @@ import {
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -279,6 +280,7 @@ export function EPFManagement() {
   const isAdmin = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
   const todayYM    = new Date().toISOString().slice(0, 7)
+  const [viewMonth] = useStatutoryMonth()   // shared across all Compliance tabs
   const last6      = useMemo(() => getLast6Months(), [])
   const [showEditConfig, setShowEditConfig] = useState(false)
 
@@ -352,15 +354,14 @@ export function EPFManagement() {
     isLoading: contribLoading,
     refetch: refetchContrib,
   } = useQuery<EPFContribution[]>({
-    queryKey: ['epf-contributions', todayYM],
-    queryFn:  () => api.get(`/payroll/statutory/epf/contributions?month=${todayYM}`)
+    queryKey: ['epf-contributions', viewMonth],
+    queryFn:  () => api.get(`/payroll/statutory/epf/contributions?month=${viewMonth}`)
       .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
 
   // ── Manual contribution compute (also runs automatically on payroll finalize) ──
-  const [computeMonth, setComputeMonth] = useState(todayYM)
   const computeMutation = useMutation({
     mutationFn: (month: string) => api.post('/payroll/statutory/epf/contributions/compute', { month }),
     onSuccess: (_d, month) => {
@@ -425,17 +426,11 @@ export function EPFManagement() {
         subtitle="Configure Provident Fund parameters, enforce wage ceilings, and monitor statutory contributions"
         actions={
           <div className="flex items-center gap-2">
-            <input
-              type="month"
-              value={computeMonth}
-              onChange={e => setComputeMonth(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50"
-              title="Month to compute EPF contributions for (run must be finalized)"
-            />
+            <StatutoryMonthPicker />
             <Button
               size="sm" className="h-8 text-xs gap-1.5"
-              onClick={() => computeMutation.mutate(computeMonth)}
-              disabled={computeMutation.isPending || !computeMonth}
+              onClick={() => computeMutation.mutate(viewMonth)}
+              disabled={computeMutation.isPending || !viewMonth}
             >
               {computeMutation.isPending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               Compute Contributions

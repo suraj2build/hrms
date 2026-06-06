@@ -30,6 +30,7 @@ import { toast }         from 'sonner'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -728,7 +729,7 @@ export function TDSManagement() {
   const todayYM         = new Date().toISOString().slice(0, 7)
   const [activeTab,      setActiveTab]       = useState<TabId>('declarations')
   const [financialYear,  setFinancialYear]   = useState(currentFY())
-  const [selectedMonth,  setSelectedMonth]   = useState(todayYM)
+  const [selectedMonth,  setSelectedMonth]   = useStatutoryMonth()   // shared across Compliance tabs
 
   if (!isAdmin) {
     return (
