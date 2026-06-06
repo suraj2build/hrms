@@ -263,14 +263,15 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // ── ESI exemption overrides (employee_statutory_overrides) ───────────────
     // The old esi_eligibility_timeline.is_esi_applicable is supplemented by
     // the new employee_statutory_overrides table.  Check both.
+    // Latest override wins — same reason as EPF: setting saved today must apply
+    // to re-runs of prior months.
     const { data: exemptRows } = await fastify.supabase
       .from('employee_statutory_overrides')
       .select('employee_id')
       .eq('tenant_id', req.tenantId)
       .eq('statutory_type', 'esi')
       .eq('is_exempt', true)
-      .lte('effective_from', monthDate)
-      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+      .order('effective_from', { ascending: false })
 
     const exemptSet = new Set<string>(((exemptRows ?? []) as any[]).map(r => r.employee_id))
 
@@ -282,11 +283,11 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // effective_from <= month wins and keeps applying until superseded. We don't
     // filter on effective_to (a passed end-date would silently revert the employee
     // to default and drop their employee-level config). Future rows still excluded.
+    // Latest row wins — setting saved today applies to re-runs of prior months.
     const { data: eligibilityRows } = await fastify.supabase
       .from('esi_eligibility_timeline')
       .select('employee_id, is_esi_applicable, continuation_until')
       .eq('tenant_id', req.tenantId)
-      .lte('effective_from', monthDate)
       .order('effective_from', { ascending: false })
 
     const eligibilityMap = new Map<string, boolean>()

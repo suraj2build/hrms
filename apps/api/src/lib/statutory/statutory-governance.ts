@@ -150,7 +150,7 @@ export async function resolveEmployeeStatutoryParams(
       .limit(1)
       .maybeSingle(),
 
-    // ESI exemption override
+    // ESI exemption override — latest row wins (same reason as EPF above).
     supabase
       .from('employee_statutory_overrides')
       .select('*')
@@ -158,12 +158,11 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .eq('statutory_type', 'esi')
       .eq('is_exempt', true)
-      .lte('effective_from', monthDate)
-      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+      .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
 
-    // PTax exemption override
+    // PTax exemption override — latest row wins.
     supabase
       .from('employee_statutory_overrides')
       .select('*')
@@ -171,8 +170,7 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .eq('statutory_type', 'ptax')
       .eq('is_exempt', true)
-      .lte('effective_from', monthDate)
-      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+      .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
   ])
@@ -242,13 +240,12 @@ export async function resolveEmployeeStatutoryParams(
   let resolvedState = stateCode
 
   // Check ptax_state_config (manual assignment overrides site)
+  // PT state assignment — latest row wins (same reason as EPF override above).
   const { data: ptaxStateRow } = await supabase
     .from('ptax_state_config')
     .select('state_code')
     .eq('employee_id', employeeId)
     .eq('tenant_id', tenantId)
-    .lte('effective_from', monthDate)
-    .or('effective_to.is.null,effective_to.gte.' + monthDate)
     .order('effective_from', { ascending: false })
     .limit(1)
     .maybeSingle()
