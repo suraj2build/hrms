@@ -128,6 +128,48 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
+  // ── PUT /payroll/statutory/esi/eligibility/:employeeId ───────────────────────
+  // Idempotent ESI applicability toggle for the employee master. Replaces the
+  // employee's current OPEN (effective_to IS NULL) eligibility row with a single
+  // row reflecting the chosen Yes/No, so toggling never piles up timeline rows.
+  fastify.put('/eligibility/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { employeeId } = req.params as { employeeId: string }
+    const schema = z.object({
+      is_esi_applicable: z.boolean(),
+      effective_from:    z.string().optional(),
+      reason:            z.string().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const effectiveFrom = parsed.data.effective_from || new Date().toISOString().slice(0, 10)
+
+    // Remove existing open-ended rows for this employee, then insert the current one.
+    await fastify.supabase
+      .from('esi_eligibility_timeline')
+      .delete()
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', employeeId)
+      .is('effective_to', null)
+
+    const { data, error } = await fastify.supabase
+      .from('esi_eligibility_timeline')
+      .insert({
+        tenant_id:         req.tenantId,
+        employee_id:       employeeId,
+        is_esi_applicable: parsed.data.is_esi_applicable,
+        gross_wages:       0,   // informational only; compute uses slip/comp wages
+        effective_from:    effectiveFrom,
+        reason:            parsed.data.reason ?? 'Set from employee master',
+      })
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    return reply.send({ data })
+  })
+
   // ── GET /payroll/statutory/esi/contributions ──────────────────────────────────
   fastify.get('/contributions', auth, async (req: any, reply) => {
     const querySchema = z.object({

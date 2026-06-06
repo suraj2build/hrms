@@ -1478,6 +1478,10 @@ export function EmployeeProfile() {
     pan_number: '', aadhaar_number: '', uan_number: '', pf_number: '',
     esi_number: '', pt_applicable: false, lwf_applicable: false,
     tax_regime: 'new' as 'old' | 'new',
+    // EPF/ESI applicability — central schemes, per-employee Yes/No
+    epf_applicable: true,
+    pf_wage_basis: 'default' as 'capped' | 'actual' | 'default',
+    esi_applicable: true,
   })
   // Open the editor with the WHOLE form reset from saved data (not merged), so
   // both the Bank and Statutory edit buttons show a faithful snapshot and never
@@ -1498,6 +1502,14 @@ export function EmployeeProfile() {
       pt_applicable:  bs?.pt_applicable  ?? false,
       lwf_applicable: bs?.lwf_applicable ?? false,
       tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
+      // EPF: default applicable=true unless an override says false.
+      epf_applicable: epfOverride ? (epfOverride.is_exempt ? false : (epfOverride.is_epf_applicable ?? true)) : true,
+      // PF wage basis from restrict_pf_to_ceiling: true→capped, false→actual, null→default.
+      pf_wage_basis:  epfOverride?.restrict_pf_to_ceiling === true ? 'capped'
+                    : epfOverride?.restrict_pf_to_ceiling === false ? 'actual'
+                    : 'default',
+      // ESI: applicable unless the latest timeline row says false.
+      esi_applicable: esiEligRow ? (esiEligRow.is_esi_applicable !== false) : true,
     })
     setEditBankOpen(true)
   }
@@ -1522,10 +1534,32 @@ export function EmployeeProfile() {
       }
       if (bankForm.account_number.trim()) body.account_number = bankForm.account_number.trim()
       if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
-      return api.put(`/employees/${id}/bank-statutory`, body)
+
+      const today = new Date().toISOString().slice(0, 10)
+      // PF wage basis → restrict_pf_to_ceiling: capped→true, actual→false, default→null.
+      const restrict = bankForm.pf_wage_basis === 'capped' ? true
+                     : bankForm.pf_wage_basis === 'actual' ? false
+                     : null
+      return Promise.all([
+        api.put(`/employees/${id}/bank-statutory`, body),
+        // EPF applicability + wage basis (central scheme, per-employee).
+        api.put(`/payroll/statutory/epf/eligibility/${id}`, {
+          is_epf_applicable:      bankForm.epf_applicable,
+          restrict_pf_to_ceiling: restrict,
+          override_reason:        'Set from employee master',
+          effective_from:         today,
+        }),
+        // ESI applicability (idempotent toggle).
+        api.put(`/payroll/statutory/esi/eligibility/${id}`, {
+          is_esi_applicable: bankForm.esi_applicable,
+          effective_from:    today,
+        }),
+      ])
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['epf-elig-profile', id] })
+      qc.invalidateQueries({ queryKey: ['esi-elig-profile', id] })
       setEditBankOpen(false)
       toast.success('Bank & Statutory details updated')
     },
@@ -4989,6 +5023,31 @@ export function EmployeeProfile() {
                   <option value="new">New Regime</option>
                   <option value="old">Old Regime</option>
                 </select>
+              </div>
+            </div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2 border-t border-border">Scheme Applicability</p>
+            <p className="text-[10px] text-muted-foreground -mt-1">EPF &amp; ESI are central schemes — set per-employee here. PT/LWF apply by work state.</p>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3 items-center">
+              <div className="flex items-center gap-2">
+                <Switch checked={bankForm.epf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,epf_applicable:v}))} />
+                <Label className="text-xs">EPF Applicable</Label>
+              </div>
+              <div>
+                <Label className="text-xs">PF Wage Basis</Label>
+                <select
+                  className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none disabled:opacity-50"
+                  value={bankForm.pf_wage_basis}
+                  disabled={!bankForm.epf_applicable}
+                  onChange={e=>setBankForm(f=>({...f,pf_wage_basis:e.target.value as 'capped'|'actual'|'default'}))}
+                >
+                  <option value="default">Follow tenant default</option>
+                  <option value="capped">Capped — restrict to ceiling</option>
+                  <option value="actual">Actual — full wages, no ceiling</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={bankForm.esi_applicable} onCheckedChange={v=>setBankForm(f=>({...f,esi_applicable:v}))} />
+                <Label className="text-xs">ESI Applicable</Label>
               </div>
             </div>
             <div className="flex gap-6 pt-1">
