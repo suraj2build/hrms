@@ -1539,6 +1539,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         '/payroll/statutory/epf/contributions/compute',
         '/payroll/statutory/esi/contributions/compute',
         '/payroll/statutory/ptax/contributions/compute',
+        '/payroll/statutory/lwf/contributions/compute',
       ]
       for (const url of computePaths) {
         try {

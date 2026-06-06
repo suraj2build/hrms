@@ -22,6 +22,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EPFConfig } from './epf-engine.js'
 import type { ESIConfig } from './esi-engine.js'
 import type { PTaxSlab } from './ptax-engine.js'
+import type { LWFConfig } from './lwf-engine.js'
+import { parseDeductionMonths } from './lwf-engine.js'
 import { DEFAULT_EPF_CONFIG } from './epf-engine.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -57,6 +59,12 @@ export interface PTaxApplicability {
   registration: string | null
 }
 
+export interface LWFApplicability {
+  isApplicable: boolean
+  isExempt:     boolean
+  config:       LWFConfig | null  // null = no state setting configured
+}
+
 export interface StatutoryRegistrations {
   epf: string | null
   esi: string | null
@@ -73,6 +81,7 @@ export interface EmployeeStatutoryParams {
   esiConfig:       ESIConfig
   esiApplicability: ESIApplicability
   ptaxApplicability: PTaxApplicability
+  lwfApplicability:  LWFApplicability
   registrations:   StatutoryRegistrations
   financialYear:   string
 }
@@ -310,6 +319,62 @@ export async function resolveEmployeeStatutoryParams(
 
   ptaxApplicability.registration = registrations.ptax
 
+  // ── LWF resolution ────────────────────────────────────────────────────────────
+  // Priority: lwf_state_config (manual) > sites.state_code (auto)
+  // Fetch the employee's LWF state override (latest row, same pattern as PT).
+  const { data: lwfStateRow } = await supabase
+    .from('lwf_state_config')
+    .select('state_code')
+    .eq('employee_id', employeeId)
+    .eq('tenant_id', tenantId)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const lwfState = (lwfStateRow as any)?.state_code ?? resolvedState
+
+  // Fetch LWF state settings for the resolved state.
+  let lwfApplicability: LWFApplicability = { isApplicable: false, isExempt: false, config: null }
+  if (lwfState) {
+    const { data: lwfRow } = await supabase
+      .from('lwf_state_settings')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('state_code', lwfState)
+      .eq('enabled', true)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    // LWF exemption override (employee_statutory_overrides, type='lwf').
+    const { data: lwfExemptRow } = await supabase
+      .from('employee_statutory_overrides')
+      .select('is_exempt, exemption_reason')
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', tenantId)
+      .eq('statutory_type', 'lwf')
+      .eq('is_exempt', true)
+      .order('effective_from', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const isExempt = !!(lwfExemptRow as any)
+    const lwfCfg = lwfRow as any
+
+    if (lwfCfg && !isExempt) {
+      const config: LWFConfig = {
+        stateCode:       lwfState,
+        employeeAmount:  Number(lwfCfg.employee_amount) || 0,
+        employerAmount:  Number(lwfCfg.employer_amount) || 0,
+        wageCeiling:     lwfCfg.wage_ceiling != null ? Number(lwfCfg.wage_ceiling) : null,
+        frequency:       (lwfCfg.frequency ?? 'monthly') as LWFConfig['frequency'],
+        deductionMonths: parseDeductionMonths(lwfCfg.frequency ?? 'monthly', lwfCfg.deduction_months),
+      }
+      lwfApplicability = { isApplicable: true, isExempt: false, config }
+    } else if (isExempt) {
+      lwfApplicability = { isApplicable: false, isExempt: true, config: null }
+    }
+  }
+
   return {
     employeeId,
     payrollMonth:     month,
@@ -320,6 +385,7 @@ export async function resolveEmployeeStatutoryParams(
     esiConfig,
     esiApplicability,
     ptaxApplicability,
+    lwfApplicability,
     registrations,
     financialYear,
   }

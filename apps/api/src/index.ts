@@ -173,6 +173,7 @@ import payrollCompensationRevisionsRoute   from './routes/payroll/compensation-r
 import payrollStatutoryEpfRoute            from './routes/payroll/statutory/epf.js'
 import payrollStatutoryEsiRoute            from './routes/payroll/statutory/esi.js'
 import payrollStatutoryPtaxRoute           from './routes/payroll/statutory/ptax.js'
+import payrollStatutoryLwfRoute            from './routes/payroll/statutory/lwf.js'
 import payrollStatutoryTdsRoute            from './routes/payroll/statutory/tds.js'
 import tdsBulkRoute                        from './routes/payroll/statutory/tds-bulk.js'
 import payrollStatutoryGovernanceRoute     from './routes/payroll/statutory/governance.js'
@@ -560,6 +561,7 @@ async function start() {
   await fastify.register(payrollStatutoryEpfRoute,          { prefix: '/payroll/statutory/epf' })   // GET/POST /payroll/statutory/epf/*
   await fastify.register(payrollStatutoryEsiRoute,          { prefix: '/payroll/statutory/esi' })   // GET/POST /payroll/statutory/esi/*
   await fastify.register(payrollStatutoryPtaxRoute,         { prefix: '/payroll/statutory/ptax' })  // GET/POST /payroll/statutory/ptax/*
+  await fastify.register(payrollStatutoryLwfRoute,          { prefix: '/payroll/statutory/lwf' })   // GET/POST /payroll/statutory/lwf/*
   await fastify.register(payrollStatutoryTdsRoute,          { prefix: '/payroll/statutory/tds' })        // GET/POST /payroll/statutory/tds/*
   await fastify.register(tdsBulkRoute,                     { prefix: '/payroll/statutory/tds' })          // bulk verify/reject/lock + reconciliation + ESS completion
   await fastify.register(payrollStatutoryGovernanceRoute,  { prefix: '/payroll/statutory/governance' })  // GET/POST /payroll/statutory/governance/*

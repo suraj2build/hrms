@@ -26,6 +26,8 @@ const schema = z.object({
   tax_regime:     z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['old','new']).optional()),
   // PT state code — stored in ptax_state_config (not employee_bank_statutory)
   pt_state_code:  clearableStr,
+  // LWF state code — stored in lwf_state_config (not employee_bank_statutory)
+  lwf_state_code: clearableStr,
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -65,7 +67,15 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle()
-    return reply.send({ data: { ...(data ?? {}), pt_state_code: (ptRow as any)?.state_code ?? null } })
+    const { data: lwfRow } = await fastify.supabase
+      .from('lwf_state_config').select('state_code')
+      .eq('employee_id', req.params.id).eq('tenant_id', req.tenantId)
+      .order('effective_from', { ascending: false }).limit(1).maybeSingle()
+    return reply.send({ data: {
+      ...(data ?? {}),
+      pt_state_code:  (ptRow  as any)?.state_code ?? null,
+      lwf_state_code: (lwfRow as any)?.state_code ?? null,
+    } })
   })
 
   // PUT /employees/:id/bank-statutory  (upsert)
@@ -76,29 +86,35 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
-    // Extract PT state code — it goes to ptax_state_config, not employee_bank_statutory.
-    const ptStateCode = parsed.data.pt_state_code
-    const bankPayload = { ...parsed.data }
+    // Extract state codes — go to their own tables, not employee_bank_statutory.
+    const ptStateCode  = parsed.data.pt_state_code
+    const lwfStateCode = parsed.data.lwf_state_code
+    const bankPayload  = { ...parsed.data }
     delete (bankPayload as any).pt_state_code
+    delete (bankPayload as any).lwf_state_code
+    const today = new Date().toISOString().slice(0, 10)
 
-    // Write PT state to ptax_state_config (idempotent: delete open rows then insert).
+    // Write PT state to ptax_state_config (idempotent).
     if (ptStateCode !== undefined) {
-      await fastify.supabase
-        .from('ptax_state_config')
-        .delete()
-        .eq('employee_id', req.params.id)
-        .eq('tenant_id', req.tenantId)
-        .is('effective_to', null)
+      await fastify.supabase.from('ptax_state_config').delete()
+        .eq('employee_id', req.params.id).eq('tenant_id', req.tenantId).is('effective_to', null)
       if (ptStateCode) {
-        await fastify.supabase
-          .from('ptax_state_config')
-          .insert({
-            employee_id:     req.params.id,
-            tenant_id:       req.tenantId,
-            state_code:      ptStateCode,
-            effective_from:  new Date().toISOString().slice(0, 10),
-            override_reason: 'Set from employee master',
-          })
+        await fastify.supabase.from('ptax_state_config').insert({
+          employee_id: req.params.id, tenant_id: req.tenantId,
+          state_code: ptStateCode, effective_from: today, override_reason: 'Set from employee master',
+        })
+      }
+    }
+
+    // Write LWF state to lwf_state_config (idempotent).
+    if (lwfStateCode !== undefined) {
+      await fastify.supabase.from('lwf_state_config').delete()
+        .eq('employee_id', req.params.id).eq('tenant_id', req.tenantId).is('effective_to', null)
+      if (lwfStateCode) {
+        await fastify.supabase.from('lwf_state_config').insert({
+          employee_id: req.params.id, tenant_id: req.tenantId,
+          state_code: lwfStateCode, effective_from: today, override_reason: 'Set from employee master',
+        })
       }
     }
 

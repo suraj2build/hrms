@@ -419,6 +419,7 @@ export const DOMAINS: Domain[] = [
           { id: 'esi',       label: 'ESI',                  route: '/admin/payroll/statutory/esi',              icon: Landmark   },
           { id: 'pt',        label: 'Prof. Tax',            route: '/admin/payroll/statutory/ptax',             icon: Landmark   },
           { id: 'tds',       label: 'TDS',                  route: '/admin/payroll/statutory/tds',              icon: Landmark   },
+          { id: 'lwf',       label: 'LWF',                  route: '/admin/payroll/statutory/lwf',              icon: Landmark   },
           { id: 'stat-recon',label: 'Statutory Recon',      route: '/admin/payroll/statutory-reconciliation',   icon: ScrollText },
         ],
       },

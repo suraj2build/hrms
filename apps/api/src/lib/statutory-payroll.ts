@@ -22,6 +22,7 @@
 import { computeEPF } from './statutory/epf-engine.js'
 import { computeESI } from './statutory/esi-engine.js'
 import { computePTax } from './statutory/ptax-engine.js'
+import { computeLWF } from './statutory/lwf-engine.js'
 import type { EmployeeStatutoryParams } from './statutory/statutory-governance.js'
 import { round2 } from './payroll-engine.js'
 import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engine.js'
@@ -29,12 +30,13 @@ import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engi
 /** Codes of statutory lines that the engines own and therefore replace.
  *  Matched ONLY against deduction / employer_contribution lines — earnings are
  *  never stripped (so a custom earning like "PT Allowance" is safe). */
-const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX)$/i
+const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i
 
 export interface StatutoryTrace {
   epf:  { applied: boolean; pfWages: number; employee: number; employer: number; reason?: string }
   esi:  { applied: boolean; esiWages: number; employee: number; employer: number; status: string }
   ptax: { applied: boolean; income: number; amount: number; stateCode: string | null }
+  lwf:  { applied: boolean; employee: number; employer: number; stateCode: string | null }
 }
 
 export interface StatutoryApplicationResult {
@@ -139,6 +141,11 @@ export function applyStatutoryToSlip(
     ? computePTax(grossWages, params.ptaxApplicability.slabs, calendarMonth, params.ptaxApplicability.stateCode)
     : null
 
+  // ── LWF ───────────────────────────────────────────────────────────────────
+  const lwf = params.lwfApplicability.isApplicable && params.lwfApplicability.config
+    ? computeLWF(grossWages, calendarMonth, params.lwfApplicability.config)
+    : null
+
   // ── Rebuild breakdown: keep earnings + non-statutory lines, replace statutory ─
   const kept = comps.filter(
     c => c.component_type === 'earning' || !STATUTORY_CODE.test(c.code),
@@ -156,6 +163,12 @@ export function applyStatutoryToSlip(
   }
   if (ptax && ptax.ptaxAmount > 0) {
     statLines.push(mkLine('PTAX', 'Professional Tax', 'deduction', ptax.ptaxAmount, 9004))
+  }
+  if (lwf && lwf.isEligible && lwf.employeeContribution > 0) {
+    statLines.push(mkLine('LWF_EMPLOYEE', 'Labour Welfare Fund (Employee)', 'deduction', lwf.employeeContribution, 9006))
+  }
+  if (lwf && lwf.isEligible && lwf.employerContribution > 0) {
+    statLines.push(mkLine('LWF_EMPLOYER', 'Labour Welfare Fund (Employer)', 'employer_contribution', lwf.employerContribution, 9007))
   }
 
   const breakdown = [...kept, ...statLines]
@@ -200,6 +213,12 @@ export function applyStatutoryToSlip(
         income:    grossWages,
         amount:    ptax?.ptaxAmount ?? 0,
         stateCode: params.ptaxApplicability.stateCode,
+      },
+      lwf: {
+        applied:   !!(lwf && lwf.isEligible && (lwf.employeeContribution > 0 || lwf.employerContribution > 0)),
+        employee:  lwf?.employeeContribution ?? 0,
+        employer:  lwf?.employerContribution ?? 0,
+        stateCode: params.lwfApplicability.config?.stateCode ?? null,
       },
     },
   }

@@ -216,6 +216,7 @@ const EPFManagement         = lazy(() => import('@/pages/payroll/statutory/EPFMa
 const ESIManagement         = lazy(() => import('@/pages/payroll/statutory/ESIManagement').then(m => ({ default: m.ESIManagement })))
 const PTAXManagement        = lazy(() => import('@/pages/payroll/statutory/PTAXManagement').then(m => ({ default: m.PTAXManagement })))
 const TDSManagement         = lazy(() => import('@/pages/payroll/statutory/TDSManagement').then(m => ({ default: m.TDSManagement })))
+const LWFManagement         = lazy(() => import('@/pages/payroll/statutory/LWFManagement').then(m => ({ default: m.LWFManagement })))
 // Notifications
 const NotificationTemplates = lazy(() => import('@/pages/notifications/NotificationTemplates').then(m => ({ default: m.NotificationTemplates })))
 const OperationalInbox      = lazy(() => import('@/pages/notifications/OperationalInbox').then(m => ({ default: m.OperationalInbox })))
@@ -644,6 +645,7 @@ export default function App() {
                 <Route path="/admin/payroll/statutory/esi"            element={<ESIManagement />} />
                 <Route path="/admin/payroll/statutory/ptax"           element={<PTAXManagement />} />
                 <Route path="/admin/payroll/statutory/tds"            element={<TDSManagement />} />
+                <Route path="/admin/payroll/statutory/lwf"            element={<LWFManagement />} />
                 <Route path="/admin/payroll/tax-governance"           element={<TaxGovernance />} />
                 <Route path="/admin/payroll/tax-governance-admin"    element={<TaxGovernanceAdmin />} />
                 {/* Phase 14 — Enterprise Payroll Operationalization */}
