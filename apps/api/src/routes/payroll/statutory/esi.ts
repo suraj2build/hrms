@@ -207,29 +207,16 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // ── Active employees ──────────────────────────────────────────────────────
     const { data: employees, error: empErr } = await fastify.supabase
       .from('employees')
-      .select('id, employee_code, statutory_group_id')
+      .select('id, employee_code')
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
 
     if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
 
-    const empList = (employees ?? []) as Array<{ id: string; employee_code: string; statutory_group_id: string | null }>
+    const empList = (employees ?? []) as Array<{ id: string; employee_code: string }>
 
-    // ── Statutory group gate (authoritative employee-master Yes/No) ──────────────
-    // Each employee's statutory group decides whether ESI applies (esi_enabled).
-    // No group / unreadable group → default APPLICABLE. esi_enabled = false → zero.
-    const groupIds = [...new Set(empList.map(e => e.statutory_group_id).filter(Boolean))] as string[]
-    const groupEsiEnabled = new Map<string, boolean>()
-    if (groupIds.length > 0) {
-      const { data: groups } = await fastify.supabase
-        .from('statutory_groups')
-        .select('id, esi_enabled')
-        .eq('tenant_id', req.tenantId)
-        .in('id', groupIds)
-      for (const g of (groups ?? []) as any[]) groupEsiEnabled.set(g.id, g.esi_enabled !== false)
-    }
-    const empEsiEnabled = (emp: { statutory_group_id: string | null }) =>
-      emp.statutory_group_id ? (groupEsiEnabled.get(emp.statutory_group_id) ?? true) : true
+    // ESI is a CENTRAL scheme: one tenant config + a per-employee Yes/No (exemption /
+    // is_esi_applicable) from the override tables. No statutory group / state.
 
     // ── ESI exemption overrides (employee_statutory_overrides) ───────────────
     // The old esi_eligibility_timeline.is_esi_applicable is supplemented by
@@ -335,8 +322,6 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     let continuationActiveCount = 0  // employees in contribution-period continuation
 
     for (const emp of empList) {
-      // Authoritative gate: statutory group's esi_enabled (employee-master Yes/No).
-      if (!empEsiEnabled(emp)) { skippedIneligible++; continue }
       // Skip employees exempted via statutory overrides OR legacy timeline
       if (exemptSet.has(emp.id)) { skippedExempt++; continue }
       if (eligibilityMap.get(emp.id) === false) { skippedIneligible++; continue }
