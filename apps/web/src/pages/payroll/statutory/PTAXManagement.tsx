@@ -105,6 +105,22 @@ export function PTAXManagement() {
   const [selectedStateCode, setSelectedStateCode] = useState<string>('')
   const [searchQuery, setSearchQuery]             = useState('')
   const [filterEnabled, setFilterEnabled]         = useState(false)
+  const [showAddState, setShowAddState]           = useState(false)
+  const [newStateCode, setNewStateCode]           = useState('')
+  const [newStateName, setNewStateName]           = useState('')
+
+  const addStateMutation = useMutation({
+    mutationFn: () => api.put(`/payroll/statutory/ptax/states/${newStateCode.toUpperCase().trim()}`, {
+      enabled:    true,
+      state_name: newStateName.trim() || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ptax-states'] })
+      toast.success('State added', { description: `${newStateCode.toUpperCase()} enabled for PT` })
+      setNewStateCode(''); setNewStateName(''); setShowAddState(false)
+    },
+    onError: (e: any) => toast.error('Failed to add state', { description: e?.message }),
+  })
   const [showAddSlabForm, setShowAddSlabForm]      = useState(false)
 
   // Registration state
@@ -279,6 +295,34 @@ export function PTAXManagement() {
         actions={
           <div className="flex items-center gap-2">
             <StatutoryMonthPicker />
+            {showAddState ? (
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={newStateCode}
+                  onChange={e => setNewStateCode(e.target.value.toUpperCase().slice(0, 4))}
+                  placeholder="Code (e.g. HR)"
+                  className="h-8 text-xs w-24"
+                  onKeyDown={e => { if (e.key === 'Enter' && newStateCode.trim()) addStateMutation.mutate() }}
+                />
+                <Input
+                  value={newStateName}
+                  onChange={e => setNewStateName(e.target.value)}
+                  placeholder="State name (optional)"
+                  className="h-8 text-xs w-40"
+                  onKeyDown={e => { if (e.key === 'Enter' && newStateCode.trim()) addStateMutation.mutate() }}
+                />
+                <Button size="sm" className="h-8 text-xs"
+                  disabled={!newStateCode.trim() || addStateMutation.isPending}
+                  onClick={() => addStateMutation.mutate()}>Add</Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs"
+                  onClick={() => { setShowAddState(false); setNewStateCode(''); setNewStateName('') }}>Cancel</Button>
+              </div>
+            ) : (
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+                onClick={() => setShowAddState(true)}>
+                + Add State
+              </Button>
+            )}
             <Button
               size="sm"
               className="h-8 text-xs gap-1.5"

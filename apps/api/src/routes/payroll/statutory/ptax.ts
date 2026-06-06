@@ -27,10 +27,12 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     CG: 'Chhattisgarh',
     GA: 'Goa',
     GJ: 'Gujarat',
+    HR: 'Haryana',
     HP: 'Himachal Pradesh',
     JH: 'Jharkhand',
     KA: 'Karnataka',
     KL: 'Kerala',
+    MP: 'Madhya Pradesh',
     MH: 'Maharashtra',
     MN: 'Manipur',
     ML: 'Meghalaya',
@@ -88,12 +90,11 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
   fastify.put('/states/:stateCode', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { stateCode } = req.params as { stateCode: string }
 
-    if (!PTAX_STATES[stateCode]) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: `Unknown state code: ${stateCode}` })
-    }
-
+    // Allow both known states and custom state codes (e.g. HR for Haryana, or any
+    // UT/special zone). The name falls back to the code if not in the known list.
     const schema = z.object({
       enabled:             z.boolean().optional(),
+      state_name:          z.string().optional(),   // custom name for unknown state codes
       registration_number: z.string().nullable().optional(),
       registration_date:   z.string().nullable().optional(),
     })
@@ -148,7 +149,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
 
     return reply.send({
       state_code:          stateCode,
-      state_name:          PTAX_STATES[stateCode],
+      state_name:          PTAX_STATES[stateCode] ?? parsed.data.state_name ?? stateCode,
       enabled:             upsertPayload.enabled,
       registration_number: upsertPayload.registration_number ?? null,
       registration_date:   upsertPayload.registration_date   ?? null,
