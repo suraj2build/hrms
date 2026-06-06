@@ -3766,6 +3766,19 @@ export function EmployeeProfile() {
                           <Badge variant={bs.lwf_applicable ? 'success' : 'secondary'} className="rounded-full text-[10px]">LWF {bs.lwf_applicable ? 'Applicable' : 'N/A'}</Badge>
                           {bs.tax_regime && <Badge variant="outline" className="rounded-full text-[10px] capitalize">{bs.tax_regime} Regime</Badge>}
                         </div>
+                        {/* PT state */}
+                        {(bs as any).pt_state_code && (
+                          <KV label="PT State" value={(bs as any).pt_state_code} />
+                        )}
+                        {/* LWF state */}
+                        {(bs as any).lwf_state_code && (
+                          <KV label="LWF State" value={(bs as any).lwf_state_code} />
+                        )}
+                        {/* Holiday group */}
+                        {(bs as any).holiday_group_id && holidayGroups.length > 0 && (
+                          <KV label="Holiday Group"
+                            value={holidayGroups.find((g: any) => g.id === (bs as any).holiday_group_id)?.name ?? (bs as any).holiday_group_id} />
+                        )}
                       </Grid2>
 
                       <TooltipProvider>
@@ -5012,126 +5025,165 @@ export function EmployeeProfile() {
 
       {/* ── Bank & Statutory Edit Dialog ── */}
       <Dialog open={editBankOpen} onOpenChange={setEditBankOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Edit Bank &amp; Statutory Details</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Bank Details</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Bank Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.bank_name} onChange={e=>setBankForm(f=>({...f,bank_name:e.target.value}))}/></div>
-              <div>
-                <Label className="text-xs">Account Type</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.account_type} onChange={e=>setBankForm(f=>({...f,account_type:e.target.value as any}))}>
-                  <option value="">—</option>
-                  {['savings','current','salary'].map(t=><option key={t} value={t} className="capitalize">{t}</option>)}
-                </select>
-              </div>
-              <div><Label className="text-xs">Account Number</Label><Input className="mt-1 h-8 text-xs font-mono" placeholder="Enter to update (masked for security)" value={bankForm.account_number} onChange={e=>setBankForm(f=>({...f,account_number:e.target.value}))}/></div>
-              <div><Label className="text-xs">IFSC Code</Label><Input className="mt-1 h-8 text-xs font-mono uppercase" value={bankForm.ifsc_code} onChange={e=>setBankForm(f=>({...f,ifsc_code:e.target.value.toUpperCase()}))}/></div>
-              <div className="col-span-2"><Label className="text-xs">Branch Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.branch_name} onChange={e=>setBankForm(f=>({...f,branch_name:e.target.value}))}/></div>
-            </div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2 border-t border-border">Statutory Identifiers</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">PAN Number</Label><Input className="mt-1 h-8 text-xs font-mono uppercase" value={bankForm.pan_number} onChange={e=>setBankForm(f=>({...f,pan_number:e.target.value.toUpperCase()}))}/></div>
-              <div><Label className="text-xs">Aadhaar Number</Label><Input className="mt-1 h-8 text-xs font-mono" placeholder="Enter to update (masked)" value={bankForm.aadhaar_number} onChange={e=>setBankForm(f=>({...f,aadhaar_number:e.target.value}))}/></div>
-              <div><Label className="text-xs">UAN</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.uan_number} onChange={e=>setBankForm(f=>({...f,uan_number:e.target.value}))}/></div>
-              <div><Label className="text-xs">PF Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.pf_number} onChange={e=>setBankForm(f=>({...f,pf_number:e.target.value}))}/></div>
-              <div><Label className="text-xs">ESI Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.esi_number} onChange={e=>setBankForm(f=>({...f,esi_number:e.target.value}))}/></div>
-              <div>
-                <Label className="text-xs">Tax Regime</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.tax_regime} onChange={e=>setBankForm(f=>({...f,tax_regime:e.target.value as 'old'|'new'}))}>
-                  <option value="new">New Regime</option>
-                  <option value="old">Old Regime</option>
-                </select>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Bank &amp; Statutory Details</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">Bank account, statutory identifiers and scheme applicability for this employee.</p>
+          </DialogHeader>
+          <div className="space-y-0 max-h-[75vh] overflow-y-auto pr-2">
+
+            {/* ── Section 1: Bank Account ───────────────────────────────── */}
+            <div className="rounded-xl border border-border bg-muted/20 p-4 mb-4">
+              <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
+                <span className="inline-flex h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] items-center justify-center font-bold">1</span>
+                Bank Account
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label className="text-xs text-muted-foreground">Bank Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.bank_name} onChange={e=>setBankForm(f=>({...f,bank_name:e.target.value}))}/></div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Account Type</Label>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.account_type} onChange={e=>setBankForm(f=>({...f,account_type:e.target.value as any}))}>
+                    <option value="">— Select —</option>
+                    {['savings','current','salary'].map(t=><option key={t} value={t} className="capitalize">{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+                  </select>
+                </div>
+                <div><Label className="text-xs text-muted-foreground">Account Number</Label><Input className="mt-1 h-8 text-xs font-mono" placeholder="Leave blank to keep existing (masked)" value={bankForm.account_number} onChange={e=>setBankForm(f=>({...f,account_number:e.target.value}))}/></div>
+                <div><Label className="text-xs text-muted-foreground">IFSC Code</Label><Input className="mt-1 h-8 text-xs font-mono uppercase" value={bankForm.ifsc_code} onChange={e=>setBankForm(f=>({...f,ifsc_code:e.target.value.toUpperCase()}))}/></div>
+                <div className="col-span-2"><Label className="text-xs text-muted-foreground">Branch Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.branch_name} onChange={e=>setBankForm(f=>({...f,branch_name:e.target.value}))}/></div>
               </div>
             </div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2 border-t border-border">Scheme Applicability</p>
-            <p className="text-[10px] text-muted-foreground -mt-1">EPF &amp; ESI are central schemes — set per-employee here. PT/LWF apply by work state.</p>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3 items-center">
-              <div className="flex items-center gap-2">
-                <Switch checked={bankForm.epf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,epf_applicable:v}))} />
-                <Label className="text-xs">EPF Applicable</Label>
-              </div>
-              <div>
-                <Label className="text-xs">PF Wage Basis</Label>
-                <select
-                  className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none disabled:opacity-50"
-                  value={bankForm.pf_wage_basis}
-                  disabled={!bankForm.epf_applicable}
-                  onChange={e=>setBankForm(f=>({...f,pf_wage_basis:e.target.value as 'capped'|'actual'|'default'}))}
-                >
-                  <option value="default">Follow tenant default</option>
-                  <option value="capped">Capped — restrict to ceiling</option>
-                  <option value="actual">Actual — full wages, no ceiling</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={bankForm.esi_applicable} onCheckedChange={v=>setBankForm(f=>({...f,esi_applicable:v}))} />
-                <Label className="text-xs">ESI Applicable</Label>
+
+            {/* ── Section 2: Statutory Identifiers ─────────────────────── */}
+            <div className="rounded-xl border border-border bg-muted/20 p-4 mb-4">
+              <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
+                <span className="inline-flex h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] items-center justify-center font-bold">2</span>
+                Statutory Identifiers
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label className="text-xs text-muted-foreground">PAN Number</Label><Input className="mt-1 h-8 text-xs font-mono uppercase" value={bankForm.pan_number} onChange={e=>setBankForm(f=>({...f,pan_number:e.target.value.toUpperCase()}))}/></div>
+                <div><Label className="text-xs text-muted-foreground">Aadhaar</Label><Input className="mt-1 h-8 text-xs font-mono" placeholder="Leave blank to keep" value={bankForm.aadhaar_number} onChange={e=>setBankForm(f=>({...f,aadhaar_number:e.target.value}))}/></div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Tax Regime</Label>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.tax_regime} onChange={e=>setBankForm(f=>({...f,tax_regime:e.target.value as 'old'|'new'}))}>
+                    <option value="new">New Regime</option>
+                    <option value="old">Old Regime</option>
+                  </select>
+                </div>
+                <div><Label className="text-xs text-muted-foreground">UAN</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.uan_number} onChange={e=>setBankForm(f=>({...f,uan_number:e.target.value}))}/></div>
+                <div><Label className="text-xs text-muted-foreground">PF Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.pf_number} onChange={e=>setBankForm(f=>({...f,pf_number:e.target.value}))}/></div>
+                <div><Label className="text-xs text-muted-foreground">ESI Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={bankForm.esi_number} onChange={e=>setBankForm(f=>({...f,esi_number:e.target.value}))}/></div>
               </div>
             </div>
-            <div className="flex gap-6 pt-1 items-end">
-              <div className="flex items-center gap-2">
-                <Switch checked={bankForm.pt_applicable} onCheckedChange={v=>setBankForm(f=>({...f,pt_applicable:v}))} />
-                <Label className="text-xs">PT Applicable</Label>
+
+            {/* ── Section 3: Scheme Applicability ──────────────────────── */}
+            <div className="rounded-xl border border-border bg-muted/20 p-4 mb-4">
+              <p className="text-xs font-semibold text-foreground mb-0.5 flex items-center gap-1.5">
+                <span className="inline-flex h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] items-center justify-center font-bold">3</span>
+                Scheme Applicability
+              </p>
+              <p className="text-[10px] text-muted-foreground mb-3 ml-6">EPF &amp; ESI are central. PT/LWF are state-based. Assign states below.</p>
+
+              {/* EPF row */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+                  <Switch checked={bankForm.epf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,epf_applicable:v}))} />
+                  <div>
+                    <p className="text-xs font-medium">EPF Applicable</p>
+                    <p className="text-[10px] text-muted-foreground">Provident Fund deduction</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">PF Wage Basis</Label>
+                  <select
+                    className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none disabled:opacity-50"
+                    value={bankForm.pf_wage_basis} disabled={!bankForm.epf_applicable}
+                    onChange={e=>setBankForm(f=>({...f,pf_wage_basis:e.target.value as 'capped'|'actual'|'default'}))}>
+                    <option value="default">Follow tenant default</option>
+                    <option value="capped">Capped (ceiling ₹15,000)</option>
+                    <option value="actual">Actual (full wages, no ceiling)</option>
+                  </select>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={bankForm.lwf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,lwf_applicable:v}))} />
-                <Label className="text-xs">LWF Applicable</Label>
+
+              {/* ESI row */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+                  <Switch checked={bankForm.esi_applicable} onCheckedChange={v=>setBankForm(f=>({...f,esi_applicable:v}))} />
+                  <div>
+                    <p className="text-xs font-medium">ESI Applicable</p>
+                    <p className="text-[10px] text-muted-foreground">Health insurance (below ₹21k)</p>
+                  </div>
+                </div>
               </div>
-              <div className="flex-1">
-                <Label className="text-xs">PT State</Label>
-                <select
-                  className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
-                  value={bankForm.pt_state_code}
-                  onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}
-                >
-                  <option value="">Auto (from site)</option>
-                  {[
-                    ['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
-                    ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
-                    ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
-                    ['MH','Maharashtra'],['MN','Manipur'],['ML','Meghalaya'],['MZ','Mizoram'],
-                    ['NL','Nagaland'],['OR','Odisha'],['PB','Punjab'],['SK','Sikkim'],
-                    ['TN','Tamil Nadu'],['TS','Telangana'],['TR','Tripura'],['WB','West Bengal'],
-                  ].map(([code, name]) => (
-                    <option key={code} value={code}>{name} ({code})</option>
+
+              {/* PT row */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+                  <Switch checked={bankForm.pt_applicable} onCheckedChange={v=>setBankForm(f=>({...f,pt_applicable:v}))} />
+                  <div>
+                    <p className="text-xs font-medium">PT Applicable</p>
+                    <p className="text-[10px] text-muted-foreground">Professional Tax (state)</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">PT State</Label>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                    value={bankForm.pt_state_code} onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}>
+                    <option value="">Auto (from site)</option>
+                    {[['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
+                      ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
+                      ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
+                      ['MH','Maharashtra'],['MN','Manipur'],['ML','Meghalaya'],['MZ','Mizoram'],
+                      ['NL','Nagaland'],['OR','Odisha'],['PB','Punjab'],['SK','Sikkim'],
+                      ['TN','Tamil Nadu'],['TS','Telangana'],['TR','Tripura'],['WB','West Bengal'],
+                    ].map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* LWF row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+                  <Switch checked={bankForm.lwf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,lwf_applicable:v}))} />
+                  <div>
+                    <p className="text-xs font-medium">LWF Applicable</p>
+                    <p className="text-[10px] text-muted-foreground">Labour Welfare Fund (state)</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">LWF State</Label>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                    value={bankForm.lwf_state_code} onChange={e => setBankForm(f => ({ ...f, lwf_state_code: e.target.value }))}>
+                    <option value="">Auto (from site)</option>
+                    {[['AP','Andhra Pradesh'],['CG','Chhattisgarh'],['GA','Goa'],['GJ','Gujarat'],
+                      ['HR','Haryana'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
+                      ['MH','Maharashtra'],['OR','Odisha'],['PB','Punjab'],
+                      ['TN','Tamil Nadu'],['TS','Telangana'],['WB','West Bengal'],
+                    ].map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section 4: Calendar ───────────────────────────────────── */}
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
+                <span className="inline-flex h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] items-center justify-center font-bold">4</span>
+                Calendar
+              </p>
+              <div>
+                <Label className="text-xs text-muted-foreground">Holiday Calendar Group</Label>
+                <p className="text-[10px] text-muted-foreground mb-1">Which group's holidays apply. Overrides the site's default group.</p>
+                <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                  value={bankForm.holiday_group_id} onChange={e => setBankForm(f => ({ ...f, holiday_group_id: e.target.value }))}>
+                  <option value="">Inherit from site</option>
+                  {holidayGroups.map((g: any) => (
+                    <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
                   ))}
                 </select>
               </div>
-              <div className="flex-1">
-                <Label className="text-xs">LWF State</Label>
-                <select
-                  className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
-                  value={bankForm.lwf_state_code}
-                  onChange={e => setBankForm(f => ({ ...f, lwf_state_code: e.target.value }))}
-                >
-                  <option value="">Auto (from site)</option>
-                  {[
-                    ['AP','Andhra Pradesh'],['CG','Chhattisgarh'],['GA','Goa'],['GJ','Gujarat'],
-                    ['HR','Haryana'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
-                    ['MH','Maharashtra'],['OR','Odisha'],['PB','Punjab'],
-                    ['TN','Tamil Nadu'],['TS','Telangana'],['WB','West Bengal'],
-                  ].map(([code, name]) => (
-                    <option key={code} value={code}>{name} ({code})</option>
-                  ))}
-                </select>
-              </div>
             </div>
-            {/* Holiday group */}
-            <div className="space-y-1 pt-1">
-              <Label className="text-xs font-medium text-muted-foreground">Holiday Calendar Group</Label>
-              <p className="text-[10px] text-muted-foreground">Which holiday group applies to this employee. Overrides the site's group.</p>
-              <select
-                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
-                value={bankForm.holiday_group_id}
-                onChange={e => setBankForm(f => ({ ...f, holiday_group_id: e.target.value }))}
-              >
-                <option value="">Inherit from site</option>
-                {holidayGroups.map((g: any) => (
-                  <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
-                ))}
-              </select>
-            </div>
+
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={()=>setEditBankOpen(false)}>Cancel</Button>
