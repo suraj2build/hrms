@@ -103,6 +103,16 @@ export function applyStatutoryToSlip(
   const grossWages = slip.gross_pay
 
   // ── EPF ───────────────────────────────────────────────────────────────────
+  // Fold the per-employee PF wage basis into the config so the SLIP matches the
+  // employee's setting (Capped / Actual), not just the tenant default:
+  //   restrictPfToCeiling true  → cap PF wages to the ceiling
+  //   false → no ceiling (PF on full PF wages)
+  //   null  → follow tenant (isWageCeilingApplicable)
+  const restrictPfToCeiling = params.epfApplicability.restrictPfToCeiling
+  const effEpfConfig = restrictPfToCeiling === null
+    ? params.epfConfig
+    : { ...params.epfConfig, isWageCeilingApplicable: restrictPfToCeiling }
+
   const epfApplicable = params.epfApplicability.isApplicable && pfWages > 0
   const epf = epfApplicable
     ? computeEPF(
@@ -115,7 +125,7 @@ export function applyStatutoryToSlip(
           higherPfOpted:         params.epfApplicability.higherPfOpted,
           higherPfPct:           params.epfApplicability.higherPfPct,
         },
-        params.epfConfig,
+        effEpfConfig,
       )
     : null
 
