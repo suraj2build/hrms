@@ -248,20 +248,23 @@ export async function resolveEmployeeStatutoryParams(
   // → sites.state_code (auto, primary)
   let resolvedState = stateCode
 
-  // Check ptax_state_config (manual assignment overrides site)
-  // PT state assignment — latest row wins (same reason as EPF override above).
-  const { data: ptaxStateRow } = await supabase
-    .from('ptax_state_config')
-    .select('state_code')
-    .eq('employee_id', employeeId)
-    .eq('tenant_id', tenantId)
-    .order('effective_from', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  // An employee works in ONE state, so PT and LWF share it. Fetch BOTH the PT
+  // and LWF manual state overrides up front and cross-fall-back, so setting either
+  // "PT State" or "LWF State" on the employee master drives both. Priority for each
+  // scheme: its own override → the other scheme's override → site.state_code.
+  const [ptaxStateRow, lwfStateRowEarly] = await Promise.all([
+    supabase.from('ptax_state_config').select('state_code')
+      .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+      .order('effective_from', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('lwf_state_config').select('state_code')
+      .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+      .order('effective_from', { ascending: false }).limit(1).maybeSingle(),
+  ])
+  const ptManual  = (ptaxStateRow as any)?.data?.state_code     ?? null
+  const lwfManual = (lwfStateRowEarly as any)?.data?.state_code ?? null
 
-  if ((ptaxStateRow as any)?.state_code) {
-    resolvedState = (ptaxStateRow as any).state_code
-  }
+  // PT state: PT override → LWF override → site
+  resolvedState = ptManual ?? lwfManual ?? stateCode
 
   // Fetch PTax slabs for resolved state
   let ptaxSlabs: PTaxSlab[] = []
@@ -320,18 +323,8 @@ export async function resolveEmployeeStatutoryParams(
   ptaxApplicability.registration = registrations.ptax
 
   // ── LWF resolution ────────────────────────────────────────────────────────────
-  // Priority: lwf_state_config (manual) > sites.state_code (auto)
-  // Fetch the employee's LWF state override (latest row, same pattern as PT).
-  const { data: lwfStateRow } = await supabase
-    .from('lwf_state_config')
-    .select('state_code')
-    .eq('employee_id', employeeId)
-    .eq('tenant_id', tenantId)
-    .order('effective_from', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  const lwfState = (lwfStateRow as any)?.state_code ?? resolvedState
+  // LWF state: LWF override → PT override → site (mirror of the PT resolution).
+  const lwfState = lwfManual ?? ptManual ?? stateCode
 
   // Fetch LWF state settings for the resolved state.
   let lwfApplicability: LWFApplicability = { isApplicable: false, isExempt: false, config: null }
