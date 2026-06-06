@@ -362,7 +362,12 @@ export default async function epfRoutes(fastify: FastifyInstance) {
 
     // PF wages straight off the finalized slip's PF-applicable earnings —
     // the same base the live run used for PF_EMPLOYEE / PF_EMPLOYER lines.
-    const slipPfWagesMap = new Map<string, number>()
+    // Also capture the ACTUAL PF deduction/employer lines from the slip so the
+    // filing tables aggregate exactly what was paid (the deposit), instead of
+    // recomputing — guaranteeing the EPF page and the reconciliation never drift.
+    const slipPfWagesMap    = new Map<string, number>()
+    const slipPfEmployeeMap = new Map<string, number>()   // PF_EMPLOYEE line
+    const slipPfEmployerMap = new Map<string, number>()   // PF_EMPLOYER line (total employer)
     for (const r of (lopSlipRows ?? []) as any[]) {
       const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
       const pfWages = breakdown
@@ -370,6 +375,13 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           c?.component_type === 'earning' && (c?.is_pf_applicable || c?.affects_pf))
         .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
       slipPfWagesMap.set(r.employee_id, Math.round(pfWages * 100) / 100)
+
+      for (const c of breakdown) {
+        const code = String(c?.code ?? '').toUpperCase()
+        const amt  = Number(c?.monthly_amount) || 0
+        if (code === 'PF_EMPLOYEE') slipPfEmployeeMap.set(r.employee_id, Math.round(amt * 100) / 100)
+        else if (code === 'PF_EMPLOYER') slipPfEmployerMap.set(r.employee_id, Math.round(amt * 100) / 100)
+      }
     }
 
     // Compute EPF for each employee
@@ -421,22 +433,39 @@ export default async function epfRoutes(fastify: FastifyInstance) {
 
       const result = computeEPF(input, employeeConfig)
 
+      // SLIP IS THE SOURCE OF TRUTH. When the employee has a finalized slip, take the
+      // ACTUAL PF deduction/employer amounts from it so the filing tables equal the
+      // payslip (the deposit) and never diverge from the reconciliation. The employer
+      // split keeps the statutory EPS/EDLI (ceiling-based, fixed) and the remainder of
+      // the slip's PF_EMPLOYER total goes to employer_pf. Employees without a slip keep
+      // the computed values (fallback).
+      const slipEmp      = slipPfEmployeeMap.get(emp.id)
+      const slipEmployer = slipPfEmployerMap.get(emp.id)
+
+      let employeeContribution = result.employeeContribution
+      let employerPf           = result.employerPf
+      let employerEps          = result.employerEps
+      let edli                 = result.edliContribution
+
+      if (slipEmp !== undefined) employeeContribution = slipEmp
+      if (slipEmployer !== undefined) {
+        // Tie the employer split to the slip's PF_EMPLOYER total.
+        employerPf = Math.round((slipEmployer - employerEps - edli) * 100) / 100
+        if (employerPf < 0) { employerPf = 0; employerEps = Math.max(0, slipEmployer - edli) }
+      }
+
       // NOTE: capped_pf_wages, total_employer_contribution and admin_charges are
       // intentionally excluded — they are not insertable columns in epf_contributions.
-      // total_employer_contribution is GENERATED ALWAYS AS (employer_pf + employer_eps
-      // + edli_contribution). capped_pf_wages and admin_charges are not in the schema
-      // (admin charges are an A/c-2 employer liability derived at filing time, not
-      // stored per-row).
       return {
         tenant_id:             req.tenantId,
         employee_id:           emp.id,
         contribution_month:    month,
         pf_wages:              result.pfWages,
-        employee_contribution: result.employeeContribution,
+        employee_contribution: employeeContribution,
         voluntary_pf:          result.voluntaryPfContribution,  // column is voluntary_pf, not voluntary_pf_contribution
-        employer_pf:           result.employerPf,
-        employer_eps:          result.employerEps,
-        edli_contribution:     result.edliContribution,
+        employer_pf:           employerPf,
+        employer_eps:          employerEps,
+        edli_contribution:     edli,
         is_capped:             result.isCapped,
       }
     })

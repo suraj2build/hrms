@@ -314,7 +314,7 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // time and becomes stale when the employee gets a salary revision).
     const { data: slipRows } = await fastify.supabase
       .from('payroll_slips')
-      .select('employee_id, gross_pay')
+      .select('employee_id, gross_pay, component_breakdown')
       .eq('tenant_id', req.tenantId)
       .eq('month', month)
       .eq('status', 'finalized')
@@ -322,6 +322,20 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     const slipGrossMap = new Map<string, number>(
       ((slipRows ?? []) as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
     )
+
+    // Actual ESI lines off the finalized slip — the deposit. Used to override the
+    // recomputed amounts so the ESI page and the reconciliation never diverge.
+    const slipEsiEmployeeMap = new Map<string, number>()
+    const slipEsiEmployerMap = new Map<string, number>()
+    for (const r of (slipRows ?? []) as any[]) {
+      const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
+      for (const c of breakdown) {
+        const code = String(c?.code ?? '').toUpperCase()
+        const amt  = Number(c?.monthly_amount) || 0
+        if (code === 'ESI_EMPLOYEE') slipEsiEmployeeMap.set(r.employee_id, Math.round(amt * 100) / 100)
+        else if (code === 'ESI_EMPLOYER') slipEsiEmployerMap.set(r.employee_id, Math.round(amt * 100) / 100)
+      }
+    }
 
     // ── Fallback gross for employees without a finalized slip ─────────────────
     // Sum all earning-type compensation components from the active compensation.
@@ -390,14 +404,18 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       if (result.status === 'continuation') continuationActiveCount++
 
       if (result.isEligible) {
+        // Slip is the source of truth: use the actual ESI lines from the finalized
+        // slip when present, so the ESI page == reconciliation == payslip (deposit).
+        const slipEmp      = slipEsiEmployeeMap.get(emp.id)
+        const slipEmployer = slipEsiEmployerMap.get(emp.id)
         contributions.push({
           tenant_id:             req.tenantId,
           employee_id:           emp.id,
           contribution_month:    month,
           esi_wages:             result.esiWages,
           is_eligible:           result.isEligible,
-          employee_contribution: result.employeeContribution,
-          employer_contribution: result.employerContribution,
+          employee_contribution: slipEmp      ?? result.employeeContribution,
+          employer_contribution: slipEmployer ?? result.employerContribution,
           // total_contribution is GENERATED ALWAYS AS (employee_contribution + employer_contribution) STORED
           // in esi_contributions — cannot be inserted; the DB computes it automatically.
         })
