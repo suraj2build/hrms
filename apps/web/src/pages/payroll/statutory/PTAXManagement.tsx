@@ -37,7 +37,7 @@ interface PTaxSlab {
   financial_year: string
   monthly_income_from: number
   monthly_income_to: number | null
-  monthly_tax: number
+  monthly_ptax: number
   gender: string
 }
 
@@ -204,7 +204,7 @@ export function PTAXManagement() {
     queries: last6.map(ym => ({
       queryKey: ['ptax-contributions', ym],
       queryFn:  () => api.get(`/payroll/statutory/ptax/contributions?month=${ym}`)
-        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as Promise<Array<{ state_code: string; tax_amount: number }>>,
+        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as Promise<Array<{ state_code: string; ptax_amount: number }>>,
       enabled:  isAdmin,
       staleTime: 120_000,
     })),
@@ -217,8 +217,8 @@ export function PTAXManagement() {
       financial_year:      CURRENT_FY,
       monthly_income_from: slabForm.monthly_income_from,
       monthly_income_to:   slabForm.monthly_income_to === '' ? null : Number(slabForm.monthly_income_to),
-      monthly_tax:         slabForm.monthly_tax,
-      gender:              slabForm.gender,
+      monthly_ptax:        slabForm.monthly_tax,
+      gender:              slabForm.gender === 'all' ? undefined : slabForm.gender,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ptax-slabs', CURRENT_FY, selectedStateCode] })
@@ -258,8 +258,8 @@ export function PTAXManagement() {
   const enabledCount   = stateList.filter(s => s.enabled).length
 
   const historyRows = last6.map((ym, i) => {
-    const rows       = (historyResults[i]?.data ?? []) as Array<{ state_code: string; tax_amount: number }>
-    const total      = rows.reduce((s, c) => s + (Number(c.tax_amount) || 0), 0)
+    const rows       = (historyResults[i]?.data ?? []) as Array<{ state_code: string; ptax_amount: number }>
+    const total      = rows.reduce((s, c) => s + (Number(c.ptax_amount) || 0), 0)
     const states     = new Set(rows.map(c => c.state_code)).size
     const headcount  = rows.length
     return { ym, headcount, states, total, loading: historyResults[i]?.isLoading }
@@ -632,14 +632,14 @@ export function PTAXManagement() {
                       : `${fmtCurrency(slab.monthly_income_from)} — ${fmtCurrency(slab.monthly_income_to)}`
                     }
                   </span>
-                  {slab.gender !== 'all' && (
+                  {slab.gender && slab.gender !== 'all' && (
                     <span className="text-[10px] text-primary font-medium capitalize">{slab.gender} only</span>
                   )}
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <div className="text-right">
                     <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Monthly Levy</span>
-                    <span className="text-sm font-black text-primary font-mono">₹{slab.monthly_tax}</span>
+                    <span className="text-sm font-black text-primary font-mono">₹{slab.monthly_ptax}</span>
                   </div>
                   {/* Delete — disabled; deletions require API endpoint */}
                   <button

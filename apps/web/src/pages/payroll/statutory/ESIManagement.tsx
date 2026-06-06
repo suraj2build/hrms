@@ -59,9 +59,9 @@ interface ESIContribution {
   id: string
   employee_id: string
   contribution_month: string
-  gross_wages: number
-  employee_esi: number
-  employer_esi: number
+  esi_wages: number
+  employee_contribution: number
+  employer_contribution: number
   total_contribution: number
   is_eligible: boolean
   status: string
@@ -522,16 +522,16 @@ export function ESIManagement() {
   const contribList       = Array.isArray(contributions) ? contributions : []
   const totalEmployees    = contribList.length
   const eligibleEmployees = contribList.filter(c => c.is_eligible).length
-  const totalEmployeeESI  = contribList.reduce((s, c) => s + (Number(c.employee_esi) || 0), 0)
-  const totalEmployerESI  = contribList.reduce((s, c) => s + (Number(c.employer_esi) || 0), 0)
+  const totalEmployeeESI  = contribList.reduce((s, c) => s + (Number(c.employee_contribution) || 0), 0)
+  const totalEmployerESI  = contribList.reduce((s, c) => s + (Number(c.employer_contribution) || 0), 0)
 
   const historyRows = last6.map((ym, i) => {
     const rows     = (historyResults[i]?.data ?? []) as ESIContribution[]
     const total    = rows.length
     const eligible = rows.filter(c => c.is_eligible).length
-    const wages    = rows.reduce((s, c) => s + (Number(c.gross_wages)   || 0), 0)
-    const empESI   = rows.reduce((s, c) => s + (Number(c.employee_esi)  || 0), 0)
-    const emprESI  = rows.reduce((s, c) => s + (Number(c.employer_esi)  || 0), 0)
+    const wages    = rows.reduce((s, c) => s + (Number(c.esi_wages)              || 0), 0)
+    const empESI   = rows.reduce((s, c) => s + (Number(c.employee_contribution)  || 0), 0)
+    const emprESI  = rows.reduce((s, c) => s + (Number(c.employer_contribution)  || 0), 0)
     return { ym, total, eligible, wages, empESI, emprESI, loading: historyResults[i]?.isLoading }
   })
   const historyLoading = historyResults.some(r => r.isLoading)
@@ -599,8 +599,8 @@ export function ESIManagement() {
                 label="Filing Employee ESI"
                 value={fmtCurrency(totalEmployeeESI)}
                 sub={`${config?.employee_contribution_pct ?? 0.75}% share`}
-                footer="Deducted Wages Base:"
-                footerValue={fmtCurrency(contribList.reduce((s, c) => s + (Number(c.gross_wages) || 0), 0))}
+                footer="ESI Wage Base:"
+                footerValue={fmtCurrency(contribList.reduce((s, c) => s + (Number(c.esi_wages) || 0), 0))}
                 iconBg="bg-emerald-50 dark:bg-emerald-950/40"
                 iconBorder="border-emerald-100 dark:border-emerald-800"
                 iconColor="text-emerald-600 dark:text-emerald-400"
