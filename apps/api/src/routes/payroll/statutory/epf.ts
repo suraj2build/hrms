@@ -417,10 +417,12 @@ export default async function epfRoutes(fastify: FastifyInstance) {
 
       const result = computeEPF(input, employeeConfig)
 
-      // NOTE: capped_pf_wages and total_employer_contribution are intentionally
-      // excluded — they do not exist as insertable columns in epf_contributions.
-      // total_employer_contribution is a GENERATED ALWAYS AS column (DB-computed).
-      // capped_pf_wages is not in the schema.
+      // NOTE: capped_pf_wages, total_employer_contribution and admin_charges are
+      // intentionally excluded — they are not insertable columns in epf_contributions.
+      // total_employer_contribution is GENERATED ALWAYS AS (employer_pf + employer_eps
+      // + edli_contribution). capped_pf_wages and admin_charges are not in the schema
+      // (admin charges are an A/c-2 employer liability derived at filing time, not
+      // stored per-row).
       return {
         tenant_id:             req.tenantId,
         employee_id:           emp.id,
@@ -431,7 +433,6 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         employer_pf:           result.employerPf,
         employer_eps:          result.employerEps,
         edli_contribution:     result.edliContribution,
-        admin_charges:         result.adminCharges,
         is_capped:             result.isCapped,
       }
     })
