@@ -73,11 +73,23 @@ export function computePTax(
   traceSteps.push(`Total slabs loaded: ${slabs.length}`)
 
   // Step 1: match slabs by income range
-  const incomeMatched = slabs.filter(slab => {
+  let incomeMatched = slabs.filter(slab => {
     const aboveFrom = monthlyIncome >= slab.monthlyIncomeFrom
     const belowTo   = slab.monthlyIncomeTo === undefined || monthlyIncome <= slab.monthlyIncomeTo
     return aboveFrom && belowTo
   })
+
+  // Catch-all: PT's top band is always open-ended ("above ₹X → flat rate"). If the
+  // configured top slab has a finite upper bound and the employee earns ABOVE it,
+  // no band matches by range — but PT must still apply at the highest band's rate.
+  // So when nothing matched and income exceeds every slab, fall to the top slab.
+  if (incomeMatched.length === 0 && slabs.length > 0) {
+    const topSlab = [...slabs].sort((a, b) => b.monthlyIncomeFrom - a.monthlyIncomeFrom)[0]
+    if (monthlyIncome >= topSlab.monthlyIncomeFrom) {
+      traceSteps.push(`Income ${monthlyIncome} exceeds all slab bands — applying highest band (from ${topSlab.monthlyIncomeFrom}) as the open-ended top rate`)
+      incomeMatched = [topSlab]
+    }
+  }
 
   if (incomeMatched.length === 0) {
     traceSteps.push(`No slab matched income ${monthlyIncome} — PTax = 0`)
