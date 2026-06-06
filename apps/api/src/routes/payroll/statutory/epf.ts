@@ -133,7 +133,6 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         ...parsed.data,
         employee_id: employeeId,
         tenant_id: req.tenantId,
-        updated_at: new Date().toISOString(),
       }, { onConflict: 'tenant_id,employee_id' })
       .select()
       .single()
