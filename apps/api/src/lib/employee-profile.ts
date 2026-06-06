@@ -242,8 +242,42 @@ export async function fetchFullProfile(
         pt_applicable:         bankStatutory.pt_applicable,
         lwf_applicable:        bankStatutory.lwf_applicable,
         tax_regime:            bankStatutory.tax_regime    ?? null,
+        // per-employee statutory state overrides — fetched below and merged in
+        pt_state_code:         null as string | null,
+        lwf_state_code:        null as string | null,
+        holiday_group_id:      null as string | null,
       }
     : null
+
+  // ── 4b. Merge per-employee PT/LWF state + holiday group into bank_statutory ──
+  // These are stored in separate tables (ptax_state_config, lwf_state_config,
+  // employees.holiday_group_id), not in employee_bank_statutory.
+  if (bank_statutory && !light) {
+    const [ptRow, lwfRow, empRow] = await Promise.all([
+      sb.from('ptax_state_config')
+        .select('state_code')
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', tenantId)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      sb.from('lwf_state_config')
+        .select('state_code')
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', tenantId)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      sb.from('employees')
+        .select('holiday_group_id')
+        .eq('id', employeeId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle(),
+    ])
+    bank_statutory.pt_state_code    = (ptRow.data  as any)?.state_code       ?? null
+    bank_statutory.lwf_state_code   = (lwfRow.data as any)?.state_code       ?? null
+    bank_statutory.holiday_group_id = (empRow.data as any)?.holiday_group_id ?? null
+  }
 
   // ── 5. Shape job_info ──────────────────────────────────────────────────────
   const job_info = jobRow
