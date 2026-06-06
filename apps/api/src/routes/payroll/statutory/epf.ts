@@ -238,13 +238,30 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     // Fetch active employees
     const { data: employees, error: empErr } = await fastify.supabase
       .from('employees')
-      .select('id, employee_code, first_name, last_name')
+      .select('id, employee_code, first_name, last_name, statutory_group_id')
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
 
     if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
 
-    const empList = (employees ?? []) as Array<{ id: string; employee_code: string; first_name: string; last_name: string }>
+    const empList = (employees ?? []) as Array<{ id: string; employee_code: string; first_name: string; last_name: string; statutory_group_id: string | null }>
+
+    // ── Statutory group gate (authoritative employee-master Yes/No) ──────────────
+    // Each employee's statutory group decides whether PF applies (pf_enabled). When
+    // an employee has no group, or the group can't be read, default to APPLICABLE.
+    // A group with pf_enabled = false forces the employee's PF to zero.
+    const groupIds = [...new Set(empList.map(e => e.statutory_group_id).filter(Boolean))] as string[]
+    const groupPfEnabled = new Map<string, boolean>()
+    if (groupIds.length > 0) {
+      const { data: groups } = await fastify.supabase
+        .from('statutory_groups')
+        .select('id, pf_enabled')
+        .eq('tenant_id', req.tenantId)
+        .in('id', groupIds)
+      for (const g of (groups ?? []) as any[]) groupPfEnabled.set(g.id, g.pf_enabled !== false)
+    }
+    const empPfEnabled = (emp: { statutory_group_id: string | null }) =>
+      emp.statutory_group_id ? (groupPfEnabled.get(emp.statutory_group_id) ?? true) : true
 
     // ── EPF eligibility overrides (configure-once → persists) ─────────────────
     // Fetch the current active override for each employee — includes UAN,
@@ -390,8 +407,12 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         else                       wagesFallbackCount++
       }
 
+      // Authoritative gate: statutory group's pf_enabled (employee-master Yes/No).
+      // A per-employee exemption / is_epf_applicable=false also forces zero. Default
+      // (no group, no override) = applicable.
       const isExempt       = eligibility?.is_exempt               ?? false
-      const isApplicable   = isExempt ? false : (eligibility?.is_epf_applicable ?? true)
+      const groupAllowsPf  = empPfEnabled(emp)
+      const isApplicable   = (isExempt || !groupAllowsPf) ? false : (eligibility?.is_epf_applicable ?? true)
       const higherPfOpted  = eligibility?.higher_pf_opted          ?? false
       const higherPfPct    = eligibility?.higher_pf_pct             ?? 12
 
