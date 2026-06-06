@@ -312,7 +312,11 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
   fastify.post('/contributions/compute', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const schema = z.object({
       month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
-      financial_year: z.string().min(1),
+      // Optional: when omitted, derive the Indian FY from the month. This lets the
+      // on-finalize auto-compute and generic "compute filings" callers send just a
+      // month — previously a missing financial_year hard-failed with 400 and PTax
+      // silently never populated.
+      financial_year: z.string().min(1).optional(),
     })
 
     const parsed = schema.safeParse(req.body)
@@ -320,7 +324,13 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { month, financial_year } = parsed.data
+    const { month } = parsed.data
+    // Indian financial year (Apr–Mar): 2026-04 → "2026-27", 2026-03 → "2025-26".
+    const financial_year = parsed.data.financial_year ?? (() => {
+      const [y, m] = month.split('-').map(Number)
+      const startY = m >= 4 ? y : y - 1
+      return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`
+    })()
     const monthDate = `${month}-01`
 
     // Guard: statutory contributions must be computed from a FINALIZED payroll run.
