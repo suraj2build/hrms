@@ -2954,15 +2954,20 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     recon.pt.filed  = (ptaxRows.data?.length ?? 0) > 0
     recon.tds.filed = (tdsRows.data?.length  ?? 0) > 0
 
-    // TDS payable IS the amount deducted on the slips (remitted to the IT dept).
-    // The tds_monthly_projections table is a forecasting aid, not the filing source.
-    // So: if projection rows exist use them; otherwise the slip-deducted TDS is the
-    // payable. Either way TDS should reconcile against what was actually deducted.
-    if (!recon.tds.filed && recon.tds.computed > 0) {
-      recon.tds.payable = recon.tds.computed
-      recon.tds.filed   = true
-    } else if (recon.tds.computed === 0) {
-      recon.tds.computed = recon.tds.payable
+    // The amount DEPOSITED to each authority is exactly what was deducted on the
+    // finalized payslips (employee + employer for PF/ESI, the PT slab for PT, the
+    // TDS line for income tax). The per-scheme filing tables (epf/esi/ptax_contributions,
+    // tds_monthly_projections) are a convenience copy that may not be populated yet.
+    // So whenever a head has no filing rows, fall back to the slip-aggregated amount
+    // as the payable — the recon then reflects the real liability sourced from payroll.
+    for (const k of STATUTE_KEYS) {
+      if (!recon[k].filed && recon[k].computed > 0) {
+        recon[k].payable = recon[k].computed
+        recon[k].filed   = true
+      } else if (recon[k].computed === 0 && recon[k].payable > 0) {
+        // Filing rows exist but slip had no line (e.g. TDS not on slip) — show payable.
+        recon[k].computed = recon[k].payable
+      }
     }
 
     recon.pf.variance  = Math.round((recon.pf.payable  - recon.pf.computed)  * 100) / 100
