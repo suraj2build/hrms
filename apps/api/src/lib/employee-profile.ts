@@ -344,17 +344,43 @@ export async function fetchFullProfile(
   const fpDeduct     = r2fp(fpDeductions.reduce((s: number, c: any) => s + (c.annual_amount ?? 0), 0))
   const fpErCon      = r2fp(fpErContrib.reduce((s: number, c: any) => s + (c.annual_amount ?? 0), 0))
 
+  // Net take-home: the salary master has no employee statutory lines (PF/ESI/PT/
+  // LWF/TDS), so fpDeduct is ~0 and gross−deduct would wrongly equal gross. Source
+  // the real employee deductions from the latest finalized payslip (full rate =
+  // total_deductions − LOP, since LOP is a paid-day reduction, not a standing
+  // deduction). Falls back to the (usually empty) structure deductions if no slip.
+  let empDeductMonthly = r2fp(fpDeduct / 12)
+  let netSource: 'payslip' | 'structure' = 'structure'
+  {
+    const { data: latestSlip } = await sb
+      .from('payroll_slips')
+      .select('total_deductions, lop_amount, month')
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'finalized')
+      .order('month', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (latestSlip) {
+      empDeductMonthly = r2fp(Math.max(0, (Number((latestSlip as any).total_deductions) || 0) - (Number((latestSlip as any).lop_amount) || 0)))
+      netSource = 'payslip'
+    }
+  }
+  const grossMonthlyVal = r2fp(fpGross / 12)
+  const netMonthlyVal   = r2fp(grossMonthlyVal - empDeductMonthly)
+
   const compensationTotals = {
     gross_annual:                   fpGross,
-    gross_monthly:                  r2fp(fpGross / 12),
+    gross_monthly:                  grossMonthlyVal,
     basic_annual:                   r2fp(fpBasic?.annual_amount ?? 0),
     basic_monthly:                  r2fp((fpBasic?.annual_amount ?? 0) / 12),
-    deductions_annual:              fpDeduct,
-    deductions_monthly:             r2fp(fpDeduct / 12),
+    deductions_annual:              r2fp(empDeductMonthly * 12),
+    deductions_monthly:             empDeductMonthly,
     employer_contributions_annual:  fpErCon,
     employer_contributions_monthly: r2fp(fpErCon / 12),
-    net_annual:                     r2fp(fpGross - fpDeduct),
-    net_monthly:                    r2fp((fpGross - fpDeduct) / 12),
+    net_annual:                     r2fp(netMonthlyVal * 12),
+    net_monthly:                    netMonthlyVal,
+    net_source:                     netSource,
   }
 
   const compensationOut = compensation
