@@ -98,8 +98,18 @@ export function PTAXManagement() {
       qc.invalidateQueries({ queryKey: ['ptax-contributions'] })
       const d = res?.data ?? res ?? {}
       const nonZero = d.computed_nonzero ?? d.computed_count ?? 0
-      // Log the engine trace for the first employee — definitive diagnostic.
-      if (d.sample_trace) console.info('[P-Tax compute trace]', d.sample_trace)
+      // Log the engine trace + per-employee resolved state — definitive diagnostic.
+      if (d.sample_trace)      console.info('[P-Tax compute trace]', d.sample_trace)
+      if (d.state_diagnostics) console.info('[P-Tax resolved states]', d.state_diagnostics)
+      const diag: Array<{ code: string; state: string | null; source: string }> = d.state_diagnostics ?? []
+      const noneState = diag.filter(x => !x.state)
+      // If the first employees have no resolved state, that's the master-tagging gap.
+      if (noneState.length > 0 && (d.computed_nonzero ?? 0) === 0) {
+        toast.warning('P-Tax: no work state on employee(s)', {
+          description: `${noneState.map(x => x.code).join(', ')} have no PT/LWF state set and their site has no state. Set the work state on the employee master (Bank & Statutory → PT/LWF State) or on the site.`,
+        })
+        return
+      }
       const parts: string[] = []
       if (d.skipped_no_state)  parts.push(`${d.skipped_no_state} no work state`)
       if (d.skipped_no_slabs)  parts.push(`${d.skipped_no_slabs} no slabs${d.no_slab_states?.length ? ` for ${d.no_slab_states.join('/')}` : ''} (FY ${d.financial_year})`)

@@ -499,13 +499,24 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const noSlabStates = new Set<string>()   // states with employees but no slabs
     let skippedNoSlabs = 0
     let sampleTrace: string[] | null = null  // trace of the first eligible employee, for diagnostics
+    // Per-employee resolved-state diagnostics (master tagging visibility)
+    const stateDiag: Array<{ code: string; state: string | null; source: string }> = []
 
     for (const emp of empList) {
       // Skip exempted employees
       if (exemptSet.has(emp.id)) { skippedExempt++; continue }
 
-      // Resolve state: manual override → site state_code (from siteStateMap)
-      const stateCode = manualStateMap.get(emp.id) ?? (emp.site_id ? siteStateMap.get(emp.site_id) ?? null : null)
+      // Resolve state: manual override (PT or LWF) → site state_code
+      const manual    = manualStateMap.get(emp.id) ?? null
+      const siteState = emp.site_id ? (siteStateMap.get(emp.site_id) ?? null) : null
+      const stateCode = manual ?? siteState
+      if (stateDiag.length < 5) {
+        stateDiag.push({
+          code:   emp.employee_code,
+          state:  stateCode,
+          source: manual ? 'employee master' : siteState ? 'site' : 'none',
+        })
+      }
       if (!stateCode) { skippedNoState++; continue }
 
       const slabs = slabsByState.get(stateCode) ?? []
@@ -555,6 +566,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       total_active:      empList.length,
       financial_year,
       sample_trace:      sampleTrace,
+      state_diagnostics: stateDiag,
       wages_from_slip:   wagesFromSlip,
       wages_fallback:    wagesFallback,
       month,
