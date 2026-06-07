@@ -96,11 +96,12 @@ export const STANDARD_SALARY_COMPONENTS: StandardComponent[] = [
       default_calculation_type: null, default_value: null }),
 
   // ── Employer contributions ────────────────────────────────────────────────
-  // 12.5% = EPF 3.67% + EPS 8.33% + EDLI 0.5% — matches the payslip employer PF line.
-  // (Admin charges 0.5% are an A/c-2 establishment cost, not booked per employee.)
+  // Employer PF = 12% (EPF 3.67% + EPS 8.33%). EDLI (0.5%) is a separate retiral line
+  // on the payslip; admin (0.5%) is an A/c-2 establishment cost. Matches how Keka /
+  // Zoho / RazorpayX present the CTC employer PF line.
   c({ code: 'PF_EMPLOYER', name: 'Provident Fund (Employer)', component_type: 'employer_contribution', display_order: 110,
       is_taxable: false,
-      default_calculation_type: 'pct_of_basic', default_value: 12.5 }),
+      default_calculation_type: 'pct_of_basic', default_value: 12 }),
   c({ code: 'ESI_EMPLOYER', name: 'ESI (Employer)', component_type: 'employer_contribution', display_order: 120,
       is_taxable: false,
       default_calculation_type: 'pct_of_gross', default_value: 3.25 }),

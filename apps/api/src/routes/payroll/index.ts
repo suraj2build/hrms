@@ -2919,7 +2919,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       for (const comp of (slip.component_breakdown ?? [])) {
         const code = (comp.code ?? '').toUpperCase()
         const amt  = Number(comp.monthly_amount ?? 0)
-        if (code === 'PF_EMPLOYEE' || code === 'PF_EMPLOYER' || code === 'EPF' || code === 'PF') recon.pf.computed  += amt
+        if (code === 'PF_EMPLOYEE' || code === 'PF_EMPLOYER' || code === 'EPF' || code === 'PF' || code === 'EPF_EDLI') recon.pf.computed  += amt
         else if (code === 'ESI_EMPLOYEE' || code === 'ESI_EMPLOYER' || code === 'ESI')            recon.esi.computed += amt
         else if (code === 'PTAX' || code === 'PT' || code === 'PROFESSIONAL_TAX')                 recon.pt.computed  += amt
         else if (code === 'TDS' || code === 'INCOME_TAX')                                         recon.tds.computed += amt

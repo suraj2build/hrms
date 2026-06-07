@@ -391,11 +391,16 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
       slipPfWagesMap.set(r.employee_id, Math.round(pfWages * 100) / 100)
 
+      // Employer total for the filing table = PF_EMPLOYER (12%) + EPF_EDLI (0.5%),
+      // since the slip now shows EDLI as a separate line. (epf_contributions
+      // total_employer_contribution = employer_pf + employer_eps + edli.)
       for (const c of breakdown) {
         const code = String(c?.code ?? '').toUpperCase()
-        const amt  = Number(c?.monthly_amount) || 0
-        if (code === 'PF_EMPLOYEE') slipPfEmployeeMap.set(r.employee_id, Math.round(amt * 100) / 100)
-        else if (code === 'PF_EMPLOYER') slipPfEmployerMap.set(r.employee_id, Math.round(amt * 100) / 100)
+        const amt  = Math.round((Number(c?.monthly_amount) || 0) * 100) / 100
+        if (code === 'PF_EMPLOYEE') slipPfEmployeeMap.set(r.employee_id, amt)
+        else if (code === 'PF_EMPLOYER' || code === 'EPF_EDLI') {
+          slipPfEmployerMap.set(r.employee_id, (slipPfEmployerMap.get(r.employee_id) ?? 0) + amt)
+        }
       }
     }
 

@@ -30,7 +30,7 @@ import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engi
 /** Codes of statutory lines that the engines own and therefore replace.
  *  Matched ONLY against deduction / employer_contribution lines — earnings are
  *  never stripped (so a custom earning like "PT Allowance" is safe). */
-const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i
+const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|EPF_EDLI|EPF_ADMIN|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i
 
 export interface StatutoryTrace {
   epf:  { applied: boolean; pfWages: number; employee: number; employer: number; reason?: string }
@@ -155,7 +155,16 @@ export function applyStatutoryToSlip(
   if (epf) {
     const empPf = round2(epf.employeeContribution + epf.voluntaryPfContribution)
     statLines.push(mkLine('PF_EMPLOYEE', 'Provident Fund (Employee)', 'deduction', empPf, 9000))
-    statLines.push(mkLine('PF_EMPLOYER', 'Provident Fund (Employer)', 'employer_contribution', epf.totalEmployerContribution, 9001))
+    // Employer PF = 12% (EPF 3.67% + EPS 8.33%). EDLI (0.5%) is shown as a separate
+    // retiral line, matching how leading payroll systems present employer PF.
+    const employerPf12 = round2(epf.employerPf + epf.employerEps)
+    statLines.push(mkLine('PF_EMPLOYER', 'Provident Fund (Employer)', 'employer_contribution', employerPf12, 9001))
+    if (epf.edliContribution > 0) {
+      statLines.push(mkLine('EPF_EDLI', 'EDLI (Employer)', 'employer_contribution', epf.edliContribution, 9008))
+    }
+    if (epf.adminCharges > 0) {
+      statLines.push(mkLine('EPF_ADMIN', 'EPF Admin Charges (Employer)', 'employer_contribution', epf.adminCharges, 9009))
+    }
   }
   if (esi && esi.isEligible) {
     statLines.push(mkLine('ESI_EMPLOYEE', 'ESI (Employee)', 'deduction', esi.employeeContribution, 9002))
