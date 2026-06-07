@@ -907,9 +907,7 @@ export function EssCompensation() {
   const sumMonthly  = (arr: typeof components) => arr.reduce((s, c) => s + (c.computed_monthly ?? 0), 0)
   const grossMonthly    = sumMonthly(earnings)
   const employerMonthly = sumMonthly(empContribs)
-  const dedMonthly      = sumMonthly(deductions)
   const ctcMonthlyCalc  = Math.round((grossMonthly + employerMonthly) * 100) / 100
-  const netMonthly      = Math.round((grossMonthly - dedMonthly) * 100) / 100
 
   const chartData = (trendData?.data ?? []).map(s => ({
     month: fmtMonthShort(s.month),
@@ -918,6 +916,18 @@ export function EssCompensation() {
   }))
 
   const latest = slips[0]
+
+  // Net take-home for the salary-structure card. The master structure has no
+  // employee statutory lines (PF/ESI/PT/LWF/TDS), so they must come from the latest
+  // finalized payslip. Use the full-rate statutory (total_deductions minus LOP,
+  // since LOP is a paid-day reduction, not a standing deduction). Null until there's
+  // a payslip — we never show net = gross (which would be wrong).
+  const estEmpDeductions = latest
+    ? Math.max(0, Math.round(((latest.total_deductions ?? 0) - (latest.lop_amount ?? 0)) * 100) / 100)
+    : null
+  const netMonthly = estEmpDeductions != null
+    ? Math.round((grossMonthly - estEmpDeductions) * 100) / 100
+    : null
 
   // ── Guard ──────────────────────────────────────────────────────────────────
 
@@ -1155,27 +1165,52 @@ export function EssCompensation() {
 
                 {/* CTC reconciliation footer */}
                 <div className="pt-3 border-t border-border space-y-1.5">
+                  {/* Take-home block: gross − employee deductions = net */}
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Gross Earnings</span>
                     <span className="font-semibold tabular-nums">{fmtCompact(grossMonthly)}/mo</span>
                   </div>
-                  {empContribs.length > 0 && (
+                  {estEmpDeductions != null && (
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Employer Contributions</span>
-                      <span className="tabular-nums text-muted-foreground">{fmtCompact(employerMonthly)}/mo</span>
+                      <span className="text-muted-foreground">
+                        Employee Deductions
+                        <span className="text-[10px] ml-1 opacity-70">PF · ESI · PT · LWF · TDS</span>
+                      </span>
+                      <span className="tabular-nums text-destructive">− {fmtCompact(estEmpDeductions)}/mo</span>
                     </div>
                   )}
-                  <div className="flex items-center justify-between text-sm rounded-md bg-primary/5 px-3 py-2">
-                    <span className="font-bold uppercase tracking-wide text-primary text-xs">Total CTC</span>
-                    <div className="text-right">
-                      <p className="font-bold tabular-nums">{fmtCompact(ctcMonthlyCalc)}/mo</p>
-                      <p className="text-[10px] text-muted-foreground tabular-nums">{fmtCompact(comp?.ctc_annual)}/yr</p>
+                  <div className="flex items-center justify-between text-sm rounded-md bg-success/5 px-3 py-2">
+                    <span className="font-bold uppercase tracking-wide text-success text-xs">Net Take-Home</span>
+                    {netMonthly != null
+                      ? <span className="font-bold tabular-nums text-success">{fmtCompact(netMonthly)}/mo</span>
+                      : <span className="text-xs text-muted-foreground">shown after first payslip</span>}
+                  </div>
+
+                  {/* CTC block: gross + employer contributions = total CTC */}
+                  <div className="pt-2 mt-1 border-t border-border/60 space-y-1.5">
+                    {empContribs.length > 0 && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          Employer Contributions
+                          <span className="text-[10px] ml-1 opacity-70">added to CTC, not deducted</span>
+                        </span>
+                        <span className="tabular-nums text-muted-foreground">+ {fmtCompact(employerMonthly)}/mo</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-sm rounded-md bg-primary/5 px-3 py-2">
+                      <span className="font-bold uppercase tracking-wide text-primary text-xs">Total CTC</span>
+                      <div className="text-right">
+                        <p className="font-bold tabular-nums">{fmtCompact(ctcMonthlyCalc)}/mo</p>
+                        <p className="text-[10px] text-muted-foreground tabular-nums">{fmtCompact(comp?.ctc_annual)}/yr</p>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Net Take-Home</span>
-                    <span className="font-semibold tabular-nums text-success">{fmtCompact(netMonthly)}/mo</span>
-                  </div>
+
+                  {estEmpDeductions != null && latest && (
+                    <p className="text-[10px] text-muted-foreground pt-1">
+                      Net take-home estimated using statutory deductions from your {fmtMonthShort(latest.month)} payslip.
+                    </p>
+                  )}
                 </div>
 
                 {comp?.effective_from && (
