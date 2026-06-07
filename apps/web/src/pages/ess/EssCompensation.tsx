@@ -601,6 +601,16 @@ function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined
   const compComponents = comp?.employee_compensation_components ?? []
   const slipComponents = slipDetail?.component_breakdown        ?? []
 
+  // ── Paid-day proration factor ───────────────────────────────────────────────
+  // Top-HRMS convention: each EARNING line is prorated by actual paid days, so LOP
+  // is reflected per component (not as a separate lump). The factor is the share of
+  // working days actually paid: (working - LOP) / working. Sum of prorated earnings
+  // therefore equals gross − LOP, matching the payslip net.
+  const lopDays   = slipDetail?.lop_days ?? 0
+  const workDays  = slipDetail?.total_working_days ?? 0
+  const factor    = (lopDays > 0 && workDays > 0) ? Math.max(0, (workDays - lopDays) / workDays) : 1
+  const isProrated = factor < 1
+
   // Merge by component code: start with CTC structure, overlay actuals
   const map = new Map<string, RvaRow>()
   for (const c of compComponents) {
@@ -614,6 +624,10 @@ function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined
     })
   }
   for (const c of slipComponents) {
+    // Skip any LOP line on the slip — LOP is distributed into the prorated earnings,
+    // not shown as a separate deduction.
+    const codeUpper = String(c.code ?? '').toUpperCase()
+    if (codeUpper === 'LOP' || codeUpper === 'LOSS_OF_PAY') continue
     const existing = map.get(c.code)
     if (existing) {
       existing.actual = c.monthly_amount
@@ -622,17 +636,14 @@ function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined
     }
   }
 
-  // Loss of Pay is booked as a lump deduction (earnings stay at full rate), so it
-  // wouldn't otherwise appear here — surface it as an actual-only deduction so the
-  // actual net is visibly lower than the CTC-rate net when there were LOP days.
-  if ((slipDetail?.lop_amount ?? 0) > 0) {
-    map.set('__LOP__', {
-      code:    'LOP',
-      name:    `Loss of Pay${slipDetail!.lop_days ? ` (${slipDetail!.lop_days} day${slipDetail!.lop_days === 1 ? '' : 's'})` : ''}`,
-      type:    'deduction',
-      ctcRate: null,
-      actual:  slipDetail!.lop_amount,
-    })
+  // Prorate EARNING actuals per line by the paid-day factor. The full monthly value
+  // is the CTC rate (authoritative full month) or, for actuals-only earnings, the
+  // slip amount. Deductions / employer contributions stay as their actual amounts
+  // (already computed on actual wages).
+  for (const row of map.values()) {
+    if (row.type !== 'earning') continue
+    const full = row.ctcRate ?? row.actual
+    if (full != null) row.actual = Math.round(full * factor)
   }
 
   const allRows  = Array.from(map.values())
@@ -680,8 +691,8 @@ function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined
             <thead className="bg-muted/40">
               <tr>
                 <th className="text-left px-3 py-2 font-medium text-muted-foreground">Component</th>
-                <th className="text-right px-3 py-2 font-medium text-muted-foreground">CTC Rate</th>
-                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Actual</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">CTC Rate <span className="font-normal text-[9px] normal-case">/ month</span></th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Actual {isEarning && isProrated && <span className="font-normal text-[9px] normal-case">/ paid days</span>}</th>
                 <th className="text-right px-3 py-2 font-medium text-muted-foreground">Variance</th>
               </tr>
             </thead>
@@ -711,10 +722,10 @@ function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined
 
   return (
     <div className="space-y-4">
-      {slipDetail && slipDetail.lop_days > 0 && (
+      {slipDetail && isProrated && (
         <div className="flex items-center gap-2 p-2.5 rounded-md bg-warning/10 border border-warning/20 text-xs text-warning">
           <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-          LOP applied: {slipDetail.lop_days} day{slipDetail.lop_days !== 1 ? 's' : ''} — actuals reflect proportional reduction across all earnings.
+          {slipDetail.lop_days} LOP day{slipDetail.lop_days !== 1 ? 's' : ''} of {slipDetail.total_working_days} working days — each earning is prorated to {(factor * 100).toFixed(1)}% of its full rate. The per-line variance is the loss-of-pay impact.
         </div>
       )}
 
