@@ -45,6 +45,8 @@ interface EPFConfig {
   pf_account_number: string | null
   establishment_code: string | null
   effective_from: string
+  edli_rate_pct?: number
+  admin_charges_pct?: number
 }
 
 interface EPFRegistration {
@@ -129,16 +131,24 @@ function ColoredStatCard({
 // ── EPF Rate Bar (right-column card) ──────────────────────────────────────────
 
 function EPFRateBar({ config }: { config: EPFConfig }) {
-  const empRate     = config.employee_contribution_pct ?? 0
-  const pfRate      = Math.max(0, (config.employer_pf_pct ?? 0) - (config.employer_eps_pct ?? 0))
-  const pensionRate = config.employer_eps_pct ?? 0
-  const adminRate   = 0.5
-  const total       = empRate + pfRate + pensionRate + adminRate
+  // Statutory split of the employer's 12% PF contribution:
+  //   EPS  = 8.33%  (carved out, capped at the ceiling)
+  //   EPF  = 12% − 8.33% = 3.67%   (derived from the employee rate, which is the
+  //          reliable 12% — avoids the ambiguous employer_pf_pct field that may be
+  //          stored as either the EPF portion or the total).
+  // EDLI (0.5%) and admin (0.5%) are additional employer costs.
+  const empRate     = config.employee_contribution_pct ?? 12
+  const pensionRate = config.employer_eps_pct ?? 8.33
+  const pfRate      = Math.max(0, empRate - pensionRate)
+  const edliRate    = config.edli_rate_pct ?? 0.5
+  const adminRate   = config.admin_charges_pct ?? 0.5
+  const total       = empRate + pfRate + pensionRate + edliRate + adminRate
 
   const segments = [
-    { label: 'Employee Share',        rate: empRate,     colorBar: 'bg-emerald-500', colorDot: 'bg-emerald-500' },
-    { label: 'Employer EPF Share',    rate: pfRate,      colorBar: 'bg-primary',     colorDot: 'bg-primary'     },
+    { label: 'Employee Share',         rate: empRate,     colorBar: 'bg-emerald-500', colorDot: 'bg-emerald-500' },
+    { label: 'Employer EPF Share',     rate: pfRate,      colorBar: 'bg-primary',     colorDot: 'bg-primary'     },
     { label: 'Employer Pension (EPS)', rate: pensionRate, colorBar: 'bg-sky-400',     colorDot: 'bg-sky-400'     },
+    { label: 'EDLI',                   rate: edliRate,    colorBar: 'bg-violet-400',  colorDot: 'bg-violet-400'  },
     { label: 'Admin Charges',          rate: adminRate,   colorBar: 'bg-amber-400',   colorDot: 'bg-amber-400'   },
   ]
 
@@ -253,7 +263,7 @@ function EditConfigDialog({ config, onClose }: { config: EPFConfig; onClose: () 
           ))}
           <div className="p-2.5 rounded-md bg-muted/30 border border-border/50 text-[11px] text-muted-foreground">
             <span className="font-medium text-foreground">EPF split: </span>
-            Employer EPF = {Math.max(0, (form.employer_pf_pct ?? 0) - (form.employer_eps_pct ?? 0)).toFixed(2)}%
+            Employer EPF = {Math.max(0, (form.employee_contribution_pct ?? 12) - (form.employer_eps_pct ?? 8.33)).toFixed(2)}%
             &nbsp;·&nbsp; EPS = {(form.employer_eps_pct ?? 0).toFixed(2)}%
           </div>
           {error && (
@@ -634,9 +644,10 @@ export function EPFManagement() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pb-4 border-t border-border/40 pt-4">
                   {[
                     { label: 'Employee Rate',         value: fmtPct(config.employee_contribution_pct) },
-                    { label: 'Employer PF',           value: fmtPct(config.employer_pf_pct) },
+                    // Employer's total PF contribution equals the employee's 12%.
+                    { label: 'Employer PF (total)',   value: fmtPct(config.employee_contribution_pct) },
                     { label: 'Pension Share (EPS)',   value: fmtPct(config.employer_eps_pct) },
-                    { label: 'Provident Share (EPF)', value: `${Math.max(0, (config.employer_pf_pct ?? 0) - (config.employer_eps_pct ?? 0)).toFixed(2)}%` },
+                    { label: 'Provident Share (EPF)', value: `${Math.max(0, (config.employee_contribution_pct ?? 12) - (config.employer_eps_pct ?? 8.33)).toFixed(2)}%` },
                   ].map(({ label, value }) => (
                     <div key={label} className="p-3.5 bg-muted/30 rounded-xl border border-border/50">
                       <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">{label}</p>

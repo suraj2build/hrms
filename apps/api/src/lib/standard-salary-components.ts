@@ -96,11 +96,11 @@ export const STANDARD_SALARY_COMPONENTS: StandardComponent[] = [
       default_calculation_type: null, default_value: null }),
 
   // ── Employer contributions ────────────────────────────────────────────────
-  // 13% = 12% (EPF 3.67% + EPS 8.33%) + 0.5% EDLI + 0.5% admin — the true employer
-  // PF cost, so the budgeted CTC matches the statutory payslip contribution.
+  // 12.5% = EPF 3.67% + EPS 8.33% + EDLI 0.5% — matches the payslip employer PF line.
+  // (Admin charges 0.5% are an A/c-2 establishment cost, not booked per employee.)
   c({ code: 'PF_EMPLOYER', name: 'Provident Fund (Employer)', component_type: 'employer_contribution', display_order: 110,
       is_taxable: false,
-      default_calculation_type: 'pct_of_basic', default_value: 13 }),
+      default_calculation_type: 'pct_of_basic', default_value: 12.5 }),
   c({ code: 'ESI_EMPLOYER', name: 'ESI (Employer)', component_type: 'employer_contribution', display_order: 120,
       is_taxable: false,
       default_calculation_type: 'pct_of_gross', default_value: 3.25 }),
