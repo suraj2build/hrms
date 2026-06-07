@@ -106,6 +106,71 @@ function shapeRecoveryResponse(rows: any[], financialYear: string) {
   }
 }
 
+/**
+ * Fallback recovery view derived from finalized payslips + TDS projections, used
+ * when tds_monthly_recovery has no rows (the admin recovery-compute hasn't run, or
+ * the employee has no submitted declaration). Shows the actual TDS deducted per
+ * month so the page is never blank when payroll exists.
+ */
+async function buildRecoveryFromSlips(
+  fastify: any, tenantId: string, employeeId: string, fy: string,
+) {
+  const fyStart = parseInt(fy.split('-')[0], 10)
+  const fromPeriod = `${fyStart}-04`
+  const toPeriod   = `${fyStart + 1}-03`
+
+  const [slipsRes, projRes] = await Promise.all([
+    fastify.supabase
+      .from('payroll_slips')
+      .select('month, tds_deducted')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .gte('month', fromPeriod)
+      .lte('month', toPeriod)
+      .order('month', { ascending: true }),
+    fastify.supabase
+      .from('tds_monthly_projections')
+      .select('projection_month, projected_annual_tax, tds_this_month')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .order('projection_month', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  const slips = (slipsRes.data ?? []) as any[]
+  if (slips.length === 0) return null   // truly nothing → let caller send empty shape
+
+  const proj = projRes.data as any
+  const projectedAnnual = Number(proj?.projected_annual_tax ?? 0)
+
+  const months = slips.map((s: any) => {
+    const [year, mm] = String(s.month).split('-')
+    return {
+      month:                `${MONTH_LABELS[mm] ?? mm} ${year}`,
+      month_key:            s.month,
+      projected_annual_tax: projectedAnnual,
+      already_deducted:     Number(s.tds_deducted ?? 0),
+      external_tds:         0,
+      remaining_tax:        0,
+      cycles_left:          1,
+      monthly_recovery:     Number(s.tds_deducted ?? 0),
+      regime:               'new' as const,
+    }
+  })
+
+  const totalDeducted = months.reduce((sum, m) => sum + m.already_deducted, 0)
+  return {
+    financial_year:       fy,
+    projected_annual_tax: projectedAnnual || totalDeducted,
+    already_deducted:     totalDeducted,
+    remaining_tax:        Math.max(0, projectedAnnual - totalDeducted),
+    next_month_recovery:  months[months.length - 1]?.monthly_recovery ?? 0,
+    months,
+    derived_from_slips:   true,
+  }
+}
+
 // =============================================================================
 export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -149,6 +214,10 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
 
     const fy = parsed.data.financial_year ?? `${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(2)}`
+    if (!data || data.length === 0) {
+      const fallback = await buildRecoveryFromSlips(fastify, req.tenantId, employeeId, fy)
+      if (fallback) return reply.send(fallback)
+    }
     return reply.send(shapeRecoveryResponse(data ?? [], fy))
   })
 
@@ -183,6 +252,10 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
       if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
 
       const fy = parsed.data.financial_year ?? `${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(2)}`
+      if (!data || data.length === 0) {
+        const fallback = await buildRecoveryFromSlips(fastify, req.tenantId, employeeId, fy)
+        if (fallback) return reply.send(fallback)
+      }
       return reply.send(shapeRecoveryResponse(data ?? [], fy))
     },
   )
