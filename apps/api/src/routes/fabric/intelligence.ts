@@ -17,7 +17,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
 
   // GET /fabric/health — fabric control plane health snapshot
   fastify.get('/fabric/health', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     try {
       const snapshot = await fabricControlPlaneService.computeFabricHealth(fastify.supabase, orgId)
       return snapshot
@@ -29,7 +29,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // POST /fabric/compose — compute intelligence composition for an entity
   fastify.post('/fabric/compose', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const body = req.body as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const composition = intelligenceCompositionService.compose({
       entity_id:        body.entity_id,
       entity_type:      body.entity_type ?? 'employee',
@@ -43,7 +43,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // POST /fabric/compose/batch — batch composition
   fastify.post('/fabric/compose/batch', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const body = req.body as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const compositions = intelligenceCompositionService.composeBatch(orgId, body.entities ?? [])
     return { compositions, total: compositions.length }
   })
@@ -57,7 +57,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // GET /fabric/federation/chain/:entityId — federation chain for entity
   fastify.get('/fabric/federation/chain/:entityId', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const { entityId } = req.params as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const chain = federationService.buildFederationChain(fastify.supabase, entityId, 'employee', orgId)
     return chain
   })
@@ -65,7 +65,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // POST /fabric/simulate/policy — policy change simulation
   fastify.post('/fabric/simulate/policy', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const body = req.body as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const run = unifiedSimulationService.simulatePolicyChange({
       org_id:           orgId,
       policy_name:      body.policy_name ?? 'unnamed',
@@ -73,7 +73,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       affected_modules: body.affected_modules ?? [],
       affected_count:   Number(body.affected_count) || 0,
       estimated_admin_hours: Number(body.estimated_admin_hours) || 0,
-      created_by:       (req as any).user.id,
+      created_by:       (req as any).userId,
     })
     void fastify.supabase.from('simulation_runs').insert({
       org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
@@ -86,13 +86,13 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // POST /fabric/simulate/governance-drift — governance drift projection
   fastify.post('/fabric/simulate/governance-drift', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const body = req.body as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const run = unifiedSimulationService.simulateGovernanceDrift({
       org_id:             orgId,
       current_drift_rate: Number(body.current_drift_rate) || 20,
       trend_direction:    body.trend_direction ?? 'stable',
       weeks_ahead:        Number(body.weeks_ahead) || 12,
-      created_by:         (req as any).user.id,
+      created_by:         (req as any).userId,
     })
     void fastify.supabase.from('simulation_runs').insert({
       org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
@@ -104,7 +104,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
 
   // GET /fabric/decisions — recent decision graph nodes
   fastify.get('/fabric/decisions', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const nodes = await decisionGraphService.getRecentNodes(fastify.supabase, orgId, Number(limit))
     return { nodes, total: nodes.length }
@@ -113,14 +113,14 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // GET /fabric/decisions/lineage/:entityId — entity decision lineage
   fastify.get('/fabric/decisions/lineage/:entityId', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const { entityId } = req.params as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const nodes = await decisionGraphService.getEntityLineage(fastify.supabase, entityId, orgId)
     return { nodes, entity_id: entityId, total: nodes.length }
   })
 
   // GET /fabric/orchestration — recent orchestration activities
   fastify.get('/fabric/orchestration', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const { limit = '20' } = req.query as any
     const activities = await workflowOrchestrationService.getRecentActivities(fastify.supabase, orgId, Number(limit))
     return { activities, total: activities.length }
@@ -129,7 +129,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // POST /fabric/orchestration/escalate — coordinate an escalation (advisory)
   fastify.post('/fabric/orchestration/escalate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const body = req.body as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const activityId = await workflowOrchestrationService.coordinateEscalation(fastify.supabase, {
       org_id:      orgId,
       entity_id:   body.entity_id,
@@ -143,21 +143,21 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   // POST /fabric/replay — start a replay session
   fastify.post('/fabric/replay', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
     const body = req.body as any
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const session = await replayIntelligenceService.replay(fastify.supabase, {
       org_id:      orgId,
       entity_id:   body.entity_id,
       entity_type: body.entity_type ?? 'employee',
       from:        body.from,
       to:          body.to,
-      created_by:  (req as any).user.id,
+      created_by:  (req as any).userId,
     })
     return session
   })
 
   // GET /fabric/replay/sessions — list replay sessions
   fastify.get('/fabric/replay/sessions', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
-    const orgId = (req as any).user.tenant_id
+    const orgId = (req as any).tenantId
     const { limit = '20' } = req.query as any
     const sessions = await replayIntelligenceService.listSessions(fastify.supabase, orgId, Number(limit))
     return { sessions, total: sessions.length }

@@ -9,9 +9,9 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * GET /observability/trace/:correlationId
    * Fetch and build a structured event trace for a correlation chain.
    */
-  fastify.get('/observability/trace/:correlationId', async (req, reply) => {
-    const user          = (req as any).user
-    const orgId: string = (req.query as any).org_id ?? user?.org_id ?? ''
+  fastify.get('/observability/trace/:correlationId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    const orgId: string = (req as any).tenantId
     const { correlationId } = req.params as { correlationId: string }
 
     const svc    = new EventStreamService((fastify as any).supabase)
@@ -26,9 +26,9 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Aggregate events into an operational summary.
    * Accepts body.events directly OR fetches via org_id + from + to query params.
    */
-  fastify.post('/observability/summary', async (req, reply) => {
-    const user          = (req as any).user
-    const orgId: string = (req.query as any).org_id ?? user?.org_id ?? ''
+  fastify.post('/observability/summary', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    const orgId: string = (req as any).tenantId
     const body          = req.body as {
       events?: ResolvedPlatformEvent[]
       period?: string
@@ -57,9 +57,9 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Build a heatmap of event activity by UTC hour + event_type.
    * Accepts body.events directly OR auto-fetches last 24h.
    */
-  fastify.post('/observability/heatmap', async (req, reply) => {
-    const user          = (req as any).user
-    const orgId: string = (req.query as any).org_id ?? user?.org_id ?? ''
+  fastify.post('/observability/heatmap', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    const orgId: string = (req as any).tenantId
     const body          = req.body as { events?: ResolvedPlatformEvent[] } | undefined
 
     let events: ResolvedPlatformEvent[]
@@ -81,9 +81,9 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * GET /observability/clusters
    * Returns event clusters from the observability intelligence service.
    */
-  fastify.get('/observability/clusters', async (req, reply) => {
-    const user          = (req as any).user
-    const orgId: string = (req.query as any).org_id ?? user?.org_id ?? ''
+  fastify.get('/observability/clusters', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    const orgId: string = (req as any).tenantId
 
     const clusters = observabilityIntelligenceService.getClusters(orgId)
     return reply.send({ clusters })

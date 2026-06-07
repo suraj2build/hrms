@@ -13,9 +13,7 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
    * POST /signals/process
    * Run suppression → prioritization → clustering on a batch of signals.
    */
-  fastify.post('/signals/process', async (req, reply) => {
-    const user   = (req as any).user
-    const orgId  = user?.org_id as string | undefined
+  fastify.post('/signals/process', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const body   = req.body as { signals?: PlatformSignal[] }
     const input  = Array.isArray(body?.signals) ? body.signals : []
 
@@ -62,9 +60,8 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
    * POST /signals/digest
    * Compute a digest summary for an org's signals.
    */
-  fastify.post('/signals/digest', async (req, reply) => {
-    const user   = (req as any).user
-    const orgId  = user?.org_id as string
+  fastify.post('/signals/digest', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const orgId  = (req as any).tenantId as string
     const body   = req.body as { signals?: PlatformSignal[]; period?: string }
     const input  = Array.isArray(body?.signals) ? body.signals : []
     const period = body?.period ?? 'last_1h'
@@ -77,7 +74,7 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
    * POST /signals/prioritize
    * Sort a batch of signals by computed priority descending.
    */
-  fastify.post('/signals/prioritize', async (req, reply) => {
+  fastify.post('/signals/prioritize', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const body  = req.body as { signals?: PlatformSignal[] }
     const input = Array.isArray(body?.signals) ? body.signals : []
 
@@ -89,7 +86,7 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
    * GET /signals/explain/:eventType
    * Returns a human-readable narrative for a given event type.
    */
-  fastify.get('/signals/explain/:eventType', async (req, reply) => {
+  fastify.get('/signals/explain/:eventType', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { eventType } = req.params as { eventType: string }
 
     const EVENT_DESCRIPTIONS: Record<string, string> = {

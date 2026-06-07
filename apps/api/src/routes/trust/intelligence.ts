@@ -18,7 +18,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/evaluate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const body = req.body as any
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     try {
       const result = await trustIntelligenceService.evaluateEmployee(fastify.supabase, {
         employee_id:    body.employee_id,
@@ -41,7 +41,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.get('/trust/graph/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { employeeId } = req.params as any
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const edges = await workforceGraphService.getEmployeeEdges(fastify.supabase, employeeId, tenantId)
     return { edges, total: edges.length }
   })
@@ -51,7 +51,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * Query duplicate detection events for the tenant.
    */
   fastify.get('/trust/duplicates', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const { data, error } = await fastify.supabase
       .from('duplicate_detection_events')
@@ -68,7 +68,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * Query verification events for the tenant.
    */
   fastify.get('/trust/verifications', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { limit = '50', employee_id } = req.query as any
     let q = fastify.supabase
       .from('verification_events')
@@ -87,7 +87,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * Get trust scores for the tenant.
    */
   fastify.get('/trust/scores', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const { data, error } = await fastify.supabase
       .from('workforce_trust_scores')
@@ -107,7 +107,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.get('/trust/scores/employee/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('workforce_trust_scores')
       .select('id, score, severity, factors, explainability, computed_at')
@@ -149,7 +149,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const body = req.body as any
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const id = await regulatoryIngestionService.ingest(fastify.supabase, {
       org_id:           tenantId,
       revision_type:    body.revision_type,
@@ -172,7 +172,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions/:id/approve', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { id } = req.params as any
-    await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).user.id)
+    await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).userId)
     return { success: true }
   })
 
@@ -182,7 +182,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions/:id/reject', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { id } = req.params as any
-    await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).user.id)
+    await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).userId)
     return { success: true }
   })
 
@@ -192,7 +192,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.get('/trust/verifications/employee/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('verification_records')
       .select('id, verification_type, status, provider, source, score, name_match_confidence, explanation, last_error, verified_at, updated_at, retry_count')
@@ -209,7 +209,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/verifications/retry/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
 
     const { data: emp, error: empErr } = await fastify.supabase
       .from('employees')
@@ -241,7 +241,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * Get verification statistics for the tenant.
    */
   fastify.get('/trust/verifications/stats', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('verification_records')
       .select('status, verification_type')
