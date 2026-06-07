@@ -266,21 +266,24 @@ export async function resolveEmployeeStatutoryParams(
   // PT state: PT override → LWF override → site
   resolvedState = ptManual ?? lwfManual ?? stateCode
 
-  // Fetch PTax slabs for resolved state
+  // Fetch PTax slabs for resolved state.
+  // select('*') (not named cols) so this is resilient if migration 166 columns
+  // (frequency / deduction_month) aren't present on the DB — a named select would
+  // error and silently yield 0 slabs, skipping PT entirely.
   let ptaxSlabs: PTaxSlab[] = []
   if (resolvedState) {
     const { data: slabRows } = await supabase
       .from('ptax_slabs')
-      .select('monthly_income_from, monthly_income_to, monthly_ptax, frequency, deduction_month')
+      .select('*')
       .eq('tenant_id', tenantId)
       .eq('state_code', resolvedState)
       .eq('financial_year', financialYear)
       .eq('is_active', true)
 
     ptaxSlabs = ((slabRows ?? []) as any[]).map(r => ({
-      monthlyIncomeFrom: r.monthly_income_from,
-      monthlyIncomeTo:   r.monthly_income_to ?? undefined,
-      monthlyPtax:       r.monthly_ptax,
+      monthlyIncomeFrom: Number(r.monthly_income_from),
+      monthlyIncomeTo:   r.monthly_income_to != null ? Number(r.monthly_income_to) : undefined,
+      monthlyPtax:       Number(r.monthly_ptax),
       frequency:         r.frequency ?? 'monthly',
       deductionMonth:    r.deduction_month ?? undefined,
     }))

@@ -470,9 +470,11 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     }
 
     // ── Fetch all ptax slabs for this tenant + financial year (all states) ─────
+    // select('*') so it's resilient if migration 166 columns (frequency /
+    // deduction_month) aren't present — a named select would error → 0 slabs.
     const { data: allSlabs } = await fastify.supabase
       .from('ptax_slabs')
-      .select('state_code, monthly_income_from, monthly_income_to, monthly_ptax, frequency, deduction_month')
+      .select('*')
       .eq('tenant_id', req.tenantId)
       .eq('financial_year', financial_year)
       .eq('is_active', true)
@@ -481,9 +483,9 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     for (const slab of (allSlabs ?? []) as any[]) {
       const existing = slabsByState.get(slab.state_code) ?? []
       existing.push({
-        monthlyIncomeFrom: slab.monthly_income_from,
-        monthlyIncomeTo:   slab.monthly_income_to ?? undefined,
-        monthlyPtax:       slab.monthly_ptax,
+        monthlyIncomeFrom: Number(slab.monthly_income_from),
+        monthlyIncomeTo:   slab.monthly_income_to != null ? Number(slab.monthly_income_to) : undefined,
+        monthlyPtax:       Number(slab.monthly_ptax),
         frequency:         slab.frequency ?? 'monthly',
         deductionMonth:    slab.deduction_month ?? undefined,
       } as PTaxSlab)
