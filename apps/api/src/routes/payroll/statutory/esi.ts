@@ -73,7 +73,20 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) {
+      // Legacy UNIQUE(tenant_id) (migration 166 not applied) → update single row.
+      if (error.code === '23505') {
+        const { data: upd, error: updErr } = await fastify.supabase
+          .from('esi_config')
+          .update({ ...rest, effective_from, effective_to: null, updated_at: new Date().toISOString() })
+          .eq('tenant_id', req.tenantId)
+          .select()
+          .single()
+        if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+        return reply.send({ data: upd })
+      }
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    }
     return reply.send({ data })
   })
 

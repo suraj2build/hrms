@@ -79,7 +79,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .is('effective_to', null)
 
-    // Insert new open-ended version
+    // Insert new open-ended version (works on the versioned schema, migration 166).
     const { data, error } = await fastify.supabase
       .from('epf_config')
       .insert({
@@ -91,7 +91,22 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) {
+      // On a DB where migration 166 hasn't dropped the legacy UNIQUE(tenant_id),
+      // versioned inserts violate the constraint. Fall back to updating the single
+      // existing row in place (overwrite config, keep it open-ended).
+      if (error.code === '23505') {
+        const { data: upd, error: updErr } = await fastify.supabase
+          .from('epf_config')
+          .update({ ...rest, effective_from, effective_to: null, updated_at: new Date().toISOString() })
+          .eq('tenant_id', req.tenantId)
+          .select()
+          .single()
+        if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+        return reply.send({ data: upd })
+      }
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    }
     return reply.send({ data })
   })
 
