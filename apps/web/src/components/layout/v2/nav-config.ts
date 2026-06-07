@@ -100,8 +100,20 @@ import {
   Search,
   BadgeCheck,
 } from 'lucide-react'
+import type { UserRole } from '@/types'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Optional role allow-list used for navigation VISIBILITY only.
+ *
+ *   · undefined / empty  → visible to every admin-portal role (super_admin + hr_admin)
+ *   · ['super_admin']    → only super_admin sees the tab / group / item
+ *
+ * This affects rendering of the menu ONLY. Route guards, RBAC, permissions and
+ * APIs are unchanged — a role that can still reach a route by URL is unaffected.
+ */
+type RoleAllowList = UserRole[]
 
 export interface DomainNavItem {
   id:     string
@@ -110,11 +122,15 @@ export interface DomainNavItem {
   icon:   React.ComponentType<{ className?: string }>
   badge?: string
   exact?: boolean
+  /** If set, only these roles see this item in the menu. */
+  roles?: RoleAllowList
 }
 
 export interface DomainNavGroup {
   label: string
   items: DomainNavItem[]
+  /** If set, only these roles see this group in the menu. */
+  roles?: RoleAllowList
 }
 
 export interface Domain {
@@ -127,6 +143,8 @@ export interface Domain {
   /** Default route when the domain tab is clicked */
   defaultRoute:  string
   groups:        DomainNavGroup[]
+  /** If set, only these roles see this domain tab in the menu. */
+  roles?:        RoleAllowList
 }
 
 // ── Domain Configuration ───────────────────────────────────────────────────────
@@ -546,7 +564,7 @@ export const DOMAINS: Domain[] = [
         label: 'Risk & Governance',
         items: [
           { id: 'governance-matrix',    label: 'Governance Matrix',      route: '/admin/approvals/governance-matrix',         icon: GitMerge     },
-          { id: 'event-governance',     label: 'Event Governance',       route: '/admin/system/event-governance',             icon: Radio        },
+          { id: 'event-governance',     label: 'Event Governance',       route: '/admin/system/event-governance',             icon: Radio,        roles: ['super_admin'] },
           { id: 'attendance-risk',      label: 'Attendance Risk',        route: '/admin/attendance/risk',                     icon: AlertTriangle },
           { id: 'attendance-confidence',label: 'Attendance Confidence',  route: '/admin/attendance/confidence',               icon: Target       },
           { id: 'policy-conflicts',     label: 'Policy Conflicts',       route: '/admin/attendance/policy-conflicts',         icon: AlertTriangle },
@@ -569,13 +587,15 @@ export const DOMAINS: Domain[] = [
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity    },
           { id: 'workforce-digest',      label: 'Daily Digest',            route: '/admin/intelligence/digest',            icon: FileText    },
           { id: 'workforce-search',      label: 'People Search',            route: '/admin/intelligence/search',            icon: Search      },
-          { id: 'uat-certification',     label: 'UAT Certification',      route: '/admin/intelligence/uat-certification', icon: ShieldCheck },
+          { id: 'uat-certification',     label: 'UAT Certification',      route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'] },
           { id: 'workforce-intel',       label: 'Intelligence Hub',         route: '/admin/intelligence',                   icon: Brain     },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],
       },
       {
         label: 'Platform Orchestration',
+        // super_admin only — platform/SRE surfaces, not HR-user features (audit D1).
+        roles: ['super_admin'],
         items: [
           { id: 'enterprise-control-center', label: 'Enterprise Control Center', route: '/admin/enterprise',               icon: Command    },
           { id: 'orchestration',             label: 'Orchestration Console',     route: '/admin/system/orchestration',     icon: GitBranch  },
@@ -778,4 +798,41 @@ export function isDomainActive(domain: Domain, pathname: string): boolean {
   return domain.matchPrefixes.some(
     p => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p),
   )
+}
+
+// ── Role-aware visibility (menu rendering only) ─────────────────────────────────
+
+/**
+ * True if a domain/group/item carrying `allow` should be visible to `role`.
+ * An undefined or empty allow-list means "no restriction" (all admin roles).
+ */
+export function isRoleAllowed(allow: RoleAllowList | undefined, role: UserRole | undefined): boolean {
+  if (!allow || allow.length === 0) return true
+  if (!role) return false
+  return allow.includes(role)
+}
+
+/**
+ * Returns a copy of `domain` with groups/items the role may not see removed.
+ * Empty groups are dropped. Does not mutate the original config.
+ */
+export function getVisibleDomain(domain: Domain, role: UserRole | undefined): Domain {
+  return {
+    ...domain,
+    groups: domain.groups
+      .filter(g => isRoleAllowed(g.roles, role))
+      .map(g => ({ ...g, items: g.items.filter(i => isRoleAllowed(i.roles, role)) }))
+      .filter(g => g.items.length > 0),
+  }
+}
+
+/**
+ * All domains visible to `role`, with groups/items filtered and any domain that
+ * ends up with zero visible groups removed entirely.
+ */
+export function getVisibleDomains(role: UserRole | undefined): Domain[] {
+  return DOMAINS
+    .filter(d => isRoleAllowed(d.roles, role))
+    .map(d => getVisibleDomain(d, role))
+    .filter(d => d.groups.length > 0)
 }

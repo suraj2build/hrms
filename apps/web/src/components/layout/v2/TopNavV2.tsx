@@ -16,7 +16,7 @@ import { Search, Sun, Moon, LogOut, ChevronDown, Menu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark } from '@/components/brand/Logo'
-import { DOMAINS, getDomainForPath } from './nav-config'
+import { getVisibleDomains, getDomainForPath } from './nav-config'
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
 import { useAuthStore }        from '@/stores/authStore'
@@ -52,6 +52,8 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   function openSearch() { onSearchOpen?.() }
 
   const activeDomain = getDomainForPath(location.pathname)
+  // Domain tabs filtered by role — visibility only (route guards unchanged).
+  const visibleDomains = getVisibleDomains(profile?.role)
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -91,7 +93,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         style={{ scrollbarWidth: 'none' }}
         aria-label="Domain navigation"
       >
-        {DOMAINS.map(domain => {
+        {visibleDomains.map(domain => {
           const isActive = activeDomain?.id === domain.id
           const Icon = domain.icon
           return (

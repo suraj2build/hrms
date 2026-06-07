@@ -16,8 +16,9 @@ import { Link, useLocation } from 'react-router-dom'
 import { ChevronDown, ChevronRight, PanelLeftClose, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
+import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
-import { getDomainForPath, type Domain, type DomainNavGroup } from './nav-config'
+import { getDomainForPath, getVisibleDomain, type Domain, type DomainNavGroup } from './nav-config'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -155,8 +156,11 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
 
 export function ContextualSidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
+  const { profile } = useAuthStore()
   const location = useLocation()
-  const domain: Domain | null = getDomainForPath(location.pathname)
+  // Active domain, then filter its groups/items by role — visibility only.
+  const rawDomain = getDomainForPath(location.pathname)
+  const domain: Domain | null = rawDomain ? getVisibleDomain(rawDomain, profile?.role) : null
 
   // Close the mobile drawer whenever the route changes
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, location.search, setMobileNavOpen])
