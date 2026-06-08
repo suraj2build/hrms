@@ -14,6 +14,11 @@ const cardVariants = cva(
         /** Elevated card — same surface but deeper shadow */
         elevated:
           'border border-border bg-card shadow-elev-3',
+        /** Interactive card — for clickable cards; lifts on hover, ring on focus */
+        interactive:
+          'border border-border bg-card shadow-elev-1 transition-all ' +
+          'hover:shadow-elev-2 hover:-translate-y-0.5 ' +
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2',
 
         // ── Aurora Navy additions ─────────────────────────────────────────
         /** Glassmorphic card — blurred frosted surface */

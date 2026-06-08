@@ -51,7 +51,7 @@ const config: Config = {
         },
         // HRMS brand colors (matches blueprint #0f1117 dark theme)
         sidebar: {
-          DEFAULT: 'hsl(var(--sidebar-background))',
+          DEFAULT: 'hsl(var(--sidebar))',
           foreground: 'hsl(var(--sidebar-foreground))',
           border: 'hsl(var(--sidebar-border))',
           accent: 'hsl(var(--sidebar-accent))',

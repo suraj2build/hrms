@@ -13,7 +13,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         // ── Core ─────────────────────────────────────────────────────────
-        // Primary action = brand gradient (green → teal → blue)
+        // Primary action = brand gradient (navy → azure)
         default:
           'bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white shadow-sm ' +
           'hover:brightness-[1.08] active:brightness-95 transition-[filter,box-shadow]',

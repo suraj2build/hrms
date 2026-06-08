@@ -5,9 +5,11 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * White + Emvora Brand — HRMS Design System v3
- * Professional conservative next-gen visual system.
- * Palette: teal #0D9488 primary, green→blue gradient brand, #FCFCFC near-pure white canvas, Manrope font, 16px radius.
+ * Emvora Brand — HRMS Design System 2.0
+ * Professional, premium, conservative next-gen visual system.
+ * Palette: navy #1A4D8F primary, navy→azure gradient brand, #F3F5F8 cool-gray canvas,
+ *          Inter font, 12px (0.75rem) base radius. Single navy accent across all
+ *          surfaces, including operational (.op-*) utilities — no legacy teal.
  */
 
 @theme inline {
@@ -239,7 +241,7 @@
 
   --accent-magenta: oklch(0.68 0.20  25);
   --accent-coral:   oklch(0.82 0.16  75);
-  --accent-teal:    oklch(0.74 0.10 184);
+  --accent-teal:    oklch(0.65 0.10 260);   /* remapped to light-navy (matches light-mode navy alias) */
   --accent-violet:  oklch(0.62 0.20  264);  /* blue */
   --accent-sky:     oklch(0.70 0.14  230);
   --accent-amber:   oklch(0.82 0.16   75);
@@ -301,7 +303,7 @@
   /* Display font utility — Sora for headings & KPI numbers */
   .font-display { font-family: var(--font-display); }
 
-  /* Emvora brand gradient text — green → teal → blue */
+  /* Emvora brand gradient text — navy → azure */
   .brand-gradient-text {
     background: linear-gradient(135deg, #1A4D8F 0%, #1E5BA8 45%, #2260A8 100%);
     -webkit-background-clip: text;
@@ -401,7 +403,7 @@
     transition: transform 160ms ease, box-shadow 160ms ease, background 120ms ease;
     cursor: pointer;
   }
-  /* Hover: deeper lift + teal glow */
+  /* Hover: deeper lift + navy glow */
   .op-row:hover {
     background: rgba(255, 255, 255, 0.99);
     box-shadow:
@@ -413,16 +415,16 @@
   /* Focused: keyboard nav ring */
   .op-row-focused {
     box-shadow:
-      0 0 0 2px rgba(13, 148, 136, 0.28),
+      0 0 0 2px rgba(26, 77, 143, 0.28),
       0 4px 12px rgba(0, 0, 0, 0.08) !important;
     transform: translateY(-1px);
   }
-  /* Selected: violet tint + active left rail */
+  /* Selected: navy tint + active left rail */
   .op-row-selected {
-    background: rgba(236, 253, 245, 0.85) !important;
+    background: rgba(235, 243, 252, 0.85) !important;
     box-shadow:
-      inset 2px 0 0 rgba(13, 148, 136, 0.50),
-      0 0 0 1px rgba(13, 148, 136, 0.14) !important;
+      inset 2px 0 0 rgba(26, 77, 143, 0.50),
+      0 0 0 1px rgba(26, 77, 143, 0.14) !important;
   }
 
   /* ── Operational state overlays ──────────────────────────── */
@@ -477,9 +479,9 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(13, 148, 136, 0.035) 35%,
-      rgba(13, 148, 136, 0.070) 50%,
-      rgba(13, 148, 136, 0.035) 65%,
+      rgba(26, 77, 143, 0.035) 35%,
+      rgba(26, 77, 143, 0.070) 50%,
+      rgba(26, 77, 143, 0.035) 65%,
       transparent 100%
     );
     animation: op-shimmer-sweep 2.6s ease-in-out infinite;
@@ -494,7 +496,7 @@
   /* ── Severity tints for rows ─────────────────────────────── */
   .op-tint-critical { background: rgba(255, 243, 243, 0.90) !important; }
   .op-tint-high     { background: rgba(255, 251, 232, 0.90) !important; }
-  .op-tint-medium   { background: rgba(236, 253, 245, 0.90) !important; }  /* violet tint */
+  .op-tint-medium   { background: rgba(235, 243, 252, 0.90) !important; }  /* navy tint */
   .op-tint-low      { background: rgba(239, 249, 255, 0.90) !important; }
 
   /* ── Severity bar strips ─────────────────────────────────── */
@@ -507,9 +509,9 @@
 
   /* ── Mission lane sidebar ────────────────────────────────── */
   .mission-lane-active {
-    background: rgba(236, 253, 245, 0.75);
-    border-left: 2px solid rgba(13, 148, 136, 0.40);
-    color: #0D9488;
+    background: rgba(235, 243, 252, 0.75);
+    border-left: 2px solid rgba(26, 77, 143, 0.40);
+    color: #1A4D8F;
     font-weight: 600;
   }
 
@@ -519,7 +521,7 @@
     align-items: center;
     font-size: 10px;
     font-weight: 500;
-    background: rgba(13, 148, 136, 0.07);
+    background: rgba(26, 77, 143, 0.07);
     color: #1A4D8F;
     border-radius: 9999px;
     padding: 0.1rem 0.5rem;
@@ -532,14 +534,14 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #0D9488;
+    color: #1A4D8F;
   }
 
   /* ── Soft canvas section ─────────────────────────────────── */
   .op-section-bg {
     background: rgba(255,255,255,0.55);
     border-radius: 1rem;
-    border: 1px solid rgba(13, 148, 136, 0.07);
+    border: 1px solid rgba(26, 77, 143, 0.07);
   }
 
   /* ── Operational lane clusters (group-level) ─────────────── */
@@ -554,12 +556,12 @@
     border-radius: 0 1rem 1rem 0;
   }
   .op-lane-medium {
-    border-left: 3px solid rgba(13, 148, 136, 0.40);   /* violet */
-    background: rgba(236, 253, 245, 0.50);
+    border-left: 3px solid rgba(26, 77, 143, 0.40);   /* navy */
+    background: rgba(235, 243, 252, 0.50);
     border-radius: 0 1rem 1rem 0;
   }
   .op-lane-default {
-    border-left: 3px solid rgba(13, 148, 136, 0.15);
+    border-left: 3px solid rgba(26, 77, 143, 0.15);
     background: rgba(255, 255, 255, 0.45);
     border-radius: 0 1rem 1rem 0;
   }
@@ -624,9 +626,9 @@
     user-select: none;
   }
   .op-pill-active {
-    background: #0D9488;
+    background: #1A4D8F;
     color: #FFFFFF;
-    box-shadow: 0 1px 3px rgba(13, 148, 136, 0.30);
+    box-shadow: 0 1px 3px rgba(26, 77, 143, 0.30);
   }
   .op-pill-inactive {
     background: #FFFFFF;
@@ -634,9 +636,9 @@
     color: #6B7280;
   }
   .op-pill-inactive:hover {
-    border-color: #5EEAD4;
-    background: #ECFDF5;
-    color: #0D9488;
+    border-color: #A9C5E8;
+    background: #EBF3FC;
+    color: #1A4D8F;
   }
 
   /* ── Section accent bar (vertical colored strip) ─────────── */
@@ -646,7 +648,7 @@
     flex-shrink: 0;
     width:  6px;
     height: 12px;
-    background: #0D9488;
+    background: #1A4D8F;
     border-radius: 9999px;
   }
 
