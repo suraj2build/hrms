@@ -252,7 +252,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     async (req, reply) => {
       const { employeeId } = req.params as { employeeId: string }
       const body = (req.body ?? {}) as { consent?: boolean; aadhaar?: string }
-      const tenantId = (req as any).user.tenant_id
+      const tenantId = (req as any).tenantId
 
       if (body.consent !== true) {
         return reply.status(400).send({ error: 'CONSENT_REQUIRED', message: 'Explicit consent is required to verify Aadhaar.' })
@@ -285,6 +285,53 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       // PII-safe echo of the outcome (mask only).
       const v = aadhaarVerificationService.validateStructure(aadhaar)
       return { status: v.isValid ? 'verified' : 'failed', masked: v.masked, employee_id: employeeId }
+    },
+  )
+
+  /**
+   * POST /ess/aadhaar/verify  (employee self-service)
+   * The signed-in employee verifies their own Aadhaar with explicit consent.
+   * Same Phase-1 engine (format + checksum); online e-KYC is Phase 2.
+   * Body: { consent: boolean, aadhaar: string }
+   */
+  fastify.post(
+    '/ess/aadhaar/verify',
+    { preHandler: [fastify.authenticate] },
+    async (req, reply) => {
+      const userId   = (req as any).userId
+      const tenantId = (req as any).tenantId
+      const body = (req.body ?? {}) as { consent?: boolean; aadhaar?: string }
+
+      if (body.consent !== true) {
+        return reply.status(400).send({ error: 'CONSENT_REQUIRED', message: 'Explicit consent is required to verify Aadhaar.' })
+      }
+      const aadhaar = (body.aadhaar ?? '').trim()
+      if (!aadhaar) {
+        return reply.status(400).send({ error: 'NO_AADHAAR', message: 'Enter your Aadhaar number to verify.' })
+      }
+
+      // Resolve the caller's own employee record — they can only verify themselves.
+      const { data: prof } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', userId)
+        .eq('tenant_id', tenantId)
+        .single()
+      const employeeId = (prof as any)?.employee_id
+      if (!employeeId) {
+        return reply.status(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record.' })
+      }
+
+      await verificationOrchestrator.verify({
+        supabase:        fastify.supabase,
+        employee_id:     employeeId,
+        tenant_id:       tenantId,
+        aadhaar,
+        aadhaar_consent: true,
+      })
+
+      const v = aadhaarVerificationService.validateStructure(aadhaar)
+      return { status: v.isValid ? 'verified' : 'failed', masked: v.masked }
     },
   )
 

@@ -37,9 +37,12 @@ const STATUS_META: Record<string, { label: string; tone: string; icon: typeof Ch
 
 export function AadhaarVerifyCard({
   employeeId,
+  self = false,
   className,
 }: {
   employeeId: string
+  /** Self-service mode (employee verifies their own Aadhaar via /ess endpoint). */
+  self?: boolean
   className?: string
 }) {
   const qc = useQueryClient()
@@ -58,10 +61,12 @@ export function AadhaarVerifyCard({
 
   const verify = useMutation({
     mutationFn: () =>
-      api.post(`/trust/verifications/aadhaar/${employeeId}`, {
-        consent,
-        aadhaar: aadhaar.replace(/\s/g, '') || undefined,
-      }),
+      self
+        ? api.post('/ess/aadhaar/verify', { consent, aadhaar: aadhaar.replace(/\s/g, '') })
+        : api.post(`/trust/verifications/aadhaar/${employeeId}`, {
+            consent,
+            aadhaar: aadhaar.replace(/\s/g, '') || undefined,
+          }),
     onSuccess: () => {
       setAadhaar('')
       qc.invalidateQueries({ queryKey: ['aadhaar-verification', employeeId] })
@@ -107,7 +112,10 @@ export function AadhaarVerifyCard({
         {/* Input */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-medium text-muted-foreground">
-            Aadhaar number <span className="opacity-60">(leave blank to use the number on file)</span>
+            Aadhaar number{' '}
+            <span className="opacity-60">
+              {self ? '(12 digits)' : '(leave blank to use the number on file)'}
+            </span>
           </label>
           <input
             inputMode="numeric"
@@ -143,7 +151,7 @@ export function AadhaarVerifyCard({
           <Button
             size="sm"
             className="h-8 text-xs gap-1.5"
-            disabled={!consent || verify.isPending || (digits.length > 0 && digits.length !== 12)}
+            disabled={!consent || verify.isPending || (self ? digits.length !== 12 : (digits.length > 0 && digits.length !== 12))}
             onClick={() => verify.mutate()}
           >
             {verify.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}

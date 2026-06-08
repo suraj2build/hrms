@@ -32,6 +32,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
+import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -704,6 +705,9 @@ function EmploymentTab({ data }: { data: ProfileData }) {
         <Field label="Blood Group"  value={pers?.blood_group ?? '—'} />
         <Field label="Nationality"  value={cap(pers?.nationality)} />
       </SectionCard>
+
+      {/* Self-service Aadhaar verification (consent-gated, Phase 1) */}
+      <AadhaarVerifyCard employeeId={emp.id} self />
 
     </div>
   )
