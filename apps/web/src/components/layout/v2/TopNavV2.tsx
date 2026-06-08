@@ -98,9 +98,9 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         </span>
       </button>
 
-      {/* ── Domain tabs — left-aligned compact angled shapes ───── */}
+      {/* ── Domain tabs — clean flat underline tabs ────────────── */}
       <nav
-        className="flex items-stretch shrink-0 overflow-x-auto"
+        className="flex items-stretch min-w-0 flex-1 overflow-x-auto"
         style={{ scrollbarWidth: 'none' }}
         aria-label="Domain navigation"
       >
@@ -114,68 +114,48 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
               onClick={() => navigate(domain.defaultRoute)}
               title={domain.label}
               className={cn(
-                'relative flex items-center -mr-2.5 group select-none',
-                'px-5 first:pl-4',
-                isActive ? 'z-10' : 'z-0 hover:z-[5]',
+                'relative flex items-center gap-1.5 px-3.5 h-full select-none whitespace-nowrap',
+                'text-[11.5px] font-semibold transition-colors',
+                isActive
+                  ? 'text-primary bg-primary/[0.06]'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
               )}
             >
-              {/* ── Angled tab background (skewed, not the content) ── */}
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'absolute inset-0 transition-colors duration-150',
-                  '[transform:skewX(-13deg)]',
-                  isActive
-                    ? 'bg-primary'
-                    : 'bg-muted/50 group-hover:bg-muted',
-                )}
-              />
-              {/* ── Right-edge shadow line to separate tabs ── */}
-              {!isActive && (
-                <span
-                  aria-hidden="true"
-                  className="absolute right-2 inset-y-[20%] w-px bg-border/60 [transform:skewX(-13deg)]"
-                />
+              <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive ? 'text-primary' : 'text-muted-foreground/80')} />
+              <span className="hidden lg:inline">{domain.label}</span>
+              <span className="lg:hidden">{domain.shortLabel ?? domain.label.slice(0, 4)}</span>
+              {/* Active underline indicator */}
+              {isActive && (
+                <span aria-hidden="true" className="absolute inset-x-2 bottom-0 h-[2.5px] rounded-full bg-primary" />
               )}
-              {/* ── Label — NOT skewed ── */}
-              <span className={cn(
-                'relative z-10 flex items-center gap-1.5 text-[11.5px] font-semibold whitespace-nowrap',
-                isActive
-                  ? 'text-primary-foreground'
-                  : 'text-muted-foreground group-hover:text-foreground',
-              )}>
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden lg:inline">{domain.label}</span>
-                <span className="lg:hidden">{domain.shortLabel ?? domain.label.slice(0, 4)}</span>
-              </span>
             </button>
           )
         })}
       </nav>
 
-      {/* ── Flexible spacer ────────────────────────────────────── */}
-      <div className="flex-1" />
-
       {/* ── Right actions ──────────────────────────────────────── */}
       {/* Search moved to a floating launcher (bottom-right) to declutter the top
-          row — see SearchLauncher in AdminShellV2. ⌘K still toggles it. */}
-      <div className="flex items-center gap-1.5 shrink-0 px-3 border-l border-border/60">
+          row — see SearchFab in AdminShellV2. ⌘K still toggles it. */}
+      <div className="flex items-center gap-1 shrink-0 pl-2 pr-3">
 
-        {/* Tenant name */}
-        {tenant?.name && (
-          <span className="text-[11px] text-muted-foreground font-medium hidden xl:block max-w-[120px] truncate border-l border-border pl-2">
-            {tenant.name}
-          </span>
-        )}
+        {/* Single hairline separates nav from the account cluster */}
+        <span aria-hidden="true" className="h-6 w-px bg-border/70 mx-1.5" />
 
-        {/* Role badge */}
-        {profile?.role && (
-          <span className="text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5 font-semibold uppercase tracking-wide hidden sm:block border border-primary/20">
-            {profile.role === 'super_admin' ? 'Admin' :
-             profile.role === 'hr_admin'    ? 'HR'    :
-             profile.role === 'manager'     ? 'Mgr'   : profile.role}
-          </span>
-        )}
+        {/* Tenant + role — grouped, no extra dividers */}
+        <div className="hidden md:flex items-center gap-1.5 mr-1">
+          {tenant?.name && (
+            <span className="text-[11px] text-muted-foreground font-medium max-w-[130px] truncate">
+              {tenant.name}
+            </span>
+          )}
+          {profile?.role && (
+            <span className="text-[9.5px] bg-primary/10 text-primary rounded-full px-2 py-0.5 font-bold uppercase tracking-wide border border-primary/15">
+              {profile.role === 'super_admin' ? 'Admin' :
+               profile.role === 'hr_admin'    ? 'HR'    :
+               profile.role === 'manager'     ? 'Mgr'   : profile.role}
+            </span>
+          )}
+        </div>
 
         {/* Executive Mode toggle — super_admin + hr_admin only */}
         {canExecMode && (
@@ -191,9 +171,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
             )}
           >
             <BarChart3 className="h-3 w-3 shrink-0" />
-            <span className="hidden sm:inline whitespace-nowrap">
-              {executiveMode ? 'Exec' : 'Exec'}
-            </span>
+            <span className="hidden sm:inline whitespace-nowrap">Exec</span>
           </button>
         )}
 
@@ -203,7 +181,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
           tabIndex={0}
           onClick={() => setNotifOpen(true)}
           onKeyDown={e => e.key === 'Enter' && setNotifOpen(true)}
-          className="p-1.5 rounded-md hover:bg-muted transition-colors cursor-pointer flex items-center justify-center relative"
+          className="p-1.5 rounded-md hover:bg-muted transition-colors cursor-pointer flex items-center justify-center relative text-muted-foreground hover:text-foreground"
           title="Notifications"
         >
           <NotificationBell />
@@ -228,7 +206,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex items-center gap-2 cursor-pointer group"
+              className="flex items-center gap-2 cursor-pointer group ml-0.5 pl-1.5 rounded-md hover:bg-muted/60 py-1 pr-1 transition-colors"
             >
               <div className="w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-[11px] shrink-0">
                 {getInitials(profile?.full_name ?? 'U')}
