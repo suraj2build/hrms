@@ -49,6 +49,7 @@ import { Switch } from '@/components/ui/switch'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter } from '@/components/ui/sheet'
 import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
 import { SignedImage } from '@/components/SignedImage'
+import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import {
   PFModeBadge,
   ESIStatusBadge,
@@ -3739,6 +3740,10 @@ export function EmployeeProfile() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Aadhaar verification — HR only (consent-gated, Phase 1) */}
+              {isAdmin && id && <AadhaarVerifyCard employeeId={id} />}
+
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
