@@ -699,6 +699,11 @@ export const DOMAINS: Domain[] = [
           { id: 'grades',       label: 'Grades & Pay Bands',  route: '/admin/masters/grades',                  icon: TrendingUp },
           { id: 'emp-types',    label: 'Employment Types',    route: '/admin/masters/employment-categories',   icon: Users     },
           { id: 'asset-cats',   label: 'Asset Categories',    route: '/admin/masters/asset-categories',        icon: Package   },
+          // Reference Data hub — identity types, relationship types, document types,
+          // and other lookup masters live on the tabbed /admin/masters page. Without
+          // this entry those tabs were unreachable (forms pointed to "Masters" with
+          // no nav path). exact:true so it doesn't clash with /admin/masters/* pages.
+          { id: 'reference-data', label: 'Reference Data',    route: '/admin/masters', exact: true,            icon: ListChecks },
         ],
       },
 
