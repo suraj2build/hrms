@@ -219,74 +219,71 @@ function ProfileHero({ data }: { data: ProfileData }) {
 
   const fullName  = `${emp.first_name} ${emp.last_name}`
   const initials  = `${emp.first_name[0] ?? ''}${emp.last_name[0] ?? ''}`.toUpperCase()
+  const isActive  = emp.status === 'active'
+
+  type MetaItem = { icon: React.ComponentType<{ className?: string }>; text: string }
+  const metaItems: MetaItem[] = ([
+    job?.designations?.name   && { icon: Award,     text: job.designations.name },
+    job?.departments?.name    && { icon: Building2,  text: job.departments.name },
+    job?.manager              && { icon: Users,      text: `${job.manager.first_name} ${job.manager.last_name}` },
+    job?.work_locations       && { icon: MapPin,     text: `${job.work_locations.name}, ${job.work_locations.city}` },
+    emp.joining_date          && { icon: Calendar,   text: `Joined ${fmtDate(emp.joining_date, { month: 'short', year: 'numeric' })}` },
+  ].filter(Boolean) as MetaItem[])
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 mb-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-card mb-4">
+      {/* Premium gradient banner */}
+      <div
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-24 bg-gradient-to-br from-primary/[0.12] via-primary/[0.05] to-transparent"
+      />
 
-        {/* Avatar */}
-        <SignedImage
-          path={pers?.profile_photo}
-          alt={fullName}
-          className="w-20 h-20 rounded-full object-cover ring-2 ring-primary/20 flex-shrink-0"
-          fallback={
-            <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center flex-shrink-0">
-              <span className="text-primary font-bold text-2xl">{initials}</span>
-            </div>
-          }
-        />
+      <div className="relative p-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
 
-        {/* Identity */}
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2 mb-0.5">
-            <h1 className="text-lg font-bold text-foreground leading-tight">{fullName}</h1>
-            <Badge
-              variant={emp.status === 'active' ? 'success' : 'secondary'}
-              className="rounded-full text-[10px] capitalize"
-            >
-              {emp.status}
-            </Badge>
+          {/* Avatar + live status dot */}
+          <div className="relative flex-shrink-0">
+            <SignedImage
+              path={pers?.profile_photo}
+              alt={fullName}
+              className="w-24 h-24 rounded-2xl object-cover ring-4 ring-card shadow-elev-2"
+              fallback={
+                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 ring-4 ring-card shadow-elev-2 flex items-center justify-center">
+                  <span className="text-primary font-bold text-3xl font-display">{initials}</span>
+                </div>
+              }
+            />
+            <span
+              title={emp.status}
+              className={cn(
+                'absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-[3px] border-card',
+                isActive ? 'bg-success' : 'bg-muted-foreground',
+              )}
+            />
           </div>
-          <p className="text-sm text-muted-foreground mb-2">{emp.employee_code}</p>
 
-          {/* Meta grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
-            {job?.designations?.name && (
-              <div className="flex items-center gap-1.5">
-                <Award className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-foreground truncate">{job.designations.name}</span>
-              </div>
-            )}
-            {job?.departments?.name && (
-              <div className="flex items-center gap-1.5">
-                <Building2 className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-foreground truncate">{job.departments.name}</span>
-              </div>
-            )}
-            {job?.manager && (
-              <div className="flex items-center gap-1.5">
-                <Users className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-foreground truncate">
-                  {job.manager.first_name} {job.manager.last_name}
-                </span>
-              </div>
-            )}
-            {job?.work_locations && (
-              <div className="flex items-center gap-1.5">
-                <MapPin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-foreground truncate">
-                  {job.work_locations.name}, {job.work_locations.city}
-                </span>
-              </div>
-            )}
-            {emp.joining_date && (
-              <div className="flex items-center gap-1.5">
-                <Calendar className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-foreground">Joined {fmtDate(emp.joining_date, { month: 'short', year: 'numeric' })}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-1.5">
-              <Phone className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+          {/* Identity */}
+          <div className="flex-1 min-w-0 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="font-display text-xl font-bold text-foreground leading-tight">{fullName}</h1>
+              <Badge
+                variant={isActive ? 'success' : 'secondary'}
+                className="rounded-full text-[10px] capitalize"
+              >
+                {emp.status}
+              </Badge>
+            </div>
+            <p className="text-[13px] text-muted-foreground mt-0.5 font-medium tabular-nums">{emp.employee_code}</p>
+          </div>
+
+          {/* Contact column */}
+          <div className="flex flex-col gap-1.5 sm:items-end w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate max-w-[220px]">{emp.email}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Phone className="h-3.5 w-3.5 flex-shrink-0" />
               <PhoneEdit
                 employeeId={emp.id}
                 current={emp.phone ?? ''}
@@ -296,12 +293,17 @@ function ProfileHero({ data }: { data: ProfileData }) {
           </div>
         </div>
 
-        {/* Email */}
-        <div className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Mail className="h-3.5 w-3.5" />
-          <span>{emp.email}</span>
-        </div>
-
+        {/* Meta chips */}
+        {metaItems.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-border/60">
+            {metaItems.map((m, i) => (
+              <div key={i} className="inline-flex items-center gap-1.5 rounded-lg bg-muted/50 px-2.5 py-1">
+                <m.icon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                <span className="text-xs text-foreground truncate max-w-[220px]">{m.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1143,25 +1145,28 @@ export function EssMyProfile({ employeeId: propEmployeeId }: { employeeId?: stri
       <PrimaryActions />
 
       {/* ── Tab navigation ───────────────────────────────────────────────── */}
-      <div className="flex gap-0.5 border-b border-border mb-4 overflow-x-auto scrollbar-none">
-        {TABS.map(tab => {
-          const Icon = tab.icon
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors',
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          )
-        })}
+      <div className="mb-4 overflow-x-auto scrollbar-none">
+        <div className="inline-flex gap-1 p-1 rounded-xl bg-muted/50 border border-border/60">
+          {TABS.map(tab => {
+            const Icon = tab.icon
+            const active = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold whitespace-nowrap rounded-lg transition-all',
+                  active
+                    ? 'bg-card text-primary shadow-elev-1'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-card/60',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* ── Tab content ───────────────────────────────────────────────────── */}
