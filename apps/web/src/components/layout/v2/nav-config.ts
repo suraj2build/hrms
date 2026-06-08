@@ -100,6 +100,7 @@ import {
   Search,
   BadgeCheck,
   Sparkles,
+  Cpu,
 } from 'lucide-react'
 import type { UserRole } from '@/types'
 
@@ -154,7 +155,9 @@ export const DOMAINS: Domain[] = [
 
   // ── 0. Home ───────────────────────────────────────────────────────────────────
   //
-  // Primary admin landing zone. Control Center + Executive Intelligence + Settings.
+  // Primary admin landing zone. Control Center is the default; Insights Hub and
+  // Platform Health round out the overview. Workforce Command lives in its own
+  // intelligence domain. Executive Intelligence is reachable via Exec Mode.
   //
   {
     id:           'home',
@@ -163,23 +166,21 @@ export const DOMAINS: Domain[] = [
     icon:         Command,
     matchPrefixes: [
       '/admin/control-center',
-      '/admin/dashboard',     // kept so redirect still activates this domain
-      '/admin/intelligence/workforce-command', // primary HR landing
-      '/admin/insights',      // Insights Hub — single front door to all analytics
-      '/admin/executive',     // Executive Intelligence Center
-      '/admin/settings',      // Company / Global Settings
-      '/admin/readiness',     // Platform health console
+      '/admin/dashboard',     // redirect target still activates this domain
+      '/admin/insights',
+      '/admin/executive',
+      '/admin/settings',
+      '/admin/readiness',
+      '/admin/intelligence/workforce-command',
     ],
-    defaultRoute: '/admin/intelligence/workforce-command',
+    defaultRoute: '/admin/control-center',
     groups: [
       {
         label: 'Overview',
         items: [
-          { id: 'workforce-command-home', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain },
-          { id: 'insights-hub',           label: 'Insights Hub',           route: '/admin/insights',       exact: true, icon: Sparkles },
-          { id: 'control-center',         label: 'Control Center',         route: '/admin/control-center', exact: true, icon: Command   },
-          { id: 'platform-health',        label: 'Platform Health',        route: '/admin/readiness',                   icon: Activity  },
-          { id: 'executive-center',       label: 'Executive Intelligence', route: '/admin/executive',                   icon: BarChart3 },
+          { id: 'control-center',  label: 'Control Center',  route: '/admin/control-center', exact: true, icon: Command   },
+          { id: 'insights-hub',    label: 'Insights Hub',    route: '/admin/insights',       exact: true, icon: Sparkles  },
+          { id: 'platform-health', label: 'Platform Health', route: '/admin/readiness',                   icon: Activity  },
         ],
       },
       {
@@ -278,7 +279,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'shift-roster',  label: 'Shift Roster',       route: '/admin/roster',                icon: CalendarClock },
           { id: 'emp-shifts',    label: 'Shift Overrides',    route: '/admin/employee-shifts',       icon: AlarmClock },
-          { id: 'roster-intel',  label: 'Roster Intelligence', route: '/admin/roster/intelligence',  icon: Brain      },
+          { id: 'roster-intel',  label: 'Roster Analytics',    route: '/admin/roster/intelligence',  icon: Brain      },
         ],
       },
       {
@@ -322,10 +323,10 @@ export const DOMAINS: Domain[] = [
           { id: 'leave-txns',       label: 'Transactions',       route: '/admin/leave/transactions',     icon: ListChecks    },
           { id: 'comp-off',         label: 'Comp Off',           route: '/admin/comp-off',               icon: RefreshCw     },
           { id: 'overtime',         label: 'Overtime',           route: '/admin/overtime',               icon: Timer         },
-          { id: 'leave-jobs',       label: 'Engine Status',      route: '/admin/leave-jobs',             icon: Activity      },
-          { id: 'leave-ledger',     label: 'Accrual Ledger',     route: '/admin/leave/ledger',           icon: BookOpen      },
-          { id: 'leave-accrual',    label: 'Accrual Engine',     route: '/admin/leave/accrual',          icon: RefreshCw     },
-          { id: 'collision-log',    label: 'Collision Log',      route: '/admin/leave/collision-log',    icon: AlertTriangle },
+          { id: 'leave-jobs',       label: 'Scheduler Status',   route: '/admin/leave-jobs',             icon: Activity      },
+          { id: 'leave-ledger',     label: 'Accrual History',    route: '/admin/leave/ledger',           icon: BookOpen      },
+          { id: 'leave-accrual',    label: 'Accrual Runs',       route: '/admin/leave/accrual',          icon: RefreshCw     },
+          { id: 'collision-log',    label: 'Leave Conflicts',    route: '/admin/leave/collision-log',    icon: AlertTriangle },
           { id: 'optional-hols',    label: 'Optional Holidays',  route: '/admin/leave/optional-holidays', icon: CalendarDays },
         ],
       },
@@ -395,13 +396,13 @@ export const DOMAINS: Domain[] = [
           { id: 'fbp-recon',      label: 'FBP Reconciliation', route: '/admin/payroll/fbp',         icon: Receipt    },
           { id: 'variable-pay',   label: 'Variable Pay',    route: '/admin/payroll/variable-pay',   icon: TrendingUp },
           { id: 'loans',          label: 'Loan Management', route: '/admin/payroll/loans',          icon: Landmark   },
-          { id: 'arrears',        label: 'Arrear Engine',   route: '/admin/payroll/arrears',        icon: RotateCcw  },
+          { id: 'arrears',        label: 'Arrear Payments', route: '/admin/payroll/arrears',        icon: RotateCcw  },
         ],
       },
       {
         label: 'Analytics & Audit',
         items: [
-          { id: 'payroll-forensics',   label: 'Forensics',     route: '/admin/payroll/forensics',   icon: AlertTriangle },
+          { id: 'payroll-forensics',   label: 'Deep Analysis', route: '/admin/payroll/forensics',   icon: AlertTriangle },
           { id: 'payroll-investigate', label: 'Investigation', route: '/admin/payroll/investigate', icon: Activity      },
         ],
       },
@@ -445,9 +446,9 @@ export const DOMAINS: Domain[] = [
         ],
       },
       {
-        label: 'IT / TDS Governance',
+        label: 'Tax & Declarations',
         items: [
-          { id: 'tax-governance',       label: 'Tax Governance',       route: '/admin/payroll/tax-governance',       icon: ScrollText },
+          { id: 'tax-governance',       label: 'Tax Declarations',     route: '/admin/payroll/tax-governance',       icon: ScrollText },
           { id: 'tax-governance-admin', label: 'Verification Queue',   route: '/admin/payroll/tax-governance-admin', icon: ShieldCheck },
         ],
       },
@@ -560,14 +561,16 @@ export const DOMAINS: Domain[] = [
       '/admin/system/webhooks',
       '/admin/system/integrations',
       '/admin/enterprise',
+      '/admin/trust',
+      '/admin/fabric',
     ],
     defaultRoute: '/admin/workforce/optimization',
     groups: [
       {
         label: 'Risk & Governance',
         items: [
-          { id: 'governance-matrix',    label: 'Governance Matrix',      route: '/admin/approvals/governance-matrix',         icon: GitMerge     },
-          { id: 'event-governance',     label: 'Event Governance',       route: '/admin/system/event-governance',             icon: Radio,        roles: ['super_admin'] },
+          { id: 'governance-matrix',    label: 'Approval Matrix',        route: '/admin/approvals/governance-matrix',         icon: GitMerge     },
+          { id: 'event-governance',     label: 'Event Log',              route: '/admin/system/event-governance',             icon: Radio,        roles: ['super_admin'] },
           { id: 'attendance-risk',      label: 'Attendance Risk',        route: '/admin/attendance/risk',                     icon: AlertTriangle },
           { id: 'attendance-confidence',label: 'Attendance Confidence',  route: '/admin/attendance/confidence',               icon: Target       },
           { id: 'policy-conflicts',     label: 'Policy Conflicts',       route: '/admin/attendance/policy-conflicts',         icon: AlertTriangle },
@@ -581,18 +584,18 @@ export const DOMAINS: Domain[] = [
         ],
       },
       {
-        label: 'Advanced Intelligence',
+        label: 'Advanced Analytics',
         items: [
-          { id: 'session-intelligence',  label: 'Session Intelligence',   route: '/admin/attendance/intelligence-center', icon: Activity  },
+          { id: 'session-intelligence',  label: 'Attendance Sessions',    route: '/admin/attendance/intelligence-center', icon: Activity  },
           { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap       },
-          { id: 'workforce-analytics',   label: 'Headcount Analytics',     route: '/admin/analytics/workforce',            icon: BarChart2 },
+          { id: 'workforce-analytics',   label: 'Headcount Analytics',    route: '/admin/analytics/workforce',            icon: BarChart2 },
           { id: 'org-health',            label: 'Org Health',             route: '/admin/intelligence/org-health',        icon: TrendingUp  },
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity    },
-          { id: 'workforce-digest',      label: 'Daily Digest',            route: '/admin/intelligence/digest',            icon: FileText    },
-          { id: 'workforce-search',      label: 'People Search',            route: '/admin/intelligence/search',            icon: Search      },
-          { id: 'uat-certification',     label: 'UAT Certification',      route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'] },
-          { id: 'narratives',            label: 'Narratives',               route: '/admin/intelligence/narratives',        icon: FileText  },
-          { id: 'workforce-intel',       label: 'Intelligence Hub',         route: '/admin/intelligence',                   icon: Brain     },
+          { id: 'workforce-digest',      label: 'Daily Digest',           route: '/admin/intelligence/digest',            icon: FileText    },
+          { id: 'workforce-search',      label: 'People Search',          route: '/admin/intelligence/search',            icon: Search      },
+          { id: 'uat-certification',     label: 'UAT Testing',            route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'] },
+          { id: 'narratives',            label: 'Narratives',             route: '/admin/intelligence/narratives',        icon: FileText  },
+          { id: 'workforce-intel',       label: 'Analytics',              route: '/admin/intelligence',                   icon: Brain     },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],
       },
@@ -602,8 +605,10 @@ export const DOMAINS: Domain[] = [
         roles: ['super_admin'],
         items: [
           { id: 'enterprise-control-center', label: 'Enterprise Control Center', route: '/admin/enterprise',               icon: Command    },
-          { id: 'orchestration',             label: 'Orchestration Console',     route: '/admin/system/orchestration',     icon: GitBranch  },
-          { id: 'observability',             label: 'Observability Console',     route: '/admin/system/observability',     icon: Radio      },
+          { id: 'trust-workspace',           label: 'Trust Intelligence',        route: '/admin/trust',                    icon: ShieldCheck },
+          { id: 'fabric-workspace',          label: 'Fabric Intelligence',       route: '/admin/fabric',                   icon: Cpu        },
+          { id: 'orchestration',             label: 'System Orchestration',      route: '/admin/system/orchestration',     icon: GitBranch  },
+          { id: 'observability',             label: 'System Monitor',            route: '/admin/system/observability',     icon: Radio      },
           { id: 'integration-registry',      label: 'Integration Registry',      route: '/admin/system/integrations',      icon: Zap        },
           { id: 'automations',               label: 'Automations',               route: '/admin/system/automations',       icon: Settings2  },
           { id: 'incidents',                 label: 'Incident Manager',          route: '/admin/system/incidents',         icon: ShieldCheck },
@@ -714,8 +719,8 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'leave-types',         label: 'Leave Types',       route: '/admin/leave-types',          icon: ListChecks    },
           { id: 'leave-policies',      label: 'Leave Policies',    route: '/admin/leave-policy',         icon: Settings2     },
-          { id: 'leave-governance',    label: 'Leave Governance',  route: '/admin/leave/governance',     icon: CalendarHeart },
-          { id: 'leave-policy-engine', label: 'Policy Engine',     route: '/admin/leave/policy-engine',  icon: Settings2     },
+          { id: 'leave-governance',    label: 'Leave Rules',       route: '/admin/leave/governance',     icon: CalendarHeart },
+          { id: 'leave-policy-engine', label: 'Policy Simulator',  route: '/admin/leave/policy-engine',  icon: Settings2     },
         ],
       },
 
@@ -758,6 +763,9 @@ export const DOMAINS: Domain[] = [
 // Three domains: Intelligence (KPIs + narratives), Reports (outputs), Workforce (read-only).
 // All routes already exist — this is nav-visibility only, no new pages.
 //
+// Entry point on toggle: Workforce Command (narrative-first — leads with AI
+// summary + attention KPIs before offering the full analytics directory).
+//
 export const EXECUTIVE_DOMAINS: Domain[] = [
 
   {
@@ -772,16 +780,16 @@ export const EXECUTIVE_DOMAINS: Domain[] = [
       '/admin/analytics',
       '/admin/operational-health',
     ],
-    defaultRoute: '/admin/insights',
+    defaultRoute: '/admin/intelligence/workforce-command',
     groups: [
       {
         label: 'Executive',
         items: [
+          { id: 'exec-workforce-command', label: 'Workforce Summary',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain      },
+          { id: 'exec-narratives',        label: 'Narratives',             route: '/admin/intelligence/narratives',                    icon: FileText   },
           { id: 'exec-insights-hub',      label: 'Insights Hub',           route: '/admin/insights',                       exact: true, icon: Sparkles   },
-          { id: 'exec-workforce-command', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain      },
           { id: 'exec-executive-center',  label: 'Executive Intelligence', route: '/admin/executive',                                  icon: BarChart3  },
           { id: 'exec-org-health',        label: 'Org Health',             route: '/admin/intelligence/org-health',                    icon: TrendingUp },
-          { id: 'exec-narratives',        label: 'Narratives',             route: '/admin/intelligence/narratives',                    icon: FileText   },
           { id: 'exec-op-health',         label: 'Operational Health',     route: '/admin/operational-health',                        icon: Activity   },
         ],
       },

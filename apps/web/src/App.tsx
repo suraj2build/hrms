@@ -184,6 +184,10 @@ const ControlCenter            = lazy(() => import('@/pages/admin/ControlCenter'
 // Enterprise Control Center (lazy — admin-only intelligence console)
 const EnterpriseControlCenter = lazy(() => import('@/pages/enterprise/EnterpriseControlCenter'))
 
+// Trust & Fabric workspaces (lazy — super_admin platform surfaces)
+const TrustWorkspace  = lazy(() => import('@/pages/trust/TrustWorkspace'))
+const FabricWorkspace = lazy(() => import('@/pages/fabric/FabricWorkspace'))
+
 // Executive Intelligence Center (lazy — CEO/CHRO strategic read-only intelligence)
 const ExecutiveIntelligenceCenter = lazy(() => import('@/pages/executive/ExecutiveIntelligenceCenter'))
 
@@ -499,8 +503,8 @@ export default function App() {
                 {/* Control Center — primary admin home */}
                 <Route path="/admin/control-center" element={<ControlCenter />} />
 
-                {/* Dashboard — redirects to Control Center (content absorbed there) */}
-                <Route path="/admin/dashboard" element={<Navigate to="/admin/intelligence/workforce-command" replace />} />
+                {/* Dashboard — redirects to primary admin home (Control Center) */}
+                <Route path="/admin/dashboard" element={<Navigate to="/admin/control-center" replace />} />
 
                 {/* ── Workspace shells consolidated — navigation moved to sidebar ── */}
                 {/* Routes preserved as redirects so existing links don't break */}
@@ -609,6 +613,8 @@ export default function App() {
                 <Route path="/admin/system/event-governance" element={<EventGovernance />} />
                 <Route path="/admin/system/orchestration"    element={<OrchestrationConsole />} />
                 <Route path="/admin/enterprise"              element={<EnterpriseControlCenter />} />
+                <Route path="/admin/trust"                  element={<TrustWorkspace />} />
+                <Route path="/admin/fabric"                 element={<FabricWorkspace />} />
                 <Route path="/admin/executive"              element={<ExecutiveIntelligenceCenter />} />
                 <Route path="/admin/system/automations"      element={<AutomationsConsole />} />
                 <Route path="/admin/system/incidents"        element={<IncidentManagement />} />

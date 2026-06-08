@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
+import { PageContainer } from '@/components/layout/PageContainer'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -129,7 +130,7 @@ export function WorkforceCommand() {
   const d = data?.data
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6 max-w-6xl">
+    <PageContainer className="max-w-6xl">
 
       {/* Gradient header */}
       <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5 flex items-start justify-between gap-4">
@@ -224,6 +225,9 @@ export function WorkforceCommand() {
               <Shield className="h-8 w-8 text-emerald-500 mx-auto" />
               <p className="text-sm font-medium text-foreground">All workforce signals within normal range</p>
               <p className="text-xs text-muted-foreground">No critical or high-priority items detected</p>
+              <p className="text-xs text-muted-foreground/60 max-w-xs mx-auto leading-relaxed">
+                Observations appear when AI detects issues such as stalled onboarding, at-risk separations, compliance gaps, or overdue asset returns. Check back daily.
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -240,7 +244,7 @@ export function WorkforceCommand() {
           )}
         </>
       )}
-    </div>
+    </PageContainer>
   )
 }
 

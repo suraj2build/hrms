@@ -21,6 +21,7 @@
 import { useMemo }              from 'react'
 import { useNavigate }          from 'react-router-dom'
 import { useQuery }             from '@tanstack/react-query'
+import { PageContainer }        from '@/components/layout/PageContainer'
 import {
   AlertTriangle, CheckCircle2, XCircle,
   Zap, RefreshCw, AlertCircle, Info,
@@ -622,7 +623,7 @@ export function ControlCenter() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-full bg-background p-5 space-y-4">
+    <PageContainer spacing="tight">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-4">
@@ -846,6 +847,9 @@ export function ControlCenter() {
               <CheckCircle2 className="h-8 w-8 text-success/40" />
               <p className="text-sm font-medium text-muted-foreground">No active exceptions</p>
               <p className="text-[11px] text-muted-foreground/60">All modules operating normally</p>
+              <p className="text-[11px] text-muted-foreground/40 max-w-[220px] leading-relaxed">
+                Monitors attendance freshness, reconciliation, scheduler heartbeats, and the job queue.
+              </p>
             </div>
           )}
           {!ohLoading && exceptionRows.length > 0 && (
@@ -1271,6 +1275,6 @@ export function ControlCenter() {
         </div>
       )}
 
-    </div>
+    </PageContainer>
   )
 }

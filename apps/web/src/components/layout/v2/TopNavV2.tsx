@@ -65,7 +65,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
 
   function handleExecModeToggle() {
     toggleExecutiveMode()
-    if (!executiveMode) navigate('/admin/insights')
+    if (!executiveMode) navigate('/admin/intelligence/workforce-command')
   }
 
   async function handleSignOut() {

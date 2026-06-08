@@ -1430,6 +1430,21 @@ export default function EnterpriseControlCenter() {
           </TabsTrigger>
         </TabsList>
 
+        {/* Tab context strip — one-line orientation for first-time users */}
+        {(() => {
+          const desc: Record<string, string> = {
+            governance:   'Compliance alerts, risk incidents, and the platform event timeline.',
+            trust:        'Employee trust scores, verification events, duplicate signals, and the regulatory pipeline.',
+            operations:   'Domain health scores, SLA breaches, security signals, and the operational heatmap.',
+            security:     'High and critical security signals, platform health status, and the job queue.',
+            audit:        'Decision lineage, replay sessions, and a statistical view of audit activity.',
+            intelligence: 'Fabric health, event clusters, and the knowledge layer.',
+          }
+          return desc[activeTab]
+            ? <p className="text-[11.5px] text-muted-foreground/60 -mt-2 px-1">{desc[activeTab]}</p>
+            : null
+        })()}
+
         <TabsContent value="governance">
           {activeTab === 'governance' && <GovernanceTab {...tabProps} />}
         </TabsContent>
