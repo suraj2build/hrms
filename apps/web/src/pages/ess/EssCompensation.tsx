@@ -1,12 +1,17 @@
 /**
- * EssCompensation — /ess/compensation
+ * EssCompensation — /ess/compensation · /manager/self/compensation
  *
- * Combined Pay & Compensation workspace for ESS:
- *   Tab 1 "Pay Slips"        — finalized slips list, YTD summary, per-slip isolated print
- *   Tab 2 "Compensation"     — CTC breakdown + month-picker Rate vs Actuals comparison table
- *   Tab 3 "Revision History" — compensation revision timeline + Gross vs Net trend chart
+ * "My Compensation" total-rewards workspace (premium layout).
+ *   Overview   — total-rewards / CTC composition hero, employment card, stat tiles
+ *   Salary     — salary structure table + Rate vs Actuals month comparison
+ *   Pay Slips  — finalized slips list, YTD summary, per-slip isolated print
+ *   Bonuses    — incentive history (awaiting backend — honest empty state)
+ *   Benefits   — perks & insurance (awaiting backend — honest empty state)
+ *   Tax        — IT statement: regime, tax computation, TDS YTD (real)
+ *   History    — compensation revision timeline + Gross vs Net trend chart
  *
- * Replaces the former separate /ess/payroll/my-slips page.
+ * Every figure is wired to live API data — no mock numbers. Tabs without a
+ * backing endpoint show a clear "coming soon" state rather than fabricated data.
  * Design: design-system tokens only — no raw hex / bg-gray-*.
  */
 
@@ -23,6 +28,9 @@ import {
   BookOpen, Printer, BarChart2,
   AlertTriangle,
   Receipt,
+  Wallet, Gift, ShieldCheck, History as HistoryIcon,
+  Building2, ArrowUpRight, PiggyBank, Clock,
+  Sparkles,
 } from 'lucide-react'
 import { EVENT_LABEL, EVENT_BADGE } from '@/lib/payroll-constants'
 
@@ -126,6 +134,37 @@ interface TrendRow {
   month:     string
   gross_pay: number
   net_pay:   number
+}
+
+// Employment identity — from /employees/:id/full-profile
+interface FullProfile {
+  employee: {
+    first_name:    string
+    last_name:     string
+    employee_code: string
+    joining_date:  string | null
+  }
+  job_info: {
+    employment_type: string
+    effective_from:  string
+    departments:     { name: string } | null
+    designations:    { name: string } | null
+    work_locations:  { name: string; city: string } | null
+    manager:         { first_name: string; last_name: string; employee_code: string } | null
+  } | null
+}
+
+// Tax computation — from /payroll/statutory/tds/it-statement/my
+interface ITStatement {
+  financial_year:      string
+  regime:              'old' | 'new'
+  gross_salary:        number
+  taxable_income:      number
+  total_tax_payable:   number
+  tds_by_employer_ytd: number
+  balance_tax_payable: number
+  monthly_recovery:    number
+  remaining_months:    number
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -819,9 +858,96 @@ function RevisionTimeline({ revisions }: { revisions: CompRevision[] }) {
   )
 }
 
+// ── StatTile — icon + label + value + hint (Overview / Salary headers) ──────────
+
+function StatTile({
+  icon: Icon, label, value, hint, accent = 'primary',
+}: {
+  icon: React.ElementType
+  label: string
+  value: string
+  hint?: string
+  accent?: 'primary' | 'success' | 'muted'
+}) {
+  const tone =
+    accent === 'success' ? 'bg-success/10 text-success' :
+    accent === 'muted'   ? 'bg-muted text-muted-foreground' :
+                           'bg-primary/10 text-primary'
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 flex items-start gap-3">
+      <div className={cn('rounded-lg p-2.5 flex-shrink-0', tone)}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="mt-1 truncate text-lg font-bold text-foreground tabular-nums">{value}</p>
+        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
+      </div>
+    </div>
+  )
+}
+
+// ── EmploymentCard — identity details (Overview side rail) ──────────────────────
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground text-right">{value}</span>
+    </div>
+  )
+}
+
+function EmploymentCard({ profile, comp }: { profile?: FullProfile; comp?: ActiveComp }) {
+  const emp = profile?.employee
+  const job = profile?.job_info
+  const mgr = job?.manager
+  return (
+    <SectionCard title="Employment" icon={<Building2 className="h-4 w-4 text-muted-foreground" />}>
+      <div className="space-y-2.5 text-sm">
+        <DetailRow label="Employee ID"  value={emp?.employee_code ?? '—'} />
+        <DetailRow label="Designation"  value={job?.designations?.name ?? '—'} />
+        <DetailRow label="Department"   value={job?.departments?.name ?? '—'} />
+        <DetailRow label="Reporting to" value={mgr ? `${mgr.first_name} ${mgr.last_name}` : '—'} />
+        <DetailRow label="Location"     value={job?.work_locations?.name ?? '—'} />
+        <DetailRow label="Date of joining" value={emp?.joining_date ? fmtDate(emp.joining_date) : '—'} />
+        {comp?.salary_structures?.name && (
+          <DetailRow label="Salary structure" value={comp.salary_structures.name} />
+        )}
+        {comp?.effective_from && (
+          <DetailRow label="CTC effective" value={fmtDate(comp.effective_from)} />
+        )}
+      </div>
+    </SectionCard>
+  )
+}
+
+// ── ComingSoon — honest placeholder for tabs without a backing endpoint ─────────
+
+function ComingSoon({ icon: Icon, title, blurb }: { icon: React.ElementType; title: string; blurb: string }) {
+  return (
+    <SectionCard>
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <div className="rounded-2xl bg-muted/60 p-4">
+          <Icon className="h-8 w-8 text-muted-foreground/70" />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-sm font-semibold text-foreground">{title}</p>
+            <Badge variant="secondary" className="rounded-full text-[10px] gap-1">
+              <Sparkles className="h-3 w-3" /> Coming soon
+            </Badge>
+          </div>
+          <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">{blurb}</p>
+        </div>
+      </div>
+    </SectionCard>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
-type Tab = 'payslips' | 'compensation' | 'revisions'
+type Tab = 'overview' | 'salary' | 'payslips' | 'bonuses' | 'benefits' | 'tax' | 'history'
 
 export function EssCompensation() {
   const { profile } = useAuthStore()
@@ -832,7 +958,7 @@ export function EssCompensation() {
   const tooltipStyle = getTooltipStyle()
 
   // ── Tab state ──────────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<Tab>('payslips')
+  const [tab, setTab] = useState<Tab>('overview')
 
   // ── Month selected for Rate vs Actuals ────────────────────────────────────
   const [selectedMonth, setSelectedMonth] = useState<string>('')
@@ -868,12 +994,12 @@ export function EssCompensation() {
     staleTime: 300_000,
   })
 
-  // Payslip detail for the selected month (Rate vs Actuals) — lazy on comp tab
+  // Payslip detail for the selected month (Rate vs Actuals) — lazy on Salary tab
   const selectedSlip   = useMemo(() => slips.find(s => s.month === selectedMonth), [slips, selectedMonth])
   const { data: rvaSlipData, isLoading: rvaLoading } = useQuery<{ data: SlipDetail }>({
     queryKey:  ['my-slip-detail', selectedSlip?.slip_id ?? ''],
     queryFn:   () => api.get(`/payroll/slips/${selectedSlip!.slip_id}`),
-    enabled:   !!selectedSlip && tab === 'compensation',
+    enabled:   !!selectedSlip && tab === 'salary',
     staleTime: 300_000,
   })
 
@@ -885,14 +1011,35 @@ export function EssCompensation() {
     staleTime: 300_000,
   })
 
-  // Revision history — lazy, only when Revisions tab is first visited
+  // Employment identity — for the Overview employment card + header subtitle
+  const { data: profileData } = useQuery<FullProfile>({
+    queryKey:  ['ess-comp-full-profile', employeeId],
+    queryFn:   () => api.get(`/employees/${employeeId}/full-profile`),
+    enabled:   !!employeeId,
+    staleTime: 300_000,
+  })
+
+  // Revision history — lazy, only when History tab is first visited
   const [revVisited, setRevVisited] = useState(false)
-  useEffect(() => { if (tab === 'revisions') setRevVisited(true) }, [tab])
+  useEffect(() => { if (tab === 'history') setRevVisited(true) }, [tab])
   const { data: revData, isLoading: revLoading } = useQuery<{ data: CompRevision[] }>({
     queryKey:  ['ess-comp-revisions', employeeId],
     queryFn:   () => api.get(`/compensation/revisions/employee/${employeeId}`),
     enabled:   !!employeeId && revVisited,
     staleTime: 120_000,
+  })
+
+  // IT statement (tax) — lazy, only when Tax tab is first visited
+  const [taxVisited, setTaxVisited] = useState(false)
+  useEffect(() => { if (tab === 'tax') setTaxVisited(true) }, [tab])
+  const { data: taxData, isLoading: taxLoading, isError: taxError } = useQuery<ITStatement | null>({
+    queryKey:  ['ess-comp-it-statement', employeeId],
+    queryFn:   async () => {
+      const res = await api.get<ITStatement>('/payroll/statutory/tds/it-statement/my')
+      return res ?? null
+    },
+    enabled:   !!employeeId && taxVisited,
+    staleTime: 300_000,
   })
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -929,6 +1076,28 @@ export function EssCompensation() {
     ? Math.round((grossMonthly - estEmpDeductions) * 100) / 100
     : null
 
+  const annualCtc = ctcMonthlyCalc > 0 ? ctcMonthlyCalc * 12 : (comp?.ctc_annual ?? 0)
+
+  // CTC composition for the Overview rewards bar. When a payslip exists we can
+  // split the gross into take-home vs employee statutory deductions; otherwise we
+  // show the gross-vs-employer split. All figures are real — no estimates beyond
+  // the statutory deductions already sourced from the latest finalized slip.
+  const rewardSegments = (netMonthly != null && estEmpDeductions != null
+    ? [
+        { label: 'Net take-home',          monthly: netMonthly,        color: 'bg-primary'   },
+        { label: 'Employee deductions',    monthly: estEmpDeductions,  color: 'bg-warning'   },
+        { label: 'Employer contributions', monthly: employerMonthly,   color: 'bg-success'   },
+      ]
+    : [
+        { label: 'Gross earnings',         monthly: grossMonthly,      color: 'bg-primary'   },
+        { label: 'Employer contributions', monthly: employerMonthly,   color: 'bg-success'   },
+      ]
+  ).filter(s => s.monthly > 0)
+  const rewardTotal = rewardSegments.reduce((s, r) => s + r.monthly, 0)
+
+  // YoY uplift — only shown when we have a real approved revision delta on record.
+  const latestDelta = (revData?.data ?? []).find(r => r.status === 'approved' && r.delta_pct != null)?.delta_pct ?? null
+
   // ── Guard ──────────────────────────────────────────────────────────────────
 
   if (!employeeId) {
@@ -948,11 +1117,20 @@ export function EssCompensation() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  const headerName = profileData?.employee
+    ? `${profileData.employee.first_name} ${profileData.employee.last_name}`
+    : (profile?.full_name ?? 'My Compensation')
+  const headerMeta = [
+    profileData?.job_info?.designations?.name,
+    profileData?.job_info?.departments?.name,
+  ].filter(Boolean).join(' · ')
+
   return (
     <PageContainer>
       <PageHeader
-        title="Pay & Compensation"
-        subtitle="Pay slips, salary structure, and revision history"
+        breadcrumb={[{ label: 'Self' }, { label: 'Compensation' }]}
+        title="My Compensation"
+        subtitle={headerMeta ? `${headerName} · ${headerMeta}` : headerName}
         actions={
           tab === 'payslips' ? (
             <div className="flex items-center gap-2">
@@ -971,28 +1149,125 @@ export function EssCompensation() {
         }
       />
 
-      {/* ── Tab switcher ──────────────────────────────────────────────────── */}
-      <div className="flex rounded-lg border border-border/50 overflow-hidden w-fit">
-        {([
-          { key: 'payslips',      label: 'Pay Slips',         icon: FileText   },
-          { key: 'compensation',  label: 'Compensation',      icon: DollarSign },
-          { key: 'revisions',     label: 'Revision History',  icon: TrendingUp },
-        ] as const).map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors',
-              key !== 'payslips' && 'border-l border-border/50',
-              tab === key
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted/50',
-            )}
-          >
-            <Icon className="h-3.5 w-3.5" />{label}
-          </button>
-        ))}
+      {/* ── Tab switcher — underline tabs, horizontally scrollable ───────────── */}
+      <div className="-mx-1 overflow-x-auto border-b border-border scrollbar-none">
+        <div className="flex min-w-max gap-1 px-1">
+          {([
+            { key: 'overview', label: 'Overview',             icon: BarChart2    },
+            { key: 'salary',   label: 'Salary',               icon: Wallet       },
+            { key: 'payslips', label: 'Pay Slips',            icon: FileText     },
+            { key: 'bonuses',  label: 'Bonuses & Incentives', icon: Gift         },
+            { key: 'benefits', label: 'Benefits',             icon: ShieldCheck  },
+            { key: 'tax',      label: 'Tax',                  icon: Building2     },
+            { key: 'history',  label: 'History',              icon: HistoryIcon  },
+          ] as const).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={cn(
+                'relative flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                tab === key
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-4 w-4" />{label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: OVERVIEW                                                       */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'overview' && (
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Total rewards / CTC composition hero */}
+          <div className="lg:col-span-2 overflow-hidden rounded-xl border border-border bg-card">
+            <div className="bg-primary px-6 py-5 text-primary-foreground">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-medium text-primary-foreground/70">Total annual CTC</p>
+                  <p className="mt-1 text-3xl font-bold tracking-tight tabular-nums">
+                    {compLoading ? '…' : fmtCurrency(annualCtc)}
+                  </p>
+                  {comp?.salary_structures?.name && (
+                    <p className="mt-1 text-xs text-primary-foreground/70">{comp.salary_structures.name}</p>
+                  )}
+                </div>
+                {latestDelta != null && (
+                  <Badge className="gap-1 rounded-full bg-success text-success-foreground hover:bg-success">
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                    {latestDelta > 0 ? '+' : ''}{latestDelta.toFixed(1)}% last revision
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="p-6">
+              {rewardTotal > 0 ? (
+                <>
+                  <div className="mb-5 flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                    {rewardSegments.map(s => (
+                      <div key={s.label} className={s.color}
+                        style={{ width: `${(s.monthly / rewardTotal) * 100}%` }} />
+                    ))}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {rewardSegments.map(s => (
+                      <div key={s.label} className="flex items-center justify-between rounded-lg border border-border p-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className={cn('h-2.5 w-2.5 rounded-full', s.color)} />
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{s.label}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {Math.round((s.monthly / rewardTotal) * 100)}% · {fmtCurrency(s.monthly)}/mo
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-sm font-semibold tabular-nums text-foreground">{fmtCurrency(s.monthly * 12)}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    {netMonthly != null
+                      ? 'Composition reflects take-home, statutory deductions and employer contributions that make up your CTC.'
+                      : 'Net take-home split appears once your first payslip is finalized.'}
+                  </p>
+                </>
+              ) : (
+                <p className="py-6 text-center text-xs text-muted-foreground">
+                  No active compensation on record. Contact HR.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Employment identity */}
+          <EmploymentCard profile={profileData} comp={comp} />
+
+          {/* Stat tiles */}
+          <StatTile
+            icon={Wallet}
+            label="Monthly take-home"
+            value={netMonthly != null ? fmtCurrency(netMonthly) : (latest ? fmtCurrency(latest.net_pay) : '—')}
+            hint={latest ? `${fmtMonthShort(latest.month)} payslip` : 'After first payslip'}
+            accent="success"
+          />
+          <StatTile
+            icon={DollarSign}
+            label="Monthly CTC"
+            value={ctcMonthlyCalc > 0 ? fmtCurrency(ctcMonthlyCalc) : (comp?.ctc_monthly ? fmtCurrency(comp.ctc_monthly) : '—')}
+            hint="Gross + employer contributions"
+          />
+          <StatTile
+            icon={PiggyBank}
+            label="Employer contributions"
+            value={employerMonthly > 0 ? fmtCurrency(employerMonthly) : '—'}
+            hint="Added to CTC · not deducted"
+            accent="muted"
+          />
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* TAB: PAY SLIPS                                                      */}
@@ -1052,39 +1327,10 @@ export function EssCompensation() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* TAB: COMPENSATION                                                   */}
+      {/* TAB: SALARY                                                        */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {tab === 'compensation' && (
+      {tab === 'salary' && (
         <>
-          {/* CTC Summary cards */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-border bg-card p-5 flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-primary/10">
-                <DollarSign className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Annual CTC</p>
-                <p className="text-2xl font-bold text-foreground tabular-nums">
-                  {compLoading ? '…' : fmtCurrency(ctcMonthlyCalc > 0 ? ctcMonthlyCalc * 12 : (comp?.ctc_annual ?? 0))}
-                </p>
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-5 flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-success/10">
-                <TrendingUp className="h-5 w-5 text-success" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Monthly CTC</p>
-                <p className="text-2xl font-bold text-success tabular-nums">
-                  {compLoading ? '…' : fmtCurrency(ctcMonthlyCalc > 0 ? ctcMonthlyCalc : (comp?.ctc_monthly ?? 0))}
-                </p>
-                {comp?.salary_structures?.name && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{comp.salary_structures.name}</p>
-                )}
-              </div>
-            </div>
-          </div>
-
           {/* Rate vs Actuals — month picker */}
           <SectionCard
             title="Rate vs Actuals"
@@ -1222,11 +1468,122 @@ export function EssCompensation() {
             )}
           </SectionCard>
 
-          {/* Trend chart */}
+        </>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: BONUSES & INCENTIVES                                           */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'bonuses' && (
+        <ComingSoon
+          icon={Gift}
+          title="Bonuses & Incentives"
+          blurb="Performance bonuses, variable pay and referral incentives will appear here once incentive payouts are published to employee self-service."
+        />
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: BENEFITS                                                       */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'benefits' && (
+        <ComingSoon
+          icon={ShieldCheck}
+          title="Benefits & Perks"
+          blurb="Group health insurance, term life cover and other perks will be listed here once the benefits catalogue is enabled for your organization."
+        />
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: TAX                                                            */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'tax' && (
+        <div className="grid gap-6 lg:grid-cols-3">
+          <SectionCard
+            className="lg:col-span-2"
+            title="Income tax computation"
+            icon={<Building2 className="h-4 w-4 text-muted-foreground" />}
+          >
+            {taxLoading ? (
+              <IntelligenceLoadingSkeleton rows={4} />
+            ) : taxError || !taxData ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+                <FileText className="h-8 w-8 opacity-30" />
+                <p className="text-sm">No tax statement available yet.</p>
+                <p className="text-xs opacity-70">Your projected IT statement appears once payroll has processed for the current financial year.</p>
+              </div>
+            ) : (
+              <div className="space-y-1 text-sm">
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="text-muted-foreground">Gross salary</span>
+                  <span className="tabular-nums">{fmtCurrency(taxData.gross_salary)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1.5 border-t border-border/40">
+                  <span className="text-muted-foreground">Taxable income</span>
+                  <span className="tabular-nums">{fmtCurrency(taxData.taxable_income)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1.5 border-t border-border/40">
+                  <span className="font-semibold">Total tax payable</span>
+                  <span className="font-semibold tabular-nums">{fmtCurrency(taxData.total_tax_payable)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1.5 border-t border-border/40">
+                  <span className="text-muted-foreground">TDS deducted (YTD)</span>
+                  <span className="tabular-nums text-success">{fmtCurrency(taxData.tds_by_employer_ytd)}</span>
+                </div>
+                <div className="flex items-center justify-between py-1.5 border-t border-border/40">
+                  <span className="text-muted-foreground">Balance tax payable</span>
+                  <span className="tabular-nums">{fmtCurrency(taxData.balance_tax_payable)}</span>
+                </div>
+                {taxData.remaining_months > 0 && (
+                  <div className="flex items-center justify-between py-1.5 border-t border-border/40">
+                    <span className="text-muted-foreground">
+                      Monthly recovery
+                      <span className="text-[10px] ml-1 opacity-70">over {taxData.remaining_months} mo</span>
+                    </span>
+                    <span className="tabular-nums">{fmtCurrency(taxData.monthly_recovery)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Tax regime" icon={<Receipt className="h-4 w-4 text-muted-foreground" />}>
+            {taxData ? (
+              <div className="space-y-2.5 text-sm">
+                <DetailRow label="Financial year" value={taxData.financial_year} />
+                <DetailRow label="Selected regime" value={taxData.regime === 'new' ? 'New regime' : 'Old regime'} />
+                <DetailRow label="Estimated tax" value={fmtCurrency(taxData.total_tax_payable)} />
+                <DetailRow label="TDS YTD" value={fmtCurrency(taxData.tds_by_employer_ytd)} />
+              </div>
+            ) : (
+              <p className="py-6 text-center text-xs text-muted-foreground">
+                Regime details appear with your IT statement.
+              </p>
+            )}
+          </SectionCard>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: HISTORY                                                        */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'history' && (
+        <>
+          <SectionCard
+            title="Compensation revision history"
+            icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+          >
+            {revLoading ? (
+              <IntelligenceLoadingSkeleton rows={4} />
+            ) : (
+              <RevisionTimeline revisions={revisions} />
+            )}
+          </SectionCard>
+
+          {/* Gross vs Net trend */}
           {chartData.length > 0 && (
             <SectionCard
-              title="Gross vs Net — Last 6 Months"
-              icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+              title="Gross vs Net — last 6 months"
+              icon={<BarChart2 className="h-4 w-4 text-muted-foreground" />}
             >
               <ResponsiveContainer width="100%" height={180}>
                 <LineChart data={chartData}>
@@ -1243,22 +1600,6 @@ export function EssCompensation() {
             </SectionCard>
           )}
         </>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* TAB: REVISION HISTORY                                               */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {tab === 'revisions' && (
-        <SectionCard
-          title="Compensation Revision History"
-          icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
-        >
-          {revLoading ? (
-            <IntelligenceLoadingSkeleton rows={4} />
-          ) : (
-            <RevisionTimeline revisions={revisions} />
-          )}
-        </SectionCard>
       )}
     </PageContainer>
   )
