@@ -262,6 +262,8 @@ const ActionCenter         = lazy(() => import('@/pages/intelligence/ActionCente
 const WorkforceDigest      = lazy(() => import('@/pages/intelligence/WorkforceDigest').then(m => ({ default: m.WorkforceDigest })))
 const WorkforceSearch      = lazy(() => import('@/pages/intelligence/WorkforceSearch').then(m => ({ default: m.WorkforceSearch })))
 const UATCertification     = lazy(() => import('@/pages/intelligence/UATCertification').then(m => ({ default: m.UATCertification })))
+// Insights Hub — single front door for all read-only intelligence/analytics surfaces
+const InsightsHub          = lazy(() => import('@/pages/insights/InsightsHub').then(m => ({ default: m.InsightsHub })))
 
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
@@ -695,6 +697,7 @@ export default function App() {
                 <Route path="/admin/intelligence/search"            element={<WorkforceSearch />} />
                 <Route path="/admin/intelligence/uat-certification"  element={<UATCertification />} />
                 <Route path="/admin/intelligence/narratives"         element={<ExecutiveNarrative />} />
+                <Route path="/admin/insights"                        element={<InsightsHub />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />

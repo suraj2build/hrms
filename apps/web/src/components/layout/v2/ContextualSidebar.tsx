@@ -34,6 +34,10 @@ const DOMAIN_ICON_COLORS: Record<string, { bg: string; text: string }> = {
   'reports':      { bg: 'bg-blue-50',     text: 'text-blue-600'    },
   'advanced-ops': { bg: 'bg-fuchsia-50',  text: 'text-fuchsia-600' },
   'setup':        { bg: 'bg-slate-100',   text: 'text-slate-500'   },
+  // Executive Mode domains
+  'exec-intelligence': { bg: 'bg-primary/10', text: 'text-primary'    },
+  'exec-reports':      { bg: 'bg-blue-50',    text: 'text-blue-600'   },
+  'exec-workforce':    { bg: 'bg-indigo-50',  text: 'text-indigo-600' },
 }
 
 const SESSION_KEY = (domainId: string) => `sidebar-v2-expanded-${domainId}`

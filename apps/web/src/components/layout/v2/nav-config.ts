@@ -99,6 +99,7 @@ import {
   FileText,
   Search,
   BadgeCheck,
+  Sparkles,
 } from 'lucide-react'
 import type { UserRole } from '@/types'
 
@@ -164,6 +165,7 @@ export const DOMAINS: Domain[] = [
       '/admin/control-center',
       '/admin/dashboard',     // kept so redirect still activates this domain
       '/admin/intelligence/workforce-command', // primary HR landing
+      '/admin/insights',      // Insights Hub — single front door to all analytics
       '/admin/executive',     // Executive Intelligence Center
       '/admin/settings',      // Company / Global Settings
       '/admin/readiness',     // Platform health console
@@ -174,6 +176,7 @@ export const DOMAINS: Domain[] = [
         label: 'Overview',
         items: [
           { id: 'workforce-command-home', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain },
+          { id: 'insights-hub',           label: 'Insights Hub',           route: '/admin/insights',       exact: true, icon: Sparkles },
           { id: 'control-center',         label: 'Control Center',         route: '/admin/control-center', exact: true, icon: Command   },
           { id: 'platform-health',        label: 'Platform Health',        route: '/admin/readiness',                   icon: Activity  },
           { id: 'executive-center',       label: 'Executive Intelligence', route: '/admin/executive',                   icon: BarChart3 },
@@ -764,15 +767,17 @@ export const EXECUTIVE_DOMAINS: Domain[] = [
     icon:         Brain,
     matchPrefixes: [
       '/admin/intelligence',
+      '/admin/insights',
       '/admin/executive',
       '/admin/analytics',
       '/admin/operational-health',
     ],
-    defaultRoute: '/admin/intelligence/workforce-command',
+    defaultRoute: '/admin/insights',
     groups: [
       {
         label: 'Executive',
         items: [
+          { id: 'exec-insights-hub',      label: 'Insights Hub',           route: '/admin/insights',                       exact: true, icon: Sparkles   },
           { id: 'exec-workforce-command', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain      },
           { id: 'exec-executive-center',  label: 'Executive Intelligence', route: '/admin/executive',                                  icon: BarChart3  },
           { id: 'exec-org-health',        label: 'Org Health',             route: '/admin/intelligence/org-health',                    icon: TrendingUp },
