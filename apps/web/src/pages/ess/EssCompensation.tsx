@@ -32,8 +32,6 @@ import {
   Building2, ArrowUpRight, PiggyBank, Clock,
   Sparkles,
 } from 'lucide-react'
-import { EVENT_LABEL, EVENT_BADGE } from '@/lib/payroll-constants'
-
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
@@ -83,17 +81,6 @@ interface SlipDetail extends SlipSummary {
   ctc_monthly:            number
   employer_contributions: number
   component_breakdown:    ComponentSnapshot[]
-}
-
-interface LedgerEntry {
-  id:                 string
-  month:              string
-  event_type:         string
-  event_description:  string
-  impact_type:        string | null
-  impact_amount:      number | null
-  source_entity_type: string | null
-  created_at:         string
 }
 
 interface ActiveComp {
@@ -230,16 +217,6 @@ function fmtDate(s: string): string {
   return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
-function getCalcHint(c: ComponentSnapshot, basicAmt: number, grossAmt: number, ctcAmt: number): string {
-  switch (c.calc_type) {
-    case 'pct_of_basic':  return `${c.value}% of Basic (${fmtCurrency(basicAmt)})`
-    case 'pct_of_ctc':    return `${c.value}% of CTC (${fmtCurrency(ctcAmt)})`
-    case 'pct_of_gross':  return `${c.value}% of Gross (${fmtCurrency(grossAmt)})`
-    case 'fixed':         return 'Fixed amount'
-    default:              return c.calc_type ?? ''
-  }
-}
-
 // ── Print utility — isolates one slip to print ─────────────────────────────────
 
 function printSlip(slipId: string) {
@@ -268,245 +245,177 @@ function printSlip(slipId: string) {
   window.print()
 }
 
-// ── SalaryChangesSection ───────────────────────────────────────────────────────
+// ── PayslipDocument — print-ready Indian payslip layout ─────────────────────────
+// Rendered off-screen and isolated for printing. Standard format: employee
+// summary + net-pay highlight, statutory IDs, two-column earnings/deductions
+// (with annualised column), and a Total Net Payable band.
 
-function SalaryChangesSection({ employeeId, month }: { employeeId: string; month: string }) {
-  const { data, isLoading, isError, refetch } = useQuery<{ data: LedgerEntry[] }>({
-    queryKey:  ['my-salary-ledger', employeeId, month],
-    queryFn:   () => api.get(`/payroll/ledger/${employeeId}?month=${month}`),
-    staleTime: 300_000,
-    enabled:   !!employeeId,
-  })
-  const entries = data?.data ?? []
+function payslipDate(s: string | null | undefined): string {
+  if (!s) return '—'
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${d.getUTCFullYear()}`
+}
+
+function PayslipDocument({ slip, profile, bank }: {
+  slip:    SlipDetail
+  profile?: FullProfile
+  bank?:   FullProfile['bank_statutory']
+}) {
+  const emp = profile?.employee
+  const job = profile?.job_info
+
+  // Earnings = actual (prorated) earning lines. Deductions = statutory only
+  // (LOP is already reflected in reduced earnings, never shown as a line).
+  const earnings   = slip.component_breakdown.filter(c => c.component_type === 'earning')
+  const deductions = slip.component_breakdown.filter(c =>
+    c.component_type === 'deduction' &&
+    !['LOP', 'LOSS_OF_PAY'].includes(String(c.code ?? '').toUpperCase()))
+
+  const grossEarnings   = slip.gross_pay
+  const totalDeductions = Math.max(0, slip.total_deductions - slip.lop_amount)
+  const rows            = Math.max(earnings.length, deductions.length)
+
+  const labelCls = { color: '#6b7280' }   // muted
 
   return (
-    <div className="rounded-md border border-border bg-muted/10 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/20">
-        <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-          Why did my salary change? — Event Log
+    <div style={{ fontFamily: 'Inter, system-ui, sans-serif', color: '#111827', background: '#fff', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as React.CSSProperties}>
+      {/* Title */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingBottom: 12, marginBottom: 16, borderBottom: '2px solid #111827' }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Pay Slip</h1>
+          <p style={{ fontSize: 12, margin: '2px 0 0', ...labelCls }}>For the month of {fmtMonth(slip.month)}</p>
+        </div>
+        <p style={{ fontSize: 11, ...labelCls }}>
+          Generated {(() => { const d=new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}` })()}
         </p>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading changes…
+      {/* Employee summary + Net pay card */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', margin: '0 0 10px', ...labelCls }}>EMPLOYEE SUMMARY</p>
+          <table style={{ fontSize: 13, borderCollapse: 'collapse' }}>
+            <tbody>
+              {[
+                ['Employee Name', emp ? `${emp.first_name} ${emp.last_name}` : '—'],
+                ['Designation',   job?.designations?.name ?? '—'],
+                ['Employee ID',   emp?.employee_code ?? '—'],
+                ['Date of Joining', payslipDate(emp?.joining_date)],
+                ['Pay Period',    fmtMonth(slip.month)],
+              ].map(([k, v]) => (
+                <tr key={k}>
+                  <td style={{ padding: '3px 0', ...labelCls }}>{k}</td>
+                  <td style={{ padding: '3px 12px', ...labelCls }}>:</td>
+                  <td style={{ padding: '3px 0', fontWeight: 600 }}>{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : isError ? (
-        <div className="flex items-center justify-between px-3 py-3 text-xs">
-          <span className="flex items-center gap-1.5 text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" />Failed to load salary change history.
-          </span>
-          <button onClick={() => refetch()} className="text-primary text-[10px] underline hover:opacity-70">
-            Retry
-          </button>
-        </div>
-      ) : entries.length === 0 ? (
-        <div className="px-3 py-3 text-xs text-muted-foreground">
-          No salary-affecting events recorded for this month.
-        </div>
-      ) : (
-        <div className="divide-y divide-border/40">
-          {entries.map(entry => (
-            <div key={entry.id} className="px-3 py-2.5 flex items-start gap-3">
-              <div className="mt-1 w-1.5 h-1.5 rounded-full bg-primary/60 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant={EVENT_BADGE[entry.event_type] ?? 'outline'} className="rounded-full text-[9px] h-4">
-                    {EVENT_LABEL[entry.event_type] ?? entry.event_type}
-                  </Badge>
-                  {entry.impact_amount != null && entry.impact_amount !== 0 && (
-                    <span className={cn('text-[10px] font-mono font-semibold',
-                      entry.impact_amount < 0 ? 'text-destructive' : 'text-success')}>
-                      {entry.impact_amount > 0 ? '+' : ''}{entry.impact_amount} day{Math.abs(entry.impact_amount) !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{entry.event_description}</p>
-                <p className="text-[9px] text-muted-foreground/60 mt-0.5">
-                  {(() => { const d=new Date(entry.created_at.length===10?entry.created_at+'T12:00:00Z':entry.created_at); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()}
-                </p>
-              </div>
+
+        {/* Net pay highlight */}
+        <div style={{ width: 280, border: '1px solid #d1fae5', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ background: '#ecfdf5', padding: '16px 18px', borderLeft: '4px solid #10b981' }}>
+            <p style={{ fontSize: 26, fontWeight: 700, margin: 0, color: '#065f46' }}>{fmtCurrency(slip.net_pay)}</p>
+            <p style={{ fontSize: 13, margin: '2px 0 0', color: '#059669' }}>Employee Net Pay</p>
+          </div>
+          <div style={{ padding: '12px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
+              <span style={labelCls}>Paid Days</span><span style={{ fontWeight: 600 }}>: {slip.payable_days}</span>
             </div>
-          ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
+              <span style={labelCls}>LOP Days</span><span style={{ fontWeight: 600 }}>: {slip.lop_days}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Statutory IDs */}
+      {(bank?.pf_number || bank?.uan) && (
+        <div style={{ display: 'flex', gap: 48, fontSize: 13, padding: '14px 0', margin: '16px 0', borderTop: '1px dashed #d1d5db', borderBottom: '1px dashed #d1d5db' }}>
+          <div><span style={labelCls}>PF A/C Number :&nbsp;</span><span style={{ fontWeight: 600 }}>{bank?.pf_number ?? '—'}</span></div>
+          <div><span style={labelCls}>UAN :&nbsp;</span><span style={{ fontWeight: 600 }}>{bank?.uan ?? '—'}</span></div>
         </div>
       )}
+
+      {/* Earnings / Deductions */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 8, border: '1px solid #e5e7eb' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+            <th style={{ textAlign: 'left',  padding: '10px 14px', ...labelCls, fontWeight: 600 }}>EARNINGS</th>
+            <th style={{ textAlign: 'right', padding: '10px 14px', ...labelCls, fontWeight: 600 }}>AMOUNT</th>
+            <th style={{ textAlign: 'right', padding: '10px 14px', ...labelCls, fontWeight: 600 }}>ANNUAL</th>
+            <th style={{ textAlign: 'left',  padding: '10px 14px', ...labelCls, fontWeight: 600, borderLeft: '1px solid #e5e7eb' }}>DEDUCTIONS</th>
+            <th style={{ textAlign: 'right', padding: '10px 14px', ...labelCls, fontWeight: 600 }}>AMOUNT</th>
+            <th style={{ textAlign: 'right', padding: '10px 14px', ...labelCls, fontWeight: 600 }}>ANNUAL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }).map((_, i) => {
+            const e = earnings[i]
+            const d = deductions[i]
+            return (
+              <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                <td style={{ padding: '9px 14px' }}>{e?.name ?? ''}</td>
+                <td style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 600 }}>{e ? fmtCurrency(e.monthly_amount) : ''}</td>
+                <td style={{ padding: '9px 14px', textAlign: 'right', ...labelCls }}>{e ? fmtCurrency(e.annual_amount) : ''}</td>
+                <td style={{ padding: '9px 14px', borderLeft: '1px solid #e5e7eb' }}>{d?.name ?? ''}</td>
+                <td style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 600 }}>{d ? fmtCurrency(d.monthly_amount) : ''}</td>
+                <td style={{ padding: '9px 14px', textAlign: 'right', ...labelCls }}>{d ? fmtCurrency(d.annual_amount) : ''}</td>
+              </tr>
+            )
+          })}
+          {/* Totals */}
+          <tr style={{ background: '#f9fafb', fontWeight: 700, borderTop: '1px solid #e5e7eb' }}>
+            <td style={{ padding: '11px 14px' }}>Gross Earnings</td>
+            <td style={{ padding: '11px 14px', textAlign: 'right' }}>{fmtCurrency(grossEarnings)}</td>
+            <td style={{ padding: '11px 14px' }} />
+            <td style={{ padding: '11px 14px', borderLeft: '1px solid #e5e7eb' }}>Total Deductions</td>
+            <td style={{ padding: '11px 14px', textAlign: 'right' }}>{fmtCurrency(totalDeductions)}</td>
+            <td style={{ padding: '11px 14px' }} />
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Net payable band */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, padding: '16px 20px', border: '1px solid #d1fae5', borderRadius: 10 }}>
+        <div>
+          <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>TOTAL NET PAYABLE</p>
+          <p style={{ fontSize: 12, margin: '2px 0 0', ...labelCls }}>Gross Earnings − Total Deductions</p>
+        </div>
+        <p style={{ fontSize: 22, fontWeight: 700, margin: 0, padding: '6px 16px', background: '#ecfdf5', borderRadius: 8, color: '#065f46' }}>
+          {fmtCurrency(slip.net_pay)}
+        </p>
+      </div>
+
+      {/* Footnotes */}
+      {(slip.lop_days > 0 || slip.overtime_hours > 0) && (
+        <p style={{ fontSize: 11, marginTop: 12, ...labelCls }}>
+          {slip.lop_days > 0 && `${slip.lop_days} LOP day(s) of ${slip.total_working_days} working days — earnings shown are prorated to paid days. `}
+          {slip.overtime_hours > 0 && `Overtime: ${slip.overtime_hours}h. `}
+        </p>
+      )}
+      <p style={{ fontSize: 10, marginTop: 10, color: '#9ca3af' }}>
+        This is a computer-generated pay slip and does not require a signature.
+      </p>
     </div>
   )
 }
 
-// ── SlipDetailCard ─────────────────────────────────────────────────────────────
-
-function SlipDetailCard({ slipId, employeeId, month }: { slipId: string; employeeId: string; month: string }) {
-  const { data, isLoading, isError } = useQuery<{ data: SlipDetail }>({
-    queryKey:  ['my-slip-detail', slipId],
-    queryFn:   () => api.get(`/payroll/slips/${slipId}`),
-    staleTime: 300_000,
-  })
-
-  if (isLoading) return (
-    <div className="flex items-center justify-center py-6 text-xs text-muted-foreground gap-2">
-      <Loader2 className="h-4 w-4 animate-spin" />Loading pay slip…
-    </div>
-  )
-  if (isError || !data?.data) return (
-    <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
-      <AlertCircle className="h-3.5 w-3.5" />Failed to load slip details.
-    </div>
-  )
-
-  const slip         = data.data
-  const earnings     = slip.component_breakdown.filter(c => c.component_type === 'earning')
-  const deductions   = slip.component_breakdown.filter(c => c.component_type === 'deduction')
-  const empContribs  = slip.component_breakdown.filter(c => c.component_type === 'employer_contribution')
-  const basicComponent = earnings.find(c => c.code.toLowerCase() === 'basic' || c.name.toLowerCase().includes('basic'))
-  const basicAmt     = basicComponent?.monthly_amount ?? 0
-  const grossForLop  = slip.lop_amount > 0 && slip.lop_days > 0 ? slip.gross_pay + slip.lop_amount : slip.gross_pay
-  const dailyRate    = slip.total_working_days > 0 ? grossForLop / slip.total_working_days : 0
-
-  return (
-    <div className="space-y-4 pt-1">
-      {slip.warning && (
-        <div className="flex items-start gap-2 p-2.5 rounded-md bg-warning/10 border border-warning/20 text-xs text-warning">
-          <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />{slip.warning}
-        </div>
-      )}
-
-      {/* Attendance summary */}
-      <div className="grid grid-cols-3 gap-2 text-center">
-        {[
-          { label: 'Working Days', value: slip.total_working_days, cls: 'text-foreground'  },
-          { label: 'Payable Days', value: slip.payable_days,       cls: 'text-success'     },
-          { label: 'LOP Days',     value: slip.lop_days,           cls: 'text-destructive' },
-        ].map(({ label, value, cls }) => (
-          <div key={label} className="p-2 rounded-md bg-muted/40">
-            <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
-            <p className={cn('text-base font-bold', cls)}>{value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Net pay walkthrough */}
-      <div className="rounded-md border border-border bg-card overflow-hidden">
-        <div className="px-3 py-2 border-b border-border bg-muted/30">
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">How Your Pay Was Calculated</p>
-        </div>
-        <div className="p-3 space-y-1.5 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">CTC Monthly</span>
-            <span className="font-medium text-muted-foreground">{fmtCurrency(slip.ctc_monthly)}</span>
-          </div>
-          {slip.lop_days > 0 ? (
-            <div className="space-y-0.5">
-              <div className="flex items-center justify-between text-destructive">
-                <span className="flex items-center gap-1"><TrendingDown className="h-3 w-3" />LOP Deduction</span>
-                <span className="font-medium">– {fmtCurrency(slip.lop_amount)}</span>
-              </div>
-              <div className="pl-4 text-[10px] text-muted-foreground">
-                {slip.lop_days} LOP day{slip.lop_days !== 1 ? 's' : ''} × {fmtCurrency(Math.round(dailyRate))}/day
-                {' '}({fmtCurrency(Math.round(grossForLop))} ÷ {slip.total_working_days} days)
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between text-success">
-              <span>No LOP</span>
-              <span className="text-[10px]">Full attendance</span>
-            </div>
-          )}
-          <div className="flex items-center justify-between border-t border-border/60 pt-1">
-            <span className="text-muted-foreground">Gross Pay</span>
-            <span className="font-semibold text-foreground">{fmtCurrency(slip.gross_pay)}</span>
-          </div>
-          {deductions.length > 0 && (
-            <div className="flex items-center justify-between text-destructive">
-              <span className="flex items-center gap-1"><TrendingDown className="h-3 w-3" />Statutory Deductions</span>
-              <span className="font-medium">– {fmtCurrency(slip.total_deductions - slip.lop_amount)}</span>
-            </div>
-          )}
-          <div className="flex items-center justify-between border-t border-border pt-1.5 mt-0.5">
-            <span className="font-semibold text-sm">Net Pay</span>
-            <span className="font-bold text-success text-sm">{fmtCurrency(slip.net_pay)}</span>
-          </div>
-          {slip.employer_contributions > 0 && (
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground border-t border-border/40 pt-1">
-              <span>Employer Contributions (not deducted)</span>
-              <span>{fmtCurrency(slip.employer_contributions)}</span>
-            </div>
-          )}
-          {slip.overtime_hours > 0 && (
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>Overtime Hours</span><span>{slip.overtime_hours}h</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Component breakdown */}
-      {slip.component_breakdown.length > 0 && (
-        <div className="space-y-3">
-          {[
-            { title: 'Earnings',               items: earnings,   showHints: false },
-            { title: 'Deductions',             items: deductions, showHints: true  },
-            { title: 'Employer Contributions', items: empContribs,showHints: true  },
-          ].filter(g => g.items.length > 0).map(({ title, items, showHints }) => (
-            <div key={title}>
-              <p className="text-xs font-semibold text-muted-foreground mb-2">{title}</p>
-              <div className="rounded-md border border-border overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/40">
-                    <tr>
-                      <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Component</th>
-                      <th className="text-right px-3 py-1.5 font-medium text-muted-foreground">Monthly</th>
-                      <th className="text-right px-3 py-1.5 font-medium text-muted-foreground">Annual</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((c, i) => {
-                      const hint = showHints ? getCalcHint(c, basicAmt, slip.gross_pay, slip.ctc_monthly) : ''
-                      return (
-                        <tr key={c.salary_component_id} className={cn('border-t border-border/40', i % 2 !== 0 && 'bg-muted/10')}>
-                          <td className="px-3 py-2">
-                            <span className="font-medium">{c.name}</span>
-                            <span className="text-muted-foreground ml-1.5 font-mono text-[10px]">({c.code})</span>
-                            {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono">{fmtCurrency(c.monthly_amount)}</td>
-                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtCurrency(c.annual_amount)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {slip.held_reason && (
-        <div className="p-2.5 rounded-md bg-warning/10 border border-warning/20 text-xs text-warning">
-          <span className="font-semibold">Held: </span>{slip.held_reason}
-        </div>
-      )}
-
-      {employeeId && <SalaryChangesSection employeeId={employeeId} month={month} />}
-    </div>
-  )
-}
-
-// ── PrintableSlip — off-screen slip render used for print-on-demand ─────────────
+// ── PrintableSlip — off-screen payslip render used for print-on-demand ──────────
 // The flat Pay Slips table has no inline expansion; clicking a row's PDF action
 // mounts this off-screen, waits for the slip detail to load, then prints just it.
 
 function PrintableSlip({
-  slip, employeeId, onDone,
+  slip, profile, bank, onDone,
 }: {
-  slip: SlipSummary
-  employeeId: string
-  onDone: () => void
+  slip:    SlipSummary
+  profile?: FullProfile
+  bank?:   FullProfile['bank_statutory']
+  onDone:  () => void
 }) {
-  // Shares the ['my-slip-detail', id] cache with SlipDetailCard — no double fetch.
-  const { isSuccess, isError } = useQuery<{ data: SlipDetail }>({
+  const { data, isSuccess, isError } = useQuery<{ data: SlipDetail }>({
     queryKey:  ['my-slip-detail', slip.slip_id],
     queryFn:   () => api.get(`/payroll/slips/${slip.slip_id}`),
     staleTime: 300_000,
@@ -515,22 +424,16 @@ function PrintableSlip({
   useEffect(() => {
     if (isError) { onDone(); return }
     if (isSuccess) {
-      // Allow SlipDetailCard to paint from cache before printing.
-      const tid = setTimeout(() => { printSlip(slip.slip_id); onDone() }, 200)
+      // Allow the payslip to paint from cache before printing.
+      const tid = setTimeout(() => { printSlip(slip.slip_id); onDone() }, 250)
       return () => clearTimeout(tid)
     }
   }, [isSuccess, isError, slip.slip_id, onDone])
 
   return (
-    <div className="fixed -left-[9999px] top-0 w-[800px]" aria-hidden>
-      <div id={`slip-print-${slip.slip_id}`}>
-        <div className="mb-4 pb-3 border-b border-border">
-          <h2 className="text-lg font-bold">Pay Slip — {fmtMonth(slip.month)}</h2>
-          <p className="text-xs text-muted-foreground">
-            Printed on {(() => { const d=new Date(); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()}` })()}
-          </p>
-        </div>
-        <SlipDetailCard slipId={slip.slip_id} employeeId={employeeId} month={slip.month} />
+    <div className="fixed -left-[9999px] top-0 w-[820px]" aria-hidden>
+      <div id={`slip-print-${slip.slip_id}`} style={{ padding: 8 }}>
+        {data?.data && <PayslipDocument slip={data.data} profile={profile} bank={bank} />}
       </div>
     </div>
   )
@@ -1138,7 +1041,7 @@ export function EssCompensation() {
           {printSlipId && (() => {
             const s = slips.find(x => x.slip_id === printSlipId)
             return s
-              ? <PrintableSlip slip={s} employeeId={employeeId} onDone={() => setPrintSlipId(null)} />
+              ? <PrintableSlip slip={s} profile={profileData} bank={bank} onDone={() => setPrintSlipId(null)} />
               : null
           })()}
         </>
