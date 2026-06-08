@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
-import { getDomainForPath, getVisibleDomain, type Domain, type DomainNavGroup } from './nav-config'
+import { getDomainForPath, getVisibleDomain, getExecutiveDomainForPath, type Domain, type DomainNavGroup } from './nav-config'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -155,12 +155,17 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
 // ── ContextualSidebar ─────────────────────────────────────────────────────────
 
 export function ContextualSidebar() {
-  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen, executiveMode } = useUIStore()
   const { profile } = useAuthStore()
   const location = useLocation()
-  // Active domain, then filter its groups/items by role — visibility only.
-  const rawDomain = getDomainForPath(location.pathname)
-  const domain: Domain | null = rawDomain ? getVisibleDomain(rawDomain, profile?.role) : null
+  // In Executive Mode: use the curated exec-domain set (pre-filtered, no role filter needed).
+  // In normal mode: find domain by path, then filter by role.
+  const rawDomain = executiveMode
+    ? getExecutiveDomainForPath(location.pathname)
+    : getDomainForPath(location.pathname)
+  const domain: Domain | null = rawDomain
+    ? (executiveMode ? rawDomain : getVisibleDomain(rawDomain, profile?.role))
+    : null
 
   // Close the mobile drawer whenever the route changes
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, location.search, setMobileNavOpen])

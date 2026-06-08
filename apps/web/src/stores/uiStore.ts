@@ -56,6 +56,15 @@ interface UIState {
   // every statutory tab instead of each page snapping back to the current month).
   statutoryMonth: string | null
   setStatutoryMonth: (month: string) => void
+
+  // ── Executive Mode (UI persona, session-only) ─────────────────────────────────
+  // UI-only toggle available to super_admin + hr_admin. When true, the domain tabs
+  // collapse to a curated executive subset (Intelligence, Reports, Workforce) and
+  // operational/setup pages are hidden from the nav.
+  // NOT persisted — always resets on page refresh.
+  executiveMode: boolean
+  setExecutiveMode: (v: boolean) => void
+  toggleExecutiveMode: () => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -106,6 +115,11 @@ export const useUIStore = create<UIState>()(
       // ── shared statutory month (session-only) ─────────────────────────────────
       statutoryMonth: null,
       setStatutoryMonth: (month) => set({ statutoryMonth: month }),
+
+      // ── executive mode (session-only) ─────────────────────────────────────────
+      executiveMode: false,
+      setExecutiveMode: (v) => set({ executiveMode: v }),
+      toggleExecutiveMode: () => set((state) => ({ executiveMode: !state.executiveMode })),
     }),
     {
       name: 'hrms-ui',

@@ -12,11 +12,11 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Sun, Moon, LogOut, ChevronDown, Menu } from 'lucide-react'
+import { Search, Sun, Moon, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark } from '@/components/brand/Logo'
-import { getVisibleDomains, getDomainForPath } from './nav-config'
+import { getVisibleDomains, getDomainForPath, getExecutiveDomainForPath, EXECUTIVE_DOMAINS } from './nav-config'
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
 import { useAuthStore }        from '@/stores/authStore'
@@ -43,7 +43,9 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const navigate   = useNavigate()
   const basePath   = useBasePath()
   const { profile, tenant, clear } = useAuthStore()
-  const toggleMobileNav = useUIStore(s => s.toggleMobileNav)
+  const toggleMobileNav      = useUIStore(s => s.toggleMobileNav)
+  const executiveMode        = useUIStore(s => s.executiveMode)
+  const toggleExecutiveMode  = useUIStore(s => s.toggleExecutiveMode)
   const [notifOpen, setNotifOpen]  = useState(false)
   const { resolvedTheme, setTheme } = useTheme()
   const dark = resolvedTheme === 'dark'
@@ -51,9 +53,20 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
 
   function openSearch() { onSearchOpen?.() }
 
-  const activeDomain = getDomainForPath(location.pathname)
-  // Domain tabs filtered by role — visibility only (route guards unchanged).
-  const visibleDomains = getVisibleDomains(profile?.role)
+  // In Executive Mode show only the curated exec domain set; otherwise role-filtered full set.
+  const activeDomain   = executiveMode
+    ? getExecutiveDomainForPath(location.pathname)
+    : getDomainForPath(location.pathname)
+  const visibleDomains = executiveMode
+    ? EXECUTIVE_DOMAINS
+    : getVisibleDomains(profile?.role)
+
+  const canExecMode = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
+
+  function handleExecModeToggle() {
+    toggleExecutiveMode()
+    if (!executiveMode) navigate('/admin/intelligence/workforce-command')
+  }
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -188,6 +201,26 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
              profile.role === 'hr_admin'    ? 'HR'    :
              profile.role === 'manager'     ? 'Mgr'   : profile.role}
           </span>
+        )}
+
+        {/* Executive Mode toggle — super_admin + hr_admin only */}
+        {canExecMode && (
+          <button
+            type="button"
+            onClick={handleExecModeToggle}
+            title={executiveMode ? 'Exit Executive Mode' : 'Switch to Executive View'}
+            className={cn(
+              'flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md transition-all border',
+              executiveMode
+                ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                : 'bg-transparent text-muted-foreground border-border/60 hover:bg-muted hover:text-foreground',
+            )}
+          >
+            <BarChart3 className="h-3 w-3 shrink-0" />
+            <span className="hidden sm:inline whitespace-nowrap">
+              {executiveMode ? 'Exec' : 'Exec'}
+            </span>
+          </button>
         )}
 
         {/* Notifications */}

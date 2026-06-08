@@ -588,6 +588,7 @@ export const DOMAINS: Domain[] = [
           { id: 'workforce-digest',      label: 'Daily Digest',            route: '/admin/intelligence/digest',            icon: FileText    },
           { id: 'workforce-search',      label: 'People Search',            route: '/admin/intelligence/search',            icon: Search      },
           { id: 'uat-certification',     label: 'UAT Certification',      route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'] },
+          { id: 'narratives',            label: 'Narratives',               route: '/admin/intelligence/narratives',        icon: FileText  },
           { id: 'workforce-intel',       label: 'Intelligence Hub',         route: '/admin/intelligence',                   icon: Brain     },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity  },
         ],
@@ -747,6 +748,104 @@ export const DOMAINS: Domain[] = [
   },
 
 ]
+
+// ── Executive Mode — curated domain set ───────────────────────────────────────
+//
+// Shown in place of DOMAINS when executiveMode is active.
+// Three domains: Intelligence (KPIs + narratives), Reports (outputs), Workforce (read-only).
+// All routes already exist — this is nav-visibility only, no new pages.
+//
+export const EXECUTIVE_DOMAINS: Domain[] = [
+
+  {
+    id:           'exec-intelligence',
+    label:        'Intelligence',
+    shortLabel:   'Intel',
+    icon:         Brain,
+    matchPrefixes: [
+      '/admin/intelligence',
+      '/admin/executive',
+      '/admin/analytics',
+      '/admin/operational-health',
+    ],
+    defaultRoute: '/admin/intelligence/workforce-command',
+    groups: [
+      {
+        label: 'Executive',
+        items: [
+          { id: 'exec-workforce-command', label: 'Workforce Command',      route: '/admin/intelligence/workforce-command', exact: true, icon: Brain      },
+          { id: 'exec-executive-center',  label: 'Executive Intelligence', route: '/admin/executive',                                  icon: BarChart3  },
+          { id: 'exec-org-health',        label: 'Org Health',             route: '/admin/intelligence/org-health',                    icon: TrendingUp },
+          { id: 'exec-narratives',        label: 'Narratives',             route: '/admin/intelligence/narratives',                    icon: FileText   },
+          { id: 'exec-op-health',         label: 'Operational Health',     route: '/admin/operational-health',                        icon: Activity   },
+        ],
+      },
+    ],
+  },
+
+  {
+    id:           'exec-reports',
+    label:        'Reports',
+    shortLabel:   'Data',
+    icon:         BarChart2,
+    matchPrefixes: [
+      '/admin/reports',
+      '/admin/payroll/cost-intelligence',
+      '/admin/payroll/ledger',
+    ],
+    defaultRoute: '/admin/reports',
+    groups: [
+      {
+        label: 'Reports',
+        items: [
+          { id: 'exec-reports-all',    label: 'All Reports',       route: '/admin/reports',                   icon: BarChart2  },
+          { id: 'exec-cost-intel',     label: 'Cost Intelligence', route: '/admin/payroll/cost-intelligence', icon: BarChart3  },
+          { id: 'exec-payroll-ledger', label: 'Payroll Ledger',    route: '/admin/payroll/ledger',            icon: BookOpen   },
+        ],
+      },
+    ],
+  },
+
+  {
+    id:           'exec-workforce',
+    label:        'Workforce',
+    shortLabel:   'People',
+    icon:         Users,
+    matchPrefixes: [
+      '/admin/employees',
+    ],
+    defaultRoute: '/admin/employees',
+    groups: [
+      {
+        label: 'Directory',
+        items: [
+          { id: 'exec-directory', label: 'Employee Directory', route: '/admin/employees', exact: true, icon: Users },
+        ],
+      },
+    ],
+  },
+
+]
+
+/**
+ * Returns the executive-mode domain for the given pathname (longest-prefix).
+ * Falls back to null if the path isn't covered by executive domains.
+ */
+export function getExecutiveDomainForPath(pathname: string): Domain | null {
+  let best: Domain | null = null
+  let bestLen = -1
+  for (const domain of EXECUTIVE_DOMAINS) {
+    for (const prefix of domain.matchPrefixes) {
+      if (pathname === prefix || pathname.startsWith(prefix + '/') || pathname.startsWith(prefix)) {
+        if (prefix.length > bestLen) {
+          bestLen = prefix.length
+          best    = domain
+        }
+      }
+    }
+  }
+  return best
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

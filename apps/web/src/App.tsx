@@ -694,6 +694,7 @@ export default function App() {
                 <Route path="/admin/intelligence/digest"            element={<WorkforceDigest />} />
                 <Route path="/admin/intelligence/search"            element={<WorkforceSearch />} />
                 <Route path="/admin/intelligence/uat-certification"  element={<UATCertification />} />
+                <Route path="/admin/intelligence/narratives"         element={<ExecutiveNarrative />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />
