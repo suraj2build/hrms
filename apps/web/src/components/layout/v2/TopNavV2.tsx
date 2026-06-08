@@ -74,13 +74,13 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   }
 
   return (
-    <header className="sticky top-0 z-40 w-full h-[52px] border-b border-border bg-card backdrop-blur-md flex items-stretch px-0 flex-shrink-0 shadow-sm shadow-border/30 overflow-hidden">
+    <header className="sticky top-0 z-40 w-full h-[52px] border-b border-black/10 bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-primary-foreground backdrop-blur-md flex items-stretch px-0 flex-shrink-0 shadow-md shadow-[#1A4D8F]/20 overflow-hidden">
 
       {/* ── Mobile hamburger (opens contextual sidebar drawer) ──── */}
       <button
         type="button"
         onClick={toggleMobileNav}
-        className="lg:hidden flex items-center justify-center px-3 border-r border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+        className="lg:hidden flex items-center justify-center px-3 border-r border-white/15 text-white/80 hover:text-white hover:bg-white/10 transition-colors"
         aria-label="Open navigation menu"
       >
         <Menu className="h-5 w-5" />
@@ -90,10 +90,12 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
       <button
         type="button"
         onClick={() => navigate('/admin/intelligence/workforce-command')}
-        className="flex items-center gap-2 shrink-0 px-4 group border-r border-border/60 bg-card hover:bg-muted/40 transition-colors"
+        className="flex items-center gap-2 shrink-0 px-4 group border-r border-white/15 hover:bg-white/10 transition-colors"
       >
-        <LogoMark size={28} />
-        <span className="font-display font-bold text-[13px] text-foreground hidden md:block group-hover:text-primary transition-colors tracking-tight">
+        <span className="rounded-lg ring-1 ring-white/25 shadow-sm flex items-center justify-center">
+          <LogoMark size={26} />
+        </span>
+        <span className="font-display font-bold text-[13px] text-white hidden md:block tracking-tight">
           Emvora
         </span>
       </button>
@@ -117,16 +119,16 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
                 'relative flex items-center gap-1.5 px-3.5 h-full select-none whitespace-nowrap',
                 'text-[11.5px] font-semibold transition-colors',
                 isActive
-                  ? 'text-primary bg-primary/[0.06]'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
+                  ? 'text-white bg-white/[0.16]'
+                  : 'text-white/65 hover:text-white hover:bg-white/10',
               )}
             >
-              <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive ? 'text-primary' : 'text-muted-foreground/80')} />
+              <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive ? 'text-white' : 'text-white/55')} />
               <span className="hidden lg:inline">{domain.label}</span>
               <span className="lg:hidden">{domain.shortLabel ?? domain.label.slice(0, 4)}</span>
               {/* Active underline indicator */}
               {isActive && (
-                <span aria-hidden="true" className="absolute inset-x-2 bottom-0 h-[2.5px] rounded-full bg-primary" />
+                <span aria-hidden="true" className="absolute inset-x-2 bottom-0 h-[2.5px] rounded-full bg-white" />
               )}
             </button>
           )
@@ -139,17 +141,17 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
       <div className="flex items-center gap-1 shrink-0 pl-2 pr-3">
 
         {/* Single hairline separates nav from the account cluster */}
-        <span aria-hidden="true" className="h-6 w-px bg-border/70 mx-1.5" />
+        <span aria-hidden="true" className="h-6 w-px bg-white/20 mx-1.5" />
 
         {/* Tenant + role — grouped, no extra dividers */}
         <div className="hidden md:flex items-center gap-1.5 mr-1">
           {tenant?.name && (
-            <span className="text-[11px] text-muted-foreground font-medium max-w-[130px] truncate">
+            <span className="text-[11px] text-white/75 font-medium max-w-[130px] truncate">
               {tenant.name}
             </span>
           )}
           {profile?.role && (
-            <span className="text-[9.5px] bg-primary/10 text-primary rounded-full px-2 py-0.5 font-bold uppercase tracking-wide border border-primary/15">
+            <span className="text-[9.5px] bg-white/15 text-white rounded-full px-2 py-0.5 font-bold uppercase tracking-wide border border-white/20">
               {profile.role === 'super_admin' ? 'Admin' :
                profile.role === 'hr_admin'    ? 'HR'    :
                profile.role === 'manager'     ? 'Mgr'   : profile.role}
@@ -166,8 +168,8 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
             className={cn(
               'flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md transition-all border',
               executiveMode
-                ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                : 'bg-transparent text-muted-foreground border-border/60 hover:bg-muted hover:text-foreground',
+                ? 'bg-white text-primary border-white shadow-sm'
+                : 'bg-transparent text-white/80 border-white/30 hover:bg-white/10 hover:text-white',
             )}
           >
             <BarChart3 className="h-3 w-3 shrink-0" />
@@ -175,13 +177,13 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
           </button>
         )}
 
-        {/* Notifications */}
+        {/* Notifications — override the shared ghost button's colors for navy */}
         <div
           role="button"
           tabIndex={0}
           onClick={() => setNotifOpen(true)}
           onKeyDown={e => e.key === 'Enter' && setNotifOpen(true)}
-          className="p-1.5 rounded-md hover:bg-muted transition-colors cursor-pointer flex items-center justify-center relative text-muted-foreground hover:text-foreground"
+          className="rounded-md cursor-pointer flex items-center justify-center relative [&_button]:!text-white/80 [&_button]:hover:!bg-white/10 [&_button]:hover:!text-white"
           title="Notifications"
         >
           <NotificationBell />
@@ -192,7 +194,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         <button
           type="button"
           onClick={toggleTheme}
-          className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/80 hover:text-white"
           title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {dark
@@ -206,17 +208,17 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex items-center gap-2 cursor-pointer group ml-0.5 pl-1.5 rounded-md hover:bg-muted/60 py-1 pr-1 transition-colors"
+              className="flex items-center gap-2 cursor-pointer group ml-0.5 pl-1.5 rounded-md hover:bg-white/10 py-1 pr-1 transition-colors"
             >
-              <div className="w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-[11px] shrink-0">
+              <div className="w-7 h-7 rounded-md bg-white/15 border border-white/25 flex items-center justify-center text-white font-bold text-[11px] shrink-0">
                 {getInitials(profile?.full_name ?? 'U')}
               </div>
               <div className="hidden sm:flex flex-col text-left">
-                <span className="text-[11px] font-semibold text-foreground leading-tight">
+                <span className="text-[11px] font-semibold text-white leading-tight">
                   {profile?.full_name ?? 'Admin'}
                 </span>
               </div>
-              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
+              <ChevronDown className="h-3 w-3 text-white/70 hidden sm:block" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
