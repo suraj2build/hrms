@@ -343,9 +343,9 @@ export const DOMAINS: Domain[] = [
   //   Simulation           (/admin/payroll/simulation)       — longer prefix → Setup wins
   //   Payroll Calendar     (/admin/payroll-readiness)
   //
-  // REMOVED (moved to Reports):
-  //   Workforce Cost  (/admin/payroll/cost-intelligence)
-  //   Payroll Ledger  (/admin/payroll/ledger)
+  // Cost Intelligence + Payroll Ledger live HERE (Analytics & Audit) — their
+  // routes are /admin/payroll/*, owned by this domain. Single home, no domain
+  // bounce. (The Reports "All Reports" page still exposes them as reports.)
   //
   // Still ACTIVE longer-prefix overrides (defined in Setup):
   //   /admin/payroll/salary-components → Setup
@@ -403,6 +403,8 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Analytics & Audit',
         items: [
+          { id: 'workforce-cost',      label: 'Cost Intelligence', route: '/admin/payroll/cost-intelligence', icon: BarChart3     },
+          { id: 'payroll-ledger',      label: 'Payroll Ledger',    route: '/admin/payroll/ledger',            icon: BookOpen      },
           { id: 'payroll-forensics',   label: 'Deep Analysis', route: '/admin/payroll/forensics',   icon: AlertTriangle },
           { id: 'payroll-investigate', label: 'Investigation', route: '/admin/payroll/investigate', icon: Activity      },
         ],
@@ -507,8 +509,6 @@ export const DOMAINS: Domain[] = [
         label: 'Reports',
         items: [
           { id: 'reports-center',  label: 'All Reports',     route: '/admin/reports',                       icon: BarChart2  },
-          { id: 'workforce-cost',  label: 'Cost Intelligence', route: '/admin/payroll/cost-intelligence',     icon: BarChart3  },
-          { id: 'payroll-ledger',  label: 'Payroll Ledger',  route: '/admin/payroll/ledger',                icon: BookOpen   },
         ],
       },
     ],
