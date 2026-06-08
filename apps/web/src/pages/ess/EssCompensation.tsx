@@ -15,7 +15,7 @@
  * Design: design-system tokens only — no raw hex / bg-gray-*.
  */
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery }                     from '@tanstack/react-query'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -151,6 +151,15 @@ interface FullProfile {
     designations:    { name: string } | null
     work_locations:  { name: string; city: string } | null
     manager:         { first_name: string; last_name: string; employee_code: string } | null
+  } | null
+  bank_statutory: {
+    bank_name:             string | null
+    account_number_masked: string | null
+    ifsc:                  string | null
+    pan:                   string | null
+    uan:                   string | null
+    pf_number:             string | null
+    esi_number:            string | null
   } | null
 }
 
@@ -485,102 +494,44 @@ function SlipDetailCard({ slipId, employeeId, month }: { slipId: string; employe
   )
 }
 
-// ── SlipCard ───────────────────────────────────────────────────────────────────
+// ── PrintableSlip — off-screen slip render used for print-on-demand ─────────────
+// The flat Pay Slips table has no inline expansion; clicking a row's PDF action
+// mounts this off-screen, waits for the slip detail to load, then prints just it.
 
-function SlipCard({ slip, prevSlip, employeeId }: { slip: SlipSummary; prevSlip?: SlipSummary; employeeId: string }) {
-  const [expanded,     setExpanded]     = useState(false)
-  const [pendingPrint, setPendingPrint] = useState(false)
-
-  const momDiff = prevSlip != null ? slip.net_pay - prevSlip.net_pay : null
-  const momPct  = prevSlip != null && prevSlip.net_pay > 0
-    ? (slip.net_pay - prevSlip.net_pay) / prevSlip.net_pay * 100
-    : null
-
-  function handlePrint(e: React.MouseEvent) {
-    e.stopPropagation()
-    if (!expanded) {
-      setExpanded(true)
-      setPendingPrint(true)
-    } else {
-      printSlip(slip.slip_id)
-    }
-  }
+function PrintableSlip({
+  slip, employeeId, onDone,
+}: {
+  slip: SlipSummary
+  employeeId: string
+  onDone: () => void
+}) {
+  // Shares the ['my-slip-detail', id] cache with SlipDetailCard — no double fetch.
+  const { isSuccess, isError } = useQuery<{ data: SlipDetail }>({
+    queryKey:  ['my-slip-detail', slip.slip_id],
+    queryFn:   () => api.get(`/payroll/slips/${slip.slip_id}`),
+    staleTime: 300_000,
+  })
 
   useEffect(() => {
-    if (pendingPrint && expanded) {
-      setPendingPrint(false)
-      // Allow SlipDetailCard to mount and its query to settle before printing
-      const tid = setTimeout(() => printSlip(slip.slip_id), 300)
+    if (isError) { onDone(); return }
+    if (isSuccess) {
+      // Allow SlipDetailCard to paint from cache before printing.
+      const tid = setTimeout(() => { printSlip(slip.slip_id); onDone() }, 200)
       return () => clearTimeout(tid)
     }
-  }, [pendingPrint, expanded, slip.slip_id])
+  }, [isSuccess, isError, slip.slip_id, onDone])
 
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
-      {/* Header row */}
-      <button
-        type="button"
-        className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors text-left"
-        onClick={() => setExpanded(v => !v)}
-      >
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-md bg-primary/10">
-            <FileText className="h-4 w-4 text-primary" />
-          </div>
-          <div>
-            <p className="font-semibold text-sm">{fmtMonth(slip.month)}</p>
-            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-              <Calendar className="h-3 w-3" />
-              {slip.payable_days} / {slip.total_working_days} days
-              {slip.lop_days > 0 && <span className="text-destructive">· {slip.lop_days} LOP</span>}
-            </p>
-          </div>
+    <div className="fixed -left-[9999px] top-0 w-[800px]" aria-hidden>
+      <div id={`slip-print-${slip.slip_id}`}>
+        <div className="mb-4 pb-3 border-b border-border">
+          <h2 className="text-lg font-bold">Pay Slip — {fmtMonth(slip.month)}</h2>
+          <p className="text-xs text-muted-foreground">
+            Printed on {(() => { const d=new Date(); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()}` })()}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-sm font-bold text-success">{fmtCurrency(slip.net_pay)}</p>
-            {momDiff != null && momPct != null ? (
-              <div className={cn('flex items-center justify-end gap-0.5 text-[10px] font-medium',
-                momDiff >= 0 ? 'text-success' : 'text-destructive')}>
-                {momDiff >= 0 ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
-                {momDiff >= 0 ? '+' : ''}{momPct.toFixed(1)}% vs prev
-              </div>
-            ) : (
-              <p className="text-[10px] text-muted-foreground">Net Pay</p>
-            )}
-          </div>
-          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-        </div>
-      </button>
-
-      {/* Compact summary */}
-      <div className="flex items-center gap-4 px-4 pb-3 text-xs text-muted-foreground border-t border-border/40">
-        <span>Gross: <span className="font-medium text-foreground">{fmtCurrency(slip.gross_pay)}</span></span>
-        <span>Deductions: <span className="font-medium text-destructive">{fmtCurrency(slip.total_deductions)}</span></span>
-        {slip.overtime_hours > 0 && <span>OT: <span className="font-medium text-foreground">{slip.overtime_hours}h</span></span>}
-        <Badge variant="success" className="rounded-full text-[10px] ml-auto capitalize">{slip.status}</Badge>
-        <button
-          type="button"
-          onClick={handlePrint}
-          className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
-          title="Print / Save as PDF"
-        >
-          <Printer className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline text-xs">Print</span>
-        </button>
+        <SlipDetailCard slipId={slip.slip_id} employeeId={employeeId} month={slip.month} />
       </div>
-
-      {/* Expanded detail — wrapped with print ID */}
-      {expanded && (
-        <div id={`slip-print-${slip.slip_id}`} className="px-4 pb-4 border-t border-border/60">
-          {/* Print-only header */}
-          <div className="hidden print:block mb-4 pb-3 border-b border-border">
-            <h2 className="text-lg font-bold">Pay Slip — {fmtMonth(slip.month)}</h2>
-            <p className="text-xs text-muted-foreground">Printed on {(() => { const d=new Date(); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()}` })()}</p>
-          </div>
-          <SlipDetailCard slipId={slip.slip_id} employeeId={employeeId} month={slip.month} />
-        </div>
-      )}
     </div>
   )
 }
@@ -621,180 +572,6 @@ function YTDSummary({ slips }: { slips: SlipSummary[] }) {
             <p className={cn('font-bold tabular-nums', k.color)}>{k.value}</p>
           </div>
         ))}
-      </div>
-    </div>
-  )
-}
-
-// ── RateVsActualsTable ─────────────────────────────────────────────────────────
-
-interface RvaRow {
-  code:    string
-  name:    string
-  type:    'earning' | 'deduction' | 'employer_contribution'
-  ctcRate: number | null
-  actual:  number | null
-}
-
-function RateVsActualsTable({ comp, slipDetail }: { comp: ActiveComp | undefined; slipDetail: SlipDetail | undefined }) {
-  const compComponents = comp?.employee_compensation_components ?? []
-  const slipComponents = slipDetail?.component_breakdown        ?? []
-
-  // ── Paid-day proration factor ───────────────────────────────────────────────
-  // Top-HRMS convention: each EARNING line is prorated by actual paid days, so LOP
-  // is reflected per component (not as a separate lump). The factor is the share of
-  // working days actually paid: (working - LOP) / working. Sum of prorated earnings
-  // therefore equals gross − LOP, matching the payslip net.
-  const lopDays   = slipDetail?.lop_days ?? 0
-  const workDays  = slipDetail?.total_working_days ?? 0
-  const factor    = (lopDays > 0 && workDays > 0) ? Math.max(0, (workDays - lopDays) / workDays) : 1
-  const isProrated = factor < 1
-
-  // Merge by component code: start with CTC structure, overlay actuals
-  const map = new Map<string, RvaRow>()
-  for (const c of compComponents) {
-    const code = c.salary_components?.code ?? c.id
-    map.set(code, {
-      code,
-      name:    c.salary_components?.name ?? 'Unknown',
-      type:    c.salary_components?.component_type ?? 'earning',
-      ctcRate: c.computed_monthly,
-      actual:  null,
-    })
-  }
-  for (const c of slipComponents) {
-    // Skip any LOP line on the slip — LOP is distributed into the prorated earnings,
-    // not shown as a separate deduction.
-    const codeUpper = String(c.code ?? '').toUpperCase()
-    if (codeUpper === 'LOP' || codeUpper === 'LOSS_OF_PAY') continue
-    const existing = map.get(c.code)
-    if (existing) {
-      existing.actual = c.monthly_amount
-    } else {
-      map.set(c.code, { code: c.code, name: c.name, type: c.component_type, ctcRate: null, actual: c.monthly_amount })
-    }
-  }
-
-  // Prorate EARNING actuals per line by the paid-day factor. The full monthly value
-  // is the CTC rate (authoritative full month) or, for actuals-only earnings, the
-  // slip amount. Deductions / employer contributions stay as their actual amounts
-  // (already computed on actual wages).
-  for (const row of map.values()) {
-    if (row.type !== 'earning') continue
-    const full = row.ctcRate ?? row.actual
-    if (full != null) row.actual = Math.round(full * factor)
-  }
-
-  const allRows  = Array.from(map.values())
-  const earnings = allRows.filter(r => r.type === 'earning')
-  const deductions = allRows.filter(r => r.type === 'deduction')
-  const empContrib = allRows.filter(r => r.type === 'employer_contribution')
-
-  // Totals for net pay summary
-  const ctcNetEst = earnings.reduce((s, r) => s + (r.ctcRate ?? 0), 0)
-    - deductions.reduce((s, r) => s + (r.ctcRate ?? 0), 0)
-  const actualNet = slipDetail?.net_pay ?? null
-
-  function VarianceRow({ row, isEarning }: { row: RvaRow; isEarning: boolean }) {
-    const variance    = row.ctcRate != null && row.actual != null ? row.actual - row.ctcRate : null
-    const variancePct = variance != null && row.ctcRate != null && row.ctcRate !== 0
-      ? (variance / row.ctcRate) * 100 : null
-    // Good variance: earning → actual ≥ rate. Deduction → actual ≤ rate.
-    const isGood = variance == null ? null
-      : isEarning ? variance >= 0 : variance <= 0
-    return (
-      <td className={cn('px-3 py-2 text-right font-mono font-medium text-xs',
-        isGood === null     ? 'text-muted-foreground' :
-        isGood              ? 'text-success'           : 'text-destructive',
-        variance === 0 && 'text-muted-foreground/50',
-      )}>
-        {variance == null ? '—' : (
-          <>
-            {variance > 0 ? '+' : ''}{fmtCurrency(variance)}
-            {variancePct != null && (
-              <span className="text-[9px] ml-1 opacity-70">({variancePct > 0 ? '+' : ''}{variancePct.toFixed(1)}%)</span>
-            )}
-          </>
-        )}
-      </td>
-    )
-  }
-
-  function GroupTable({ title, rows, isEarning }: { title: string; rows: RvaRow[]; isEarning: boolean }) {
-    if (rows.length === 0) return null
-    return (
-      <div>
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{title}</p>
-        <div className="rounded-md border border-border overflow-hidden">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/40">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Component</th>
-                <th className="text-right px-3 py-2 font-medium text-muted-foreground">CTC Rate <span className="font-normal text-[9px] normal-case">/ month</span></th>
-                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Actual {isEarning && isProrated && <span className="font-normal text-[9px] normal-case">/ paid days</span>}</th>
-                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Variance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, i) => (
-                <tr key={row.code} className={cn('border-t border-border/40', i % 2 !== 0 && 'bg-muted/10')}>
-                  <td className="px-3 py-2">
-                    <span className="font-medium">{row.name}</span>
-                    <span className="text-muted-foreground ml-1.5 font-mono text-[10px]">({row.code})</span>
-                    {row.ctcRate == null && <span className="ml-2 text-[9px] text-warning">actuals only</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-xs">
-                    {row.ctcRate != null ? fmtCurrency(row.ctcRate) : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className={cn('px-3 py-2 text-right font-mono text-xs', row.actual == null && 'text-muted-foreground')}>
-                    {row.actual != null ? fmtCurrency(row.actual) : '—'}
-                  </td>
-                  <VarianceRow row={row} isEarning={isEarning} />
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      {slipDetail && isProrated && (
-        <div className="flex items-center gap-2 p-2.5 rounded-md bg-warning/10 border border-warning/20 text-xs text-warning">
-          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-          {slipDetail.lop_days} LOP day{slipDetail.lop_days !== 1 ? 's' : ''} of {slipDetail.total_working_days} working days — each earning is prorated to {(factor * 100).toFixed(1)}% of its full rate. The per-line variance is the loss-of-pay impact.
-        </div>
-      )}
-
-      <GroupTable title="Earnings"               rows={earnings}    isEarning={true}  />
-      <GroupTable title="Deductions"             rows={deductions}  isEarning={false} />
-      <GroupTable title="Employer Contributions" rows={empContrib}  isEarning={true}  />
-
-      {/* Net Pay summary */}
-      <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-3 gap-4 flex-wrap">
-        <span className="text-sm font-semibold">Net Pay</span>
-        <div className="flex items-center gap-6 text-xs">
-          <div className="text-right">
-            <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">CTC Rate (est.)</p>
-            <p className="font-mono font-semibold tabular-nums">{fmtCurrency(ctcNetEst)}</p>
-          </div>
-          {actualNet != null && (
-            <>
-              <div className="text-right">
-                <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Actual</p>
-                <p className="font-mono font-bold text-success tabular-nums">{fmtCurrency(actualNet)}</p>
-              </div>
-              <div className={cn('text-right', actualNet < ctcNetEst ? 'text-destructive' : 'text-success')}>
-                <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Variance</p>
-                <p className="font-mono font-semibold tabular-nums">
-                  {actualNet - ctcNetEst > 0 ? '+' : ''}{fmtCurrency(actualNet - ctcNetEst)}
-                </p>
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </div>
   )
@@ -945,6 +722,32 @@ function ComingSoon({ icon: Icon, title, blurb }: { icon: React.ElementType; tit
   )
 }
 
+// ── SalaryGroup — labelled component rows for the Salary structure table ─────────
+
+function SalaryGroup({ label, items }: { label: string; items: CompComponent[] }) {
+  return (
+    <>
+      <tr className="bg-muted/30">
+        <td colSpan={3} className="px-5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </td>
+      </tr>
+      {[...items].sort((a, b) => a.sequence - b.sequence).map(c => (
+        <tr key={c.id} className="border-b border-border/40 last:border-0">
+          <td className="px-5 py-2.5">
+            <span className="font-medium text-foreground">{c.salary_components?.name}</span>
+            {c.salary_components?.is_taxable && (
+              <Badge className="ml-2 rounded-full text-[9px]" variant="outline">Taxable</Badge>
+            )}
+          </td>
+          <td className="px-5 py-2.5 text-right tabular-nums">{fmtCurrency(c.computed_monthly)}</td>
+          <td className="px-5 py-2.5 text-right tabular-nums text-muted-foreground">{fmtCurrency(c.computed_annual)}</td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 type Tab = 'overview' | 'salary' | 'payslips' | 'bonuses' | 'benefits' | 'tax' | 'history'
@@ -960,8 +763,8 @@ export function EssCompensation() {
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [tab, setTab] = useState<Tab>('overview')
 
-  // ── Month selected for Rate vs Actuals ────────────────────────────────────
-  const [selectedMonth, setSelectedMonth] = useState<string>('')
+  // ── Slip queued for print (Pay Slips flat table) ──────────────────────────
+  const [printSlipId, setPrintSlipId] = useState<string | null>(null)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -976,13 +779,6 @@ export function EssCompensation() {
 
   const slips = slipsData?.data ?? []
 
-  // Auto-select most recent month when slips load
-  useEffect(() => {
-    if (slips.length > 0 && !selectedMonth) {
-      setSelectedMonth(slips[0].month)
-    }
-  }, [slips, selectedMonth])
-
   // Active compensation (CTC structure) — always loaded
   // Active compensation with its raw component breakdown (incl. employer
   // contributions + nested salary_components). This endpoint returns the active
@@ -991,15 +787,6 @@ export function EssCompensation() {
     queryKey:  ['ess-comp-active', employeeId],
     queryFn:   () => api.get(`/payroll/compensation/employee/${employeeId}`),
     enabled:   !!employeeId,
-    staleTime: 300_000,
-  })
-
-  // Payslip detail for the selected month (Rate vs Actuals) — lazy on Salary tab
-  const selectedSlip   = useMemo(() => slips.find(s => s.month === selectedMonth), [slips, selectedMonth])
-  const { data: rvaSlipData, isLoading: rvaLoading } = useQuery<{ data: SlipDetail }>({
-    queryKey:  ['my-slip-detail', selectedSlip?.slip_id ?? ''],
-    queryFn:   () => api.get(`/payroll/slips/${selectedSlip!.slip_id}`),
-    enabled:   !!selectedSlip && tab === 'salary',
     staleTime: 300_000,
   })
 
@@ -1046,6 +833,7 @@ export function EssCompensation() {
 
   // Endpoint returns active record(s) — take the most recent active one.
   const comp       = Array.isArray(compData?.data) ? compData!.data[0] : (compData?.data as ActiveComp | undefined)
+  const bank       = profileData?.bank_statutory ?? undefined
   const revisions  = revData?.data ?? []
   const components  = comp?.employee_compensation_components ?? []
   const earnings    = components.filter(c => c.salary_components?.component_type === 'earning')
@@ -1274,39 +1062,20 @@ export function EssCompensation() {
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === 'payslips' && (
         <>
-          {/* Latest slip summary cards */}
-          {latest && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {[
-                { label: 'Latest Month',  value: fmtMonth(latest.month), cls: '' },
-                { label: 'Net Pay',       value: fmtCurrency(latest.net_pay), cls: 'text-success' },
-                { label: 'Payable Days',  value: `${latest.payable_days} / ${latest.total_working_days}`, cls: '' },
-                {
-                  label: 'LOP Days',
-                  value: String(latest.lop_days),
-                  cls: latest.lop_days > 0 ? 'text-destructive' : 'text-success',
-                },
-              ].map(k => (
-                <div key={k.label} className="p-4 rounded-lg border border-border bg-card">
-                  <p className="text-xs text-muted-foreground">{k.label}</p>
-                  <p className={cn('text-sm font-bold mt-1', k.cls)}>{k.value}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* YTD Summary */}
+          {/* YTD Summary strip */}
           {slips.length > 0 && <YTDSummary slips={slips} />}
 
-          {/* Slip list */}
+          {/* Pay slips — flat table */}
           <SectionCard
-            title="Pay Slip History"
+            title="Pay slips"
+            description={slips.length > 0 ? `${slips.length} finalized` : undefined}
             icon={<FileText className="h-4 w-4 text-muted-foreground" />}
+            noPadding
           >
             {slipsLoading ? (
-              <IntelligenceLoadingSkeleton rows={4} />
+              <div className="p-4"><IntelligenceLoadingSkeleton rows={5} /></div>
             ) : slipsError ? (
-              <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+              <div className="m-4 flex items-center gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
                 <AlertCircle className="h-3.5 w-3.5" />Failed to load pay slips. Please try again.
               </div>
             ) : slips.length === 0 ? (
@@ -1316,13 +1085,62 @@ export function EssCompensation() {
                 <p className="text-xs opacity-70">Pay slips appear here once HR finalizes the payroll run.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {slips.map((slip, idx) => (
-                  <SlipCard key={slip.slip_id} slip={slip} prevSlip={slips[idx + 1]} employeeId={employeeId} />
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="px-5 py-2.5 text-left font-medium">Pay period</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Gross</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Deductions</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Net pay</th>
+                      <th className="px-5 py-2.5 text-left font-medium">Status</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slips.map(slip => (
+                      <tr key={slip.slip_id} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                        <td className="px-5 py-3">
+                          <p className="font-medium text-foreground">{fmtMonth(slip.month)}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {slip.payable_days} / {slip.total_working_days} days
+                            {slip.lop_days > 0 && <span className="text-destructive"> · {slip.lop_days} LOP</span>}
+                          </p>
+                        </td>
+                        <td className="px-5 py-3 text-right tabular-nums">{fmtCurrency(slip.gross_pay)}</td>
+                        <td className="px-5 py-3 text-right tabular-nums text-muted-foreground">−{fmtCurrency(slip.total_deductions)}</td>
+                        <td className="px-5 py-3 text-right font-semibold tabular-nums text-success">{fmtCurrency(slip.net_pay)}</td>
+                        <td className="px-5 py-3">
+                          <Badge variant="success" className="rounded-full text-[10px] capitalize">{slip.status}</Badge>
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <Button
+                            size="sm" variant="ghost"
+                            className="h-7 gap-1.5 text-xs text-primary"
+                            disabled={printSlipId === slip.slip_id}
+                            onClick={() => setPrintSlipId(slip.slip_id)}
+                          >
+                            {printSlipId === slip.slip_id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Printer className="h-3.5 w-3.5" />}
+                            PDF
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </SectionCard>
+
+          {/* Off-screen render that prints the chosen slip, then clears itself */}
+          {printSlipId && (() => {
+            const s = slips.find(x => x.slip_id === printSlipId)
+            return s
+              ? <PrintableSlip slip={s} employeeId={employeeId} onDone={() => setPrintSlipId(null)} />
+              : null
+          })()}
         </>
       )}
 
@@ -1330,145 +1148,94 @@ export function EssCompensation() {
       {/* TAB: SALARY                                                        */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === 'salary' && (
-        <>
-          {/* Rate vs Actuals — month picker */}
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Salary structure — clean Component / Monthly / Annual table */}
           <SectionCard
-            title="Rate vs Actuals"
-            icon={<Receipt className="h-4 w-4 text-muted-foreground" />}
-            action={
-              slips.length > 0 ? (
-                <select
-                  value={selectedMonth}
-                  onChange={e => setSelectedMonth(e.target.value)}
-                  className="h-7 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  {slips.map(s => (
-                    <option key={s.month} value={s.month}>{fmtMonth(s.month)}</option>
-                  ))}
-                </select>
-              ) : undefined
-            }
-          >
-            {slips.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-4 text-center">
-                No finalized payslips yet — Rate vs Actuals will appear once your first payslip is processed.
-              </p>
-            ) : rvaLoading ? (
-              <IntelligenceLoadingSkeleton rows={4} />
-            ) : (
-              <RateVsActualsTable comp={comp} slipDetail={rvaSlipData?.data} />
-            )}
-          </SectionCard>
-
-          {/* Salary structure (base CTC components) */}
-          <SectionCard
-            title="Salary Structure"
+            className="lg:col-span-2"
+            title="Salary structure"
+            description={comp?.effective_from ? `Effective ${fmtDate(comp.effective_from)}` : undefined}
             icon={<FileText className="h-4 w-4 text-muted-foreground" />}
+            action={
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => window.print()}>
+                <Printer className="h-3.5 w-3.5" />Download
+              </Button>
+            }
+            noPadding
           >
             {compError && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                 Failed to load data. Please refresh and try again.
               </div>
             )}
             {compLoading ? (
-              <IntelligenceLoadingSkeleton rows={4} />
+              <div className="p-4"><IntelligenceLoadingSkeleton rows={5} /></div>
             ) : components.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-6 text-center">No salary components configured. Contact HR.</p>
+              <p className="py-10 text-center text-xs text-muted-foreground">No salary components configured. Contact HR.</p>
             ) : (
-              <div className="space-y-4">
-                {[
-                  { label: 'Earnings',                items: earnings   },
-                  { label: 'Deductions',              items: deductions },
-                  { label: 'Employer Contributions',  items: empContribs },
-                ].filter(g => g.items.length > 0).map(({ label, items }) => (
-                  <div key={label}>
-                    <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">{label}</p>
-                    <div className="space-y-1">
-                      {items.sort((a, b) => a.sequence - b.sequence).map(c => (
-                        <div key={c.id}
-                          className={cn('flex items-center justify-between px-3 py-2 rounded-md text-sm',
-                            label === 'Deductions' ? 'bg-destructive/5' : label === 'Employer Contributions' ? 'bg-muted/20' : 'bg-muted/30')}>
-                          <div>
-                            <span className="font-medium text-foreground">{c.salary_components?.name}</span>
-                            {c.salary_components?.is_taxable && (
-                              <Badge className="ml-2 rounded-full text-[9px]" variant="outline">Taxable</Badge>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <p className={cn('font-semibold tabular-nums',
-                              label === 'Deductions' ? 'text-destructive' : label === 'Employer Contributions' ? 'text-muted-foreground' : 'text-success')}>
-                              {label === 'Deductions' ? '-' : ''}{fmtCompact(c.computed_monthly)}<span className="text-xs text-muted-foreground">/mo</span>
-                            </p>
-                            <p className="text-[10px] text-muted-foreground tabular-nums">
-                              {fmtCompact(c.computed_annual)}/yr
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-
-                {/* CTC reconciliation footer */}
-                <div className="pt-3 border-t border-border space-y-1.5">
-                  {/* Take-home block: gross − employee deductions = net */}
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Gross Earnings</span>
-                    <span className="font-semibold tabular-nums">{fmtCompact(grossMonthly)}/mo</span>
-                  </div>
-                  {estEmpDeductions != null && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">
-                        Employee Deductions
-                        <span className="text-[10px] ml-1 opacity-70">PF · ESI · PT · LWF · TDS</span>
-                      </span>
-                      <span className="tabular-nums text-destructive">− {fmtCompact(estEmpDeductions)}/mo</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between text-sm rounded-md bg-success/5 px-3 py-2">
-                    <span className="font-bold uppercase tracking-wide text-success text-xs">Net Take-Home</span>
-                    {netMonthly != null
-                      ? <span className="font-bold tabular-nums text-success">{fmtCompact(netMonthly)}/mo</span>
-                      : <span className="text-xs text-muted-foreground">shown after first payslip</span>}
-                  </div>
-
-                  {/* CTC block: gross + employer contributions = total CTC */}
-                  <div className="pt-2 mt-1 border-t border-border/60 space-y-1.5">
-                    {empContribs.length > 0 && (
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          Employer Contributions
-                          <span className="text-[10px] ml-1 opacity-70">added to CTC, not deducted</span>
-                        </span>
-                        <span className="tabular-nums text-muted-foreground">+ {fmtCompact(employerMonthly)}/mo</span>
-                      </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="px-5 py-2.5 text-left font-medium">Component</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Monthly</th>
+                      <th className="px-5 py-2.5 text-right font-medium">Annual</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: 'Earnings',               items: earnings    },
+                      { label: 'Employer contributions', items: empContribs },
+                    ].filter(g => g.items.length > 0).map(({ label, items }) => (
+                      <SalaryGroup key={label} label={label} items={items} />
+                    ))}
+                    {/* Total CTC */}
+                    <tr className="border-t-2 border-border bg-muted/50 font-semibold">
+                      <td className="px-5 py-3">Total CTC</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{fmtCurrency(ctcMonthlyCalc)}</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{fmtCurrency(annualCtc)}</td>
+                    </tr>
+                    {/* Take-home reference row */}
+                    {netMonthly != null && (
+                      <tr className="border-t border-border/60 text-success">
+                        <td className="px-5 py-3 font-medium">
+                          Net take-home
+                          <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">after PF · ESI · PT · LWF · TDS</span>
+                        </td>
+                        <td className="px-5 py-3 text-right font-semibold tabular-nums">{fmtCurrency(netMonthly)}</td>
+                        <td className="px-5 py-3 text-right font-semibold tabular-nums">{fmtCurrency(netMonthly * 12)}</td>
+                      </tr>
                     )}
-                    <div className="flex items-center justify-between text-sm rounded-md bg-primary/5 px-3 py-2">
-                      <span className="font-bold uppercase tracking-wide text-primary text-xs">Total CTC</span>
-                      <div className="text-right">
-                        <p className="font-bold tabular-nums">{fmtCompact(ctcMonthlyCalc)}/mo</p>
-                        <p className="text-[10px] text-muted-foreground tabular-nums">{fmtCompact(comp?.ctc_annual)}/yr</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {estEmpDeductions != null && latest && (
-                    <p className="text-[10px] text-muted-foreground pt-1">
-                      Net take-home estimated using statutory deductions from your {fmtMonthShort(latest.month)} payslip.
-                    </p>
-                  )}
-                </div>
-
-                {comp?.effective_from && (
-                  <p className="text-[10px] text-muted-foreground pt-3 border-t border-border">
-                    Effective from {fmtDate(comp.effective_from)}
+                  </tbody>
+                </table>
+                {netMonthly != null && latest && (
+                  <p className="px-5 py-3 text-[11px] text-muted-foreground border-t border-border/40">
+                    Net take-home estimated using statutory deductions from your {fmtMonthShort(latest.month)} payslip.
+                    Employer contributions are part of CTC but not deducted from pay.
                   </p>
                 )}
               </div>
             )}
           </SectionCard>
 
-        </>
+          {/* Bank & pay schedule — real masked data from full-profile */}
+          <SectionCard title="Bank & pay schedule" icon={<Wallet className="h-4 w-4 text-muted-foreground" />}>
+            <div className="space-y-2.5 text-sm">
+              <DetailRow label="Pay frequency" value="Monthly" />
+              <DetailRow label="Pay date"      value="Last working day" />
+              <DetailRow label="Bank"
+                value={bank?.bank_name
+                  ? `${bank.bank_name}${bank.account_number_masked ? ` ${bank.account_number_masked}` : ''}`
+                  : 'Not on file'} />
+              <DetailRow label="IFSC" value={bank?.ifsc ?? '—'} />
+              <DetailRow label="UAN"  value={bank?.uan ?? '—'} />
+              <DetailRow label="PAN"  value={bank?.pan ?? '—'} />
+              {bank?.pf_number && <DetailRow label="PF number" value={bank.pf_number} />}
+              <div className="mt-1 rounded-lg border border-dashed border-border bg-muted/30 p-3 text-[11px] text-muted-foreground">
+                Bank, PAN and UAN are managed by HR. Contact HR to update these details.
+              </div>
+            </div>
+          </SectionCard>
+        </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
