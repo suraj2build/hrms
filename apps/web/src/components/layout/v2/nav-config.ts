@@ -952,3 +952,42 @@ export function getVisibleDomains(role: UserRole | undefined): Domain[] {
     .map(d => getVisibleDomain(d, role))
     .filter(d => d.groups.length > 0)
 }
+
+// ── Searchable nav index ────────────────────────────────────────────────────────
+//
+// Flattens the LIVE DOMAINS tree into a single list the command palette can
+// search — so nav search always matches exactly what's in the sidebar (no
+// drift). Role-aware: hidden domains/groups/items are excluded.
+//
+export interface SearchableNavItem {
+  id:     string
+  label:  string
+  route:  string
+  domain: string
+  group:  string
+  icon:   React.ComponentType<{ className?: string }>
+  badge?: string
+}
+
+export function getSearchableNavItems(role: UserRole | undefined): SearchableNavItem[] {
+  const out: SearchableNavItem[] = []
+  const seen = new Set<string>()   // dedupe by route — first (most specific) wins
+  for (const domain of getVisibleDomains(role)) {
+    for (const group of domain.groups) {
+      for (const item of group.items) {
+        if (seen.has(item.route)) continue
+        seen.add(item.route)
+        out.push({
+          id:     item.id,
+          label:  item.label,
+          route:  item.route,
+          domain: domain.label,
+          group:  group.label,
+          icon:   item.icon,
+          badge:  item.badge,
+        })
+      }
+    }
+  }
+  return out
+}

@@ -26,6 +26,8 @@ import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import { ADMIN_NAV_ITEMS } from '@/config/navigation.config';
+import { getSearchableNavItems } from '@/components/layout/v2/nav-config';
+import { useAuthStore } from '@/stores/authStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -204,6 +206,20 @@ export function UniversalSearch({
   const navigate   = useNavigate();
   const inputRef   = useRef<HTMLInputElement>(null);
   const listRef    = useRef<HTMLDivElement>(null);
+  const role       = useAuthStore(s => s.profile?.role);
+
+  // Live nav index — sourced from the real sidebar (DOMAINS), so search always
+  // matches what's actually navigable. Keyword map (from ADMIN_NAV_ITEMS) adds
+  // fuzzy synonyms (e.g. "payslip" → Pay Slips) where routes overlap.
+  const navIndex = useMemo(() => getSearchableNavItems(role), [role]);
+  const kwByRoute = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const it of ADMIN_NAV_ITEMS) {
+      const kw = [...(it.keywords ?? []), it.description ?? ''].join(' ').toLowerCase();
+      if (kw.trim()) m.set(it.route, kw);
+    }
+    return m;
+  }, []);
 
   const [query,       setQuery]       = useState('');
   const [activeTab,   setActiveTab]   = useState<ActiveTab>('all');
@@ -235,25 +251,45 @@ export function UniversalSearch({
     }
   }, [open]);
 
-  // Navigation search (instant, synchronous)
+  // Navigation search (instant, synchronous) — tokenised + scored against the
+  // live nav index so all tokens must match, with sensible ranking.
   const searchNav = useCallback((q: string): SearchResult[] => {
-    const lower = q.toLowerCase();
-    return ADMIN_NAV_ITEMS.filter(
-      (item) =>
-        item.label.toLowerCase().includes(lower) ||
-        item.keywords?.some((k) => k.toLowerCase().includes(lower)) ||
-        item.description?.toLowerCase().includes(lower),
-    )
-      .slice(0, 6)
-      .map((item) => ({
-        id:       `nav-${item.id}`,
-        group:    'navigation' as const,
-        label:    item.label,
-        sublabel: item.description,
-        route:    item.route,
-        icon:     <item.icon className="h-4 w-4" />,
-      }));
-  }, []);
+    const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return [];
+    const phrase = tokens.join(' ');
+
+    const scored = navIndex.map((item) => {
+      const label = item.label.toLowerCase();
+      const kw    = kwByRoute.get(item.route) ?? '';
+      const hay   = `${label} ${item.group.toLowerCase()} ${item.domain.toLowerCase()} ${kw}`;
+      // every token must appear somewhere
+      if (!tokens.every((t) => hay.includes(t))) return { item, score: 0 };
+      let score = 1;
+      if (label === phrase)            score += 100;
+      else if (label.startsWith(phrase)) score += 50;
+      else if (label.includes(phrase)) score += 25;
+      for (const t of tokens) if (label.startsWith(t)) score += 6;
+      // prefer label/group hits over keyword-only hits
+      if (tokens.every((t) => label.includes(t))) score += 12;
+      return { item, score };
+    });
+
+    return scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map(({ item }) => {
+        const Icon = item.icon;
+        return {
+          id:       `nav-${item.id}`,
+          group:    'navigation' as const,
+          label:    item.label,
+          sublabel: `${item.domain} › ${item.group}`,
+          route:    item.route,
+          icon:     <Icon className="h-4 w-4" />,
+        };
+      });
+  }, [navIndex, kwByRoute]);
 
   // Debounced API search
   useEffect(() => {

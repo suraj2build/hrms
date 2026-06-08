@@ -8,7 +8,8 @@ import { useBasePath }         from '@/lib/routing'
 import { Button }              from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { getInitials }         from '@/lib/utils'
-import { CommandPaletteTrigger } from '@/components/operational/CommandPalette'
+import { useCommandPalette } from '@/components/operational/CommandPalette'
+import { SearchFab }         from '@/components/search/SearchFab'
 import { ThemeToggle }         from '@/components/theme-toggle'
 import { RoleSwitcher }        from './RoleSwitcher'
 import { NotificationBell }    from '@/components/notifications'
@@ -39,6 +40,7 @@ export function Topbar() {
   const navigate = useNavigate()
   const basePath = useBasePath()
   const toggleMobileNav = useUIStore(s => s.toggleMobileNav)
+  const { open: openSearch } = useCommandPalette()
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -59,8 +61,9 @@ export function Topbar() {
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Command palette trigger */}
-      <CommandPaletteTrigger className="flex-shrink-0" />
+      {/* Search moved to a floating launcher (bottom-right) — declutters the
+          header. ⌘K still opens it. */}
+      <SearchFab onClick={openSearch} />
 
       <div className="flex items-center gap-2 ml-auto">
         {/* Company name */}

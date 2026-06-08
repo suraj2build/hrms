@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Sun, Moon, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
+import { Sun, Moon, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark } from '@/components/brand/Logo'
@@ -50,8 +50,6 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const { resolvedTheme, setTheme } = useTheme()
   const dark = resolvedTheme === 'dark'
   function toggleTheme() { setTheme(dark ? 'light' : 'dark') }
-
-  function openSearch() { onSearchOpen?.() }
 
   // In Executive Mode show only the curated exec domain set; otherwise role-filtered full set.
   const activeDomain   = executiveMode
@@ -159,33 +157,9 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
       <div className="flex-1" />
 
       {/* ── Right actions ──────────────────────────────────────── */}
+      {/* Search moved to a floating launcher (bottom-right) to declutter the top
+          row — see SearchLauncher in AdminShellV2. ⌘K still toggles it. */}
       <div className="flex items-center gap-1.5 shrink-0 px-3 border-l border-border/60">
-
-        {/* Search bar — full pill on md+, icon-only on small screens */}
-        <button
-          type="button"
-          onClick={openSearch}
-          className="hidden md:flex items-center gap-2.5 lg:w-64 xl:w-80 w-48 pl-3 pr-2.5 py-1.5 rounded-lg border border-border bg-muted/40 hover:bg-muted/70 hover:border-border/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:bg-background transition-all text-muted-foreground group"
-          title="Search (⌘K)"
-        >
-          <Search className="h-3.5 w-3.5 shrink-0 group-hover:text-foreground transition-colors" />
-          <span className="flex-1 text-left text-[11.5px] font-medium truncate group-hover:text-foreground/70 transition-colors">
-            Search employees, pages, payroll…
-          </span>
-          <kbd className="shrink-0 hidden lg:inline-flex items-center gap-0.5 text-[10px] font-mono bg-background/80 border border-border/60 rounded px-1.5 py-0.5 text-muted-foreground/50">
-            ⌘K
-          </kbd>
-        </button>
-
-        {/* Icon-only on small screens */}
-        <button
-          type="button"
-          onClick={openSearch}
-          className="md:hidden p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-          title="Search (⌘K)"
-        >
-          <Search className="h-4 w-4" />
-        </button>
 
         {/* Tenant name */}
         {tenant?.name && (

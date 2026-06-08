@@ -28,6 +28,7 @@ import { PreviewBanner }          from '@/components/layout/PreviewBanner'
 import { TopNavV2 }          from './v2/TopNavV2'
 import { ContextualSidebar } from './v2/ContextualSidebar'
 import { UniversalSearch }            from '@/components/search/UniversalSearch'
+import { SearchFab }                  from '@/components/search/SearchFab'
 import { OperationalContextProvider } from '@/contexts/OperationalContext'
 import { PayrollDeadlineProvider }    from '@/contexts/PayrollDeadlineContext'
 
@@ -124,6 +125,7 @@ export function AdminShellV2() {
         </div>
 
         {/* ── Global floating overlays ──────────────────────────────── */}
+        <SearchFab onClick={() => setSearchOpen(true)} />
         <UniversalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       </div>
