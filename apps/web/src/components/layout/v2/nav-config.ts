@@ -487,8 +487,11 @@ export const DOMAINS: Domain[] = [
 
   // ── 7. Reports ────────────────────────────────────────────────────────────────
   //
-  // OUTPUTS ONLY: reports, exports, muster roll, salary sheets.
+  // OUTPUTS ONLY: reports, exports, salary sheets.
   // Workforce Cost + Payroll Ledger moved here from Payroll Analytics.
+  // Muster Roll is NOT listed here — it's an operational Attendance surface
+  // (/admin/attendance/muster), owned solely by the Attendance domain. The
+  // "All Reports" page still exposes muster as a report/export.
   //
   {
     id:           'reports',
@@ -504,7 +507,6 @@ export const DOMAINS: Domain[] = [
         label: 'Reports',
         items: [
           { id: 'reports-center',  label: 'All Reports',     route: '/admin/reports',                       icon: BarChart2  },
-          { id: 'muster-roll',     label: 'Muster Roll',     route: '/admin/attendance/muster',             icon: BookOpen   },
           { id: 'workforce-cost',  label: 'Cost Intelligence', route: '/admin/payroll/cost-intelligence',     icon: BarChart3  },
           { id: 'payroll-ledger',  label: 'Payroll Ledger',  route: '/admin/payroll/ledger',                icon: BookOpen   },
         ],
