@@ -30,8 +30,9 @@
  *  /admin/payroll/compensation   → Setup       (28 > /admin/payroll 14)
  *  /admin/payroll/simulation     → Setup       (26 > /admin/payroll 14)
  *  /admin/attendance/policy      → Setup       (24 > /admin/attendance 16)
- *  /admin/attendance/periods     → Setup       (25 > /admin/attendance 16)
  *  /admin/attendance/groups      → Setup       (24 > /admin/attendance 16)
+ *  (note: /admin/attendance/periods stays in Attendance — Period Lock/Close
+ *   is an operational action, owned by the Attendance domain only.)
  *  /admin/masters/rosters         → Setup       (broad /admin/masters prefix)
  *  /admin/leave-types            → Setup       (18 > /admin/leave 12)
  *  /admin/leave-policy           → Setup       (19 > /admin/leave 12)
@@ -247,7 +248,7 @@ export const DOMAINS: Domain[] = [
   // REMOVED (moved to Setup › Workforce Rules):
   //   Shift Master     (/admin/shift-master)
   //   Attendance Policy(/admin/attendance/policy)
-  //   Pay Periods      (/admin/attendance/periods)
+  // Periods (Lock/Close) stays HERE — operational period lock/close, single home.
   //
   {
     id:           'attendance',
@@ -638,7 +639,6 @@ export const DOMAINS: Domain[] = [
   //   /admin/masters/*               (all master data — broad ownership)
   //   /admin/shift-master            (longer than /admin/attendance)
   //   /admin/attendance/policy       (longer than /admin/attendance)
-  //   /admin/attendance/periods      (longer than /admin/attendance)
   //   /admin/attendance/groups       (longer than /admin/attendance)
 
   //   /admin/leave-types             (longer than /admin/leave)
@@ -662,7 +662,6 @@ export const DOMAINS: Domain[] = [
       // Attendance config overrides (longer than /admin/attendance)
       '/admin/shift-master',
       '/admin/attendance/policy',
-      '/admin/attendance/periods',
       '/admin/attendance/groups',
       // Leave config overrides (longer than /admin/leave)
       '/admin/leave-types',
@@ -734,7 +733,6 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'comp-setup',      label: 'Compensation Setup',  route: '/admin/payroll/setup',             icon: Layers        },
           { id: 'payroll-grps',    label: 'Payroll Groups',      route: '/admin/masters/payroll-groups',    icon: DollarSign    },
-          { id: 'pay-cycles',      label: 'Attendance Periods',  route: '/admin/attendance/periods',        icon: CalendarClock },
           { id: 'payroll-cal',     label: 'Payroll Calendar',    route: '/admin/payroll-readiness',         icon: CalendarDays  },
           { id: 'simulation',      label: 'Simulation',          route: '/admin/payroll/simulation',        icon: FlaskConical  },
         ],
@@ -872,7 +870,6 @@ export function getExecutiveDomainForPath(pathname: string): Domain | null {
  *   /admin/payroll/compensation       → Setup       (28 chars > Payroll 14)
  *   /admin/payroll/simulation         → Setup       (26 chars > Payroll 14)
  *   /admin/attendance/policy          → Setup       (24 chars > Attendance 16)
- *   /admin/attendance/periods         → Setup       (25 chars > Attendance 16)
  *   /admin/leave-types                → Setup       (18 chars > Leave 12)
  *   /admin/leave-policy               → Setup       (19 chars > Leave 12)
  *   /admin/masters/grades             → Setup       (broad /admin/masters prefix)
