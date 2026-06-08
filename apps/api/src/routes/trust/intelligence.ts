@@ -9,6 +9,8 @@ import { workforceGraphService }       from '../../platform/trust/graph/workforc
 import { regulatoryIngestionService }  from '../../platform/regulatory/ingestion/regulatory-ingestion.service.js'
 import { verificationOrchestrator }    from '../../platform/trust/orchestrator/verification-orchestrator.service.js'
 import { verificationRetryService }    from '../../platform/integrations/retry/verification-retry.service.js'
+import { aadhaarVerificationService }  from '../../platform/trust/verification/aadhaar/aadhaar-verification.service.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function trustIntelligenceRoutes(fastify: FastifyInstance) {
   /**
@@ -235,6 +237,56 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
     return { status: 'retry_scheduled', employee_id: employeeId }
   })
+
+  /**
+   * POST /trust/verifications/aadhaar/:employeeId  (HR admin)
+   * Phase 1 Aadhaar verification — format + Verhoeff checksum + recorded consent.
+   * Online e-KYC against UIDAI is Phase 2 (provider-gated). Requires explicit
+   * consent (Aadhaar Act §8 / DPDP Act). The raw number is used transiently and
+   * never stored by this layer — only a masked record lands in verification_records.
+   * Body: { consent: boolean, aadhaar?: string }  (falls back to the number on file)
+   */
+  fastify.post(
+    '/trust/verifications/aadhaar/:employeeId',
+    { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] },
+    async (req, reply) => {
+      const { employeeId } = req.params as { employeeId: string }
+      const body = (req.body ?? {}) as { consent?: boolean; aadhaar?: string }
+      const tenantId = (req as any).user.tenant_id
+
+      if (body.consent !== true) {
+        return reply.status(400).send({ error: 'CONSENT_REQUIRED', message: 'Explicit consent is required to verify Aadhaar.' })
+      }
+
+      // Prefer a number supplied in the request; otherwise use the one on file.
+      let aadhaar = (body.aadhaar ?? '').trim()
+      if (!aadhaar) {
+        const { data: bs } = await fastify.supabase
+          .from('employee_bank_statutory')
+          .select('aadhaar_number')
+          .eq('employee_id', employeeId)
+          .eq('tenant_id', tenantId)
+          .maybeSingle()
+        aadhaar = (bs as any)?.aadhaar_number ?? ''
+      }
+      if (!aadhaar) {
+        return reply.status(400).send({ error: 'NO_AADHAAR', message: 'No Aadhaar number on file for this employee.' })
+      }
+
+      // Awaited so the verification_records row is persisted before we respond.
+      await verificationOrchestrator.verify({
+        supabase:        fastify.supabase,
+        employee_id:     employeeId,
+        tenant_id:       tenantId,
+        aadhaar,
+        aadhaar_consent: true,
+      })
+
+      // PII-safe echo of the outcome (mask only).
+      const v = aadhaarVerificationService.validateStructure(aadhaar)
+      return { status: v.isValid ? 'verified' : 'failed', masked: v.masked, employee_id: employeeId }
+    },
+  )
 
   /**
    * GET /trust/verifications/stats
