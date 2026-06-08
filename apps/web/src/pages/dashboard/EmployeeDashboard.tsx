@@ -112,7 +112,7 @@ function LinkBtn({ children, onClick }: { children: ReactNode; onClick: () => vo
   return (
     <button
       onClick={onClick}
-      style={{ color: '#4338ca', fontSize: 12.5, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0 }}
+      style={{ color: 'var(--primary)', fontSize: 12.5, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0 }}
     >
       {children}
     </button>
@@ -240,10 +240,10 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
       {/* Avatar */}
       <div style={{
         width: 44, height: 44, borderRadius: 11, flexShrink: 0, position: 'relative',
-        background: 'radial-gradient(circle at 30% 25%,#d2d8ff 0%,transparent 55%),linear-gradient(135deg,#4338ca,#8b5cf6 70%,#0ea5e9)',
+        background: 'radial-gradient(circle at 30% 25%,#cfe0f4 0%,transparent 55%),linear-gradient(135deg,var(--primary),var(--info) 75%,#3b82c4)',
         color: '#fff', display: 'grid', placeItems: 'center',
         fontSize: 15, fontWeight: 700, letterSpacing: '-.01em',
-        boxShadow: '0 6px 14px -8px rgba(67,56,202,.55)',
+        boxShadow: '0 6px 14px -8px rgba(26,77,143,.55)',
       }}>
         {initials}
         <span style={{
@@ -493,29 +493,38 @@ function CompStructure({
           <CardLabel>Compensation Structure</CardLabel>
           {effectiveFrom && <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)' }}>Revised {effectiveFrom}</span>}
         </div>
-        <LinkBtn onClick={() => navigate('/ess/compensation?tab=compensation')}>
+        <LinkBtn onClick={() => navigate('/ess/compensation')}>
           Details <ChevronRight style={{ width: 12, height: 12 }} />
         </LinkBtn>
       </div>
 
       <div style={{ padding: '12px 16px' }}>
-        {/* CTC summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 8, marginBottom: 14 }}>
+        {/* CTC summary — navy primary / success hierarchy, balanced tiles */}
+        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: 10, marginBottom: 14 }}>
           {[
-            { k: 'Annual CTC',   v: fmtINR(comp?.ctc_annual),  accent: true },
-            { k: 'Monthly CTC',  v: fmtINR(comp?.ctc_monthly)               },
-            { k: 'Net Take-Home',v: latestSlip ? fmtINR(latestSlip.net_pay) : '—' },
-          ].map(m => (
-            <div key={m.k} style={{
-              borderRadius: 8, border: '1px solid var(--border)', padding: '8px 10px',
-              background: m.accent ? 'linear-gradient(135deg,#eef0ff,#f8f9ff)' : 'var(--card)',
-            }}>
-              <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase' as const, letterSpacing: '.12em' }}>{m.k}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: m.accent ? '#4338ca' : 'var(--foreground)', marginTop: 3, ...MONO }}>
-                {m.v}
+            { k: 'Annual CTC',    v: fmtINR(comp?.ctc_annual),  tone: 'primary' as const },
+            { k: 'Monthly CTC',   v: fmtINR(comp?.ctc_monthly), tone: 'neutral' as const },
+            { k: 'Net Take-Home', v: latestSlip ? fmtINR(latestSlip.net_pay) : '—', tone: 'success' as const },
+          ].map(m => {
+            const tinted = m.tone !== 'neutral'
+            const accent = m.tone === 'success' ? 'var(--success)' : 'var(--primary)'
+            return (
+              <div key={m.k} style={{
+                borderRadius: 10, border: '1px solid var(--border)',
+                borderTop: `2px solid ${tinted ? accent : 'var(--border)'}`,
+                padding: '10px 12px',
+                background: tinted
+                  ? `color-mix(in srgb, ${accent} 6%, var(--card))`
+                  : 'var(--card)',
+                display: 'flex', flexDirection: 'column', gap: 4,
+              }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted-foreground)', textTransform: 'uppercase' as const, letterSpacing: '.12em' }}>{m.k}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: tinted ? accent : 'var(--foreground)', ...MONO }}>
+                  {m.v}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Earnings bars */}
@@ -533,7 +542,7 @@ function CompStructure({
                   <div style={{ flex: 1, height: 5, borderRadius: 999, background: 'var(--muted)', overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 999,
-                      background: 'linear-gradient(90deg,#6366f1,#8b5cf6)',
+                      background: 'linear-gradient(90deg, var(--primary), var(--info))',
                       width: `${Math.max(4, Math.round((c.computed_monthly / maxEarning) * 100))}%`,
                       transition: 'width .3s ease',
                     }} />
@@ -561,7 +570,7 @@ function CompStructure({
                   background: 'var(--card)', padding: '3px 8px',
                 }}>
                   <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{c.name}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#f43f5e', ...MONO }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--destructive)', ...MONO }}>
                     {fmtINR(c.computed_monthly)}
                   </span>
                 </div>
@@ -744,7 +753,7 @@ function LeaveUsage({ balances, navigate }: { balances: LeaveBalance[]; navigate
                 height: '100%', borderRadius: 999,
                 background: item.pctUsed > 70
                   ? 'linear-gradient(90deg,#f59e0b,#f43f5e)'
-                  : 'linear-gradient(90deg,#6366f1,#8b5cf6)',
+                  : 'linear-gradient(90deg, var(--primary), var(--info))',
                 width: `${Math.max(0, item.pctUsed)}%`,
                 transition: 'width .3s ease',
               }} />
@@ -811,10 +820,10 @@ function Upcoming({ holidays, navigate }: { holidays: Holiday[]; navigate: (to: 
             }}>
               <div style={{
                 width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                background: 'linear-gradient(135deg,#eef0ff,#e8e9ff)',
+                background: 'color-mix(in srgb, var(--primary) 10%, var(--card))',
                 display: 'grid', placeItems: 'center',
               }}>
-                <Calendar style={{ width: 12, height: 12, color: '#4338ca' }} />
+                <Calendar style={{ width: 12, height: 12, color: 'var(--primary)' }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
@@ -863,7 +872,7 @@ const TONE: Record<string, { bg: string; color: string }> = {
   sk: { bg: '#e3f3fc', color: '#0ea5e9' },
   vl: { bg: '#efeafe', color: '#8b5cf6' },
   rs: { bg: '#ffe7eb', color: '#f43f5e' },
-  '': { bg: '#eef0ff', color: '#4338ca' },
+  '': { bg: '#e9f0f8', color: '#1A4D8F' },
 }
 
 function QuickActionsBar({ navigate, basePath }: { navigate: (to: string) => void; basePath: string }) {
