@@ -70,36 +70,56 @@ function downloadCSV(filename: string, rows: string[][]) {
 
 // ── Column card wrapper ────────────────────────────────────────────────────────
 
+type Tone = 'neutral' | 'destructive' | 'success' | 'info'
+
+const TONE_CLS: Record<Tone, { head: string; icon: string; badge: string }> = {
+  neutral:     { head: 'bg-muted/40',     icon: 'text-muted-foreground', badge: 'bg-background/70 text-foreground' },
+  destructive: { head: 'bg-destructive/[0.06]', icon: 'text-destructive', badge: 'bg-destructive/10 text-destructive' },
+  success:     { head: 'bg-success/[0.06]', icon: 'text-success',   badge: 'bg-success/10 text-success' },
+  info:        { head: 'bg-info/[0.06]',    icon: 'text-info',      badge: 'bg-info/10 text-info' },
+}
+
 function Column({
-  title, count, accent, icon: Icon, onDownload, children,
+  title, count, tone, icon: Icon, onDownload, children,
 }: {
   title:      string
   count:      number
-  accent:     string
+  tone:       Tone
   icon:       React.ComponentType<{ className?: string }>
   onDownload: () => void
   children:   React.ReactNode
 }) {
+  const t = TONE_CLS[tone]
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-card overflow-hidden min-h-0">
+    <div className="flex flex-col rounded-xl border border-border bg-card overflow-hidden shadow-elev-1 h-[60vh] min-h-[360px] max-h-[680px]">
       {/* Header */}
-      <div className={cn('flex items-center justify-between px-4 py-3 border-b border-border', accent)}>
+      <div className={cn('flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0', t.head)}>
         <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4" />
-          <span className="text-sm font-semibold">{title}</span>
-          <span className="text-xs font-bold tabular-nums bg-background/60 rounded-full px-2 py-0.5">
+          <Icon className={cn('h-4 w-4', t.icon)} />
+          <span className="text-sm font-semibold text-foreground">{title}</span>
+          <span className={cn('text-xs font-bold tabular-nums rounded-full px-2 py-0.5', t.badge)}>
             {count}
           </span>
         </div>
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-60 hover:opacity-100" onClick={onDownload}>
+        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-50 hover:opacity-100" onClick={onDownload}>
           <Download className="h-3.5 w-3.5" />
         </Button>
       </div>
 
       {/* Rows */}
-      <div className="flex-1 overflow-y-auto divide-y divide-border/60">
+      <div className="flex-1 overflow-y-auto divide-y divide-border/60 min-h-0">
         {children}
       </div>
+    </div>
+  )
+}
+
+// Centered empty-state filler for a column body
+function ColumnEmpty({ icon: Icon, text }: { icon: React.ComponentType<{ className?: string }>; text: string }) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-2 px-4 text-center">
+      <Icon className="h-7 w-7 text-muted-foreground/30" />
+      <p className="text-xs text-muted-foreground">{text}</p>
     </div>
   )
 }
@@ -214,7 +234,7 @@ export function WhoIsIn() {
   // ── Main render ───────────────────────────────────────────────────────────────
 
   return (
-    <PageContainer className="flex flex-col gap-4 h-full">
+    <PageContainer spacing="tight">
       <PageHeader
         title="Who Is In"
         subtitle="Real-time attendance status board"
@@ -263,17 +283,17 @@ export function WhoIsIn() {
               Employees Information for &nbsp;<span className="text-foreground">{fmtDate(date)}</span>
             </p>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border">
+          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border">
             {[
               { label: 'Not Yet In',    count: summary.not_yet_in.count,    pct: summary.not_yet_in.pct,    color: 'text-muted-foreground' },
               { label: 'Late In',       count: summary.late_arrivals.count,  pct: summary.late_arrivals.pct,  color: 'text-destructive'       },
-              { label: 'On-Time',       count: summary.on_time.count,        pct: summary.on_time.pct,        color: 'text-green-600'          },
-              { label: 'Out of Office', count: summary.out_of_office.count,  pct: summary.out_of_office.pct,  color: 'text-blue-600'           },
+              { label: 'On-Time',       count: summary.on_time.count,        pct: summary.on_time.pct,        color: 'text-success'           },
+              { label: 'Out of Office', count: summary.out_of_office.count,  pct: summary.out_of_office.pct,  color: 'text-info'              },
             ].map(({ label, count, pct, color }) => (
-              <div key={label} className="px-4 py-3 text-center">
-                <p className={cn('font-display text-xl font-bold tabular-nums', color)}>{(pct ?? 0).toFixed(2)}%</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {count} Employee{count !== 1 ? '(s)' : ''} Are {label}
+              <div key={label} className="px-4 py-3.5 text-center">
+                <p className={cn('font-display text-2xl font-bold tabular-nums', color)}>{(pct ?? 0).toFixed(1)}%</p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  <span className="font-semibold text-foreground">{count}</span> {label.toLowerCase()}
                 </p>
               </div>
             ))}
@@ -282,18 +302,18 @@ export function WhoIsIn() {
       )}
 
       {/* ── Four columns ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-1 min-h-0" style={{ minHeight: '400px' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 
         {/* Not Yet In */}
         <Column
           title="Not Yet In"
           count={notYetIn.length}
-          accent="bg-muted/40"
+          tone="neutral"
           icon={UserX}
           onDownload={dlNotYetIn}
         >
           {notYetIn.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">All employees accounted for</p>
+            <ColumnEmpty icon={UserCheck} text="All employees accounted for" />
           ) : (
             notYetIn.map(e => (
               <EmpRow key={e.employee_id} name={e.name} code={e.employee_code} right={
@@ -311,12 +331,12 @@ export function WhoIsIn() {
         <Column
           title="Late Arrivals"
           count={lateArrivals.length}
-          accent="bg-destructive/5"
+          tone="destructive"
           icon={AlertCircle}
           onDownload={dlLate}
         >
           {lateArrivals.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">No late arrivals</p>
+            <ColumnEmpty icon={AlertCircle} text="No late arrivals" />
           ) : (
             lateArrivals.map(e => (
               <EmpRow key={e.employee_id} name={e.name} code={e.employee_code} right={
@@ -333,18 +353,18 @@ export function WhoIsIn() {
         <Column
           title="On Time"
           count={onTime.length}
-          accent="bg-green-500/5"
+          tone="success"
           icon={UserCheck}
           onDownload={dlOnTime}
         >
           {onTime.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">No on-time arrivals yet</p>
+            <ColumnEmpty icon={UserCheck} text="No on-time arrivals yet" />
           ) : (
             onTime.map(e => (
               <EmpRow key={e.employee_id} name={e.name} code={e.employee_code} right={
                 <div className="text-right">
                   {e.early_minutes > 0 && (
-                    <p className="text-xs font-semibold text-green-600">{e.early_by}</p>
+                    <p className="text-xs font-semibold text-success">{e.early_by}</p>
                   )}
                   <p className="text-[10px] text-muted-foreground font-mono">{e.check_in}</p>
                 </div>
@@ -357,7 +377,7 @@ export function WhoIsIn() {
         <Column
           title="Out of Office"
           count={outOfOfficeEmps.length}
-          accent="bg-blue-500/5"
+          tone="info"
           icon={Plane}
           onDownload={dlOoo}
         >
@@ -379,14 +399,17 @@ export function WhoIsIn() {
           )}
 
           {outOfOfficeEmps.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">No one out of office</p>
+            <div className="flex flex-col items-center justify-center gap-2 py-12 px-4 text-center">
+              <Plane className="h-7 w-7 text-muted-foreground/30" />
+              <p className="text-xs text-muted-foreground">No one out of office</p>
+            </div>
           ) : (
             outOfOfficeEmps.map(e => (
               <EmpRow key={e.employee_id} name={e.name} code={e.employee_code} right={
                 <div className="text-right flex flex-col items-end gap-1">
                   <p className="text-xs text-muted-foreground">{e.days} Day{e.days !== 1 ? 's' : ''}</p>
                   {e.applied && (
-                    <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-blue-400/40 text-blue-600 bg-blue-500/5">
+                    <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-info/40 text-info bg-info/5">
                       Applied
                     </Badge>
                   )}
