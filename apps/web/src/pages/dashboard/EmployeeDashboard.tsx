@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore }  from '@/stores/authStore'
 import { api }           from '@/lib/api/client'
+import { SignedImage }   from '@/components/SignedImage'
 import type { Employee } from '@/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -29,6 +30,24 @@ const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type DayStatus = 'present' | 'absent' | 'late' | 'leave' | 'holiday' | 'off' | 'future'
+
+// Enriched identity from /employees/:id/full-profile
+interface DashFullProfile {
+  employee: {
+    first_name:    string
+    last_name:     string
+    employee_code: string
+    joining_date:  string | null
+  }
+  personal_info: { profile_photo: string | null } | null
+  job_info: {
+    departments:    { name: string } | null
+    designations:   { name: string } | null
+    grades:         { name: string } | null
+    work_locations: { name: string; city: string } | null
+    manager:        { first_name: string; last_name: string } | null
+  } | null
+}
 
 interface DayData {
   day: number; date: Date; dow: number
@@ -216,17 +235,25 @@ function buildMonthData(
 
 // ── 1. ProfileBar ─────────────────────────────────────────────────────────────
 
-function ProfileBar({ emp }: { emp: Employee | null }) {
+function ProfileBar({ emp, profile: fp }: { emp: Employee | null; profile?: DashFullProfile }) {
   const { profile } = useAuthStore()
-  const name     = emp ? `${emp.first_name} ${emp.last_name}` : (profile?.full_name ?? 'Employee')
+  const pEmp = fp?.employee
+  const job  = fp?.job_info
+
+  const name     = pEmp ? `${pEmp.first_name} ${pEmp.last_name}`
+                 : emp ? `${emp.first_name} ${emp.last_name}`
+                 : (profile?.full_name ?? 'Employee')
   const initials = name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2)
-  const dept     = (emp as any)?.department?.name ?? (emp as any)?.departments?.name ?? '—'
-  const grade    = (emp as any)?.grade?.name      ?? (emp as any)?.grades?.name      ?? null
-  const manager  = emp?.manager ? `${emp.manager.first_name} ${emp.manager.last_name}` : '—'
-  const location = (emp as any)?.work_location?.name ?? (emp as any)?.work_locations?.name ?? '—'
-  const empCode  = emp?.employee_code ?? '—'
-  const tenure   = calcTenure((emp as any)?.joining_date)
-  const joiningDate = (emp as any)?.joining_date
+  const photo    = fp?.personal_info?.profile_photo ?? null
+  const designation = job?.designations?.name ?? null
+  const dept     = job?.departments?.name ?? (emp as any)?.department?.name ?? '—'
+  const grade    = job?.grades?.name ?? null
+  const manager  = job?.manager ? `${job.manager.first_name} ${job.manager.last_name}`
+                 : emp?.manager ? `${emp.manager.first_name} ${emp.manager.last_name}` : '—'
+  const location = job?.work_locations?.name ?? (emp as any)?.work_location?.name ?? '—'
+  const empCode  = pEmp?.employee_code ?? emp?.employee_code ?? '—'
+  const joiningDate = pEmp?.joining_date ?? (emp as any)?.joining_date
+  const tenure   = calcTenure(joiningDate)
   const joinedStr   = (() => {
     if (!joiningDate) return null
     const d = new Date(joiningDate.length === 10 ? joiningDate + 'T12:00:00Z' : joiningDate)
@@ -235,44 +262,59 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
     return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
   })()
 
+  const AVATAR = 60
   return (
-    <section style={{ ...CARD, display: 'flex', alignItems: 'center', gap: 14, padding: '10px 20px' }}>
-      {/* Avatar */}
-      <div style={{
-        width: 44, height: 44, borderRadius: 11, flexShrink: 0, position: 'relative',
-        background: 'radial-gradient(circle at 30% 25%,#cfe0f4 0%,transparent 55%),linear-gradient(135deg,var(--primary),var(--info) 75%,#3b82c4)',
-        color: '#fff', display: 'grid', placeItems: 'center',
-        fontSize: 15, fontWeight: 700, letterSpacing: '-.01em',
-        boxShadow: '0 6px 14px -8px rgba(26,77,143,.55)',
-      }}>
-        {initials}
+    <section style={{ ...CARD, display: 'flex', alignItems: 'center', gap: 18, padding: '16px 22px' }}>
+      {/* Avatar — master photo, initials fallback */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <div style={{
+          width: AVATAR, height: AVATAR, borderRadius: 16, overflow: 'hidden',
+          background: 'radial-gradient(circle at 30% 25%,#cfe0f4 0%,transparent 55%),linear-gradient(135deg,var(--primary),var(--info) 75%,#3b82c4)',
+          color: '#fff', display: 'grid', placeItems: 'center',
+          fontSize: 22, fontWeight: 800, letterSpacing: '-.02em',
+          boxShadow: '0 10px 22px -10px rgba(26,77,143,.6)',
+          outline: '3px solid var(--card)',
+        }}>
+          <SignedImage
+            path={photo}
+            alt={name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            fallback={<span>{initials}</span>}
+          />
+        </div>
         <span style={{
-          position: 'absolute', right: -3, bottom: -3,
-          width: 14, height: 14, borderRadius: '50%',
-          background: '#10b981', border: '2px solid #fff',
+          position: 'absolute', right: -2, bottom: -2,
+          width: 18, height: 18, borderRadius: '50%',
+          background: 'var(--success)', border: '3px solid var(--card)',
           display: 'grid', placeItems: 'center',
         }}>
-          <Check style={{ width: 7, height: 7, strokeWidth: 3, color: '#fff' }} />
+          <Check style={{ width: 9, height: 9, strokeWidth: 3.5, color: '#fff' }} />
         </span>
       </div>
 
       {/* Name + meta */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.015em' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' as const }}>
+          <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1.1 }}>
             {name}
           </span>
           {grade && (
             <span style={{
               fontSize: 9.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase' as const,
-              background: '#ecfbf3', color: '#0a6d4a', border: '1px solid #cdebd9',
-              padding: '1px 7px', borderRadius: 999,
+              background: 'color-mix(in srgb, var(--success) 12%, var(--card))', color: 'var(--success)',
+              border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)',
+              padding: '2px 8px', borderRadius: 999,
             }}>
               {grade}
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '2px 16px' }}>
+        {designation && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', letterSpacing: '-.005em' }}>
+            {designation}
+          </span>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '2px 18px', marginTop: 1 }}>
           {[
             { k: 'ID', v: empCode, mono: true },
             { k: 'Dept', v: dept },
@@ -281,7 +323,7 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
           ].map(f => (
             <span key={f.k} style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>
               <span style={{ fontWeight: 600, color: 'var(--muted-foreground)', marginRight: 3 }}>{f.k}</span>
-              <span style={{ color: '#2b2d44', fontWeight: 500, ...(f.mono ? MONO : {}) }}>
+              <span style={{ color: 'var(--foreground)', fontWeight: 600, ...(f.mono ? MONO : {}) }}>
                 {f.v}
               </span>
             </span>
@@ -293,14 +335,14 @@ function ProfileBar({ emp }: { emp: Employee | null }) {
 
       {/* Tenure */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
-        <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase' as const, color: 'var(--muted-foreground)' }}>
+        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase' as const, color: 'var(--muted-foreground)' }}>
           Tenure
         </span>
-        <span style={{ fontSize: 19, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1.15, ...MONO }}>
+        <span style={{ fontSize: 24, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1.1, ...MONO }}>
           {tenure}
         </span>
         {joinedStr && (
-          <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 1 }}>Joined {joinedStr}</span>
+          <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 2 }}>Joined {joinedStr}</span>
         )}
       </div>
     </section>
@@ -942,6 +984,15 @@ export function EmployeeDashboard() {
     staleTime: 5 * 60_000,
   })
 
+  // Enriched identity — profile photo + designation/department/manager/location
+  // (the lean /employees/:id omits these; the master view carries them).
+  const { data: fullProfile } = useQuery<DashFullProfile>({
+    queryKey:  ['ess-dash-full-profile', employeeId],
+    queryFn:   () => api.get(`/employees/${employeeId}/full-profile`),
+    enabled:   !!employeeId,
+    staleTime: 5 * 60_000,
+  })
+
   const monthStart = `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-01`
   const monthEnd   = (() => {
     const d = new Date(cursor.y, cursor.m + 1, 0)
@@ -1028,7 +1079,7 @@ export function EmployeeDashboard() {
   return (
     <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-5" style={{ background: 'var(--muted)', minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* 1. Profile bar */}
-      <ProfileBar emp={emp} />
+      <ProfileBar emp={emp} profile={fullProfile} />
 
       {/* 2. KPI row */}
       <div style={{ display: 'flex', gap: 12 }}>
