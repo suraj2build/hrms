@@ -1,4 +1,4 @@
-type VerificationType = 'pan' | 'bank_account'
+type VerificationType = 'pan' | 'bank_account' | 'aadhaar'
 
 interface RetryEntry {
   employee_id:       string

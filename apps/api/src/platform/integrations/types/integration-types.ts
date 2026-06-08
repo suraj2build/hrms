@@ -7,6 +7,7 @@ export type IntegrationProvider =
   | 'decentro_pan'      // fallback PAN provider
   | 'signzy_pan'        // fallback PAN provider
   | 'penny_drop'        // optional bank account penny-drop
+  | 'aadhaar_okyc'      // Aadhaar Offline e-KYC / licensed AUA aggregator (Phase 2)
 
 export type IntegrationStatus = 'active' | 'degraded' | 'not_configured' | 'error'
 

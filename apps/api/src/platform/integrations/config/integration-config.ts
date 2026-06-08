@@ -86,6 +86,18 @@ export function getIntegrationConfig(provider: IntegrationProvider): Integration
         timeout_ms: 10_000,
       }
     }
+
+    case 'aadhaar_okyc': {
+      // Phase 2: a licensed AUA aggregator / Offline e-KYC provider. Disabled
+      // until creds are supplied — Phase 1 runs purely on local validation.
+      const api_key = process.env['AADHAAR_OKYC_API_KEY']
+      return {
+        provider, enabled: !!api_key,
+        api_key,
+        base_url: process.env['AADHAAR_OKYC_BASE_URL'] ?? '',
+        timeout_ms,
+      }
+    }
   }
 }
 

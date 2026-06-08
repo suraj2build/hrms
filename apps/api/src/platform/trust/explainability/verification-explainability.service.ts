@@ -1,6 +1,7 @@
 import type { IntegrationAdapterResult } from '../../integrations/types/integration-types.js'
 import type { PanVerificationData }       from '../../integrations/adapters/pan-verification.adapter.js'
 import type { BankVerificationData }      from '../../integrations/adapters/bank-verification.adapter.js'
+import type { AadhaarVerificationData }   from '../../integrations/adapters/aadhaar-verification.adapter.js'
 import type { VerificationStatus }        from '../types/trust-types.js'
 
 function cap(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1) }
@@ -37,6 +38,26 @@ export class VerificationExplainabilityService {
     if (result.data.penny_drop_status === 'not_attempted') parts.push('Account ownership verification not enabled.')
     if (result.data.penny_drop_status === 'pending') parts.push('Penny drop verification in progress.')
     return parts.join(' ')
+  }
+
+  aadhaar(result: IntegrationAdapterResult<AadhaarVerificationData>, consent = true): string {
+    if (!consent) {
+      return 'Aadhaar verification needs the employee’s explicit consent before it can run.'
+    }
+    if (result.status === 'active' && result.data?.is_valid) {
+      const parts = [`Aadhaar verified (${result.data.masked}).`]
+      if (result.data.name_match_confidence) parts.push(`Name confidence: ${cap(result.data.name_match_confidence)}.`)
+      return parts.join(' ')
+    }
+    if (result.status === 'error' || result.status === 'degraded') {
+      return 'Aadhaar verification degraded due to provider issue. Operations may continue. Retry scheduled automatically.'
+    }
+    if (result.status === 'not_configured') {
+      if (!result.data?.format_ok)   return 'Aadhaar number format is invalid (must be 12 digits, not starting with 0 or 1).'
+      if (!result.data?.checksum_ok) return 'Aadhaar number failed the checksum test — please re-enter the number.'
+      return `Aadhaar format & checksum valid (${result.data.masked}). Online e-KYC not configured — add a provider to confirm against UIDAI.`
+    }
+    return 'Aadhaar verification returned an inconclusive result. Manual review recommended.'
   }
 
   stateNarrative(status: VerificationStatus): string {

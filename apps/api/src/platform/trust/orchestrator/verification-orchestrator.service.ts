@@ -1,12 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { panVerificationAdapter }            from '../../integrations/adapters/pan-verification.adapter.js'
 import { bankVerificationAdapter }           from '../../integrations/adapters/bank-verification.adapter.js'
+import { aadhaarVerificationAdapter }        from '../../integrations/adapters/aadhaar-verification.adapter.js'
 import { verificationRetryService }          from '../../integrations/retry/verification-retry.service.js'
 import { verificationExplainabilityService } from '../explainability/verification-explainability.service.js'
 import type { VerificationStatus }           from '../types/trust-types.js'
 import type { IntegrationAdapterResult }     from '../../integrations/types/integration-types.js'
 import type { PanVerificationData }          from '../../integrations/adapters/pan-verification.adapter.js'
 import type { BankVerificationData }         from '../../integrations/adapters/bank-verification.adapter.js'
+import type { AadhaarVerificationData }      from '../../integrations/adapters/aadhaar-verification.adapter.js'
 
 export interface VerifyEmployeeParams {
   supabase:        SupabaseClient
@@ -15,6 +17,8 @@ export interface VerifyEmployeeParams {
   pan?:            string
   account_number?: string
   ifsc_code?:      string
+  aadhaar?:        string
+  aadhaar_consent?: boolean
 }
 
 export class VerificationOrchestrator {
@@ -25,6 +29,8 @@ export class VerificationOrchestrator {
     const jobs: Promise<void>[] = []
     if (params.pan) jobs.push(this.verifyPan(params))
     if (params.account_number && params.ifsc_code) jobs.push(this.verifyBank(params))
+    // Aadhaar runs only with explicit consent (Aadhaar Act §8 / DPDP Act).
+    if (params.aadhaar && params.aadhaar_consent) jobs.push(this.verifyAadhaar(params))
     await Promise.allSettled(jobs)
   }
 
@@ -119,6 +125,39 @@ export class VerificationOrchestrator {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn('[VerificationOrchestrator] Bank verify error (silent):', msg)
+    }
+  }
+
+  private async verifyAadhaar(params: VerifyEmployeeParams): Promise<void> {
+    try {
+      const result: IntegrationAdapterResult<AadhaarVerificationData> =
+        await aadhaarVerificationAdapter.verify(params.aadhaar!)
+
+      const status      = this.adapterToVerificationStatus(result.status, result.data?.is_valid ?? false)
+      const explanation = verificationExplainabilityService.aadhaar(result, params.aadhaar_consent ?? false)
+
+      await this.upsert(params.supabase, {
+        employee_id:        params.employee_id,
+        tenant_id:          params.tenant_id,
+        verification_type:  'aadhaar',
+        status,
+        provider:           result.provider,
+        source:             result.source,
+        score:              result.data?.is_valid ? 85 : 15,
+        provider_reference: result.data?.provider_reference ?? null,
+        explanation,
+        last_error:         result.error ?? null,
+        verified_at:        new Date().toISOString(),
+      })
+
+      if (status === 'degraded') {
+        verificationRetryService.enqueue(params.employee_id, 'aadhaar', result.error ?? 'provider unavailable')
+      } else {
+        verificationRetryService.dequeue(params.employee_id, 'aadhaar')
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn('[VerificationOrchestrator] Aadhaar verify error (silent):', msg)
     }
   }
 }
