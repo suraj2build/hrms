@@ -243,6 +243,40 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     return reply.send({ data: data ?? [] })
   })
 
+  // ── POST /payroll/loans/:id/pause-emi ────────────────────────────────────────
+  fastify.post('/:id/pause-emi', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const schema = z.object({ pause_reason: z.string().min(1) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { error } = await fastify.supabase
+      .from('employee_loans')
+      .update({ is_emi_paused: true, pause_reason: parsed.data.pause_reason, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'EMI paused' })
+  })
+
+  // ── POST /payroll/loans/:id/resume-emi ────────────────────────────────────────
+  fastify.post('/:id/resume-emi', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { error } = await fastify.supabase
+      .from('employee_loans')
+      .update({ is_emi_paused: false, pause_reason: null, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'EMI resumed' })
+  })
+
   // ── POST /payroll/loans/:id/foreclose ────────────────────────────────────────
   fastify.post('/:id/foreclose', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }

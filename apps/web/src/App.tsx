@@ -217,8 +217,7 @@ const EssFBP                = lazy(() => import('@/pages/ess/EssFBP').then(m => 
 const PayrollLedger         = lazy(() => import('@/pages/payroll/PayrollLedger').then(m => ({ default: m.PayrollLedger })))
 const PayrollGovernance     = lazy(() => import('@/pages/payroll/PayrollGovernance').then(m => ({ default: m.PayrollGovernance })))
 const PayrollValidation     = lazy(() => import('@/pages/payroll/PayrollValidation').then(m => ({ default: m.PayrollValidation })))
-const AdvanceSalary         = lazy(() => import('@/pages/payroll/AdvanceSalary').then(m => ({ default: m.AdvanceSalary })))
-const LoanManagement        = lazy(() => import('@/pages/payroll/LoanManagement').then(m => ({ default: m.LoanManagement })))
+const LoansAndAdvances      = lazy(() => import('@/pages/payroll/LoansAndAdvances').then(m => ({ default: m.LoansAndAdvances })))
 const Reimbursements        = lazy(() => import('@/pages/payroll/Reimbursements').then(m => ({ default: m.Reimbursements })))
 const VariablePay           = lazy(() => import('@/pages/payroll/VariablePay').then(m => ({ default: m.VariablePay })))
 const ArrearEngine          = lazy(() => import('@/pages/payroll/ArrearEngine').then(m => ({ default: m.ArrearEngine })))
@@ -656,8 +655,8 @@ export default function App() {
                 <Route path="/admin/payroll/reconciliation"           element={<PayrollReconciliation />} />
                 <Route path="/admin/payroll/statutory-dashboard"      element={<StatutoryDashboard />} />
                 <Route path="/admin/payroll/filing-pack"             element={<FilingPackCenter />} />
-                <Route path="/admin/payroll/advances"                 element={<AdvanceSalary />} />
-                <Route path="/admin/payroll/loans"                    element={<LoanManagement />} />
+                <Route path="/admin/payroll/advances"                 element={<LoansAndAdvances />} />
+                <Route path="/admin/payroll/loans"                    element={<LoansAndAdvances />} />
                 <Route path="/admin/payroll/reimbursements"           element={<Reimbursements />} />
                 <Route path="/admin/payroll/fbp"                      element={<FbpReconciliation />} />
                 <Route path="/admin/payroll/variable-pay"             element={<VariablePay />} />

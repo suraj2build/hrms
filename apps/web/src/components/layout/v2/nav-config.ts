@@ -401,11 +401,10 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Pay Inputs',
         items: [
-          { id: 'advances',       label: 'Salary Advances',     route: '/admin/payroll/advances',       icon: CreditCard, keywords: ['advance salary', 'salary advance request', 'loan advance', 'emergency advance'] },
+          { id: 'loans-advances', label: 'Loans & Advances',    route: '/admin/payroll/advances',       icon: CreditCard, keywords: ['advance salary', 'salary advance request', 'loan advance', 'emergency advance', 'employee loan', 'loan EMI', 'loan deduction', 'salary loan'] },
           { id: 'reimbursements', label: 'Reimbursements',      route: '/admin/payroll/reimbursements', icon: Receipt,    keywords: ['expense', 'claim', 'reimbursement request', 'expense claim', 'medical reimbursement'] },
           { id: 'fbp-recon',      label: 'FBP Reconciliation',  route: '/admin/payroll/fbp',            icon: Receipt,    keywords: ['FBP', 'flexible benefit plan', 'flexi benefit', 'FBP declaration', 'flexible pay', 'flexi pay'] },
           { id: 'variable-pay',   label: 'Variable Pay',        route: '/admin/payroll/variable-pay',   icon: TrendingUp, keywords: ['incentive', 'bonus', 'performance pay', 'variable component', 'incentive pay'] },
-          { id: 'loans',          label: 'Loan Management',     route: '/admin/payroll/loans',          icon: Landmark,   keywords: ['employee loan', 'loan EMI', 'loan deduction', 'salary loan'] },
           { id: 'arrears',        label: 'Arrear Payments',     route: '/admin/payroll/arrears',        icon: RotateCcw,  keywords: ['arrear', 'back pay', 'retroactive pay', 'previous month', 'pending salary'] },
         ],
       },
