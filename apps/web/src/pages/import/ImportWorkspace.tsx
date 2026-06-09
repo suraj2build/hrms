@@ -1184,7 +1184,7 @@ export function ImportWorkspace() {
             → switching back causes a full remount and visual flash even though
             parent-level state (parsedRows, currentStep, etc.) is preserved.
             The `hidden` class drives visibility via CSS — no remount. */}
-        <TabsContent value="import" forceMount className={cn('space-y-6', activeTab !== 'import' && 'hidden')}>
+        <TabsContent value="import" forceMount className={cn('space-y-4', activeTab !== 'import' && 'hidden')}>
 
           {/* Section 1: Master Type Selector */}
           <SectionCard
@@ -1192,7 +1192,7 @@ export function ImportWorkspace() {
             description="Choose the data category you want to import"
             icon={<FileSpreadsheet className="h-4 w-4 text-muted-foreground" />}
           >
-            <div className="space-y-6">
+            <div className="space-y-4">
               {IMPORT_GROUPS.map((group) => {
                 const groupConfigs = MASTER_CONFIGS.filter(c => c.group === group.key)
                 if (groupConfigs.length === 0) return null
@@ -1232,8 +1232,8 @@ export function ImportWorkspace() {
                       </div>
                     )}
 
-                    {/* Card grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 gap-3">
+                    {/* Card grid — compact horizontal tiles */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                       {groupConfigs.map((cfg) => {
                         const Icon = cfg.icon
                         const isSelected = selectedMaster === cfg.type
@@ -1242,39 +1242,37 @@ export function ImportWorkspace() {
                             key={cfg.type}
                             type="button"
                             onClick={() => selectMaster(cfg.type)}
+                            title={cfg.description}
                             className={cn(
-                              'flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-all duration-150',
-                              'hover:border-primary/60 hover:bg-muted/40',
+                              'group flex items-center gap-2.5 rounded-lg border p-2.5 text-left transition-all duration-150',
+                              'hover:border-primary/50 hover:bg-primary/[0.04]',
                               isSelected
-                                ? 'border-primary ring-2 ring-primary/30 bg-primary/5'
+                                ? 'border-primary ring-1 ring-primary/25 bg-primary/[0.06]'
                                 : 'border-border bg-card',
                             )}
                           >
-                            <div className="flex items-start justify-between w-full gap-2">
-                              <div
-                                className={cn(
-                                  'rounded-md p-2 shrink-0',
-                                  isSelected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                <Icon className="h-5 w-5" />
-                              </div>
-                              {cfg.groupStep && (
-                                <span className={cn(
-                                  'text-[10px] font-semibold rounded-full px-1.5 py-0.5 border shrink-0',
-                                  isSelected
-                                    ? 'border-primary/40 text-primary bg-primary/10'
-                                    : 'border-border text-muted-foreground/60 bg-muted/50',
-                                )}>
-                                  Step {cfg.groupStep}
-                                </span>
+                            <div
+                              className={cn(
+                                'rounded-md p-1.5 shrink-0 transition-colors',
+                                isSelected
+                                  ? 'bg-primary/12 text-primary'
+                                  : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary',
                               )}
+                            >
+                              <Icon className="h-4 w-4" />
                             </div>
-                            <div className="min-w-0">
-                              <p className={cn('text-sm font-semibold', isSelected ? 'text-primary' : 'text-foreground')}>
-                                {cfg.label}
-                              </p>
-                              <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{cfg.description}</p>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <p className={cn('text-[13px] font-semibold truncate', isSelected ? 'text-primary' : 'text-foreground')}>
+                                  {cfg.label}
+                                </p>
+                                {cfg.groupStep && (
+                                  <span className="text-[9px] font-bold text-muted-foreground/50 shrink-0 tabular-nums">
+                                    #{cfg.groupStep}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-muted-foreground truncate">{cfg.description}</p>
                             </div>
                           </button>
                         )
@@ -1324,9 +1322,9 @@ export function ImportWorkspace() {
 
               {/* Step 1: Download Template */}
               {currentStep === 'download' && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   <div className="flex flex-col items-center gap-4 py-4">
-                    <div className="rounded-full bg-primary/10 p-4">
+                    <div className="rounded-full bg-primary/10 p-3">
                       <Download className="h-8 w-8 text-primary" />
                     </div>
                     <div className="text-center">
@@ -1372,7 +1370,7 @@ export function ImportWorkspace() {
 
               {/* Step 2: Upload File */}
               {currentStep === 'upload' && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {/* Drag-and-drop zone */}
                   <div
                     onDrop={handleDrop}
@@ -1454,14 +1452,14 @@ export function ImportWorkspace() {
 
               {/* Step 3: Validate */}
               {currentStep === 'validate' && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {/* Run Validation CTA */}
                   {!validationResult && !validateMutation.isPending && (
                     parsedRows.length === 0 ? (
                       // Impossible state guard: arrived at validate with no rows
                       // (session demote should prevent this, but defend explicitly)
                       <div className="flex flex-col items-center gap-4 py-6">
-                        <div className="rounded-full bg-warning/10 p-4">
+                        <div className="rounded-full bg-warning/10 p-3">
                           <AlertTriangle className="h-8 w-8 text-warning" />
                         </div>
                         <div className="text-center">
@@ -1476,7 +1474,7 @@ export function ImportWorkspace() {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-4 py-6">
-                        <div className="rounded-full bg-warning/10 p-4">
+                        <div className="rounded-full bg-warning/10 p-3">
                           <CheckCircle2 className="h-8 w-8 text-warning" />
                         </div>
                         <div className="text-center">
@@ -1640,7 +1638,7 @@ export function ImportWorkspace() {
 
               {/* Step 4: Import */}
               {currentStep === 'import' && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {/* Show summary+action whenever not running — isSuccess is excluded because
                       currentStep transitions to 'complete' atomically with isSuccess=true in
                       React 18 batching, so checking it here only creates a blank-panel race. */}
@@ -1732,7 +1730,7 @@ export function ImportWorkspace() {
               )}
 
               {currentStep === 'complete' && importResult && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {importResult.failed === 0 ? (
                     <div className="flex flex-col items-center gap-4 py-4">
                       <div className="rounded-full bg-success/10 p-5">
@@ -1897,12 +1895,12 @@ export function ImportWorkspace() {
 
             {/* Jobs Table */}
             {jobsLoading ? (
-              <div className="flex items-center justify-center py-10 gap-2">
+              <div className="flex items-center justify-center py-8 gap-2">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Loading import history…</span>
               </div>
             ) : jobsError ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+              <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
                 <XCircle className="h-8 w-8 text-destructive/50" />
                 <p className="text-sm text-muted-foreground">Failed to load import history.</p>
                 <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['import-jobs'], exact: true })}>
@@ -1911,7 +1909,7 @@ export function ImportWorkspace() {
                 </Button>
               </div>
             ) : filteredJobs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
+              <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
                 <History className="h-8 w-8 text-muted-foreground/50" />
                 <p className="text-sm text-muted-foreground">No import jobs found.</p>
               </div>
