@@ -83,7 +83,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
       <button
         type="button"
         onClick={toggleMobileNav}
-        className="lg:hidden flex items-center justify-center px-3 border-r border-white/15 text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+        className="lg:hidden flex items-center justify-center px-3 border-r border-white/15 text-white/90 hover:text-white hover:bg-white/10 transition-colors"
         aria-label="Open navigation menu"
       >
         <Menu className="h-5 w-5" />
@@ -123,10 +123,10 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
                 'text-[11.5px] font-semibold transition-colors',
                 isActive
                   ? 'text-white bg-white/[0.16]'
-                  : 'text-white/65 hover:text-white hover:bg-white/10',
+                  : 'text-white/85 hover:text-white hover:bg-white/10',
               )}
             >
-              <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive ? 'text-white' : 'text-white/55')} />
+              <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive ? 'text-white' : 'text-white/90')} />
               <span className="hidden lg:inline">{domain.label}</span>
               <span className="lg:hidden">{domain.shortLabel ?? domain.label.slice(0, 4)}</span>
               {/* Active underline indicator */}
@@ -149,7 +149,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         {/* Tenant + role — grouped, no extra dividers */}
         <div className="hidden md:flex items-center gap-1.5 mr-1">
           {tenant?.name && (
-            <span className="text-[11px] text-white/75 font-medium max-w-[130px] truncate">
+            <span className="text-[11px] text-white/90 font-medium max-w-[130px] truncate">
               {tenant.name}
             </span>
           )}
@@ -172,7 +172,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
               'flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md transition-all border',
               executiveMode
                 ? 'bg-white text-primary border-white shadow-sm'
-                : 'bg-transparent text-white/80 border-white/30 hover:bg-white/10 hover:text-white',
+                : 'bg-transparent text-white/90 border-white/30 hover:bg-white/10 hover:text-white',
             )}
           >
             <BarChart3 className="h-3 w-3 shrink-0" />
@@ -186,7 +186,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
           tabIndex={0}
           onClick={() => setNotifOpen(true)}
           onKeyDown={e => e.key === 'Enter' && setNotifOpen(true)}
-          className="rounded-md cursor-pointer flex items-center justify-center relative [&_button]:!text-white/80 [&_button]:hover:!bg-white/10 [&_button]:hover:!text-white"
+          className="rounded-md cursor-pointer flex items-center justify-center relative [&_button]:!text-white/90 [&_button]:hover:!bg-white/10 [&_button]:hover:!text-white"
           title="Notifications"
         >
           <NotificationBell />
@@ -197,7 +197,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         <button
           type="button"
           onClick={toggleTheme}
-          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/80 hover:text-white"
+          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/90 hover:text-white"
           title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {dark
@@ -221,7 +221,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
                   {profile?.full_name ?? 'Admin'}
                 </span>
               </div>
-              <ChevronDown className="h-3 w-3 text-white/70 hidden sm:block" />
+              <ChevronDown className="h-3 w-3 text-white/85 hidden sm:block" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
