@@ -260,7 +260,8 @@ export function UniversalSearch({
 
     const scored = navIndex.map((item) => {
       const label = item.label.toLowerCase();
-      const kw    = kwByRoute.get(item.route) ?? '';
+      // kw = legacy keywords from navigation.config + inline keywords from nav-config
+      const kw    = [kwByRoute.get(item.route) ?? '', ...(item.keywords ?? [])].join(' ').toLowerCase();
       const hay   = `${label} ${item.group.toLowerCase()} ${item.domain.toLowerCase()} ${kw}`;
       // every token must appear somewhere
       if (!tokens.every((t) => hay.includes(t))) return { item, score: 0 };
