@@ -190,6 +190,11 @@ const FabricWorkspace = lazy(() => import('@/pages/fabric/FabricWorkspace'))
 
 // Executive Intelligence Center (lazy — CEO/CHRO strategic read-only intelligence)
 const ExecutiveIntelligenceCenter = lazy(() => import('@/pages/executive/ExecutiveIntelligenceCenter'))
+const ExecChroView       = lazy(() => import('@/pages/executive/ChroView'))
+const ExecWorkforceView  = lazy(() => import('@/pages/executive/WorkforceView'))
+const ExecFinancialView  = lazy(() => import('@/pages/executive/FinancialView'))
+const ExecComplianceView = lazy(() => import('@/pages/executive/ComplianceView'))
+const ExecTrendsView     = lazy(() => import('@/pages/executive/TrendsView'))
 
 // Phase UX-6 — Payroll-First IA
 const DailyOperationsWorkspace = lazy(() => import('@/pages/workspace/DailyOperationsWorkspace').then(m => ({ default: m.DailyOperationsWorkspace })))
@@ -616,6 +621,11 @@ export default function App() {
                 <Route path="/admin/trust"                  element={<TrustWorkspace />} />
                 <Route path="/admin/fabric"                 element={<FabricWorkspace />} />
                 <Route path="/admin/executive"              element={<ExecutiveIntelligenceCenter />} />
+                <Route path="/admin/executive/chro"          element={<ExecChroView />} />
+                <Route path="/admin/executive/workforce"     element={<ExecWorkforceView />} />
+                <Route path="/admin/executive/financial"     element={<ExecFinancialView />} />
+                <Route path="/admin/executive/compliance"    element={<ExecComplianceView />} />
+                <Route path="/admin/executive/trends"        element={<ExecTrendsView />} />
                 <Route path="/admin/system/automations"      element={<AutomationsConsole />} />
                 <Route path="/admin/system/incidents"        element={<IncidentManagement />} />
                 <Route path="/admin/system/webhooks"         element={<WebhookManagement />} />

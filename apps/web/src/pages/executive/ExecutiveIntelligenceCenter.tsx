@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity, AlertTriangle, ArrowRight, Brain,
+  Activity, AlertTriangle, ArrowRight,
   Clock, Download, Gauge, IndianRupee, Lightbulb,
   Sparkles, Target,
   UserMinus, UserPlus, Users, Wallet, CalendarCheck, Info, ChevronRight,
@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { DrillDownSheet, type DeptRow } from '@/components/exec/DrillDownSheet'
+import { ExecLayout } from '@/components/exec/ExecShell'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 
@@ -183,18 +184,10 @@ export default function ExecutiveIntelligenceCenter() {
   ]
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6">
-      {/* Page header — controls live here; the app nav handles bell / profile / search */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[image:var(--gradient-primary)] text-primary-foreground shadow-sm">
-            <Brain className="h-4 w-4" />
-          </div>
-          <div>
-            <h1 className="font-display text-lg font-bold leading-none text-foreground">Manpower Intelligence Center</h1>
-            <p className="mt-1 text-[11px] text-muted-foreground">CEO &amp; CHRO view · {loading ? 'loading…' : 'live data'}</p>
-          </div>
-        </div>
+    <ExecLayout
+      title="Manpower Intelligence Center"
+      subtitle={`CEO & CHRO view · ${loading ? 'loading…' : 'live data'}`}
+      actions={
         <div className="flex items-center gap-2">
           <div className="hidden items-center rounded-lg border bg-muted/40 p-0.5 sm:flex">
             {(['30D', 'QTD', 'YTD', '12M'] as const).map((p) => (
@@ -203,8 +196,8 @@ export default function ExecutiveIntelligenceCenter() {
           </div>
           <Button variant="outline" size="sm" className="gap-1.5" onClick={exportDepts}><Download className="h-3.5 w-3.5" /> Export</Button>
         </div>
-      </div>
-
+      }
+    >
         {/* Hero strip */}
         <section className="relative overflow-hidden rounded-2xl border bg-[image:var(--gradient-primary)] p-6 text-primary-foreground shadow-[var(--shadow-elegant)]">
           <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
@@ -449,7 +442,7 @@ export default function ExecutiveIntelligenceCenter() {
       </footer>
 
       <DrillDownSheet open={!!drillDept} onOpenChange={(o) => !o && setDrillDept(null)} dept={drillDept} />
-    </div>
+    </ExecLayout>
   )
 }
 
