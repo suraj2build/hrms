@@ -79,9 +79,10 @@ const SECTIONS: ReportSection[] = [
     blurb: 'Deep-dive analytics surfaces — cost intelligence, workforce patterns, compliance posture.',
     accent: { tile: 'bg-violet-500/10', text: 'text-violet-600', border: 'hover:border-violet-300' },
     links: [
-      { label: 'Workforce Analytics',  description: 'Headcount distribution, reliability and movement patterns.', route: '/admin/analytics/workforce',          icon: LineChart  },
-      { label: 'Cost Intelligence',    description: 'Manpower cost breakdown by department and employment type.', route: '/admin/payroll/cost-intelligence',    icon: DollarSign },
-      { label: 'Attendance Analytics', description: 'Session-level intelligence, biometric trends and gaps.',    route: '/admin/attendance/intelligence-center', icon: BarChart3  },
+      { label: 'Analytics Studio',     description: 'Explore payroll, headcount & attendance data by dimension, metric and time range.', route: '/admin/reports/analytics',            icon: Sparkles, badge: 'New' },
+      { label: 'Workforce Analytics',  description: 'Headcount distribution, reliability and movement patterns.',                        route: '/admin/analytics/workforce',          icon: LineChart  },
+      { label: 'Cost Intelligence',    description: 'Manpower cost breakdown by department and employment type.',                        route: '/admin/payroll/cost-intelligence',    icon: DollarSign },
+      { label: 'Attendance Analytics', description: 'Session-level intelligence, biometric trends and gaps.',                            route: '/admin/attendance/intelligence-center', icon: BarChart3  },
     ],
   },
   {

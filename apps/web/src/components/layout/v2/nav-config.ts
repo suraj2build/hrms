@@ -498,6 +498,12 @@ export const DOMAINS: Domain[] = [
         ],
       },
       {
+        label: 'Analytics',
+        items: [
+          { id: 'analytics-studio',    label: 'Analytics Studio',    route: '/admin/reports/analytics',               icon: Sparkles,  keywords: ['analytics studio', 'workforce analytics', 'payroll analytics', 'explore data', 'charts', 'trend', 'department analytics'] },
+        ],
+      },
+      {
         label: 'Operational',
         items: [
           { id: 'reports-operational', label: 'Operational Reports', route: '/admin/reports/operational',              icon: FileText,  keywords: ['headcount report', 'attendance report', 'salary register', 'statutory register', 'muster roll', 'leave register', 'payroll register'] },
