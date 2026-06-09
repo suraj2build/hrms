@@ -79,6 +79,7 @@ import {
   // Compliance
   Landmark,
   ScrollText,
+  Archive,
   // Advanced Operations
   Activity,
   Target,
@@ -430,6 +431,7 @@ export const DOMAINS: Domain[] = [
       '/admin/payroll/statutory',        // longer than /admin/payroll — wins
       '/admin/payroll/tax-governance',   // exact match for governance pages
       '/admin/payroll/tax-governance-admin',
+      '/admin/payroll/filing-pack',      // Filing Pack Center
     ],
     defaultRoute: '/admin/payroll/statutory-dashboard',
     groups: [
@@ -455,6 +457,12 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'tax-governance',       label: 'Tax Declarations',   route: '/admin/payroll/tax-governance',       icon: ScrollText,  keywords: ['IT declaration', 'investment declaration', 'form 12BB', 'HRA claim', 'tax saving', '80C', 'tax proof'] },
           { id: 'tax-governance-admin', label: 'Verification Queue', route: '/admin/payroll/tax-governance-admin', icon: ShieldCheck, keywords: ['verify declarations', 'tax verification', 'declaration approval', 'IT proof verification'] },
+        ],
+      },
+      {
+        label: 'Filing Pack',
+        items: [
+          { id: 'filing-pack', label: 'Filing Pack', route: '/admin/payroll/filing-pack', icon: Archive, keywords: ['filing pack', 'ECR 2.0', 'ECR file', 'EPFO upload', '24Q', 'form 24Q', 'TDS return', 'challan sheet', 'ready to file', 'generate compliance files', 'statutory filing', 'compliance pack', 'ITNS 281', 'TDS challan'] },
         ],
       },
     ],
