@@ -34,6 +34,7 @@ import documentRoutes from './routes/documents/index.js'
 import analyticsRoutes              from './routes/analytics/index.js'
 import reportsRoutes                from './routes/analytics/reports.js'
 import reportExportRoutes           from './routes/reports/export.js'
+import datasetsRoutes               from './routes/datasets/index.js'
 import workforceIntelligenceRoutes  from './routes/analytics/workforce-intelligence.js'
 import workforceDrillRoutes         from './routes/analytics/workforce-drill.js'
 import rosterIntelligenceRoutes     from './routes/analytics/roster-intelligence.js'
@@ -427,6 +428,7 @@ async function start() {
   await fastify.register(analyticsRoutes)
   await fastify.register(reportsRoutes)
   await fastify.register(reportExportRoutes)
+  await fastify.register(datasetsRoutes, { prefix: '/datasets' })
   await fastify.register(workforceIntelligenceRoutes)  // GET /analytics/workforce/*
   await fastify.register(workforceDrillRoutes)         // GET /analytics/workforce/drill
   await fastify.register(rosterIntelligenceRoutes)     // GET /analytics/roster/*
