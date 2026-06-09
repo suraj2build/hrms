@@ -74,7 +74,10 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   }
 
   return (
-    <header className="sticky top-0 z-40 w-full h-[52px] border-b border-black/10 bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-primary-foreground backdrop-blur-md flex items-stretch px-0 flex-shrink-0 shadow-md shadow-[#1A4D8F]/20 overflow-hidden">
+    <header className="sticky top-0 z-40 w-full h-[52px] border-b border-black/15 bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-primary-foreground backdrop-blur-md flex items-stretch px-0 flex-shrink-0 overflow-hidden relative shadow-[inset_0_1px_0_0_rgba(255,255,255,0.22),inset_0_-1px_0_0_rgba(0,0,0,0.20),0_6px_16px_-4px_rgba(26,77,143,0.5)]">
+
+      {/* 3D sheen — top highlight → bottom shade, behind the content (pointer-events-none) */}
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.12] via-transparent to-black/[0.10]" />
 
       {/* ── Mobile hamburger (opens contextual sidebar drawer) ──── */}
       <button
