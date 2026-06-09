@@ -50,12 +50,12 @@ export function Topbar() {
   }
 
   return (
-    <header className="h-14 border-b border-black/10 bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white shadow-md shadow-[#1A4D8F]/20 flex items-center px-4 gap-3 flex-shrink-0">
+    <header className="h-14 border-b border-border bg-background flex items-center px-4 gap-3 flex-shrink-0">
       {/* Mobile hamburger — opens the shell sidebar drawer */}
       <button
         type="button"
         onClick={toggleMobileNav}
-        className="lg:hidden p-1.5 -ml-1 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
+        className="lg:hidden p-1.5 -ml-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0"
         aria-label="Open navigation menu"
       >
         <Menu className="h-5 w-5" />
@@ -65,13 +65,10 @@ export function Topbar() {
           header. ⌘K still opens it. */}
       <SearchFab onClick={openSearch} />
 
-      {/* Right cluster — scoped overrides recolour shared triggers (RoleSwitcher,
-          ThemeToggle, bell, user menu) to white/translucent for the navy bar.
-          Dropdown/dialog content is portaled, so it stays on the light theme. */}
-      <div className="flex items-center gap-2 ml-auto [&_button]:!bg-transparent [&_button]:!text-white [&_button]:!border-white/25 [&_button:hover]:!bg-white/10 [&_svg]:!text-white/90">
+      <div className="flex items-center gap-2 ml-auto">
         {/* Company name */}
         {tenant && (
-          <span className="text-xs text-white/75 hidden md:block">
+          <span className="text-xs text-muted-foreground hidden md:block">
             {tenant.name}
           </span>
         )}
@@ -91,12 +88,12 @@ export function Topbar() {
             <Button variant="ghost" className="flex items-center gap-2 h-9 px-2">
               <Avatar className="h-7 w-7">
                 <AvatarImage src={profile?.avatar_url ?? undefined} />
-                <AvatarFallback className="text-xs bg-white/15 text-white">
+                <AvatarFallback className="text-xs bg-primary/20 text-primary">
                   {getInitials(profile?.full_name ?? 'U')}
                 </AvatarFallback>
               </Avatar>
               <span className="text-sm hidden md:block">{profile?.full_name ?? 'User'}</span>
-              <ChevronDown className="h-3 w-3 text-white/70" />
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
 
