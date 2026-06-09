@@ -24,7 +24,6 @@ import { getDomainForPath, getVisibleDomain, getExecutiveDomainForPath, type Dom
 
 // Colored icon container tokens — one accent per domain
 const DOMAIN_ICON_COLORS: Record<string, { bg: string; text: string }> = {
-  'home':         { bg: 'bg-slate-100',   text: 'text-slate-500'   },
   'workforce':    { bg: 'bg-indigo-50',   text: 'text-indigo-600'  },
   'attendance':   { bg: 'bg-amber-50',    text: 'text-amber-600'   },
   'leave':        { bg: 'bg-emerald-50',  text: 'text-emerald-600' },

@@ -302,7 +302,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         .from('epf_contributions')
         .select(`
           employee_id, pf_wages, employee_contribution, voluntary_pf,
-          employer_pf, employer_eps, edli_contribution, admin_charges, ncp_days,
+          employer_pf, employer_eps, edli_contribution,
           employees(employee_code, first_name, last_name)
         `)
         .eq('tenant_id', req.tenantId)
@@ -350,7 +350,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const totEpf      = sum(rows, 'employee_contribution')
     const totEps      = sum(rows, 'employer_eps')
     const totDiff     = r2(rows.reduce((s, r) => s + r2((r.employer_pf ?? 0) - (r.employer_eps ?? 0)), 0))
-    const totNcp      = rows.reduce((s, r) => s + (r.ncp_days ?? 0), 0)
+    const totNcp      = 0  // ncp_days not stored in epf_contributions — EPFO portal fills from biometric
 
     const estId   = reg.registration_number ?? ''
     const estName = tenant.name ?? ''
@@ -394,7 +394,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         r.employee_contribution ?? 0,
         r.employer_eps ?? 0,
         diff,
-        r.ncp_days ?? 0,
+        0,  // ncp_days — not stored; fill manually before EPFO upload if needed
         0,  // refund of advances
       ].join('~'))
     }
@@ -572,7 +572,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const [epfRes, esiRes, ptaxRes, tdsRes, epfReg, esiReg, ptaxRegs] = await Promise.all([
       fastify.supabase
         .from('epf_contributions')
-        .select('employee_contribution, voluntary_pf, employer_pf, employer_eps, edli_contribution, admin_charges')
+        .select('employee_contribution, voluntary_pf, employer_pf, employer_eps, edli_contribution, pf_wages')
         .eq('tenant_id', req.tenantId)
         .eq('contribution_month', month),
 
@@ -634,6 +634,9 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
     }
 
+    // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate)
+    const epfAdminCharges = r2(sum(epfRows, 'pf_wages') * 0.005)
+
     const challan = {
       month,
       epf: {
@@ -643,11 +646,11 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         employer_pf:           sum(epfRows, 'employer_pf'),
         employer_eps:          sum(epfRows, 'employer_eps'),
         edli:                  sum(epfRows, 'edli_contribution'),
-        admin_charges:         sum(epfRows, 'admin_charges'),
+        admin_charges:         epfAdminCharges,
         total_remittance: r2(
           sum(epfRows, 'employee_contribution') + sum(epfRows, 'voluntary_pf') +
           sum(epfRows, 'employer_pf')           + sum(epfRows, 'employer_eps') +
-          sum(epfRows, 'edli_contribution')      + sum(epfRows, 'admin_charges')
+          sum(epfRows, 'edli_contribution')      + epfAdminCharges
         ),
         employee_count: epfRows.length,
         challan_type:   'EPFO ECR',
@@ -683,7 +686,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       grand_total_remittance: r2(
         sum(epfRows, 'employee_contribution') + sum(epfRows, 'voluntary_pf') +
         sum(epfRows, 'employer_pf')           + sum(epfRows, 'employer_eps') +
-        sum(epfRows, 'edli_contribution')      + sum(epfRows, 'admin_charges') +
+        sum(epfRows, 'edli_contribution')      + epfAdminCharges +
         sum(esiRows, 'total_contribution')    +
         r2(ptaxRows.reduce((s: number, r: any) => s + (r.ptax_amount ?? 0), 0)) +
         r2(tdsRows.reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0))

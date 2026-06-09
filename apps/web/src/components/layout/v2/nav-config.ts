@@ -2,10 +2,10 @@
  * nav-config.ts — Enterprise HRMS Navigation
  *
  * ┌─────────────────────────────────────────────────────────────┐
- * │  8 enterprise domains — top nav + contextual left sidebar   │
+ * │  9 domains — top nav + contextual left sidebar              │
  * │                                                             │
- * │  Workforce · Attendance · Leave · Payroll · Compliance      │
- * │  Operations · Reports · Setup                               │
+ * │  Operations · Workforce · Attendance · Leave · Payroll      │
+ * │  Compliance · Reports · Intelligence · Setup                │
  * └─────────────────────────────────────────────────────────────┘
  *
  * ═══════════════════════════════════════════════════════════════
@@ -157,25 +157,28 @@ export interface Domain {
 
 export const DOMAINS: Domain[] = [
 
-  // ── 0. Home ───────────────────────────────────────────────────────────────────
+  // ── 0. Operations ─────────────────────────────────────────────────────────────
   //
-  // Primary admin landing zone. Control Center is the default; Insights Hub and
-  // Platform Health round out the overview. Workforce Command lives in its own
-  // intelligence domain. Executive Intelligence is reachable via Exec Mode.
+  // Unified admin home + work queue. Control Center is the default entry point;
+  // Insights Hub and Platform Health round out the overview. The Queue group
+  // surfaces the work queue, daily-ops and approvals inbox in the same domain.
   //
   {
-    id:           'home',
-    label:        'Home',
-    shortLabel:   'Home',
+    id:           'operations',
+    label:        'Operations',
+    shortLabel:   'Ops',
     icon:         Command,
     matchPrefixes: [
       '/admin/control-center',
       '/admin/dashboard',     // redirect target still activates this domain
       '/admin/insights',
       '/admin/executive',
-      '/admin/settings',
       '/admin/readiness',
       '/admin/intelligence/workforce-command',
+      '/admin/my-work-queue',
+      '/admin/daily-ops',
+      '/admin/approvals/inbox',
+      '/admin/notifications/inbox',
     ],
     defaultRoute: '/admin/control-center',
     groups: [
@@ -188,9 +191,12 @@ export const DOMAINS: Domain[] = [
         ],
       },
       {
-        label: 'Configuration',
+        label: 'Queue',
         items: [
-          { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', icon: Settings },
+          { id: 'ops-queue',   label: 'Operations Queue', route: '/admin/my-work-queue',       icon: Inbox,       keywords: ['work queue', 'my tasks', 'pending actions', 'to-do', 'tasks', 'queue', 'pending items'] },
+          { id: 'daily-ops',   label: 'Daily Operations', route: '/admin/daily-ops',           icon: Activity,    keywords: ['daily tasks', 'ops dashboard', 'today ops', 'daily work', 'daily checklist'] },
+          { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare, keywords: ['approve', 'reject', 'pending approvals', 'leave approval', 'attendance approval', 'inbox'] },
+          { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen,    keywords: ['notifications', 'alerts', 'messages', 'notification center'] },
         ],
       },
     ],
@@ -468,36 +474,7 @@ export const DOMAINS: Domain[] = [
     ],
   },
 
-  // ── 6. Operations ─────────────────────────────────────────────────────────────
-  //
-  // UNIFIED QUEUE ONLY: pending approvals, unresolved items, escalations.
-  //
-  {
-    id:           'operations',
-    label:        'Operations',
-    shortLabel:   'Ops',
-    icon:         Inbox,
-    matchPrefixes: [
-      '/admin/my-work-queue',
-      '/admin/daily-ops',
-      '/admin/approvals/inbox',
-      '/admin/notifications/inbox',
-    ],
-    defaultRoute: '/admin/my-work-queue',
-    groups: [
-      {
-        label: 'Queue',
-        items: [
-          { id: 'ops-queue',   label: 'Operations Queue', route: '/admin/my-work-queue',       icon: Inbox,       keywords: ['work queue', 'my tasks', 'pending actions', 'to-do', 'tasks', 'queue', 'pending items'] },
-          { id: 'daily-ops',   label: 'Daily Operations', route: '/admin/daily-ops',           icon: Activity,    keywords: ['daily tasks', 'ops dashboard', 'today ops', 'daily work', 'daily checklist'] },
-          { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare, keywords: ['approve', 'reject', 'pending approvals', 'leave approval', 'attendance approval', 'inbox'] },
-          { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen,    keywords: ['notifications', 'alerts', 'messages', 'notification center'] },
-        ],
-      },
-    ],
-  },
-
-  // ── 7. Reports ────────────────────────────────────────────────────────────────
+  // ── 6. Reports ────────────────────────────────────────────────────────────────
   //
   // OUTPUTS ONLY: reports, exports, salary sheets.
   // Workforce Cost + Payroll Ledger moved here from Payroll Analytics.
@@ -524,7 +501,7 @@ export const DOMAINS: Domain[] = [
     ],
   },
 
-  // ── 8. Advanced Operations ───────────────────────────────────────────────────
+  // ── 7. Intelligence ──────────────────────────────────────────────────────────
   //
   // First-class primary domain for enterprise oversight, risk, simulation, and
   // advanced workforce intelligence tools.
@@ -547,8 +524,8 @@ export const DOMAINS: Domain[] = [
   //
   {
     id:           'advanced-ops',
-    label:        'Advanced Operations',
-    shortLabel:   'Adv',
+    label:        'Intelligence',
+    shortLabel:   'Intel',
     icon:         Brain,
     matchPrefixes: [
       // Risk & Governance
@@ -631,7 +608,7 @@ export const DOMAINS: Domain[] = [
     ],
   },
 
-  // ── 9. Setup ──────────────────────────────────────────────────────────────────
+  // ── 8. Setup ──────────────────────────────────────────────────────────────────
   //
   // SINGLE SOURCE OF TRUTH for all configuration and master data.
   //
@@ -668,6 +645,8 @@ export const DOMAINS: Domain[] = [
     shortLabel:   'Admin',
     icon:         Settings,
     matchPrefixes: [
+      // Company settings (longer sub-paths /admin/settings/roles and /users still win)
+      '/admin/settings',
       // Organizational masters
       '/admin/organization',
       '/admin/masters',                  // broad — all /admin/masters/* belong here
@@ -697,6 +676,14 @@ export const DOMAINS: Domain[] = [
     ],
     defaultRoute: '/admin/organization',
     groups: [
+
+      // ── Company ─────────────────────────────────────────────────────────────
+      {
+        label: 'Company',
+        items: [
+          { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', icon: Settings, keywords: ['company setup', 'company profile', 'tenant settings', 'company details', 'organization settings', 'branding'] },
+        ],
+      },
 
       // ── Organization ────────────────────────────────────────────────────────
       {
