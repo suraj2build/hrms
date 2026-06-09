@@ -347,6 +347,88 @@ function buildFailureSummary(
   }
 }
 
+/**
+ * Fetch pending advance recovery and loan EMI deductions for one employee for a
+ * payroll month.  Respects is_recovery_paused / is_emi_paused flags and only
+ * returns deductions whose parent advance/loan is in the correct active status.
+ *
+ * Non-throwing: returns [] on any error so advance/loan failures never abort a run.
+ */
+async function fetchAdvanceLoanDeductions(
+  supabase: any,
+  tenantId: string,
+  employeeId: string,
+  month: string, // YYYY-MM
+): Promise<Array<{
+  type: 'advance_recovery' | 'loan_emi'
+  schedule_id: string
+  amount: number
+  label: string
+}>> {
+  const results: Array<{
+    type: 'advance_recovery' | 'loan_emi'
+    schedule_id: string
+    amount: number
+    label: string
+  }> = []
+
+  try {
+    // 1. Advance recovery schedules
+    const { data: advRows, error: advErr } = await supabase
+      .from('advance_recovery_schedules')
+      .select('id, scheduled_amount, advance_salary_requests!inner(is_recovery_paused, status)')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .eq('recovery_month', month)
+      .eq('status', 'pending')
+      .eq('advance_salary_requests.is_recovery_paused', false)
+      .in('advance_salary_requests.status', ['disbursed', 'recovering'])
+
+    if (advErr) {
+      console.warn(`[payroll] fetchAdvanceLoanDeductions: advance query failed for employee ${employeeId} (${month}):`, advErr.message)
+    } else {
+      for (const row of (advRows ?? []) as any[]) {
+        results.push({
+          type:        'advance_recovery',
+          schedule_id: row.id,
+          amount:      row.scheduled_amount,
+          label:       'Salary Advance Recovery',
+        })
+      }
+    }
+
+    // 2. Loan EMI schedules
+    const { data: loanRows, error: loanErr } = await supabase
+      .from('loan_schedules')
+      .select('id, emi_amount, installment_number, employee_loans!inner(loan_type, is_emi_paused, status)')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .eq('due_month', month)
+      .eq('status', 'pending')
+      .eq('employee_loans.is_emi_paused', false)
+      .eq('employee_loans.status', 'active')
+
+    if (loanErr) {
+      console.warn(`[payroll] fetchAdvanceLoanDeductions: loan query failed for employee ${employeeId} (${month}):`, loanErr.message)
+    } else {
+      for (const row of (loanRows ?? []) as any[]) {
+        const loanType = (row.employee_loans as any)?.loan_type ?? 'Loan'
+        const typeCap  = loanType.charAt(0).toUpperCase() + loanType.slice(1)
+        results.push({
+          type:        'loan_emi',
+          schedule_id: row.id,
+          amount:      row.emi_amount,
+          label:       `${typeCap} Loan EMI #${row.installment_number}`,
+        })
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[payroll] fetchAdvanceLoanDeductions: unexpected error for employee ${employeeId} (${month}):`, err?.message)
+  }
+
+  return results
+}
+
 export default async function payrollRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -532,8 +614,13 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             continue
           }
 
+          const advLoanDeductions = await fetchAdvanceLoanDeductions(
+            fastify.supabase, tenantId, emp.id, month,
+          )
+
           const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, {
             tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days,
+            advance_loan_deductions: advLoanDeductions,
           }, month)
           const slipRow    = buildSlipRow(tenantId, 'dry-run', result, month)
           const slipValid  = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
@@ -673,6 +760,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           continue
         }
 
+        // ── Stage 1.5: Fetch advance / loan deductions for this employee ─────
+        const advLoanDeductions = await fetchAdvanceLoanDeductions(
+          fastify.supabase, tenantId, emp.id, month,
+        )
+
         // ── Stage 2: Validate compensation ────────────────────────────────
         const compValidation = validateCompensation(
           compensation, { employeeId: emp.id, month }, runPeriodEnd,
@@ -717,6 +809,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           compensation,
           attendance,
           total_working_days,
+          advance_loan_deductions: advLoanDeductions,
         }, month)
 
         // ── Stage 4: Validate slip payload before insert ──────────────────
@@ -1420,6 +1513,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
               fetchAttendanceSummary(fastify.supabase, tenantId, employeeId, run.month as string),
             ])
 
+            const freshAdvLoanDeductions = await fetchAdvanceLoanDeductions(
+              fastify.supabase, tenantId, employeeId, run.month as string,
+            )
+
             const freshSlip = await computeSlipWithStatutory(fastify.supabase, tenantId, {
               tenantId,
               employeeId,
@@ -1427,6 +1524,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
               compensation,
               attendance,
               total_working_days,
+              advance_loan_deductions: freshAdvLoanDeductions,
             }, run.month as string)
 
             // 3. Update the existing draft slip in place
@@ -1504,6 +1602,105 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         error:   'SLIP_FINALIZE_FAILED',
         message: 'Failed to finalize payroll slips — the run remains in draft. Retry finalization.',
       })
+    }
+
+    // ── Mark advance recovery schedules and loan EMIs as paid ─────────────────
+    // Non-fatal: failures here must never block finalization.
+    try {
+      const { data: finalizedSlips } = await fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id')
+        .eq('run_id', id)
+        .eq('status', 'finalized')
+
+      const finalizedEmpIds = (finalizedSlips ?? []).map((s: any) => s.employee_id as string)
+
+      if (finalizedEmpIds.length > 0) {
+        const now = new Date().toISOString()
+
+        // Mark advance recovery schedules as recovered
+        await fastify.supabase
+          .from('advance_recovery_schedules')
+          .update({ status: 'recovered', payroll_run_id: id, recovered_at: now })
+          .eq('tenant_id', req.tenantId)
+          .eq('recovery_month', run.month)
+          .eq('status', 'pending')
+          .in('employee_id', finalizedEmpIds)
+
+        // Mark loan schedules as paid
+        await fastify.supabase
+          .from('loan_schedules')
+          .update({ status: 'paid', payroll_run_id: id, paid_at: now })
+          .eq('tenant_id', req.tenantId)
+          .eq('due_month', run.month)
+          .eq('status', 'pending')
+          .in('employee_id', finalizedEmpIds)
+
+        // Advance status sweep: mark as 'recovering' or 'fully_recovered'
+        const { data: recoveredScheds } = await fastify.supabase
+          .from('advance_recovery_schedules')
+          .select('advance_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('recovery_month', run.month)
+          .eq('status', 'recovered')
+          .eq('payroll_run_id', id)
+
+        const affectedAdvanceIds = [...new Set((recoveredScheds ?? []).map((r: any) => r.advance_id as string))]
+
+        for (const advId of affectedAdvanceIds) {
+          const { count: pendingCount } = await fastify.supabase
+            .from('advance_recovery_schedules')
+            .select('id', { count: 'exact', head: true })
+            .eq('advance_id', advId)
+            .eq('tenant_id', req.tenantId)
+            .eq('status', 'pending')
+
+          const newStatus = (pendingCount ?? 0) === 0 ? 'fully_recovered' : 'recovering'
+          await fastify.supabase
+            .from('advance_salary_requests')
+            .update({ status: newStatus, updated_at: now })
+            .eq('id', advId)
+            .eq('tenant_id', req.tenantId)
+        }
+
+        // Loan outstanding balance sweep: reduce by principal_component for each paid EMI
+        const { data: paidLoanScheds } = await fastify.supabase
+          .from('loan_schedules')
+          .select('loan_id, principal_component')
+          .eq('tenant_id', req.tenantId)
+          .eq('due_month', run.month)
+          .eq('status', 'paid')
+          .eq('payroll_run_id', id)
+
+        const loanPrincipalMap = new Map<string, number>()
+        for (const s of (paidLoanScheds ?? []) as any[]) {
+          loanPrincipalMap.set(s.loan_id, (loanPrincipalMap.get(s.loan_id) ?? 0) + (s.principal_component ?? 0))
+        }
+
+        for (const [loanId, principalPaid] of loanPrincipalMap) {
+          const { data: loanRow } = await fastify.supabase
+            .from('employee_loans')
+            .select('outstanding_balance')
+            .eq('id', loanId)
+            .eq('tenant_id', req.tenantId)
+            .single()
+
+          if (loanRow) {
+            const newOutstanding = Math.max(0, Math.round(((loanRow as any).outstanding_balance - principalPaid) * 100) / 100)
+            await fastify.supabase
+              .from('employee_loans')
+              .update({
+                outstanding_balance: newOutstanding,
+                status:              newOutstanding <= 0 ? 'completed' : 'active',
+                updated_at:          now,
+              })
+              .eq('id', loanId)
+              .eq('tenant_id', req.tenantId)
+          }
+        }
+      }
+    } catch (advLoanErr: any) {
+      req.log.warn({ err: advLoanErr }, 'payroll finalize: advance/loan schedule marking failed (non-fatal)')
     }
 
     // Step 2: Mark the run as finalized (only after slips are confirmed finalized)

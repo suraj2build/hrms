@@ -77,6 +77,13 @@ export interface PayrollSlipInput {
   }
   /** Total scheduled working days in the month for this employee */
   total_working_days: number
+  /** Pending advance recovery and loan EMI deductions fetched from schedules */
+  advance_loan_deductions?: Array<{
+    type:        'advance_recovery' | 'loan_emi'
+    schedule_id: string   // advance_recovery_schedules.id or loan_schedules.id
+    amount:      number
+    label:       string   // "Salary Advance Recovery" or "Personal Loan EMI #3"
+  }>
 }
 
 export interface PayrollSlipResult {
@@ -102,6 +109,7 @@ export interface PayrollSlipResult {
 export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
   const {
     employeeId, month, compensation, attendance, total_working_days,
+    advance_loan_deductions,
   } = input
 
   // ── Warning: no attendance data (employee will receive full pay — may be wrong) ─
@@ -167,7 +175,22 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       'LOP deduction skipped to avoid wiping salary; verify holiday/roster/working-day setup.'
   }
 
-  const total_deductions = round2(deduction_total_base + lop_amount)
+  // Advance recovery and loan EMI deductions
+  const alDeductions = advance_loan_deductions ?? []
+  const al_total = round2(alDeductions.reduce((s, d) => s + d.amount, 0))
+  const al_components: PayrollComponentSnapshot[] = alDeductions.map((d, idx) => ({
+    salary_component_id: d.schedule_id,
+    name:                d.label,
+    code:                d.type === 'advance_recovery' ? 'ADVANCE_RECOVERY' : 'LOAN_EMI',
+    component_type:      'deduction' as const,
+    calc_type:           'fixed',
+    value:               d.amount,
+    monthly_amount:      d.amount,
+    annual_amount:       0,
+    sequence:            900 + idx,
+  }))
+
+  const total_deductions = round2(deduction_total_base + lop_amount + al_total)
   const net_pay          = round2(Math.max(0, gross_pay - total_deductions))
 
   return {
@@ -183,7 +206,7 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     total_deductions,
     net_pay,
     employer_contributions,
-    component_breakdown: components,
+    component_breakdown: [...components, ...al_components],
     // Propagate no-attendance + zero-working-days warnings so the run surfaces them.
     warning: [noAttendanceWarning, zeroDenomWarning].filter(Boolean).join(' ') || undefined,
   }
