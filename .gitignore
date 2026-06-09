@@ -11,3 +11,6 @@ coverage/
 
 apps/website.rar
 apps/website.zip
+
+# Claude Code internal worktrees
+.claude/worktrees/
