@@ -32,7 +32,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   // for sub-100ms response times.
   fastify.get('/employees/search', hrAdminAuth, async (request, reply) => {
     const searchSchema = z.object({
-      q:     z.string().min(1).max(100),
+      q:     z.string().max(100).default(''),
       limit: z.coerce.number().int().min(1).max(20).default(10),
     })
 
@@ -42,16 +42,22 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     }
 
     const { q, limit } = parsed.data
-    const term = `%${q.trim()}%`
+    const trimmed = q.trim()
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('employees')
       .select('id, employee_code, first_name, last_name, email, status')
       .eq('tenant_id', request.tenantId)
-      .or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term},email.ilike.${term}`)
       .eq('status', 'active')
       .order('first_name', { ascending: true })
       .limit(limit)
+
+    if (trimmed) {
+      const term = `%${trimmed}%`
+      query = query.or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term},email.ilike.${term}`)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
