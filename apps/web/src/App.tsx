@@ -233,6 +233,7 @@ const NotificationTemplates = lazy(() => import('@/pages/notifications/Notificat
 const OperationalInbox      = lazy(() => import('@/pages/notifications/OperationalInbox').then(m => ({ default: m.OperationalInbox })))
 // ESS payroll
 const EssReimbursements     = lazy(() => import('@/pages/ess/EssReimbursements').then(m => ({ default: m.EssReimbursements })))
+const EssLoansAdvances      = lazy(() => import('@/pages/ess/EssLoansAdvances').then(m => ({ default: m.EssLoansAdvances })))
 
 // ESS tax tools (IT Tax Planner, IT Statement, YTD Statement, Phase 2)
 const TaxPlanner            = lazy(() => import('@/pages/ess/TaxPlanner').then(m => ({ default: m.TaxPlanner })))
@@ -816,6 +817,7 @@ export default function App() {
                 <Route path="/ess/salary/hra"                 element={<HRADeclarations />} />
                 <Route path="/ess/salary/tds-recovery"        element={<TDSRecovery />} />
                 <Route path="/ess/reimbursements"         element={<EssReimbursements />} />
+                <Route path="/ess/loans"                  element={<EssLoansAdvances />} />
                 <Route path="/ess/approvals"              element={<EssApprovals />} />
                 <Route path="/ess/leave/balance"          element={<EssLeaveBalance />} />
                 <Route path="/ess/documents"              element={<EssDocuments />} />

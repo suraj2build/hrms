@@ -188,6 +188,7 @@ import tdsHraDeclarationsRoute             from './routes/payroll/statutory/hra-
 import tdsRecoveryRoute                    from './routes/payroll/statutory/tds-recovery.js'
 import payrollAdvancesRoute                from './routes/payroll/advances.js'
 import payrollLoansRoute                   from './routes/payroll/loans.js'
+import payrollEssLoansRoute               from './routes/payroll/ess-loans.js'
 import payrollReimbursementsRoute          from './routes/payroll/reimbursements.js'
 import payrollFbpRoute                      from './routes/payroll/fbp.js'
 import payrollVariablePayRoute             from './routes/payroll/variable-pay.js'
@@ -578,6 +579,7 @@ async function start() {
   await fastify.register(tdsRecoveryRoute,                 { prefix: '/payroll/statutory/tds' })          // GET/POST /payroll/statutory/tds/recovery/*
   await fastify.register(payrollAdvancesRoute,              { prefix: '/payroll/advances' })         // GET/POST /payroll/advances/*
   await fastify.register(payrollLoansRoute,                 { prefix: '/payroll/loans' })            // GET/POST /payroll/loans/*
+  await fastify.register(payrollEssLoansRoute,              { prefix: '/payroll/ess' })              // ESS + manager approval endpoints
   await fastify.register(payrollReimbursementsRoute,        { prefix: '/payroll/reimbursements' })  // GET/POST /payroll/reimbursements/*
   await fastify.register(payrollFbpRoute,                   { prefix: '/payroll/fbp' })             // FBP quarterly reconciliation
   await fastify.register(payrollVariablePayRoute,           { prefix: '/payroll/variable-pay' })    // GET/POST /payroll/variable-pay/*
