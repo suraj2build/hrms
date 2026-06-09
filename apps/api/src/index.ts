@@ -196,6 +196,7 @@ import payrollValidationRoute              from './routes/payroll/validation.js'
 import payrollReconciliationRoute          from './routes/payroll/reconciliation.js'
 import payrollAdjustmentsRoute            from './routes/payroll/adjustments.js'
 import payrollExportsRoute                from './routes/payroll/exports.js'
+import payrollFilingPackRoute             from './routes/payroll/filing-pack.js'
 import payrollOpsDashboardRoute           from './routes/payroll/ops-dashboard.js'
 import payrollBulkOpsRoute               from './routes/payroll/bulk-ops.js'
 import payrollSchedulerMonitorRoute       from './routes/payroll/scheduler-monitor.js'
@@ -584,6 +585,7 @@ async function start() {
   await fastify.register(payrollReconciliationRoute)                                                 // POST /payroll/reconciliation/:id/acknowledge|escalate
   await fastify.register(payrollAdjustmentsRoute,           { prefix: '/payroll/adjustments' })      // GET/POST /payroll/adjustments/*
   await fastify.register(payrollExportsRoute,               { prefix: '/payroll/exports' })           // GET /payroll/exports/epf|esi|ptax|tds|challan|statutory-reconciliation
+  await fastify.register(payrollFilingPackRoute,            { prefix: '/payroll/filing-pack' })        // GET/POST/PATCH /payroll/filing-pack/*
   await fastify.register(payrollOpsDashboardRoute,          { prefix: '/payroll/ops' })               // GET /payroll/ops/dashboard|issues|validate
   await fastify.register(payrollBulkOpsRoute,              { prefix: '/payroll/bulk' })              // POST /payroll/bulk/tds-approve|tds-reject|proof-verify|leave-approve|remind|statutory-update
   await fastify.register(payrollSchedulerMonitorRoute,      { prefix: '/payroll/scheduler' })         // GET /payroll/scheduler/jobs|status, POST /payroll/scheduler/retry/:jobId

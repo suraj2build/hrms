@@ -78,6 +78,7 @@ import {
   // Compliance
   Landmark,
   ScrollText,
+  Archive,
   // Advanced Operations
   Activity,
   Target,
@@ -104,12 +105,13 @@ import {
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface DomainNavItem {
-  id:     string
-  label:  string
-  route:  string
-  icon:   React.ComponentType<{ className?: string }>
-  badge?: string
-  exact?: boolean
+  id:       string
+  label:    string
+  route:    string
+  icon:     React.ComponentType<{ className?: string }>
+  badge?:   string
+  exact?:   boolean
+  keywords?: string[]
 }
 
 export interface DomainNavGroup {
@@ -403,6 +405,7 @@ export const DOMAINS: Domain[] = [
       '/admin/payroll/statutory',        // longer than /admin/payroll — wins
       '/admin/payroll/tax-governance',   // exact match for governance pages
       '/admin/payroll/tax-governance-admin',
+      '/admin/payroll/filing-pack',      // Filing Pack Center
     ],
     defaultRoute: '/admin/payroll/statutory-dashboard',
     groups: [
@@ -428,6 +431,12 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'tax-governance',       label: 'Tax Governance',       route: '/admin/payroll/tax-governance',       icon: ScrollText },
           { id: 'tax-governance-admin', label: 'Verification Queue',   route: '/admin/payroll/tax-governance-admin', icon: ShieldCheck },
+        ],
+      },
+      {
+        label: 'Filing Pack',
+        items: [
+          { id: 'filing-pack', label: 'Filing Pack', route: '/admin/payroll/filing-pack', icon: Archive, keywords: ['filing pack', 'ECR 2.0', 'ECR file', 'EPFO upload', '24Q', 'form 24Q', 'TDS return', 'challan sheet', 'ready to file', 'generate compliance files', 'statutory filing', 'compliance pack', 'ITNS 281', 'TDS challan'] },
         ],
       },
     ],

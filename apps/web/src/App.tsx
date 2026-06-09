@@ -143,6 +143,7 @@ const AutomationsConsole   = lazy(() => import('@/pages/system/AutomationsConsol
 // Payroll pages previously only accessible as workspace tabs
 const PayrollReconciliation = lazy(() => import('@/pages/payroll/PayrollReconciliation').then(m => ({ default: m.PayrollReconciliation })))
 const StatutoryDashboard    = lazy(() => import('@/pages/payroll/StatutoryDashboard').then(m => ({ default: m.StatutoryDashboard })))
+const FilingPackCenter      = lazy(() => import('@/pages/payroll/FilingPackCenter').then(m => ({ default: m.FilingPackCenter })))
 
 // Sprint 12 — Workforce Optimization + Event Governance + Orchestration + Governance Evolution + Incidents + Webhooks + Integrations
 const WorkforceOptimizationEngine = lazy(() => import('@/pages/attendance/WorkforceOptimizationEngine').then(m => ({ default: m.WorkforceOptimizationEngine })))
@@ -634,6 +635,7 @@ export default function App() {
                 <Route path="/admin/payroll/validation"               element={<PayrollValidation />} />
                 <Route path="/admin/payroll/reconciliation"           element={<PayrollReconciliation />} />
                 <Route path="/admin/payroll/statutory-dashboard"      element={<StatutoryDashboard />} />
+                <Route path="/admin/payroll/filing-pack"             element={<FilingPackCenter />} />
                 <Route path="/admin/payroll/advances"                 element={<AdvanceSalary />} />
                 <Route path="/admin/payroll/loans"                    element={<LoanManagement />} />
                 <Route path="/admin/payroll/reimbursements"           element={<Reimbursements />} />
