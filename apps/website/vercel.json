@@ -1,5 +1,8 @@
 {
-  "framework": "nextjs",
+  "framework": "vite",
   "buildCommand": "npm run build",
-  "outputDirectory": ".next"
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+  ]
 }

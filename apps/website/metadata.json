@@ -1,0 +1,6 @@
+{
+  "name": "Emvora",
+  "description": "An employee-centric HR, automated payroll, geofenced attendance, continuous OKRs performance, and recruitment ATS platform inspired by Keka.com.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
