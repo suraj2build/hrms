@@ -493,9 +493,15 @@ export const DOMAINS: Domain[] = [
     defaultRoute: '/admin/reports',
     groups: [
       {
-        label: 'Reports',
+        label: 'Overview',
         items: [
-          { id: 'reports-center',  label: 'All Reports',     route: '/admin/reports',                       icon: BarChart2  },
+          { id: 'reports-hub',         label: 'Reports Hub',         route: '/admin/reports',             exact: true, icon: BarChart2, keywords: ['reports home', 'all reports', 'reports overview', 'reporting center'] },
+        ],
+      },
+      {
+        label: 'Operational',
+        items: [
+          { id: 'reports-operational', label: 'Operational Reports', route: '/admin/reports/operational',              icon: FileText,  keywords: ['headcount report', 'attendance report', 'salary register', 'statutory register', 'muster roll', 'leave register', 'payroll register'] },
         ],
       },
     ],

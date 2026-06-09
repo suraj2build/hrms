@@ -55,6 +55,7 @@ import type { Profile, Tenant } from '@/types'
 const Organization      = lazy(() => import('@/pages/organization/Organization').then(m => ({ default: m.Organization })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
+const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
 
 // Import + Onboarding
 const ImportWorkspace      = lazy(() => import('@/pages/import/ImportWorkspace').then(m => ({ default: m.ImportWorkspace })))
@@ -574,7 +575,8 @@ export default function App() {
                 <Route path="/admin/attendance/intelligence-center" element={<AttendanceIntelligenceCenter />} />
 
                 {/* Reports */}
-                <Route path="/admin/reports" element={<Reports />} />
+                <Route path="/admin/reports"             element={<ReportingHub />} />
+                <Route path="/admin/reports/operational" element={<Reports />} />
 
                 {/* Leave (admin) */}
                 <Route path="/admin/holidays"                element={<Holidays />} />
