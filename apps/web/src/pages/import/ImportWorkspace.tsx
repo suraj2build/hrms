@@ -332,6 +332,18 @@ const IMPORT_GROUPS: ImportGroupDef[] = [
   { key: 'reference',  label: 'Reference Data', note: 'Document types, identity types, relationship types' },
 ]
 
+// Per-group accent palette — soft tinted section boxes + matching card icons.
+// Opacity-based so it reads correctly in both light and dark mode.
+const GROUP_ACCENT: Record<string, { box: string; label: string; icon: string }> = {
+  organization: { box: 'bg-blue-500/[0.05] border-blue-500/15',     label: 'text-blue-600 dark:text-blue-400',     icon: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+  people:       { box: 'bg-violet-500/[0.05] border-violet-500/15',  label: 'text-violet-600 dark:text-violet-400', icon: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
+  payroll:      { box: 'bg-emerald-500/[0.05] border-emerald-500/15', label: 'text-emerald-600 dark:text-emerald-400', icon: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+  enterprise:   { box: 'bg-amber-500/[0.06] border-amber-500/20',    label: 'text-amber-600 dark:text-amber-400',   icon: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  onboarding:   { box: 'bg-cyan-500/[0.05] border-cyan-500/15',      label: 'text-cyan-600 dark:text-cyan-400',     icon: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' },
+  reference:    { box: 'bg-slate-500/[0.06] border-slate-500/15',    label: 'text-slate-600 dark:text-slate-300',   icon: 'bg-slate-500/10 text-slate-600 dark:text-slate-300' },
+}
+const DEFAULT_ACCENT = { box: 'bg-muted/40 border-border', label: 'text-muted-foreground', icon: 'bg-muted text-muted-foreground' }
+
 // IMPORTANT: requiredFields / optionalFields MUST match the actual CSV column keys
 // defined in apps/api/src/lib/import-engine/templates.ts — these are what the
 // backend validator expects and what appears in the downloaded template.
@@ -1204,44 +1216,23 @@ export function ImportWorkspace() {
               {IMPORT_GROUPS.map((group) => {
                 const groupConfigs = MASTER_CONFIGS.filter(c => c.group === group.key)
                 if (groupConfigs.length === 0) return null
-                const isOrgGroup = group.key === 'organization'
+                const accent = GROUP_ACCENT[group.key] ?? DEFAULT_ACCENT
                 return (
-                  <div key={group.key}>
+                  <div key={group.key} className={cn('rounded-xl border p-3.5 space-y-3', accent.box)}>
                     {/* Group header */}
-                    <div className="flex items-center gap-3 mb-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className={cn('text-xs font-bold uppercase tracking-wider', accent.label)}>
                         {group.label}
                       </p>
-                      <div className="flex-1 h-px bg-border" />
                       {group.note && (
-                        <span className="text-[10px] text-muted-foreground/60 italic shrink-0">
+                        <span className="text-[10px] text-muted-foreground/60 italic shrink-0 truncate hidden sm:block">
                           {group.note}
                         </span>
                       )}
                     </div>
 
-                    {/* Org group: show horizontal dependency chain indicator */}
-                    {isOrgGroup && (
-                      <div className="flex items-center gap-1.5 mb-3 px-1">
-                        {groupConfigs.map((cfg, i) => (
-                          <React.Fragment key={cfg.type}>
-                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-                              <span className="h-4 w-4 rounded-full bg-muted border border-border flex items-center justify-center text-[9px] font-bold text-muted-foreground shrink-0">
-                                {cfg.groupStep}
-                              </span>
-                              <span>{cfg.label}</span>
-                            </div>
-                            {i < groupConfigs.length - 1 && (
-                              <ArrowRight className="h-3 w-3 text-muted-foreground/30 shrink-0" />
-                            )}
-                          </React.Fragment>
-                        ))}
-                        <span className="ml-1 text-[10px] text-muted-foreground/50">— upload in this order</span>
-                      </div>
-                    )}
-
                     {/* Card grid — compact horizontal tiles */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
                       {groupConfigs.map((cfg) => {
                         const Icon = cfg.icon
                         const isSelected = selectedMaster === cfg.type
@@ -1252,19 +1243,16 @@ export function ImportWorkspace() {
                             onClick={() => selectMaster(cfg.type)}
                             title={cfg.description}
                             className={cn(
-                              'group flex items-center gap-2.5 rounded-lg border p-2.5 text-left transition-all duration-150',
-                              'hover:border-primary/50 hover:bg-primary/[0.04]',
+                              'group/card flex items-start gap-2.5 rounded-lg border bg-card p-3 text-left transition-all duration-150',
                               isSelected
-                                ? 'border-primary ring-1 ring-primary/25 bg-primary/[0.06]'
-                                : 'border-border bg-card',
+                                ? 'border-primary ring-1 ring-primary/30 bg-primary/[0.04]'
+                                : 'border-border/70 hover:border-primary/40 hover:shadow-sm',
                             )}
                           >
                             <div
                               className={cn(
-                                'rounded-md p-1.5 shrink-0 transition-colors',
-                                isSelected
-                                  ? 'bg-primary/12 text-primary'
-                                  : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary',
+                                'rounded-md p-1.5 shrink-0',
+                                isSelected ? 'bg-primary/10 text-primary' : accent.icon,
                               )}
                             >
                               <Icon className="h-4 w-4" />
@@ -1275,12 +1263,12 @@ export function ImportWorkspace() {
                                   {cfg.label}
                                 </p>
                                 {cfg.groupStep && (
-                                  <span className="text-[9px] font-bold text-muted-foreground/50 shrink-0 tabular-nums">
+                                  <span className="text-[10px] font-bold text-muted-foreground/45 shrink-0 tabular-nums">
                                     #{cfg.groupStep}
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[11px] text-muted-foreground truncate">{cfg.description}</p>
+                              <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">{cfg.description}</p>
                             </div>
                           </button>
                         )
