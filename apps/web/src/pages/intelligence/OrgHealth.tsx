@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 interface Department {
   id: string; name: string; headcount: number
@@ -55,7 +56,7 @@ export function OrgHealth() {
   const loading   = depts.isLoading || trend.isLoading || attrition.isLoading
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6 max-w-6xl">
+    <PageContainer>
       {/* Gradient header */}
       <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5">
         <h1 className="text-lg font-semibold">Organization Health</h1>
@@ -171,7 +172,7 @@ export function OrgHealth() {
           </div>
         </>
       )}
-    </div>
+    </PageContainer>
   )
 }
 

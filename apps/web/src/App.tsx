@@ -261,7 +261,7 @@ const AdminComingSoon      = lazy(() => import('@/pages/admin/AdminComingSoon').
 // Intelligence — AI Workforce OS Phase 1
 const WorkforceCommand     = lazy(() => import('@/pages/intelligence/WorkforceCommand').then(m => ({ default: m.WorkforceCommand })))
 const OrgHealth            = lazy(() => import('@/pages/intelligence/OrgHealth').then(m => ({ default: m.OrgHealth })))
-const ExecutiveNarrative   = lazy(() => import('@/pages/intelligence/ExecutiveNarrative').then(m => ({ default: m.ExecutiveNarrative })))
+const ExecutiveNarrative   = lazy(() => import('@/pages/intelligence/ExecutiveNarrative').then(m => ({ default: m.NarrativesPage })))
 const ActionCenter         = lazy(() => import('@/pages/intelligence/ActionCenter').then(m => ({ default: m.ActionCenter })))
 const WorkforceDigest      = lazy(() => import('@/pages/intelligence/WorkforceDigest').then(m => ({ default: m.WorkforceDigest })))
 const WorkforceSearch      = lazy(() => import('@/pages/intelligence/WorkforceSearch').then(m => ({ default: m.WorkforceSearch })))

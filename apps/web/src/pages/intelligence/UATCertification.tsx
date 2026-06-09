@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import {
   CheckCircle2, XCircle, MinusCircle, Circle, ShieldCheck, Download, RotateCcw,
 } from 'lucide-react'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 type Status = 'pending' | 'pass' | 'fail' | 'na'
 
@@ -98,8 +99,8 @@ function saveState(tenantId: string, s: CertState) {
 
 const STATUS_META: Record<Status, { icon: React.ComponentType<{ className?: string }>; cls: string; label: string }> = {
   pending: { icon: Circle,       cls: 'text-muted-foreground', label: 'Pending' },
-  pass:    { icon: CheckCircle2, cls: 'text-emerald-600',      label: 'Pass' },
-  fail:    { icon: XCircle,      cls: 'text-red-600',          label: 'Fail' },
+  pass:    { icon: CheckCircle2, cls: 'text-success',      label: 'Pass' },
+  fail:    { icon: XCircle,      cls: 'text-destructive',          label: 'Fail' },
   na:      { icon: MinusCircle,  cls: 'text-muted-foreground', label: 'N/A' },
 }
 
@@ -167,7 +168,7 @@ export function UATCertification() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6 max-w-5xl">
+    <PageContainer>
       {/* Header */}
       <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5 flex items-start justify-between gap-4">
         <div className="space-y-1">
@@ -178,7 +179,7 @@ export function UATCertification() {
             <span className="px-2 py-0.5 rounded-full bg-white/20">{totals.fail} fail</span>
             <span className="px-2 py-0.5 rounded-full bg-white/20">{totals.pending} pending</span>
             <span className="px-2 py-0.5 rounded-full bg-white/20">{totals.pct}% reviewed</span>
-            {totals.certified && <span className="px-2 py-0.5 rounded-full bg-emerald-400/90 text-emerald-950 font-semibold">✓ CERTIFIED</span>}
+            {totals.certified && <span className="px-2 py-0.5 rounded-full bg-success text-success-foreground font-semibold">✓ CERTIFIED</span>}
           </div>
         </div>
         <div className="flex flex-col gap-2 flex-shrink-0">
@@ -205,10 +206,10 @@ export function UATCertification() {
             <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-foreground">{m.label}</p>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="text-emerald-600">{st.pass}✓</span>
-                {st.fail > 0 && <span className="text-red-600">{st.fail}✗</span>}
+                <span className="text-success">{st.pass}✓</span>
+                {st.fail > 0 && <span className="text-destructive">{st.fail}✗</span>}
                 {st.pending > 0 && <span>{st.pending} pending</span>}
-                {moduleCertified && <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">certified</span>}
+                {moduleCertified && <span className="px-1.5 py-0.5 rounded-full bg-success/10 text-success font-medium">certified</span>}
               </div>
             </div>
             <div className="divide-y divide-border/50">
@@ -258,7 +259,7 @@ export function UATCertification() {
       <p className="text-[11px] text-muted-foreground">
         Certification marks are stored locally in this browser for audit convenience — they are not a system of record and never modify employee, payroll, or any operational data.
       </p>
-    </div>
+    </PageContainer>
   )
 }
 

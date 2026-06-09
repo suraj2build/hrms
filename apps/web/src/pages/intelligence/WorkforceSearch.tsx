@@ -9,6 +9,7 @@ import { Link } from 'react-router-dom'
 import { api } from '@/lib/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Search, Loader2, AlertCircle, Users } from 'lucide-react'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -125,7 +126,7 @@ export function WorkforceSearch() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <PageContainer>
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -223,8 +224,8 @@ export function WorkforceSearch() {
 
       {/* Unrecognised query */}
       {state.kind === 'unrecognised' && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-yellow-800 font-medium text-sm">
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-warning font-medium text-sm">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             Could not interpret your query. Try one of these:
           </div>
@@ -233,7 +234,7 @@ export function WorkforceSearch() {
               <button
                 key={s}
                 onClick={() => handleExampleClick(s)}
-                className="px-3 py-1.5 text-xs rounded-full border border-yellow-300 bg-white text-yellow-800 hover:bg-yellow-100 transition-colors"
+                className="px-3 py-1.5 text-xs rounded-full border border-warning/40 bg-card text-warning hover:bg-warning/10 transition-colors"
               >
                 {s}
               </button>
@@ -244,7 +245,7 @@ export function WorkforceSearch() {
 
       {/* API error */}
       {state.kind === 'error' && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start gap-2 text-sm text-red-700">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 flex items-start gap-2 text-sm text-destructive">
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <span>{state.message}</span>
         </div>
@@ -267,6 +268,6 @@ export function WorkforceSearch() {
           </div>
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }

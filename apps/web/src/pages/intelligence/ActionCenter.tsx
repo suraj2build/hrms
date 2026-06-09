@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import {
   Loader2, RefreshCw, UserPlus, LogOut, Package, AlertCircle, Info, CheckCircle,
 } from 'lucide-react'
+import { PageContainer } from '@/components/layout/PageContainer'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ export function ActionCenter() {
   const updatedAt = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : null
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
+    <PageContainer>
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -151,7 +152,7 @@ export function ActionCenter() {
 
       {/* Error */}
       {isError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           Unable to load action center data.{' '}
           {error instanceof Error ? error.message : 'Unknown error.'}{' '}
           <button className="underline ml-1" onClick={() => refetch()}>Retry</button>
@@ -170,7 +171,7 @@ export function ActionCenter() {
           {/* Empty state */}
           {data.total === 0 && (
             <div className="flex flex-col items-center gap-3 py-20 text-center">
-              <CheckCircle className="h-10 w-10 text-green-500" />
+              <CheckCircle className="h-10 w-10 text-success" />
               <p className="font-medium text-base">No recent activity</p>
               <p className="text-sm text-muted-foreground max-w-xs">
                 No significant workforce events were detected in the last 48 hours. Check back after new activity occurs.
@@ -197,6 +198,6 @@ export function ActionCenter() {
           })()}
         </>
       )}
-    </div>
+    </PageContainer>
   )
 }

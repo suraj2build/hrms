@@ -6,6 +6,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import { Loader2, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 interface NarrativeMetrics {
   headcount:        number
@@ -97,6 +99,21 @@ export function ExecutiveNarrative({ month }: { month?: string }) {
         </div>
       )}
     </div>
+  )
+}
+
+// Standalone page wrapper — the bare component is a card embedded elsewhere;
+// the /admin/intelligence/narratives route needs proper page chrome.
+export function NarrativesPage() {
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Narratives"
+        subtitle="AI-generated monthly workforce narrative — every figure is a live COUNT from source tables"
+        breadcrumb={[{ label: 'Advanced Operations' }, { label: 'Narratives' }]}
+      />
+      <ExecutiveNarrative />
+    </PageContainer>
   )
 }
 
