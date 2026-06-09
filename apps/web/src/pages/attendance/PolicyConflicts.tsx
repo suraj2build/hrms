@@ -47,10 +47,12 @@ interface PolicyConflict {
   }
 }
 
+// Matches GET /attendance/policy-conflicts/summary
 interface ConflictSummary {
   total: number
-  by_type: Array<{ conflict_type: string; count: number }>
-  unresolved_count: number
+  by_type:           Record<string, number>
+  by_severity:       Record<string, number>
+  payroll_impacting: number
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -127,26 +129,26 @@ export function PolicyConflicts() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: listData, isLoading } = useQuery<{ data: PolicyConflict[] }>({
+  const { data: listData, isLoading } = useQuery<{ data: PolicyConflict[]; total: number }>({
     queryKey: ['policy-conflicts-list', applied, page],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) })
-      if (applied.date_from)   params.set('date_from',   applied.date_from)
-      if (applied.date_to)     params.set('date_to',     applied.date_to)
+      if (applied.date_from)   params.set('from', applied.date_from)
+      if (applied.date_to)     params.set('to',   applied.date_to)
       if (applied.employee_id) params.set('employee_id', applied.employee_id)
-      if (applied.resolution)  params.set('resolution',  applied.resolution)
-      return api.get(`/attendance/policy-conflicts/list?${params}`)
+      return api.get(`/attendance/policy-conflicts?${params}`)
     },
     enabled:   isAdmin,
     staleTime: 60_000,
   })
 
-  const { data: summaryData } = useQuery<{ data: ConflictSummary }>({
-    queryKey: ['policy-conflicts-summary', applied.date_from, applied.date_to],
+  // The summary API is month-scoped — derive the month from the range end.
+  const summaryMonth = (applied.date_to || applied.date_from || '').slice(0, 7)
+  const { data: summaryData } = useQuery<ConflictSummary>({
+    queryKey: ['policy-conflicts-summary', summaryMonth],
     queryFn: () => {
       const params = new URLSearchParams()
-      if (applied.date_from) params.set('date_from', applied.date_from)
-      if (applied.date_to)   params.set('date_to',   applied.date_to)
+      if (summaryMonth) params.set('month', summaryMonth)
       return api.get(`/attendance/policy-conflicts/summary?${params}`)
     },
     enabled:   isAdmin,
@@ -195,10 +197,13 @@ export function PolicyConflicts() {
     c.resolution.toLowerCase().includes(search.toLowerCase())
   )
 
-  const summary  = summaryData?.data
-  const top3Types = (summary?.by_type ?? []).slice(0, 3)
+  const summary  = summaryData
+  const top3Types = Object.entries(summary?.by_type ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([conflict_type, count]) => ({ conflict_type, count }))
 
-  const totalPages = Math.ceil((listData?.data?.length ?? 0) / PAGE_SIZE)
+  const totalPages = Math.ceil((listData?.total ?? listData?.data?.length ?? 0) / PAGE_SIZE)
 
   return (
     <PageContainer>
@@ -217,19 +222,19 @@ export function PolicyConflicts() {
             <p className="text-[10px] text-muted-foreground mt-0.5">in selected date range</p>
           </SectionCard>
 
-          {/* Unresolved */}
+          {/* Payroll impacting */}
           <SectionCard>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Unresolved</p>
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Payroll Impacting</p>
             <div className="flex items-center gap-2 mt-1">
-              {summary.unresolved_count > 0 && <AlertTriangle className="h-5 w-5 text-destructive" />}
+              {summary.payroll_impacting > 0 && <AlertTriangle className="h-5 w-5 text-destructive" />}
               <p className={cn('text-3xl font-bold tabular-nums',
-                summary.unresolved_count > 0 ? 'text-destructive' : 'text-success',
+                summary.payroll_impacting > 0 ? 'text-destructive' : 'text-success',
               )}>
-                {summary.unresolved_count}
+                {summary.payroll_impacting}
               </p>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {summary.unresolved_count > 0 ? 'Require attention' : 'All resolved'}
+              {summary.payroll_impacting > 0 ? 'Affect payroll' : 'None affect payroll'}
             </p>
           </SectionCard>
 
