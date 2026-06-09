@@ -690,6 +690,9 @@ export function ImportWorkspace() {
   // ── Global State ──────────────────────────────────────────────────────────
   // Initial values derived from the single initialSession read — no async race.
   const [selectedMaster, setSelectedMaster] = useState<MasterType | null>(initialSession?.masterType ?? null)
+  // Collapse the master picker once a type is chosen so the workflow sits right
+  // at the top (no scrolling past the full grid). Re-opened via "Change master".
+  const [pickerOpen, setPickerOpen] = useState<boolean>(!initialSession?.masterType)
   const [currentStep, setCurrentStep] = useState<Step>(initialSession ? validateSessionStep(initialSession) : 'download')
   const [parsedRows, setParsedRows] = useState<Record<string, string>[]>(initialSession?.parsedRows ?? [])
   const [fileName, setFileName] = useState<string>(initialSession?.fileName ?? '')
@@ -1107,6 +1110,7 @@ export function ImportWorkspace() {
     validateMutation.reset()
     importMutation.reset()
     setSelectedMaster(type)
+    setPickerOpen(false)   // collapse picker → surface the workflow immediately
     const snap = loadSession(type)
     if (snap) {
       const safeStep = validateSessionStep(snap)
@@ -1186,11 +1190,15 @@ export function ImportWorkspace() {
             The `hidden` class drives visibility via CSS — no remount. */}
         <TabsContent value="import" forceMount className={cn('space-y-4', activeTab !== 'import' && 'hidden')}>
 
-          {/* Section 1: Master Type Selector */}
+          {/* Section 1: Master Type Selector — collapses once a type is picked */}
+          {pickerOpen && (
           <SectionCard
             title="Select Master Type"
             description="Choose the data category you want to import"
             icon={<FileSpreadsheet className="h-4 w-4 text-muted-foreground" />}
+            action={selectedMaster && (
+              <Button variant="ghost" size="sm" onClick={() => setPickerOpen(false)}>Close</Button>
+            )}
           >
             <div className="space-y-4">
               {IMPORT_GROUPS.map((group) => {
@@ -1283,6 +1291,27 @@ export function ImportWorkspace() {
               })}
             </div>
           </SectionCard>
+          )}
+
+          {/* Collapsed selected-master bar — keeps the workflow at the top */}
+          {!pickerOpen && selectedMaster && masterConfig && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="rounded-md bg-primary/10 p-1.5 text-primary shrink-0">
+                  <masterConfig.icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-foreground truncate">{masterConfig.label}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {IMPORT_GROUPS.find(g => g.key === masterConfig.group)?.label ?? 'Master data'}
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => setPickerOpen(true)}>
+                <RotateCcw className="h-3.5 w-3.5" /> Change master
+              </Button>
+            </div>
+          )}
 
           {/* Section 2: Import Workflow */}
           {selectedMaster && masterConfig && (
