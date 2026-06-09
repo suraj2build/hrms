@@ -11,9 +11,9 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity, AlertTriangle, ArrowRight, Bell, Brain,
+  Activity, AlertTriangle, ArrowRight, Brain,
   Clock, Download, Gauge, IndianRupee, Lightbulb,
-  Search, Sparkles, Target,
+  Sparkles, Target,
   UserMinus, UserPlus, Users, Wallet, CalendarCheck, Info, ChevronRight,
 } from 'lucide-react'
 import {
@@ -25,14 +25,10 @@ import { useNavigate } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { DrillDownSheet, type DeptRow } from '@/components/exec/DrillDownSheet'
 import { api } from '@/lib/api/client'
-import { useAuthStore } from '@/stores/authStore'
-import { getInitials } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
 // ── Real /executive response shapes ─────────────────────────────────────────────
@@ -96,7 +92,6 @@ const sevTone: Record<string, string> = {
 // ── Page ─────────────────────────────────────────────────────────────────────────
 
 export default function ExecutiveIntelligenceCenter() {
-  const { profile } = useAuthStore()
   const navigate = useNavigate()
   const [period, setPeriod] = useState<'30D' | 'QTD' | 'YTD' | '12M'>('12M')
   const [drillDept, setDrillDept] = useState<DeptRow | null>(null)
@@ -188,44 +183,28 @@ export default function ExecutiveIntelligenceCenter() {
   ]
 
   return (
-    <div className="-mx-6 -my-5">
-      {/* Top bar */}
-      <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-6 py-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[image:var(--gradient-primary)] text-primary-foreground">
-              <Brain className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold leading-none">Manpower Intelligence Center</div>
-              <div className="text-[11px] text-muted-foreground">HRMS · CHRO &amp; CEO View</div>
-            </div>
+    <div className="mx-auto max-w-[1600px] space-y-6">
+      {/* Page header — controls live here; the app nav handles bell / profile / search */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[image:var(--gradient-primary)] text-primary-foreground shadow-sm">
+            <Brain className="h-4 w-4" />
           </div>
-
-          <div className="ml-6 hidden flex-1 items-center lg:flex">
-            <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Ask anything — coming soon" disabled className="pl-9 bg-muted/40" />
-            </div>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            <div className="hidden items-center rounded-lg border bg-muted/40 p-0.5 md:flex">
-              {(['30D', 'QTD', 'YTD', '12M'] as const).map((p) => (
-                <button key={p} onClick={() => setPeriod(p)} className={cn('rounded-md px-3 py-1 text-xs font-medium transition-colors', period === p ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{p}</button>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={exportDepts}><Download className="h-3.5 w-3.5" /> Export</Button>
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-4 w-4" />
-              {(ceo?.open_exceptions ?? 0) > 0 && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />}
-            </Button>
-            <Avatar className="h-8 w-8 border"><AvatarFallback className="bg-primary text-primary-foreground text-xs">{getInitials(profile?.full_name ?? 'U')}</AvatarFallback></Avatar>
+          <div>
+            <h1 className="font-display text-lg font-bold leading-none text-foreground">Manpower Intelligence Center</h1>
+            <p className="mt-1 text-[11px] text-muted-foreground">CEO &amp; CHRO view · {loading ? 'loading…' : 'live data'}</p>
           </div>
         </div>
-      </header>
+        <div className="flex items-center gap-2">
+          <div className="hidden items-center rounded-lg border bg-muted/40 p-0.5 sm:flex">
+            {(['30D', 'QTD', 'YTD', '12M'] as const).map((p) => (
+              <button key={p} onClick={() => setPeriod(p)} className={cn('rounded-md px-3 py-1 text-xs font-medium transition-colors', period === p ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{p}</button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={exportDepts}><Download className="h-3.5 w-3.5" /> Export</Button>
+        </div>
+      </div>
 
-      <main className="mx-auto max-w-[1600px] space-y-6 px-6 py-6">
         {/* Hero strip */}
         <section className="relative overflow-hidden rounded-2xl border bg-[image:var(--gradient-primary)] p-6 text-primary-foreground shadow-[var(--shadow-elegant)]">
           <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
@@ -465,10 +444,9 @@ export default function ExecutiveIntelligenceCenter() {
           </div>
         </section>
 
-        <footer className="pb-8 pt-2 text-center text-[11px] text-muted-foreground">
-          Manpower Intelligence Center · HRMS · Confidential · Live data
-        </footer>
-      </main>
+      <footer className="pb-4 pt-2 text-center text-[11px] text-muted-foreground">
+        Manpower Intelligence Center · HRMS · Confidential · Live data
+      </footer>
 
       <DrillDownSheet open={!!drillDept} onOpenChange={(o) => !o && setDrillDept(null)} dept={drillDept} />
     </div>
