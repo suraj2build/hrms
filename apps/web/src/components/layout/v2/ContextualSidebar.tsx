@@ -118,23 +118,22 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
                   'relative flex items-center gap-2 rounded-lg py-1.5 text-[12.5px] transition-colors',
                   collapsed ? 'justify-center px-0 w-10 mx-auto' : 'px-1.5',
                   isActive
-                    ? 'bg-primary/[0.12] text-primary font-semibold'
+                    // Selected row mirrors the top bar's 3D recipe: navy gradient fill,
+                    // white content, inset top-highlight + bottom-shade and a soft colored
+                    // drop shadow so it reads as the same raised pill as the header.
+                    ? 'bg-[image:var(--gradient-nav)] text-white font-semibold shadow-[inset_0_1px_0_0_rgba(255,255,255,0.20),inset_0_-1px_0_0_rgba(0,0,0,0.18),0_2px_8px_-2px_rgba(26,77,143,0.55)]'
                     : 'text-sidebar-foreground/75 hover:bg-muted/60 hover:text-sidebar-foreground',
                 )}
               >
-                {/* Left active indicator pill */}
-                {isActive && !collapsed && (
-                  <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-[3px] h-[18px] rounded-full bg-primary" />
-                )}
-
-                {/* Colored icon container */}
+                {/* Colored icon container — goes white-on-translucent when the
+                    row is selected, matching the top bar's chips. */}
                 <span
                   className={cn(
                     'flex items-center justify-center rounded-md flex-shrink-0 transition-opacity',
                     collapsed ? 'h-7 w-7' : 'h-6 w-6',
-                    iconColors.bg,
-                    iconColors.text,
-                    isActive ? 'opacity-100' : 'opacity-75',
+                    isActive
+                      ? 'bg-white/15 text-white opacity-100'
+                      : cn(iconColors.bg, iconColors.text, 'opacity-75'),
                   )}
                 >
                   <item.icon className={collapsed ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
@@ -143,7 +142,10 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
                   <span className="flex-1 truncate">{item.label}</span>
                 )}
                 {!collapsed && item.badge && (
-                  <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                  <span className={cn(
+                    'text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-full',
+                    isActive ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground',
+                  )}>
                     {item.badge}
                   </span>
                 )}

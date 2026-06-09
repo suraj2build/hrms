@@ -89,6 +89,11 @@
   --gradient-primary: var(--grad-primary);
   --gradient-sidebar: var(--grad-sidebar);
 
+  /* Navy navigation gradient — single source of truth for the top bar AND the
+     selected left-sidebar row, so the active tab reads as a raised, dark "3D"
+     pill that visually connects to the header. Fixed navy in light + dark. */
+  --gradient-nav:      linear-gradient(to right, #1A4D8F, #1E5BA8, #2260A8);
+
   /* Legacy glow vars — resolved to transparent so no visual glitch */
   --shadow-glow-soft:    0 0 0 transparent;
   --shadow-glow-violet:  0 0 0 transparent;
