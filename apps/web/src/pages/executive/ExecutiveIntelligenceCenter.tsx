@@ -1,1114 +1,540 @@
 /**
- * Executive Intelligence Center — /admin/executive
+ * ExecutiveIntelligenceCenter — /admin/executive
  *
- * Read-only strategic intelligence for CEO / CHRO / Enterprise Admin.
- * No operational actions. No approvals. No workflow execution.
- * All data derives from existing SSOT modules.
- *
- * 6 tabs:
- *   CEO View      — headcount, payroll cost, attention items, narrative
- *   CHRO View     — workforce distribution, leave, compensation, trust
- *   Workforce     — headcount trends, dept breakdown, type/gender analysis
- *   Financial     — payroll cost trends, dept cost, revision impact
- *   Compliance    — incidents, exceptions, trust risks, governance alerts
- *   Trends        — 6-month strategic trends (attendance, leave, payroll)
+ * CEO / CHRO "Manpower Intelligence Center". Single-scroll executive dashboard.
+ * Every figure is wired to the live /executive/* API. Panels for which we have
+ * no backing data yet (predictive attrition, hiring funnel, exit reasons,
+ * position ageing, productivity, per-department attrition, plan/budget, payroll
+ * component mix) render an honest "not available yet" empty state rather than
+ * fabricated numbers.
  */
-
-import { useState, useMemo }           from 'react'
-import { useQuery }                    from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
-  TrendingUp, Minus,
-  Users, DollarSign, ShieldCheck,
-  AlertTriangle, CheckCircle2, BarChart3,
-  Activity, Brain, RefreshCw,
-  Loader2, AlertCircle, ArrowUpRight,
-  ArrowDownRight,
+  Activity, AlertTriangle, ArrowRight, Bell, Brain,
+  Clock, Download, Gauge, IndianRupee, Lightbulb,
+  Search, Sparkles, Target,
+  UserMinus, UserPlus, Users, Wallet, CalendarCheck, Info, ChevronRight,
 } from 'lucide-react'
-import { PageContainer }  from '@/components/layout/PageContainer'
-import { PageHeader }     from '@/components/layout/PageHeader'
-import { SectionCard }    from '@/components/layout/SectionCard'
-import { Badge }          from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { api }            from '@/lib/api/client'
-import { cn }             from '@/lib/utils'
-import { ExecutiveNarrative } from '@/pages/intelligence/ExecutiveNarrative'
+import {
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart,
+  Legend, Line, Pie, PieChart, ResponsiveContainer,
+  Tooltip, XAxis, YAxis,
+} from 'recharts'
+import { useNavigate } from 'react-router-dom'
 
-// ── Local types (match API response shapes) ───────────────────────────────────
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Separator } from '@/components/ui/separator'
+import { KpiCard } from '@/components/exec/KpiCard'
+import { DrillDownSheet, type DeptRow } from '@/components/exec/DrillDownSheet'
+import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/authStore'
+import { getInitials } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+
+// ── Real /executive response shapes ─────────────────────────────────────────────
 
 interface CeoSnapshot {
-  employee_count:        number
-  joiners_30d:           number
-  exits_30d:             number
-  net_headcount_change:  number
-  attendance_rate:       number
-  absence_rate:          number
-  payroll_cost_current:  number
-  payroll_net_current:   number
-  payroll_headcount:     number
-  payroll_month:         string
-  avg_cost_per_employee: number
-  open_exceptions:       number
-  open_incidents:        number
-  pending_revisions:     number
-  total_attention_items: number
-  narrative:             string
-  generated_at:          string
-  period:                { from: string; to: string }
+  employee_count: number; joiners_30d: number; exits_30d: number
+  net_headcount_change: number; attendance_rate: number; absence_rate: number
+  payroll_cost_current: number; payroll_net_current: number; avg_cost_per_employee: number
+  open_exceptions: number; open_incidents: number; pending_revisions: number
+  total_attention_items: number; narrative: string
 }
-
 interface ChroSnapshot {
-  employee_count:               number
+  gender_distribution: Record<string, number>
   employment_type_distribution: Record<string, number>
-  gender_distribution:          Record<string, number>
-  dept_distribution:            Record<string, number>
-  attendance_rate:              number
-  absence_rate:                 number
-  leave_applied:                number
-  leave_approved:               number
-  leave_pending:                number
-  total_days_taken:             number
-  leave_utilization_pct:        number
-  pending_revisions:            number
-  approved_revisions:           number
-  pending_revisions_by_type:    Record<string, number>
-  trust_high_risk:              number
-  trust_verified:               number
-  trust_total:                  number
-  trust_verification_pct:       number
-  narrative:                    string
-  generated_at:                 string
+  leave_utilization_pct: number; trust_high_risk: number; narrative: string
 }
-
 interface WorkforceData {
-  employee_count:              number
-  monthly_trends:              Array<{ month: string; joiners: number; exits: number; net: number }>
-  dept_distribution:           Array<{ dept: string; count: number; pct: number }>
+  employee_count: number
+  monthly_trends: Array<{ month: string; joiners: number; exits: number; net: number }>
+  dept_distribution: Array<{ dept: string; count: number; pct: number }>
   employment_type_distribution: Array<{ type: string; count: number; pct: number }>
-  gender_distribution:         Record<string, number>
-  total_joiners_period:        number
-  total_exits_period:          number
+  gender_distribution: Record<string, number>
+  total_joiners_period: number; total_exits_period: number
 }
-
 interface FinancialData {
-  payroll_current_gross:    number
-  payroll_current_net:      number
-  payroll_current_headcount: number
-  payroll_current_month:    string
-  payroll_mom_change:       number
-  payroll_cost_trend:       Array<{ month: string; total_gross: number; total_net: number; employee_count: number; avg_cost_per_head: number }>
-  total_revision_delta:     number
-  avg_revision_pct:         number
-  revisions_by_type:        Record<string, number>
-  approved_revisions_count: number
-  dept_cost_breakdown:      Array<{ dept: string; headcount: number; total_gross: number; total_net: number; ot_cost: number }>
+  payroll_current_gross: number; payroll_current_net: number; payroll_mom_change: number
+  payroll_cost_trend: Array<{ month: string; total_gross: number; employee_count: number; avg_cost_per_head: number }>
+  dept_cost_breakdown: Array<{ dept: string; headcount: number; total_gross: number; total_net: number; ot_cost: number }>
 }
-
 interface ComplianceData {
-  open_incidents:        number
-  critical_incidents:    number
-  total_incidents_30d:   number
-  open_exceptions:       number
-  sla_breached_30d:      number
-  total_exceptions_30d:  number
-  sla_breach_rate:       number
-  trust_high_risk:       number
-  trust_medium_risk:     number
-  trust_at_risk:         number
-  trust_total:           number
-  trust_verified:        number
-  trust_verification_pct: number
-  gov_total_30d:         number
-  gov_by_severity:       Record<string, number>
-  open_duplicates:       number
-  compliance_risk_score: number
-  risk_status:           'low' | 'medium' | 'high'
+  open_incidents: number; critical_incidents: number; open_exceptions: number
+  trust_high_risk: number; compliance_risk_score: number; risk_status: 'low' | 'medium' | 'high'
 }
-
 interface TrendsData {
-  months:      Array<{
-    month:                 string
-    attendance_rate:       number
-    leave_days_approved:   number
-    payroll_gross:         number | null
-    payroll_headcount:     number | null
-    joiners:               number
-    exits:                 number
-    net_headcount:         number
-  }>
-  month_count: number
+  months: Array<{ month: string; attendance_rate: number; leave_days_approved: number; payroll_gross: number | null; payroll_headcount: number | null; joiners: number; exits: number; net_headcount: number }>
 }
 
-// ── Formatting helpers ────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────────
 
-function fmtCurrency(n: number): string {
-  if (n >= 10_000_000) return `₹${((n ?? 0) / 10_000_000).toFixed(1)}Cr`
-  if (n >= 100_000)    return `₹${((n ?? 0) / 100_000).toFixed(1)}L`
-  if (n >= 1_000)      return `₹${((n ?? 0) / 1_000).toFixed(0)}K`
-  return `₹${(n ?? 0).toLocaleString()}`
+const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
+const TIP = { background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 } as const
+
+function cr(n: number): string {
+  if (n >= 1e7) return `₹${(n / 1e7).toFixed(1)}Cr`
+  if (n >= 1e5) return `₹${(n / 1e5).toFixed(1)}L`
+  if (n >= 1e3) return `₹${(n / 1e3).toFixed(0)}K`
+  return `₹${Math.round(n).toLocaleString()}`
 }
-
-function fmtPct(n: number): string { return `${(n ?? 0).toFixed(1)}%` }
-function fmtNum(n: number): string { return (n ?? 0).toLocaleString() }
 function fmtMonth(ym: string): string {
-  try {
-    const [y, m] = ym.split('-').map(Number)
-    return new Date(y, m - 1).toLocaleString('default', { month: 'short', year: '2-digit' })
-  } catch { return ym }
+  try { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1).toLocaleString('default', { month: 'short' }) }
+  catch { return ym }
 }
 
-// ── Reusable sub-components ───────────────────────────────────────────────────
-
-function MetricCard({
-  label, value, sub, trend, trendDir, icon: Icon, accent,
-}: {
-  label:    string
-  value:    string | number
-  sub?:     string
-  trend?:   string
-  trendDir?: 'up' | 'down' | 'neutral'
-  icon?:    React.ComponentType<{ className?: string }>
-  accent?:  'green' | 'amber' | 'red' | 'blue' | 'default'
-}) {
-  const colourMap = {
-    green:   'border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/30',
-    amber:   'border-amber-200   bg-amber-50/50   dark:border-amber-800   dark:bg-amber-950/30',
-    red:     'border-red-200     bg-red-50/50     dark:border-red-800     dark:bg-red-950/30',
-    blue:    'border-blue-200    bg-blue-50/50    dark:border-blue-800    dark:bg-blue-950/30',
-    default: '',
-  }
-  return (
-    <div className={cn(
-      'rounded-lg border p-4 space-y-1',
-      accent ? colourMap[accent] : colourMap.default,
-    )}>
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-      </div>
-      <p className="text-2xl font-bold tracking-tight">{value}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-      {trend && (
-        <div className={cn('flex items-center gap-1 text-xs font-medium',
-          trendDir === 'up'   ? 'text-emerald-600' :
-          trendDir === 'down' ? 'text-red-500' : 'text-muted-foreground',
-        )}>
-          {trendDir === 'up'      ? <ArrowUpRight className="h-3 w-3" />
-           : trendDir === 'down'  ? <ArrowDownRight className="h-3 w-3" />
-           : <Minus className="h-3 w-3" />}
-          {trend}
-        </div>
-      )}
-    </div>
-  )
+const sevTone: Record<string, string> = {
+  critical: 'bg-destructive/10 text-destructive border-destructive/20',
+  high: 'bg-warning/15 text-warning border-warning/30',
+  medium: 'bg-info/10 text-info border-info/20',
+  low: 'bg-muted text-muted-foreground border-border',
 }
 
-function RiskBadge({ status }: { status: 'low' | 'medium' | 'high' }) {
-  return (
-    <Badge variant={
-      status === 'high'   ? 'destructive' :
-      status === 'medium' ? 'outline' : 'secondary'
-    } className={cn(
-      status === 'medium' && 'border-amber-400 text-amber-700 bg-amber-50',
-      status === 'low'    && 'border-emerald-400 text-emerald-700 bg-emerald-50',
-    )}>
-      {status.toUpperCase()} RISK
-    </Badge>
-  )
-}
-
-function SimpleBar({ label, value, max, colour = 'bg-primary' }: {
-  label: string; value: number; max: number; colour?: string
-}) {
-  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="w-28 truncate text-muted-foreground shrink-0">{label}</span>
-      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-        <div className={cn('h-full rounded-full', colour)} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="w-10 text-right font-medium tabular-nums">{fmtNum(value)}</span>
-    </div>
-  )
-}
-
-function LoadingState() {
-  return (
-    <div className="flex items-center justify-center h-48">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-    </div>
-  )
-}
-
-function ErrorState({ message }: { message?: string }) {
-  return (
-    <div className="flex flex-col items-center gap-2 h-48 justify-center text-muted-foreground">
-      <AlertCircle className="h-6 w-6 text-destructive" />
-      <p className="text-sm">{message ?? 'Failed to load data'}</p>
-    </div>
-  )
-}
-
-function NarrativeBox({ text }: { text: string }) {
-  return (
-    <div className="rounded-md border border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20 p-3">
-      <div className="flex gap-2">
-        <Brain className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-        <p className="text-sm text-blue-900 dark:text-blue-200 leading-relaxed">{text}</p>
-      </div>
-    </div>
-  )
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Page ─────────────────────────────────────────────────────────────────────────
 
 export default function ExecutiveIntelligenceCenter() {
-  const [activeTab, setActiveTab] = useState('ceo')
+  const { profile } = useAuthStore()
+  const navigate = useNavigate()
+  const [period, setPeriod] = useState<'30D' | 'QTD' | 'YTD' | '12M'>('12M')
+  const [drillDept, setDrillDept] = useState<DeptRow | null>(null)
 
-  // All queries are lazy — only fetch when the tab is first visited
-  const ceoQ = useQuery<CeoSnapshot>({
-    queryKey:  ['exec-ceo'],
-    queryFn:   () => api.get('/executive/ceo').then((r: any) => r.data ?? r),
-    enabled:   activeTab === 'ceo',
-    staleTime: 60_000,
-  })
+  const ceoQ        = useQuery<CeoSnapshot>({ queryKey: ['exec-ceo'],        queryFn: () => api.get('/executive/ceo').then((r: any) => r.data ?? r),        staleTime: 5 * 60_000 })
+  const chroQ       = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'],       queryFn: () => api.get('/executive/chro').then((r: any) => r.data ?? r),       staleTime: 5 * 60_000 })
+  const workforceQ  = useQuery<WorkforceData>({ queryKey: ['exec-workforce'],  queryFn: () => api.get('/executive/workforce').then((r: any) => r.data ?? r),  staleTime: 5 * 60_000 })
+  const financialQ  = useQuery<FinancialData>({ queryKey: ['exec-financial'],  queryFn: () => api.get('/executive/financial').then((r: any) => r.data ?? r),  staleTime: 5 * 60_000 })
+  const complianceQ = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get('/executive/compliance').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
+  const trendsQ     = useQuery<TrendsData>({ queryKey: ['exec-trends'],      queryFn: () => api.get('/executive/trends').then((r: any) => r.data ?? r),      staleTime: 5 * 60_000 })
 
-  const chroQ = useQuery<ChroSnapshot>({
-    queryKey:  ['exec-chro'],
-    queryFn:   () => api.get('/executive/chro').then((r: any) => r.data ?? r),
-    enabled:   activeTab === 'chro',
-    staleTime: 60_000,
-  })
+  const ceo = ceoQ.data, chro = chroQ.data, wf = workforceQ.data, fin = financialQ.data, comp = complianceQ.data, trends = trendsQ.data
 
-  const workforceQ = useQuery<WorkforceData>({
-    queryKey:  ['exec-workforce'],
-    queryFn:   () => api.get('/executive/workforce').then((r: any) => r.data ?? r),
-    enabled:   activeTab === 'workforce',
-    staleTime: 60_000,
-  })
+  // ── Derived (all from real data) ──────────────────────────────────────────────
 
-  const financialQ = useQuery<FinancialData>({
-    queryKey:  ['exec-financial'],
-    queryFn:   () => api.get('/executive/financial').then((r: any) => r.data ?? r),
-    enabled:   activeTab === 'financial',
-    staleTime: 60_000,
-  })
+  const genderFemalePct = useMemo(() => {
+    const g = wf?.gender_distribution ?? chro?.gender_distribution ?? {}
+    const total = Object.values(g).reduce((s, v) => s + v, 0)
+    const female = Object.entries(g).find(([k]) => /female|^f$/i.test(k))?.[1] ?? 0
+    return total > 0 ? (female / total) * 100 : null
+  }, [wf, chro])
 
-  const complianceQ = useQuery<ComplianceData>({
-    queryKey:  ['exec-compliance'],
-    queryFn:   () => api.get('/executive/compliance').then((r: any) => r.data ?? r),
-    enabled:   activeTab === 'compliance',
-    staleTime: 60_000,
-  })
+  const attritionTTM = useMemo(() => {
+    const m = trends?.months ?? []
+    if (m.length === 0) return null
+    const exits = m.reduce((s, r) => s + (r.exits ?? 0), 0)
+    const avgHc = m.reduce((s, r) => s + (r.net_headcount ?? 0), 0) / m.length
+    return avgHc > 0 ? (exits / avgHc) * 100 : null
+  }, [trends])
 
-  const trendsQ = useQuery<TrendsData>({
-    queryKey:  ['exec-trends'],
-    queryFn:   () => api.get('/executive/trends').then((r: any) => r.data ?? r),
-    enabled:   activeTab === 'trends',
-    staleTime: 60_000,
-  })
+  const headcountSpark = (fin?.payroll_cost_trend ?? []).map(r => r.employee_count)
+  const attritionSpark = (trends?.months ?? []).map(r => (r.net_headcount > 0 ? +(r.exits / r.net_headcount * 100).toFixed(2) : 0))
+  const costSpark      = (fin?.payroll_cost_trend ?? []).map(r => +(r.total_gross / 1e7).toFixed(2))
 
-  // ── CEO Tab ──────────────────────────────────────────────────────────────────
+  const headcountTrend = (fin?.payroll_cost_trend ?? []).map(r => ({ month: fmtMonth(r.month), actual: r.employee_count }))
+  const mixData = (wf?.employment_type_distribution ?? []).map((d, i) => ({ name: d.type, value: d.count, color: PALETTE[i % PALETTE.length] }))
+  const attendanceTrend = (trends?.months ?? []).map(r => ({ month: fmtMonth(r.month), present: +(r.attendance_rate ?? 0).toFixed(1) }))
+  const combinedTrend = (trends?.months ?? []).map(r => ({
+    month: fmtMonth(r.month),
+    headcount: r.net_headcount ?? 0,
+    payroll: r.payroll_gross != null ? +(r.payroll_gross / 1e7).toFixed(2) : null,
+    attrition: r.net_headcount > 0 ? +(r.exits / r.net_headcount * 100).toFixed(2) : 0,
+  }))
 
-  const CeoTab = useMemo(() => {
-    const { data, isLoading, isError } = ceoQ
-    if (isLoading) return <LoadingState />
-    if (isError || !data) return <ErrorState />
-    const d = data
+  // Department table — real headcount + cost; per-dept attrition/diversity not available.
+  const deptRows: DeptRow[] = useMemo(() => {
+    const costByDept = new Map((fin?.dept_cost_breakdown ?? []).map(d => [d.dept, d]))
+    const rows = (wf?.dept_distribution ?? []).map(d => {
+      const c = costByDept.get(d.dept)
+      const gross = c?.total_gross ?? 0
+      const headcount = c?.headcount ?? d.count
+      return {
+        name: d.dept,
+        headcount,
+        cost: gross / 1e7,
+        costPerHead: headcount > 0 && gross > 0 ? gross / headcount / 1000 : null,
+        net: c?.total_net ?? null,
+        ot: c?.ot_cost ?? null,
+        open: null, attrition: null, productivity: null, female: null, contract: null, growth: null,
+      } as DeptRow
+    })
+    return rows.sort((a, b) => b.headcount - a.headcount)
+  }, [wf, fin])
 
-    const headcountTrend = d.net_headcount_change > 0 ? 'up'
-      : d.net_headcount_change < 0 ? 'down' : 'neutral'
+  // AI insights from the real CEO/CHRO narratives
+  const insights = [
+    ceo?.narrative ? { label: 'CEO Summary', body: ceo.narrative, tone: 'border-info/30 bg-info/5' } : null,
+    chro?.narrative ? { label: 'CHRO Summary', body: chro.narrative, tone: 'border-success/30 bg-success/5' } : null,
+  ].filter(Boolean) as { label: string; body: string; tone: string }[]
 
-    const momChange = (d as any).payroll_mom_change as number | undefined
-    const payrollTrend = momChange !== undefined
-      ? (momChange > 0 ? 'up' : momChange < 0 ? 'down' : 'neutral')
-      : undefined
+  const loading = ceoQ.isLoading || workforceQ.isLoading
+  const fmtNum = (n: number | undefined | null) => (n ?? 0).toLocaleString()
 
-    return (
-      <div className="space-y-4">
-        <NarrativeBox text={d.narrative} />
+  function exportDepts() {
+    const rows = [['Department', 'Headcount', 'Cost (Cr)', 'Cost/Head (K)'], ...deptRows.map(d => [d.name, String(d.headcount), d.cost.toFixed(2), d.costPerHead?.toFixed(1) ?? ''])]
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'department-manpower.csv'; a.click()
+  }
 
-        {/* Monthly workforce narrative — deltas + provenance (read-only) */}
-        <ExecutiveNarrative />
-
-        {/* Workforce */}
-        <SectionCard title="Workforce Snapshot" icon={<Users className="h-4 w-4 text-muted-foreground" />}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MetricCard
-              label="Active Employees"
-              value={fmtNum(d.employee_count)}
-              accent="blue"
-              icon={Users}
-            />
-            <MetricCard
-              label="Joiners (30d)"
-              value={d.joiners_30d}
-              sub="New hires"
-              trend={d.joiners_30d > 0 ? `+${d.joiners_30d}` : undefined}
-              trendDir={headcountTrend}
-              accent="green"
-            />
-            <MetricCard
-              label="Exits (30d)"
-              value={d.exits_30d}
-              sub="Separations"
-              accent={d.exits_30d > 5 ? 'amber' : 'default'}
-            />
-            <MetricCard
-              label="Net Change"
-              value={d.net_headcount_change >= 0 ? `+${d.net_headcount_change}` : d.net_headcount_change}
-              trendDir={headcountTrend}
-              trend={headcountTrend === 'up' ? 'Growing' : headcountTrend === 'down' ? 'Shrinking' : 'Stable'}
-            />
-          </div>
-        </SectionCard>
-
-        {/* Payroll */}
-        <SectionCard title="Payroll Snapshot" icon={<DollarSign className="h-4 w-4 text-muted-foreground" />}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MetricCard
-              label="Gross Cost"
-              value={fmtCurrency(d.payroll_cost_current)}
-              sub={`${d.payroll_month}`}
-              accent="blue"
-              icon={DollarSign}
-            />
-            <MetricCard
-              label="Net Payout"
-              value={fmtCurrency(d.payroll_net_current)}
-              sub="Take-home total"
-            />
-            <MetricCard
-              label="Avg Cost / Employee"
-              value={fmtCurrency(d.avg_cost_per_employee)}
-              sub={`${fmtNum(d.payroll_headcount)} employees`}
-            />
-            {(d as any).payroll_mom_change !== undefined && (
-              <MetricCard
-                label="MoM Change"
-                value={`${(d as any).payroll_mom_change > 0 ? '+' : ''}${(d as any).payroll_mom_change}%`}
-                trendDir={payrollTrend}
-                trend={payrollTrend === 'up' ? 'Increased' : 'Decreased'}
-              />
-            )}
-          </div>
-        </SectionCard>
-
-        {/* Attendance */}
-        <SectionCard title="Operational Health (Last 30 Days)" icon={<Activity className="h-4 w-4 text-muted-foreground" />}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MetricCard
-              label="Attendance Rate"
-              value={fmtPct(d.attendance_rate)}
-              accent={d.attendance_rate >= 90 ? 'green' : d.attendance_rate >= 75 ? 'amber' : 'red'}
-            />
-            <MetricCard
-              label="Absence Rate"
-              value={fmtPct(d.absence_rate)}
-              accent={d.absence_rate <= 5 ? 'green' : d.absence_rate <= 15 ? 'amber' : 'red'}
-            />
-            <MetricCard
-              label="Open Exceptions"
-              value={d.open_exceptions}
-              accent={d.open_exceptions > 10 ? 'amber' : 'default'}
-              icon={AlertTriangle}
-            />
-            <MetricCard
-              label="Open Incidents"
-              value={d.open_incidents}
-              accent={d.open_incidents > 0 ? 'red' : 'green'}
-              icon={ShieldCheck}
-            />
-          </div>
-        </SectionCard>
-
-        {/* Attention items */}
-        {d.total_attention_items > 0 && (
-          <SectionCard title="Attention Required" icon={<AlertCircle className="h-4 w-4 text-muted-foreground" />}>
-            <div className="space-y-2">
-              {d.open_exceptions > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-2">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                    Open attendance exceptions
-                  </span>
-                  <Badge variant="outline" className="text-amber-700 border-amber-400 bg-amber-50">
-                    {d.open_exceptions}
-                  </Badge>
-                </div>
-              )}
-              {d.open_incidents > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-2">
-                    <ShieldCheck className="h-3.5 w-3.5 text-red-500" />
-                    Open operational incidents
-                  </span>
-                  <Badge variant="destructive">{d.open_incidents}</Badge>
-                </div>
-              )}
-              {d.pending_revisions > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-2">
-                    <RefreshCw className="h-3.5 w-3.5 text-blue-500" />
-                    Pending compensation revisions
-                  </span>
-                  <Badge variant="secondary">{d.pending_revisions}</Badge>
-                </div>
-              )}
-            </div>
-          </SectionCard>
-        )}
-      </div>
-    )
-  }, [ceoQ.data, ceoQ.isLoading, ceoQ.isError])
-
-  // ── CHRO Tab ─────────────────────────────────────────────────────────────────
-
-  const ChroTab = useMemo(() => {
-    const { data, isLoading, isError } = chroQ
-    if (isLoading) return <LoadingState />
-    if (isError || !data) return <ErrorState />
-    const d = data
-
-    const deptEntries = Object.entries(d.dept_distribution)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-    const maxDept = deptEntries[0]?.[1] ?? 1
-
-    const typeEntries = Object.entries(d.employment_type_distribution)
-      .sort((a, b) => b[1] - a[1])
-
-    return (
-      <div className="space-y-4">
-        <NarrativeBox text={d.narrative} />
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Workforce overview */}
-          <SectionCard title="Workforce Distribution" icon={<Users className="h-4 w-4 text-muted-foreground" />}>
-            <div className="mb-3 grid grid-cols-2 gap-2">
-              <MetricCard label="Active Headcount" value={fmtNum(d.employee_count)} accent="blue" />
-            </div>
-            <div className="space-y-1.5 mt-2">
-              <p className="text-xs font-medium text-muted-foreground mb-2">By Department</p>
-              {deptEntries.map(([dept, count]) => (
-                <SimpleBar key={dept} label={dept} value={count} max={maxDept} />
-              ))}
-            </div>
-            <div className="mt-3 space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground mb-2">By Employment Type</p>
-              {typeEntries.map(([type, count]) => (
-                <SimpleBar key={type} label={type} value={count} max={d.employee_count} colour="bg-blue-500" />
-              ))}
-            </div>
-          </SectionCard>
-
-          {/* Attendance & Leave */}
-          <SectionCard title="Attendance & Leave (30d)" icon={<Activity className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <MetricCard
-                label="Attendance"
-                value={fmtPct(d.attendance_rate)}
-                accent={d.attendance_rate >= 90 ? 'green' : 'amber'}
-              />
-              <MetricCard
-                label="Absence"
-                value={fmtPct(d.absence_rate)}
-                accent={d.absence_rate <= 5 ? 'green' : 'amber'}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <MetricCard label="Leave Applied" value={d.leave_applied} />
-              <MetricCard label="Leave Approved" value={d.leave_approved} accent="green" />
-              <MetricCard label="Pending" value={d.leave_pending} accent={d.leave_pending > 5 ? 'amber' : 'default'} />
-            </div>
-            <div className="mt-2 text-xs text-muted-foreground">
-              {d.total_days_taken} days taken · {fmtPct(d.leave_utilization_pct)} utilization
-            </div>
-          </SectionCard>
-
-          {/* Compensation revisions */}
-          <SectionCard title="Compensation Revisions" icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <MetricCard
-                label="Pending"
-                value={d.pending_revisions}
-                accent={d.pending_revisions > 5 ? 'amber' : 'default'}
-              />
-              <MetricCard label="Approved (30d)" value={d.approved_revisions} accent="green" />
-            </div>
-            {Object.entries(d.pending_revisions_by_type).length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Pending by Type</p>
-                {Object.entries(d.pending_revisions_by_type).map(([type, count]) => (
-                  <SimpleBar
-                    key={type}
-                    label={type.replace(/_/g, ' ')}
-                    value={count}
-                    max={d.pending_revisions}
-                    colour="bg-amber-500"
-                  />
-                ))}
-              </div>
-            )}
-          </SectionCard>
-
-          {/* Trust */}
-          <SectionCard title="Trust & Verification" icon={<ShieldCheck className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <MetricCard
-                label="High Risk"
-                value={d.trust_high_risk}
-                accent={d.trust_high_risk > 0 ? 'red' : 'green'}
-                icon={AlertTriangle}
-              />
-              <MetricCard
-                label="Verified"
-                value={fmtPct(d.trust_verification_pct)}
-                accent={d.trust_verification_pct >= 80 ? 'green' : 'amber'}
-                icon={CheckCircle2}
-              />
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {fmtNum(d.trust_verified)} of {fmtNum(d.trust_total)} employees verified
-            </div>
-          </SectionCard>
-        </div>
-      </div>
-    )
-  }, [chroQ.data, chroQ.isLoading, chroQ.isError])
-
-  // ── Workforce Tab ─────────────────────────────────────────────────────────────
-
-  const WorkforceTab = useMemo(() => {
-    const { data, isLoading, isError } = workforceQ
-    if (isLoading) return <LoadingState />
-    if (isError || !data) return <ErrorState />
-    const d = data
-    const maxDept = d.dept_distribution[0]?.count ?? 1
-
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricCard label="Active Headcount" value={fmtNum(d.employee_count)} icon={Users} accent="blue" />
-          <MetricCard label="Joiners (Period)" value={d.total_joiners_period} trendDir="up" accent="green" />
-          <MetricCard label="Exits (Period)" value={d.total_exits_period} trendDir="down" />
-          <MetricCard
-            label="Net Change"
-            value={d.total_joiners_period - d.total_exits_period >= 0
-              ? `+${d.total_joiners_period - d.total_exits_period}`
-              : d.total_joiners_period - d.total_exits_period}
-            trendDir={d.total_joiners_period - d.total_exits_period > 0 ? 'up' : 'down'}
-          />
-        </div>
-
-        {/* Monthly trend table */}
-        <SectionCard title="Monthly Headcount Movement" icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left pb-2 px-2 font-medium text-muted-foreground">Month</th>
-                  {d.monthly_trends.map(t => (
-                    <th key={t.month} className="text-center pb-2 px-2 font-medium text-muted-foreground">
-                      {fmtMonth(t.month)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { label: 'Joiners', key: 'joiners' as const },
-                  { label: 'Exits',   key: 'exits'   as const },
-                  { label: 'Net',     key: 'net'     as const },
-                ].map(({ label, key }) => (
-                  <tr key={key} className="border-b last:border-0">
-                    <td className="py-1.5 px-2 font-medium text-muted-foreground">{label}</td>
-                    {d.monthly_trends.map(t => (
-                      <td key={t.month} className={cn(
-                        'py-1.5 px-2 text-center tabular-nums',
-                        key === 'net' && t.net > 0  ? 'text-emerald-600 font-medium' :
-                        key === 'net' && t.net < 0  ? 'text-red-500 font-medium' : '',
-                      )}>
-                        {key === 'net' && t[key] > 0 ? `+${t[key]}` : t[key]}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Department breakdown */}
-          <SectionCard title="Department Breakdown" icon={<Users className="h-4 w-4 text-muted-foreground" />}>
-            <div className="space-y-1.5">
-              {d.dept_distribution.slice(0, 10).map(item => (
-                <SimpleBar key={item.dept} label={item.dept} value={item.count} max={maxDept} />
-              ))}
-            </div>
-          </SectionCard>
-
-          {/* Type & Gender */}
-          <SectionCard title="Employment Mix" icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}>
-            <p className="text-xs font-medium text-muted-foreground mb-2">By Employment Type</p>
-            <div className="space-y-1.5 mb-4">
-              {d.employment_type_distribution.slice(0, 6).map(item => (
-                <SimpleBar
-                  key={item.type}
-                  label={item.type.replace(/_/g, ' ')}
-                  value={item.count}
-                  max={d.employee_count}
-                  colour="bg-blue-500"
-                />
-              ))}
-            </div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">By Gender</p>
-            <div className="space-y-1.5">
-              {Object.entries(d.gender_distribution).map(([g, count]) => (
-                <SimpleBar
-                  key={g}
-                  label={g}
-                  value={count}
-                  max={d.employee_count}
-                  colour="bg-violet-500"
-                />
-              ))}
-            </div>
-          </SectionCard>
-        </div>
-      </div>
-    )
-  }, [workforceQ.data, workforceQ.isLoading, workforceQ.isError])
-
-  // ── Financial Tab ─────────────────────────────────────────────────────────────
-
-  const FinancialTab = useMemo(() => {
-    const { data, isLoading, isError } = financialQ
-    if (isLoading) return <LoadingState />
-    if (isError || !data) return <ErrorState />
-    const d = data
-    const maxDeptCost = d.dept_cost_breakdown[0]?.total_gross ?? 1
-
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricCard
-            label="Current Gross Cost"
-            value={fmtCurrency(d.payroll_current_gross)}
-            sub={d.payroll_current_month}
-            icon={DollarSign}
-            accent="blue"
-          />
-          <MetricCard
-            label="Current Net Payout"
-            value={fmtCurrency(d.payroll_current_net)}
-            sub="Employee take-home"
-          />
-          <MetricCard
-            label="Avg Cost / Head"
-            value={fmtCurrency(
-              d.payroll_current_headcount > 0
-                ? Math.round(d.payroll_current_gross / d.payroll_current_headcount)
-                : 0,
-            )}
-            sub={`${fmtNum(d.payroll_current_headcount)} employees`}
-          />
-          <MetricCard
-            label="MoM Change"
-            value={`${d.payroll_mom_change >= 0 ? '+' : ''}${d.payroll_mom_change}%`}
-            trendDir={d.payroll_mom_change > 0 ? 'up' : d.payroll_mom_change < 0 ? 'down' : 'neutral'}
-            accent={Math.abs(d.payroll_mom_change) > 10 ? 'amber' : 'default'}
-          />
-        </div>
-
-        {/* Payroll trend table */}
-        <SectionCard title="Payroll Cost Trend" icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}>
-          {d.payroll_cost_trend.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left pb-2 px-2 font-medium text-muted-foreground">Month</th>
-                    {d.payroll_cost_trend.map(t => (
-                      <th key={t.month} className="text-center pb-2 px-2 font-medium text-muted-foreground">
-                        {fmtMonth(t.month)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { label: 'Gross Cost',    key: 'total_gross'       as const, fmt: fmtCurrency },
-                    { label: 'Net Payout',    key: 'total_net'         as const, fmt: fmtCurrency },
-                    { label: 'Headcount',     key: 'employee_count'    as const, fmt: fmtNum      },
-                    { label: 'Avg / Head',    key: 'avg_cost_per_head' as const, fmt: fmtCurrency },
-                  ].map(({ label, key, fmt }) => (
-                    <tr key={key} className="border-b last:border-0">
-                      <td className="py-1.5 px-2 font-medium text-muted-foreground">{label}</td>
-                      {d.payroll_cost_trend.map(t => (
-                        <td key={t.month} className="py-1.5 px-2 text-center tabular-nums">
-                          {(fmt as (n: number) => string)(t[key] as number)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground text-center py-6">No payroll runs found for this period</p>
-          )}
-        </SectionCard>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Dept cost breakdown */}
-          <SectionCard title="Cost by Department (Current Month)" icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}>
-            {d.dept_cost_breakdown.length > 0 ? (
-              <div className="space-y-1.5">
-                {d.dept_cost_breakdown.map(dept => (
-                  <div key={dept.dept} className="flex items-center gap-2 text-xs">
-                    <span className="w-28 truncate text-muted-foreground shrink-0">{dept.dept}</span>
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full"
-                        style={{ width: `${Math.min(100, (dept.total_gross / maxDeptCost) * 100)}%` }}
-                      />
-                    </div>
-                    <span className="w-16 text-right font-medium tabular-nums">{fmtCurrency(dept.total_gross)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">No dept snapshot available</p>
-            )}
-          </SectionCard>
-
-          {/* Revision impact */}
-          <SectionCard title="Compensation Revision Impact" icon={<RefreshCw className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <MetricCard
-                label="Total Delta"
-                value={fmtCurrency(Math.abs(d.total_revision_delta))}
-                sub={d.total_revision_delta >= 0 ? 'Increase' : 'Decrease'}
-                trendDir={d.total_revision_delta > 0 ? 'up' : 'down'}
-              />
-              <MetricCard
-                label="Avg Delta %"
-                value={`${d.avg_revision_pct > 0 ? '+' : ''}${d.avg_revision_pct}%`}
-                sub={`${d.approved_revisions_count} revisions`}
-              />
-            </div>
-            {Object.entries(d.revisions_by_type).length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Approved by Type</p>
-                {Object.entries(d.revisions_by_type).map(([type, count]) => (
-                  <SimpleBar
-                    key={type}
-                    label={type.replace(/_/g, ' ')}
-                    value={count}
-                    max={d.approved_revisions_count}
-                    colour="bg-green-500"
-                  />
-                ))}
-              </div>
-            )}
-          </SectionCard>
-        </div>
-      </div>
-    )
-  }, [financialQ.data, financialQ.isLoading, financialQ.isError])
-
-  // ── Compliance Tab ────────────────────────────────────────────────────────────
-
-  const ComplianceTab = useMemo(() => {
-    const { data, isLoading, isError } = complianceQ
-    if (isLoading) return <LoadingState />
-    if (isError || !data) return <ErrorState />
-    const d = data
-
-    return (
-      <div className="space-y-4">
-        {/* Overall risk */}
-        <SectionCard title="Compliance Risk Status" icon={<ShieldCheck className="h-4 w-4 text-muted-foreground" />}>
-          <div className="flex items-center gap-4 mb-4">
-            <div className="text-4xl font-bold tabular-nums">{d.compliance_risk_score}</div>
-            <div className="space-y-1">
-              <RiskBadge status={d.risk_status} />
-              <p className="text-xs text-muted-foreground">Composite risk score (0 = no risk, 100 = critical)</p>
-            </div>
-          </div>
-          <div className="h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className={cn(
-                'h-full rounded-full transition-all',
-                d.compliance_risk_score >= 50 ? 'bg-destructive' :
-                d.compliance_risk_score >= 25 ? 'bg-amber-500' : 'bg-emerald-500',
-              )}
-              style={{ width: `${d.compliance_risk_score}%` }}
-            />
-          </div>
-        </SectionCard>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Incidents */}
-          <SectionCard title="Operational Incidents" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <MetricCard
-                label="Open Incidents"
-                value={d.open_incidents}
-                accent={d.open_incidents > 0 ? 'red' : 'green'}
-                icon={AlertCircle}
-              />
-              <MetricCard
-                label="Critical / High"
-                value={d.critical_incidents}
-                accent={d.critical_incidents > 0 ? 'red' : 'default'}
-              />
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {d.total_incidents_30d} incidents logged in last 30 days
-            </div>
-          </SectionCard>
-
-          {/* Exceptions & SLA */}
-          <SectionCard title="Exception & SLA Health" icon={<Activity className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <MetricCard
-                label="Open Exceptions"
-                value={d.open_exceptions}
-                accent={d.open_exceptions > 10 ? 'amber' : 'default'}
-              />
-              <MetricCard
-                label="SLA Breach Rate"
-                value={fmtPct(d.sla_breach_rate)}
-                accent={d.sla_breach_rate >= 20 ? 'red' : d.sla_breach_rate >= 10 ? 'amber' : 'green'}
-              />
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {d.sla_breached_30d} of {d.total_exceptions_30d} exceptions breached SLA (30d)
-            </div>
-          </SectionCard>
-
-          {/* Trust */}
-          <SectionCard title="Trust & Identity Risk" icon={<ShieldCheck className="h-4 w-4 text-muted-foreground" />}>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-              <MetricCard
-                label="High Risk"
-                value={d.trust_high_risk}
-                accent={d.trust_high_risk > 0 ? 'red' : 'green'}
-              />
-              <MetricCard
-                label="Medium Risk"
-                value={d.trust_medium_risk}
-                accent={d.trust_medium_risk > 5 ? 'amber' : 'default'}
-              />
-              <MetricCard
-                label="Verified %"
-                value={fmtPct(d.trust_verification_pct)}
-                accent={d.trust_verification_pct >= 80 ? 'green' : 'amber'}
-              />
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {fmtNum(d.trust_verified)} of {fmtNum(d.trust_total)} profiles verified ·
-              {d.open_duplicates > 0 && ` ${d.open_duplicates} duplicate flags open`}
-            </div>
-          </SectionCard>
-
-          {/* Governance events */}
-          <SectionCard title="Governance Events (30d)" icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}>
-            <div className="mb-3">
-              <MetricCard label="Total Events" value={d.gov_total_30d} />
-            </div>
-            {Object.entries(d.gov_by_severity).length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">By Severity</p>
-                {Object.entries(d.gov_by_severity)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([sev, count]) => (
-                    <SimpleBar
-                      key={sev}
-                      label={sev}
-                      value={count}
-                      max={d.gov_total_30d}
-                      colour={
-                        sev === 'critical' ? 'bg-red-500' :
-                        sev === 'high'     ? 'bg-orange-500' :
-                        sev === 'medium'   ? 'bg-amber-500' : 'bg-muted-foreground'
-                      }
-                    />
-                  ))}
-              </div>
-            )}
-          </SectionCard>
-        </div>
-      </div>
-    )
-  }, [complianceQ.data, complianceQ.isLoading, complianceQ.isError])
-
-  // ── Trends Tab ────────────────────────────────────────────────────────────────
-
-  const TrendsTab = useMemo(() => {
-    const { data, isLoading, isError } = trendsQ
-    if (isLoading) return <LoadingState />
-    if (isError || !data) return <ErrorState />
-    const d = data
-    const months = d.months
-
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Historical trend view — last {d.month_count} months. No forecasting. Read-only.
-        </p>
-
-        {/* Attendance trend */}
-        <SectionCard title="Attendance Rate Trend" icon={<Activity className="h-4 w-4 text-muted-foreground" />}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left pb-2 px-2 font-medium text-muted-foreground w-32">Metric</th>
-                  {months.map(m => (
-                    <th key={m.month} className="text-center pb-2 px-2 font-medium text-muted-foreground">
-                      {fmtMonth(m.month)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b">
-                  <td className="py-1.5 px-2 font-medium text-muted-foreground">Attendance %</td>
-                  {months.map(m => (
-                    <td key={m.month} className={cn(
-                      'py-1.5 px-2 text-center tabular-nums font-medium',
-                      m.attendance_rate >= 90 ? 'text-emerald-600' :
-                      m.attendance_rate >= 75 ? 'text-amber-600' : 'text-red-500',
-                    )}>
-                      {m.attendance_rate > 0 ? fmtPct(m.attendance_rate) : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b">
-                  <td className="py-1.5 px-2 font-medium text-muted-foreground">Leave Days</td>
-                  {months.map(m => (
-                    <td key={m.month} className="py-1.5 px-2 text-center tabular-nums">
-                      {m.leave_days_approved > 0 ? fmtNum(m.leave_days_approved) : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b">
-                  <td className="py-1.5 px-2 font-medium text-muted-foreground">Gross Payroll</td>
-                  {months.map(m => (
-                    <td key={m.month} className="py-1.5 px-2 text-center tabular-nums">
-                      {m.payroll_gross !== null ? fmtCurrency(m.payroll_gross) : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b">
-                  <td className="py-1.5 px-2 font-medium text-muted-foreground">Payroll Head</td>
-                  {months.map(m => (
-                    <td key={m.month} className="py-1.5 px-2 text-center tabular-nums">
-                      {m.payroll_headcount !== null ? fmtNum(m.payroll_headcount) : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="border-b">
-                  <td className="py-1.5 px-2 font-medium text-muted-foreground">Joiners</td>
-                  {months.map(m => (
-                    <td key={m.month} className="py-1.5 px-2 text-center tabular-nums text-emerald-600">
-                      {m.joiners > 0 ? `+${m.joiners}` : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-1.5 px-2 font-medium text-muted-foreground">Exits</td>
-                  {months.map(m => (
-                    <td key={m.month} className="py-1.5 px-2 text-center tabular-nums text-red-500">
-                      {m.exits > 0 ? m.exits : '—'}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-
-        {/* Net headcount bar indicators */}
-        <SectionCard title="Net Headcount Change by Month" icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}>
-          <div className="space-y-2">
-            {months.map(m => {
-              const abs = Math.abs(m.net_headcount)
-              const maxAbs = Math.max(1, ...months.map(x => Math.abs(x.net_headcount)))
-              return (
-                <div key={m.month} className="flex items-center gap-3 text-xs">
-                  <span className="w-12 font-medium text-muted-foreground">{fmtMonth(m.month)}</span>
-                  <div className="flex-1 h-3 bg-muted rounded-full overflow-hidden relative">
-                    {m.net_headcount !== 0 && (
-                      <div
-                        className={cn('h-full rounded-full', m.net_headcount > 0 ? 'bg-emerald-500' : 'bg-red-400')}
-                        style={{ width: `${Math.min(100, (abs / maxAbs) * 100)}%` }}
-                      />
-                    )}
-                  </div>
-                  <span className={cn(
-                    'w-8 text-right font-medium tabular-nums',
-                    m.net_headcount > 0 ? 'text-emerald-600' :
-                    m.net_headcount < 0 ? 'text-red-500' : 'text-muted-foreground',
-                  )}>
-                    {m.net_headcount > 0 ? `+${m.net_headcount}` : m.net_headcount || '0'}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </SectionCard>
-      </div>
-    )
-  }, [trendsQ.data, trendsQ.isLoading, trendsQ.isError])
-
-  // ── Render ────────────────────────────────────────────────────────────────────
+  const kpis = [
+    { label: 'Active Headcount', value: fmtNum(ceo?.employee_count), delta: ceo ? +(ceo.net_headcount_change / Math.max(1, ceo.employee_count) * 100).toFixed(1) : undefined, deltaLabel: '30D', icon: Users, tone: 'primary' as const, spark: headcountSpark, hint: ceo ? `+${ceo.joiners_30d} / -${ceo.exits_30d}` : undefined },
+    { label: 'Attrition (TTM)', value: attritionTTM == null ? '—' : `${attritionTTM.toFixed(1)}%`, icon: UserMinus, tone: 'destructive' as const, spark: attritionSpark, hint: 'Annualised' },
+    { label: 'Open Positions', value: '—', icon: UserPlus, tone: 'warning' as const, hint: 'Recruitment not wired' },
+    { label: 'Time to Hire', value: '—', icon: CalendarCheck, tone: 'success' as const, hint: 'Recruitment not wired' },
+    { label: 'Manpower Cost', value: cr(fin?.payroll_current_gross ?? 0), delta: fin?.payroll_mom_change, deltaLabel: 'MoM', icon: Wallet, tone: 'info' as const, spark: costSpark, hint: fin ? ceo?.payroll_cost_current ? undefined : undefined : undefined },
+    { label: 'Productivity Index', value: '—', icon: Gauge, tone: 'success' as const, hint: 'Not available yet' },
+    { label: 'Diversity (F)', value: genderFemalePct == null ? '—' : `${genderFemalePct.toFixed(1)}%`, icon: Sparkles, tone: 'info' as const, hint: 'Org-wide' },
+    { label: 'Open Exceptions', value: fmtNum(ceo?.open_exceptions), delta: undefined, icon: AlertTriangle, tone: 'destructive' as const, hint: ceo ? `${ceo.open_incidents} incidents` : undefined },
+  ]
 
   return (
-    <PageContainer>
-      <PageHeader
-        title="Executive Intelligence Center"
-        subtitle="Read-only strategic intelligence derived from operational SSOT. No actions, no approvals."
-      />
+    <div className="-mx-6 -my-5">
+      {/* Top bar */}
+      <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-6 py-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[image:var(--gradient-primary)] text-primary-foreground">
+              <Brain className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold leading-none">Manpower Intelligence Center</div>
+              <div className="text-[11px] text-muted-foreground">HRMS · CHRO &amp; CEO View</div>
+            </div>
+          </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="mt-4"
-      >
-        <TabsList className="flex flex-wrap gap-1 h-auto p-1">
-          <TabsTrigger value="ceo"        className="flex items-center gap-1.5 text-xs">
-            <Activity className="h-3.5 w-3.5" />CEO View
-          </TabsTrigger>
-          <TabsTrigger value="chro"       className="flex items-center gap-1.5 text-xs">
-            <Users className="h-3.5 w-3.5" />CHRO View
-          </TabsTrigger>
-          <TabsTrigger value="workforce"  className="flex items-center gap-1.5 text-xs">
-            <Users className="h-3.5 w-3.5" />Workforce
-          </TabsTrigger>
-          <TabsTrigger value="financial"  className="flex items-center gap-1.5 text-xs">
-            <DollarSign className="h-3.5 w-3.5" />Financial
-          </TabsTrigger>
-          <TabsTrigger value="compliance" className="flex items-center gap-1.5 text-xs">
-            <ShieldCheck className="h-3.5 w-3.5" />Compliance
-          </TabsTrigger>
-          <TabsTrigger value="trends"     className="flex items-center gap-1.5 text-xs">
-            <BarChart3 className="h-3.5 w-3.5" />Trends
-          </TabsTrigger>
-        </TabsList>
+          <div className="ml-6 hidden flex-1 items-center lg:flex">
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Ask anything — coming soon" disabled className="pl-9 bg-muted/40" />
+            </div>
+          </div>
 
-        <div className="mt-4">
-          <TabsContent value="ceo"        className="m-0">{CeoTab}</TabsContent>
-          <TabsContent value="chro"       className="m-0">{ChroTab}</TabsContent>
-          <TabsContent value="workforce"  className="m-0">{WorkforceTab}</TabsContent>
-          <TabsContent value="financial"  className="m-0">{FinancialTab}</TabsContent>
-          <TabsContent value="compliance" className="m-0">{ComplianceTab}</TabsContent>
-          <TabsContent value="trends"     className="m-0">{TrendsTab}</TabsContent>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="hidden items-center rounded-lg border bg-muted/40 p-0.5 md:flex">
+              {(['30D', 'QTD', 'YTD', '12M'] as const).map((p) => (
+                <button key={p} onClick={() => setPeriod(p)} className={cn('rounded-md px-3 py-1 text-xs font-medium transition-colors', period === p ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{p}</button>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={exportDepts}><Download className="h-3.5 w-3.5" /> Export</Button>
+            <Button variant="ghost" size="icon" className="relative">
+              <Bell className="h-4 w-4" />
+              {(ceo?.open_exceptions ?? 0) > 0 && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />}
+            </Button>
+            <Avatar className="h-8 w-8 border"><AvatarFallback className="bg-primary text-primary-foreground text-xs">{getInitials(profile?.full_name ?? 'U')}</AvatarFallback></Avatar>
+          </div>
         </div>
-      </Tabs>
-    </PageContainer>
+      </header>
+
+      <main className="mx-auto max-w-[1600px] space-y-6 px-6 py-6">
+        {/* Hero strip */}
+        <section className="relative overflow-hidden rounded-2xl border bg-[image:var(--gradient-primary)] p-6 text-primary-foreground shadow-[var(--shadow-elegant)]">
+          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute right-10 bottom-0 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-[11px] font-medium uppercase tracking-wider backdrop-blur">
+                <Activity className="h-3 w-3" /> Live · {loading ? 'Loading…' : 'Updated just now'}
+              </div>
+              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+                {ceo?.employee_count != null
+                  ? <>Workforce at <span className="underline decoration-white/40 underline-offset-4">{fmtNum(ceo.employee_count)} active</span>, payroll {cr(fin?.payroll_current_gross ?? 0)} this month.</>
+                  : 'Executive manpower overview'}
+              </h1>
+              <p className="mt-2 text-sm text-primary-foreground/80">
+                {ceo?.narrative ?? 'Real-time headcount, payroll cost, attendance and risk — wired to live operational data.'}
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-3 lg:gap-6">
+              <HeroStat label="Attendance" value={ceo ? `${ceo.attendance_rate.toFixed(1)}%` : '—'} tone="success" />
+              <HeroStat label="At-Risk" value={fmtNum(comp?.trust_high_risk)} tone="info" />
+              <HeroStat label="Critical Items" value={fmtNum(comp?.critical_incidents)} tone="destructive" />
+            </div>
+          </div>
+        </section>
+
+        {/* KPI grid */}
+        <section>
+          <SectionHeader title="Critical Manpower KPIs" subtitle="Live snapshot from operational data" icon={Gauge} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
+          </div>
+        </section>
+
+        {/* Headcount trend + Workforce mix */}
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Panel className="xl:col-span-2" icon={Users} iconClass="text-primary" title="Headcount Trend"
+            subtitle="Active employees per month · plan/budget targets not configured">
+            {headcountTrend.length > 0 ? (
+              <div className="mt-4 h-72">
+                <ResponsiveContainer>
+                  <ComposedChart data={headcountTrend}>
+                    <defs><linearGradient id="hcArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                    <YAxis tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} domain={['dataMin - 30', 'dataMax + 20']} />
+                    <Tooltip contentStyle={TIP} />
+                    <Area type="monotone" dataKey="actual" name="Actual" stroke="var(--chart-1)" strokeWidth={2.5} fill="url(#hcArea)" />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyBody text="Headcount trend will appear once payroll has run for a few months." />}
+          </Panel>
+
+          <Panel icon={Users} iconClass="text-success" title="Workforce Composition" subtitle="By employment type · current">
+            {mixData.length > 0 ? (
+              <>
+                <div className="mt-2 h-52">
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie data={mixData} dataKey="value" innerRadius={48} outerRadius={78} paddingAngle={2} stroke="var(--background)" strokeWidth={2}>
+                        {mixData.map((d) => <Cell key={d.name} fill={d.color} />)}
+                      </Pie>
+                      <Tooltip contentStyle={TIP} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-2 space-y-2">
+                  {mixData.map((d) => (
+                    <div key={d.name} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: d.color }} /><span className="text-foreground capitalize">{d.name}</span></div>
+                      <span className="font-medium tabular-nums text-muted-foreground">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : <EmptyBody text="No workforce composition data." />}
+          </Panel>
+        </section>
+
+        {/* Predictive attrition (empty) + Attendance */}
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Panel className="xl:col-span-2" icon={Sparkles} iconClass="text-info" title="Predictive Attrition · Next 6 Months"
+            badge={<Badge variant="secondary" className="bg-info/10 text-info border-info/20">AI</Badge>}
+            subtitle="Forecast model not enabled yet">
+            <EmptyBody text="Predictive attrition (ML forecast with confidence bands) isn't available yet — it needs the workforce intelligence engine enabled." />
+          </Panel>
+
+          <Panel icon={CalendarCheck} iconClass="text-primary" title="Attendance Trend" subtitle="Monthly attendance rate (%)">
+            {attendanceTrend.length > 0 ? (
+              <>
+                <div className="mt-3 h-56">
+                  <ResponsiveContainer>
+                    <AreaChart data={attendanceTrend}>
+                      <defs><linearGradient id="attA" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-3)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-3)" stopOpacity={0} /></linearGradient></defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                      <YAxis tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} unit="%" domain={[70, 100]} />
+                      <Tooltip contentStyle={TIP} />
+                      <Area type="monotone" dataKey="present" name="Present %" stroke="var(--chart-3)" strokeWidth={2.5} fill="url(#attA)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <Separator className="my-3" />
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <MiniStat label="Present" value={ceo ? `${ceo.attendance_rate.toFixed(1)}%` : '—'} tone="success" />
+                  <MiniStat label="Absence" value={ceo ? `${ceo.absence_rate.toFixed(1)}%` : '—'} tone="destructive" />
+                  <MiniStat label="Leave Util" value={chro ? `${chro.leave_utilization_pct.toFixed(0)}%` : '—'} tone="muted" />
+                </div>
+              </>
+            ) : <EmptyBody text="Attendance trend will appear once attendance is processed." />}
+          </Panel>
+        </section>
+
+        {/* Combined trend + Payroll mix (empty) */}
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Panel className="xl:col-span-2" icon={IndianRupee} iconClass="text-primary" title="Manpower, Attrition & Payroll Cost Trend"
+            badge={<Badge variant="secondary">12 months</Badge>} subtitle="Headcount & payroll (₹ Cr) bars · attrition % line">
+            {combinedTrend.length > 0 ? (
+              <div className="mt-4 h-72">
+                <ResponsiveContainer>
+                  <ComposedChart data={combinedTrend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} unit="%" />
+                    <Tooltip contentStyle={TIP} />
+                    <Bar yAxisId="left" dataKey="headcount" name="Headcount" fill="var(--chart-1)" radius={[3, 3, 0, 0]} barSize={14} />
+                    <Bar yAxisId="left" dataKey="payroll" name="Payroll ₹Cr" fill="var(--chart-3)" radius={[3, 3, 0, 0]} barSize={14} />
+                    <Line yAxisId="right" type="monotone" dataKey="attrition" name="Attrition %" stroke="var(--chart-5)" strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyBody text="Combined trend will appear once trend data is available." />}
+          </Panel>
+
+          <Panel icon={Wallet} iconClass="text-success" title="Payroll Cost Mix" subtitle="By component (₹ Cr)"
+            badge={<Badge variant="secondary" className="ml-auto">{cr(fin?.payroll_current_gross ?? 0)}</Badge>}>
+            <EmptyBody text="Component-level payroll breakdown (fixed / variable / statutory / OT) isn't exposed yet — only gross & net totals are available." />
+          </Panel>
+        </section>
+
+        {/* Position ageing / tenure / reasons — all empty */}
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Panel icon={Clock} iconClass="text-warning" title="Open Position Ageing" subtitle="Days since requisition opened">
+            <EmptyBody text="Requisition ageing needs the recruitment module, which isn't enabled yet." />
+          </Panel>
+          <Panel icon={UserMinus} iconClass="text-destructive" title="Attrition Ageing · Tenure" subtitle="Exits by tenure band">
+            <EmptyBody text="Tenure-band attrition isn't available yet." />
+          </Panel>
+          <Panel icon={Lightbulb} iconClass="text-info" title="Why People Leave" subtitle="Top reasons (% of exits)"
+            badge={<Badge variant="secondary" className="ml-auto">Exit interviews</Badge>}>
+            <EmptyBody text="Exit-reason analysis needs exit-interview capture, which isn't wired yet." />
+          </Panel>
+        </section>
+
+        {/* Hiring funnel (empty) + Diversity (empty) */}
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Panel icon={UserPlus} iconClass="text-info" title="Hiring Funnel" subtitle="Conversion across stages">
+            <EmptyBody text="Hiring funnel needs the recruitment module, which isn't enabled yet." />
+          </Panel>
+          <Panel className="xl:col-span-2" icon={Target} iconClass="text-primary" title="Gender Diversity by Department"
+            subtitle="Per-department breakdown not available"
+            badge={genderFemalePct != null ? <Badge variant="secondary" className="ml-auto">Org-wide F: {genderFemalePct.toFixed(0)}%</Badge> : undefined}>
+            <EmptyBody text="Diversity is only available org-wide right now, not per department. Per-department gender will appear once it's modelled." />
+          </Panel>
+        </section>
+
+        {/* AI insights + Exceptions */}
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Panel icon={Lightbulb} iconClass="text-warning" title="AI Manpower Insights" badge={<Badge variant="secondary" className="ml-auto">Auto-generated</Badge>}>
+            <div className="mt-3 space-y-3">
+              {insights.length > 0 ? insights.map((ins) => (
+                <div key={ins.label} className={cn('rounded-xl border p-3', ins.tone)}>
+                  <div className="mb-1 flex items-center justify-between"><span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{ins.label}</span><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{ins.body}</p>
+                </div>
+              )) : <EmptyBody text="Narrative insights will appear once the snapshot is generated." />}
+            </div>
+          </Panel>
+
+          <Panel className="xl:col-span-2" icon={AlertTriangle} iconClass="text-destructive" title="Manpower Exceptions & Actions"
+            badge={<Badge className="bg-destructive/10 text-destructive border-destructive/20" variant="outline">{ceo?.open_exceptions ?? 0} open</Badge>}
+            action={<Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/admin/intelligence/action-center')}>Action Center <ArrowRight className="ml-1 h-3 w-3" /></Button>}>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MiniStat label="Open Exceptions" value={fmtNum(ceo?.open_exceptions)} tone={(ceo?.open_exceptions ?? 0) > 0 ? 'destructive' : 'success'} />
+              <MiniStat label="Open Incidents" value={fmtNum(comp?.open_incidents)} tone={(comp?.open_incidents ?? 0) > 0 ? 'destructive' : 'success'} />
+              <MiniStat label="Critical" value={fmtNum(comp?.critical_incidents)} tone="destructive" />
+              <MiniStat label="Pending Revisions" value={fmtNum(ceo?.pending_revisions)} tone="muted" />
+            </div>
+            <div className="mt-4">
+              <EmptyBody text="A detailed, itemised exception feed lives in the Action Center — these are the live roll-up counts." />
+            </div>
+          </Panel>
+        </section>
+
+        {/* Department analysis — real headcount + cost */}
+        <section className="rounded-2xl border bg-card p-5 shadow-[var(--shadow-card)]">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2"><Users className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Department Manpower Analysis</h3><Badge variant="secondary" className="ml-1">{deptRows.length} depts</Badge></div>
+              <p className="text-xs text-muted-foreground">Headcount &amp; payroll cost are live · click a row to drill down</p>
+            </div>
+            <Button variant="ghost" size="sm" className="text-xs" onClick={exportDepts}>Export <Download className="ml-1 h-3 w-3" /></Button>
+          </div>
+          <div className="mt-3 overflow-x-auto rounded-xl border">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Department</th>
+                  <th className="px-3 py-2 text-right font-medium">Headcount</th>
+                  <th className="px-3 py-2 text-right font-medium">Cost ₹Cr</th>
+                  <th className="px-3 py-2 text-right font-medium">Cost/Head</th>
+                  <th className="px-3 py-2 text-right font-medium">OT Cost</th>
+                  <th className="px-3 py-2 text-right font-medium">Attrition</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {deptRows.map((d) => (
+                  <tr key={d.name} onClick={() => setDrillDept(d)} className="cursor-pointer hover:bg-muted/30">
+                    <td className="px-3 py-2.5 font-medium">{d.name}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{d.headcount}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">₹{d.cost.toFixed(1)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{d.costPerHead == null ? '—' : `₹${d.costPerHead.toFixed(1)}K`}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{d.ot ? cr(d.ot) : '—'}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">—</td>
+                    <td className="px-3 py-2.5 text-right"><ChevronRight className="ml-auto h-4 w-4 text-muted-foreground" /></td>
+                  </tr>
+                ))}
+                {deptRows.length === 0 && (
+                  <tr><td colSpan={7} className="px-3 py-10 text-center text-xs text-muted-foreground">No department data.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <footer className="pb-8 pt-2 text-center text-[11px] text-muted-foreground">
+          Manpower Intelligence Center · HRMS · Confidential · Live data
+        </footer>
+      </main>
+
+      <DrillDownSheet open={!!drillDept} onOpenChange={(o) => !o && setDrillDept(null)} dept={drillDept} />
+    </div>
+  )
+}
+
+// ── Reusable bits ────────────────────────────────────────────────────────────────
+
+function Panel({ title, subtitle, icon: Icon, iconClass, badge, action, className, children }: {
+  title: string; subtitle?: string; icon: React.ComponentType<{ className?: string }>; iconClass?: string
+  badge?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode
+}) {
+  return (
+    <div className={cn('rounded-2xl border bg-card p-5 shadow-[var(--shadow-card)]', className)}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon className={cn('h-4 w-4', iconClass)} />
+            <h3 className="text-sm font-semibold">{title}</h3>
+            {badge}
+          </div>
+          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function EmptyBody({ text }: { text: string }) {
+  return (
+    <div className="mt-4 flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center">
+      <Info className="h-6 w-6 text-muted-foreground/40" />
+      <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">{text}</p>
+    </div>
+  )
+}
+
+function SectionHeader({ title, subtitle, icon: Icon }: { title: string; subtitle?: string; icon?: React.ComponentType<{ className?: string }> }) {
+  return (
+    <div className="mb-3 flex items-end justify-between">
+      <div>
+        <div className="flex items-center gap-2">{Icon && <Icon className="h-4 w-4 text-primary" />}<h2 className="text-sm font-semibold">{title}</h2></div>
+        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+      </div>
+    </div>
+  )
+}
+
+function HeroStat({ label, value, tone }: { label: string; value: string; tone: 'success' | 'info' | 'destructive' }) {
+  const cls = tone === 'success' ? 'bg-success/20' : tone === 'destructive' ? 'bg-destructive/30' : 'bg-white/15'
+  return (
+    <div className={cn('rounded-xl border border-white/20 p-3 backdrop-blur text-white', cls)}>
+      <div className="text-[10px] font-medium uppercase tracking-wider text-white/80">{label}</div>
+      <div className="text-xl font-semibold tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+function MiniStat({ label, value, tone }: { label: string; value: string; tone: 'success' | 'destructive' | 'muted' }) {
+  const cls = tone === 'success' ? 'text-success' : tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
+  return (
+    <div>
+      <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn('text-sm font-semibold tabular-nums', cls)}>{value}</div>
+    </div>
   )
 }

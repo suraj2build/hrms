@@ -82,6 +82,7 @@
   --shadow-elev-2:    var(--elev-2);
   --shadow-elev-3:    var(--elev-3);
   --shadow-card:      var(--elev-1);
+  --shadow-elegant:   var(--elev-3);
 
   /* Legacy gradient vars — kept for backward compat */
   --gradient-hero:    var(--grad-hero);
