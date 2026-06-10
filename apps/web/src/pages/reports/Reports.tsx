@@ -24,7 +24,7 @@
  *   - Server-generated .xlsx exports (tabs 5-7) with freeze panes + metadata sheet
  */
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Link }                           from 'react-router-dom'
 import { useQuery }                       from '@tanstack/react-query'
 import { toast }                          from 'sonner'
@@ -236,6 +236,27 @@ function monthMinus(n: number) {
   const d = new Date()
   d.setMonth(d.getMonth() - n)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Month state for payroll-based reports. Defaults to the latest month with
+ * finalized payroll (so the report lands on real data instead of an empty
+ * current month) until the user picks a month explicitly.
+ */
+function usePayrollMonthState(): [string, (m: string) => void] {
+  const { data: anchor } = useQuery<{ month: string | null }>({
+    queryKey:  ['payroll-anchor'],
+    queryFn:   () => api.get('/datasets/payroll-cost/anchor'),
+    staleTime: 5 * 60_000,
+    retry:     false,
+  })
+  const [month, setMonth] = useState(currentMonth())
+  const touched = useRef(false)
+  useEffect(() => {
+    if (!touched.current && anchor?.month) setMonth(anchor.month)
+  }, [anchor?.month])
+  const update = useCallback((m: string) => { touched.current = true; setMonth(m) }, [])
+  return [month, update]
 }
 
 /** Download CSV and fire a success toast with row count */
@@ -892,7 +913,7 @@ function AttendanceReport({ departments, basePath }: { departments: Department[]
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SalaryRegister({ departments, basePath }: { departments: Department[]; basePath: string }) {
-  const [month,   setMonth]   = useState(currentMonth())
+  const [month,   setMonth]   = usePayrollMonthState()
   const [empType, setEmpType] = useState('')
   const [deptId,  setDeptId]  = useState('')
   const [search,  setSearch]  = useState('')
@@ -1290,7 +1311,7 @@ const _STATUS_CLS_CELL: Record<string, string> = {
 void _STATUS_SHORT; void _STATUS_CLS_CELL // suppress unused-var until wired up
 
 function MusterRollReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
-  const [month,      setMonth]      = useState(currentMonth())
+  const [month,      setMonth]      = usePayrollMonthState()
   const [deptId,     setDeptId]     = useState('')
   const [search,     setSearch]     = useState('')
   const [genAt,      setGenAt]      = useState<Date | null>(null)
@@ -1463,7 +1484,7 @@ function MusterRollReport({ departments, basePath }: { departments: Department[]
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SalarySheetReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
-  const [month,       setMonth]       = useState(currentMonth())
+  const [month,       setMonth]       = usePayrollMonthState()
   const [deptId,      setDeptId]      = useState('')
   const [genAt,       setGenAt]       = useState<Date | null>(null)
   const [downloading, setDownloading] = useState(false)
@@ -1852,7 +1873,7 @@ const RUN_STATUS_CLS: Record<string, string> = {
 }
 
 function PayrollRegisterReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
-  const [month,        setMonth]        = useState(currentMonth())
+  const [month,        setMonth]        = usePayrollMonthState()
   const [deptId,       setDeptId]       = useState('')
   const [search,       setSearch]       = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('ALL')
@@ -2178,7 +2199,7 @@ function PayrollRegisterReport({ departments, basePath }: { departments: Departm
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AttendancePayrollReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
-  const [month,        setMonth]        = useState(currentMonth())
+  const [month,        setMonth]        = usePayrollMonthState()
   const [deptId,       setDeptId]       = useState('')
   const [mismatchOnly, setMismatchOnly] = useState(false)
   const [search,       setSearch]       = useState('')
