@@ -488,6 +488,7 @@ export const DOMAINS: Domain[] = [
     icon:         BarChart2,
     matchPrefixes: [
       '/admin/reports',
+      '/admin/explorer',   // Data Explorer lives outside /admin/reports — keep Reports tab active
     ],
     defaultRoute: '/admin/reports',
     groups: [

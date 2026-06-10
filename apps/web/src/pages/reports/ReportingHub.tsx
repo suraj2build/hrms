@@ -100,10 +100,10 @@ const SECTIONS: ReportSection[] = [
   {
     id:    'explorer',
     label: 'Explorer',
-    blurb: 'Ad-hoc dataset querying — coming soon.',
-    accent: { tile: 'bg-slate-500/10', text: 'text-slate-500', border: 'border-dashed' },
+    blurb: 'Ad-hoc dataset querying — group, drill and export across every canonical dataset.',
+    accent: { tile: 'bg-emerald-500/10', text: 'text-emerald-600', border: 'border-emerald-500/20' },
     links: [
-      { label: 'Dataset Explorer', description: 'Browse and query canonical datasets — headcount, attendance, payroll, statutory.', route: '#', icon: Database, badge: 'Soon' },
+      { label: 'Data Explorer', description: 'Group by any dimension, drill row-by-row to the employee list, export CSV / Excel — across People, Payroll, Attendance, Leave, Separation & Assets.', route: '/admin/explorer', icon: Database, badge: 'New' },
     ],
   },
 ]
