@@ -60,8 +60,8 @@ const CAT_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
 
 function KpiTile({ label, value, urgent }: { label: string; value: number | string | null; urgent?: boolean }) {
   return (
-    <div className={['rounded-lg border p-4 flex flex-col gap-1', urgent ? 'border-red-200 bg-red-50' : 'border-border bg-card'].join(' ')}>
-      <span className={['text-2xl font-bold', urgent ? 'text-red-700' : 'text-foreground'].join(' ')}>
+    <div className={['surface-premium lift-hover p-4 flex flex-col gap-1', urgent ? 'ring-1 ring-destructive/25' : ''].join(' ')}>
+      <span className={['text-2xl font-bold tabular-nums', urgent ? 'text-destructive' : 'text-foreground'].join(' ')}>
         {value ?? 0}
       </span>
       <span className="text-xs text-muted-foreground">{label}</span>
