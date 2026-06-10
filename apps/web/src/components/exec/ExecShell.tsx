@@ -5,7 +5,7 @@
  * + chart helpers that every exec page uses.
  */
 import { NavLink } from 'react-router-dom'
-import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, Brain, Info } from 'lucide-react'
+import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, BarChart2, Brain, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
@@ -30,6 +30,7 @@ const TABS = [
   { to: '/admin/executive/financial',  label: 'Financial',  icon: DollarSign },
   { to: '/admin/executive/compliance', label: 'Compliance', icon: ShieldCheck },
   { to: '/admin/executive/trends',     label: 'Trends',     icon: BarChart3 },
+  { to: '/admin/executive/headcount',  label: 'Headcount',  icon: BarChart2 },
 ]
 
 export function ExecNav() {

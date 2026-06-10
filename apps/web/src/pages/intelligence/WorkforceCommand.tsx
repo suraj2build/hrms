@@ -162,9 +162,9 @@ export function WorkforceCommand({ embedded = false }: { embedded?: boolean } = 
       /* Gradient header */
       <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5 flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-lg font-semibold">Workforce Command Center</h1>
+          <h1 className="text-lg font-semibold">Workforce Signals</h1>
           <p className="text-sm text-white/80">
-            Real-time workforce intelligence — derived from live operational data
+            Live, prioritised people signals — what changed and what needs action, from operational data
           </p>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             {d && d.critical_count > 0 && (

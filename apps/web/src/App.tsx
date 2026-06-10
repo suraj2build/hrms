@@ -199,6 +199,7 @@ const ExecWorkforceView  = lazy(() => import('@/pages/executive/WorkforceView'))
 const ExecFinancialView  = lazy(() => import('@/pages/executive/FinancialView'))
 const ExecComplianceView = lazy(() => import('@/pages/executive/ComplianceView'))
 const ExecTrendsView     = lazy(() => import('@/pages/executive/TrendsView'))
+const ExecHeadcountView  = lazy(() => import('@/pages/executive/HeadcountView'))
 
 // Phase UX-6 — Payroll-First IA
 const DailyOperationsWorkspace = lazy(() => import('@/pages/workspace/DailyOperationsWorkspace').then(m => ({ default: m.DailyOperationsWorkspace })))
@@ -279,7 +280,6 @@ const WorkforceSearch      = lazy(() => import('@/pages/intelligence/WorkforceSe
 const UATCertification     = lazy(() => import('@/pages/intelligence/UATCertification').then(m => ({ default: m.UATCertification })))
 // Insights Hub — single front door for all read-only intelligence/analytics surfaces
 const InsightsHub          = lazy(() => import('@/pages/insights/InsightsHub').then(m => ({ default: m.InsightsHub })))
-const ManpowerIntelligenceCenter = lazy(() => import('@/pages/intelligence/ManpowerIntelligenceCenter').then(m => ({ default: m.ManpowerIntelligenceCenter })))
 
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
@@ -637,6 +637,7 @@ export default function App() {
                 <Route path="/admin/executive/financial"     element={<ExecFinancialView />} />
                 <Route path="/admin/executive/compliance"    element={<ExecComplianceView />} />
                 <Route path="/admin/executive/trends"        element={<ExecTrendsView />} />
+                <Route path="/admin/executive/headcount"     element={<ExecHeadcountView />} />
                 <Route path="/admin/system/automations"      element={<AutomationsConsole />} />
                 <Route path="/admin/system/incidents"        element={<IncidentManagement />} />
                 <Route path="/admin/system/webhooks"         element={<WebhookManagement />} />
@@ -726,7 +727,8 @@ export default function App() {
                 <Route path="/admin/intelligence/uat-certification"  element={<UATCertification />} />
                 <Route path="/admin/intelligence/narratives"         element={<ExecutiveNarrative />} />
                 <Route path="/admin/insights"                        element={<InsightsHub />} />
-                <Route path="/admin/insights/manpower"               element={<ManpowerIntelligenceCenter />} />
+                {/* Manpower Intelligence dissolved: Headcount → Executive tab, Signals → Workforce Signals */}
+                <Route path="/admin/insights/manpower"               element={<Navigate to="/admin/intelligence/workforce-command" replace />} />
 
                 {/* Settings */}
                 <Route path="/admin/settings"              element={<Settings />} />

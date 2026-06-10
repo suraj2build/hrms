@@ -70,7 +70,8 @@ const CATEGORIES: InsightCategory[] = [
     icon:  Users,
     accent: { tile: 'bg-indigo-500/10', text: 'text-indigo-600 dark:text-indigo-400', rail: 'group-hover:border-indigo-500/40' },
     cards: [
-      { title: 'Manpower Intelligence Center', description: 'Headcount analytics and live workforce signals in one place — distribution, reliability, movement and what to act on.', route: '/admin/insights/manpower', icon: LineChart, engine: 'Manpower Intelligence Center' },
+      { title: 'Workforce Signals',   description: 'Live, prioritised observations about your people — stalled onboarding, pending separations, assets at risk, probation due.', route: '/admin/intelligence/workforce-command', icon: Activity },
+      { title: 'Headcount Analytics', description: 'Workforce distribution, reliability and movement patterns — now in the Executive dashboard.', route: '/admin/executive/headcount', icon: LineChart },
       { title: 'Org Health',          description: 'Headcount by department, joiners vs exits, and the six-month growth trend.', route: '/admin/intelligence/org-health', icon: TrendingUp },
       { title: 'Action Center',       description: 'Suggestions triggered by recent events — new hires, separations, asset issues.', route: '/admin/intelligence/action-center', icon: Target },
       { title: 'Daily Digest',        description: 'A daily / weekly / monthly summary of workforce operations and metrics.', route: '/admin/intelligence/digest', icon: FileText },

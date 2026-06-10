@@ -256,7 +256,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   { label: 'People Directory',    description: 'Search and manage employee records',         href: '/admin/employees',              icon: Users,        accent: 'neutral'  },
   { label: 'AI Onboarding',       description: 'AI-powered bulk employee onboarding',        href: '/admin/onboarding',             icon: UserPlus,     accent: 'warning'  },
   { label: 'Organization Chart',  description: 'Visual org structure and hierarchy',         href: '/admin/organization',           icon: Building2,    accent: 'neutral'  },
-  { label: 'Manpower Intelligence', description: 'Headcount analytics & live workforce signals', href: '/admin/insights/manpower',    icon: BarChart2,    accent: 'neutral'  },
+  { label: 'Workforce Signals',   description: 'Live people signals — stalled onboarding, exits, risk', href: '/admin/intelligence/workforce-command',    icon: BarChart2,    accent: 'neutral'  },
   { label: 'Intelligence',        description: 'Risk scores, anomalies, at-risk employees',  href: '/admin/intelligence',           icon: Brain,        accent: 'warning'  },
   { label: 'Executive Intel',     description: 'C-suite workforce intelligence reports',      href: '/admin/analytics/executive',    icon: PieChart,     accent: 'neutral'  },
   { label: 'Master Import',       description: 'Bulk data import via CSV',                   href: '/admin/import',                 icon: FolderUp,     accent: 'neutral'  },
