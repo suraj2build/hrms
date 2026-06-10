@@ -308,8 +308,12 @@ function validateGenericMaster(
     }
   }
 
-  // Batch duplicate check on 'code' or 'name' (leave_types uses name)
-  const uniqueKey = masterType === 'leave_types' ? 'name' : 'code'
+  // Batch duplicate check on 'code' or 'name' (leave_types uses name,
+  // employee_bank_details keys on employee_code)
+  const uniqueKey =
+    masterType === 'leave_types' ? 'name' :
+    masterType === 'employee_bank_details' ? 'employee_code' :
+    'code'
   const codeVal = (d[uniqueKey] ?? '').toUpperCase()
   let isDuplicate = false
   if (codeVal) {
@@ -998,6 +1002,41 @@ export async function validateImportRows(
       if (existingAssign) {
         vr.isDuplicate = true // Will overwrite
       }
+    }
+  } else if (masterType === 'employee_bank_details') {
+    // Resolve employee_code → employee_id
+    const empCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.employee_code)
+          .map((r) => r.normalizedData.employee_code as string),
+      ),
+    ]
+    const empCodeMap = await resolveEmployeeCodes(supabase, tenantId, empCodes)
+
+    // Flag rows whose employee already has a bank/statutory record (will update)
+    const empIds = [...empCodeMap.values()]
+    const existingBank = new Set<string>()
+    if (empIds.length > 0) {
+      const { data: bankRows } = await supabase
+        .from('employee_bank_statutory')
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .in('employee_id', empIds)
+      if (bankRows) for (const r of bankRows as any[]) existingBank.add(r.employee_id as string)
+    }
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+      const empCode = vr.normalizedData.employee_code as string
+      const empId   = empCodeMap.get(empCode.toUpperCase())
+      if (!empId) {
+        vr.errors.push({ field: 'employee_code', message: `Employee "${empCode}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.employee_id = empId
+      if (existingBank.has(empId)) vr.isDuplicate = true // upsert will update
     }
   } else if (masterType === 'work_locations') {
     // ── Resolve optional site_code → site_id ────────────────────────────────

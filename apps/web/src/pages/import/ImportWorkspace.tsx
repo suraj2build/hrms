@@ -18,6 +18,7 @@ import {
   Users,
   Clock,
   CalendarDays,
+  Landmark,
   Building2,
   Briefcase,
   MapPin,
@@ -91,6 +92,7 @@ type MasterType =
   | 'salary_structures'
   // Enterprise onboarding imports
   | 'employee_compensation'
+  | 'employee_bank_details'
   | 'leave_opening_balances'
   | 'shift_assignments'
   | 'compensation_revisions'
@@ -209,7 +211,7 @@ interface FlatJobRow {
 // ─── Session Persistence ──────────────────────────────────────────────────────
 
 // Sensitive master types whose row data must not be written to localStorage
-const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions']
+const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions', 'employee_bank_details']
 // Max rows to persist — very large files are re-uploaded after refresh
 const SESSION_ROW_LIMIT = 5_000
 const SESSION_TTL_MS    = 24 * 60 * 60 * 1000  // 24 h
@@ -518,6 +520,15 @@ const MASTER_CONFIGS: MasterConfig[] = [
     icon: Wallet,
     requiredFields: ['employee_code', 'effective_from', 'ctc_annual'],
     optionalFields: ['salary_structure_code', 'notes'],
+    group: 'onboarding',
+  },
+  {
+    type: 'employee_bank_details',
+    label: 'Employee Bank & Statutory',
+    description: 'Bank account + PAN / UAN / PF / ESI details per employee',
+    icon: Landmark,
+    requiredFields: ['employee_code'],
+    optionalFields: ['bank_name', 'account_number', 'ifsc_code', 'branch_name', 'account_type', 'pan_number', 'uan_number', 'pf_number', 'esi_number', 'tax_regime'],
     group: 'onboarding',
   },
   {
@@ -1034,6 +1045,7 @@ export function ImportWorkspace() {
         asset_categories:      ['asset-categories'],
         salary_structures:     ['salary-structures'],
         holiday_calendar:      ['holiday-calendar'],
+        employee_bank_details: ['employees'],
       }
       const keysToInvalidate = selectedMaster ? (MASTER_QUERY_KEYS[selectedMaster] ?? []) : []
       for (const k of keysToInvalidate) {

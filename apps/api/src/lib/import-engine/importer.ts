@@ -774,9 +774,65 @@ async function importCompensationRevisions(
   return { created, updated: 0, failed, skipped }
 }
 
+/**
+ * Bulk-upsert employee bank + statutory details. employee_code is resolved to
+ * employee_id by the validator. Only columns the file actually provides are
+ * written, so blank cells never erase existing values.
+ */
+async function importEmployeeBankDetails(
+  supabase: SupabaseClient,
+  tenantId: string,
+  _createdBy: string,
+  validRows: ValidatedRow[],
+  mode: ImportMode,
+): Promise<{ created: number; updated: number; failed: number; skipped: number }> {
+  const FIELDS = [
+    'bank_name', 'account_number', 'ifsc_code', 'branch_name', 'account_type',
+    'pan_number', 'uan_number', 'pf_number', 'esi_number', 'tax_regime',
+  ]
+  let created = 0
+  let updated = 0
+  let failed  = 0
+  let skipped = 0
+
+  for (const vr of validRows) {
+    const norm = vr.normalizedData
+    try {
+      if (vr.isDuplicate && mode === 'create_only') { skipped++; continue }
+
+      const payload: Record<string, unknown> = {
+        tenant_id:   tenantId,
+        employee_id: norm.employee_id as string,
+      }
+      for (const f of FIELDS) {
+        if (norm[f] !== undefined && norm[f] !== '') payload[f] = norm[f]
+      }
+
+      const { error } = await supabase
+        .from('employee_bank_statutory')
+        .upsert(payload, { onConflict: 'tenant_id,employee_id' })
+      if (error) throw new Error(error.message)
+
+      if (vr.isDuplicate) updated++
+      else created++
+    } catch (err) {
+      vr.errors.push({
+        field: '_db',
+        message: err instanceof Error ? err.message : String(err),
+        severity: 'error',
+      })
+      vr.isValid = false
+      failed++
+    }
+  }
+
+  return { created, updated, failed, skipped }
+}
+
 const CUSTOM_HANDLERS: Record<string, CustomImportHandler> = {
   employees:               importEmployees,
   employee_compensation:   importEmployeeCompensation,
+  employee_bank_details:   importEmployeeBankDetails,
   leave_opening_balances:  importLeaveOpeningBalances,
   shift_assignments:       importShiftAssignments,
   compensation_revisions:  importCompensationRevisions,
