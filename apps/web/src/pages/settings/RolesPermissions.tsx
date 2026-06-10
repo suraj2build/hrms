@@ -20,6 +20,7 @@ import {
   Settings, FileSearch, GitBranch, Target,
 } from 'lucide-react'
 import { cn }             from '@/lib/utils'
+import { SubTabs }        from '@/components/ui/SubTabs'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
@@ -481,22 +482,15 @@ export function RolesPermissions() {
       />
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border mb-4">
-        {(['matrix', 'roles'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
-              activeTab === tab
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {tab === 'matrix' ? 'Permission Matrix' : 'Role Overview'}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={[
+          { id: 'matrix', label: 'Permission Matrix' },
+          { id: 'roles',  label: 'Role Overview'     },
+        ]}
+        value={activeTab}
+        onChange={setActiveTab}
+        className="mb-4"
+      />
 
       {/* ── Permission Matrix Tab ──────────────────────────────── */}
       {activeTab === 'matrix' && (

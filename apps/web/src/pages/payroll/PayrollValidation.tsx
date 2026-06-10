@@ -19,6 +19,7 @@ import {
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
@@ -557,25 +558,15 @@ export function PayrollValidation() {
       />
 
       {/* Tabs */}
-      <div className="mb-4 flex gap-1 border-b border-border">
-        {([
-          { id: 'rules'   as const, label: 'Validation Rules' },
-          { id: 'history' as const, label: 'Run History'      },
-        ]).map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
-              activeTab === tab.id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={[
+          { id: 'rules',   label: 'Validation Rules' },
+          { id: 'history', label: 'Run History'      },
+        ]}
+        value={activeTab}
+        onChange={setActiveTab}
+        className="mb-4"
+      />
 
       <SectionCard>
         {activeTab === 'rules'   && <ValidationRulesTab />}

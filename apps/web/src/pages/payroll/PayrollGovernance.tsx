@@ -15,6 +15,7 @@ import {
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
@@ -662,26 +663,12 @@ export function PayrollGovernance() {
       />
 
       {/* Tabs */}
-      <div className="mb-4 flex gap-1 border-b border-border">
-        {tabs.map(tab => {
-          const Icon = tab.icon
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px',
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {tab.label}
-            </button>
-          )
-        })}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={tabs.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
+        value={activeTab}
+        onChange={setActiveTab}
+        className="mb-4"
+      />
 
       <SectionCard>
         {activeTab === 'maker-checker' && <MakerCheckerTab />}

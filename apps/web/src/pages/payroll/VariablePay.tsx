@@ -14,6 +14,7 @@ import {
 
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
+import { SubTabs }        from '@/components/ui/SubTabs'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
@@ -392,22 +393,12 @@ export function VariablePay() {
       />
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-border mb-6">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={tabs.map(t => ({ id: t.key, label: t.label }))}
+        value={activeTab}
+        onChange={setActiveTab}
+        className="mb-6"
+      />
 
       {/* ── Batches Tab ── */}
       {activeTab === 'batches' && (
