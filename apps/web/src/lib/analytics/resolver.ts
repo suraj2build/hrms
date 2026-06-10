@@ -142,8 +142,11 @@ async function payrollByDept(q: AnalyticsQuery, months: string[], drillFilters: 
     }
   }
 
-  const lastResult = results[results.length - 1]
-  const topDepts = ([...(lastResult?.by_department ?? [])] as any[])
+  // Pick the chart's departments from the latest month that actually has data,
+  // so a trailing empty month (e.g. current month not yet finalized) doesn't
+  // blank the whole trend.
+  const pivotResult = [...results].reverse().find(r => (r?.by_department ?? []).length > 0)
+  const topDepts = ([...(pivotResult?.by_department ?? [])] as any[])
     .sort((a, b) => (b.gross ?? 0) - (a.gross ?? 0))
     .slice(0, 8)
     .map(d => ({ name: d.name, id: d.department_id ?? '' }))

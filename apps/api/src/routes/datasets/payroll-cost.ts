@@ -16,6 +16,8 @@ import type { FastifyInstance } from 'fastify'
 // Payroll slips advance finalized → processed → paid through the pay cycle.
 // All of these are "final" data for reporting; only 'draft' is excluded.
 const FINAL_SLIP_STATUSES = ['finalized', 'processed', 'paid', 'completed']
+// A finalized run is the authoritative signal that a month's payroll is locked.
+const FINAL_RUN_STATUSES = ['finalized', 'completed', 'paid', 'processed']
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -69,18 +71,18 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
       return (data as any)?.month ?? null
     }
 
-    let month = await latestSlipMonth(FINAL_SLIP_STATUSES)
-    if (!month) {
-      const { data: run } = await fastify.supabase
-        .from('payroll_runs')
-        .select('month')
-        .eq('tenant_id', tid)
-        .in('status', ['finalized', 'completed'])
-        .order('month', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      month = (run as any)?.month ?? null
-    }
+    // Prefer the latest finalized RUN month — that's the authoritative "payroll
+    // is locked" signal and matches what the breakdown reads.
+    const { data: run } = await fastify.supabase
+      .from('payroll_runs')
+      .select('month')
+      .eq('tenant_id', tid)
+      .in('status', FINAL_RUN_STATUSES)
+      .order('month', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    let month = (run as any)?.month ?? null
+    if (!month) month = await latestSlipMonth(FINAL_SLIP_STATUSES)
     if (!month) month = await latestSlipMonth()   // any slip at all
     return reply.send({ month })
   })
@@ -109,26 +111,7 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
 
     // ── Parallel queries ────────────────────────────────────────────────────────
 
-    // Current month: payroll run + slips
-    let slipsQuery = fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        employee_id, gross_pay, net_pay, total_deductions, lop_amount,
-        component_breakdown,
-        employees!inner(
-          id, grade_id, designation_id,
-          job_history!job_history_employee_id_fkey(
-            department_id, work_location_id, is_current,
-            departments(id, name),
-            work_locations(id, name)
-          )
-        )
-      `)
-      .eq('tenant_id', tid)
-      .eq('month', month)
-      .in('status', FINAL_SLIP_STATUSES) as any
-
-    const [runRes, priorRunRes] = await Promise.all([
+    const [runRes, priorRunRes, finalRunRes] = await Promise.all([
       fastify.supabase
         .from('payroll_runs')
         .select('id, month, status, total_gross, total_net, employee_count')
@@ -146,12 +129,48 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
+
+      // The latest FINALIZED run for the month — its slips are the source of
+      // truth for the breakdown regardless of individual slip status drift.
+      fastify.supabase
+        .from('payroll_runs')
+        .select('id')
+        .eq('tenant_id', tid)
+        .eq('month', month)
+        .in('status', FINAL_RUN_STATUSES)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ])
 
-    const run      = (runRes.data      as any) ?? null
-    const priorRun = (priorRunRes.data as any) ?? null
+    const run        = (runRes.data      as any) ?? null
+    const priorRun   = (priorRunRes.data as any) ?? null
+    const finalRunId = (finalRunRes.data as any)?.id ?? null
 
-    // Now fetch slips (we needed run first only for fallback — but we fetch all finalized slips)
+    // Slips: prefer the finalized run's slips (run_id gate); otherwise fall back
+    // to month + final slip statuses so it still works if run rows are absent.
+    let slipsQuery = fastify.supabase
+      .from('payroll_slips')
+      .select(`
+        employee_id, gross_pay, net_pay, total_deductions, lop_amount,
+        component_breakdown,
+        employees!inner(
+          id, grade_id, designation_id,
+          job_history!job_history_employee_id_fkey(
+            department_id, work_location_id, is_current,
+            departments(id, name),
+            work_locations(id, name)
+          )
+        )
+      `)
+      .eq('tenant_id', tid) as any
+
+    if (finalRunId) {
+      slipsQuery = slipsQuery.eq('run_id', finalRunId)
+    } else {
+      slipsQuery = slipsQuery.eq('month', month).in('status', FINAL_SLIP_STATUSES)
+    }
+
     if (deptFilter) {
       slipsQuery = slipsQuery.eq('employees.job_history.department_id', deptFilter)
     }
