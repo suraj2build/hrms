@@ -202,7 +202,135 @@ export const HELP_CONTENT: HelpEntry[] = [
     ],
   },
 
-  // ── Setup ─────────────────────────────────────────────────────────────────
+  // ── Setup / Configuration ─────────────────────────────────────────────────
+  {
+    match:   '/admin/settings/roles',
+    title:   'Roles & Permissions',
+    summary: 'Control who can see and do what across the admin portal (role-based access).',
+    why:     'Right-sizing access keeps sensitive payroll/compliance data safe and the UI uncluttered for each role.',
+    steps: [
+      { title: 'Open the Permission Matrix', detail: 'The matrix lists every **module** down the side and each **role** across the top.' },
+      { title: 'Toggle access', detail: 'Switch a module on/off for a role to grant or revoke it. Changes apply to the menu and route access.' },
+      { title: 'Review roles', detail: 'Use the **Role Overview** tab to see each role’s summary before assigning it to users.' },
+    ],
+  },
+  {
+    match:   '/admin/settings/users',
+    title:   'Users',
+    summary: 'Manage who can log into the admin portal and which role they hold.',
+    why:     'Every admin action is tied to a user + role — set these up before handing the system to your team.',
+    steps: [
+      { title: 'Add a user', detail: 'Create the login and **assign a role** (HR admin, manager, etc.). They receive access immediately.' },
+      { title: 'Activate / deactivate', detail: 'Suspend access instantly when someone leaves — no need to delete the record.' },
+    ],
+  },
+  {
+    match:   '/admin/settings',
+    title:   'Company Settings',
+    summary: 'Your company profile, branding and the first-time **Getting Started** checklist.',
+    why:     'Company details flow onto payslips, letters and statutory filings — get them right once, here.',
+    steps: [
+      { title: 'Complete the company profile', detail: 'Legal name, address and identifiers. These appear on official documents.' },
+      { title: 'Upload your logo', detail: 'Used on payslips and letters for a branded experience.' },
+      { title: 'Work the Getting Started checklist', detail: 'It walks you through the **essential setup** (structure, policies, first payroll) in order.' },
+      { title: 'Tune Help & Guidance', detail: 'The **Help & Guidance** card controls whether this Guide appears, and for which roles/modules.' },
+    ],
+  },
+  {
+    match:   '/admin/organization',
+    title:   'Departments & Org Structure',
+    summary: 'Define departments, designations and the reporting hierarchy.',
+    why:     'Structure drives approvals (who approves whom), analytics grouping, and access — build it before adding people.',
+    steps: [
+      { title: 'Create departments', detail: 'Add each department (e.g. Sales, Operations). Employees are grouped and reported by these.' },
+      { title: 'Add designations', detail: 'Job titles within departments — used on letters and in analytics.' },
+      { title: 'Set the hierarchy', detail: 'Define reporting lines so **manager approvals** route correctly.' },
+    ],
+  },
+  {
+    match:   '/admin/masters/grades',
+    title:   'Grades & Pay Bands',
+    summary: 'Salary grades/bands that anchor compensation and benchmarking.',
+    why:     'Grades let you set consistent pay ranges and analyse compensation by band across the org.',
+    steps: [
+      { title: 'Create a grade', detail: 'Give it a name/level (e.g. L3, Manager Band).' },
+      { title: 'Set the pay band', detail: 'Define the **min–max** salary range for the grade.' },
+      { title: 'Map employees', detail: 'Assign grades via the employee’s job history; analytics can then group by grade.' },
+    ],
+  },
+  {
+    match:   '/admin/masters/work-locations',
+    title:   'Work Locations',
+    summary: 'The offices / sites employees are mapped to.',
+    why:     'Location drives **state-specific PT/LWF rules**, attendance geofencing, and location analytics.',
+    steps: [
+      { title: 'Add a location', detail: 'Name, code and **state** — the state determines statutory rules that apply.' },
+      { title: 'Assign employees', detail: 'Map people to a location via job history; payroll & compliance use it automatically.' },
+    ],
+  },
+  {
+    match:   '/admin/masters',
+    title:   'Reference Data',
+    summary: 'The lookup/master data (categories, types, codes) that keeps records consistent.',
+    why:     'Defining masters once prevents typos and mismatches that break filtering and reporting.',
+    steps: [
+      { title: 'Pick a master', detail: 'Choose the list to manage (document types, asset categories, cost centers, etc.).' },
+      { title: 'Add or edit entries', detail: 'Keep them tidy — these appear as dropdown options across the app.' },
+    ],
+  },
+  {
+    match:   '/admin/leave-types',
+    title:   'Leave Types',
+    summary: 'Define the kinds of leave employees can apply for (CL, SL, PL, EL…).',
+    why:     'Leave types are the foundation of the whole leave module — applications, balances and accruals all reference them.',
+    steps: [
+      { title: 'Add a leave type', detail: 'Set a name and **code** (e.g. CL).' },
+      { title: 'Set the rules', detail: 'Paid/unpaid, max days, whether it needs approval.' },
+      { title: 'Activate it', detail: 'Active types become selectable when employees apply for leave.' },
+    ],
+  },
+  {
+    match:   '/admin/leave-policy',
+    title:   'Leave Policies',
+    summary: 'How leave is earned and governed — accrual, eligibility, carry-forward and encashment.',
+    why:     'Policies turn leave types into rules the system enforces automatically each month.',
+    steps: [
+      { title: 'Configure accrual & eligibility', detail: 'Set how much leave accrues, for whom, and from when.' },
+      { title: 'Set windows & lifecycle', detail: 'Application windows, carry-forward and encashment rules.' },
+      { title: 'Save & simulate', detail: 'Use the **Policy Simulator** to test the rules before rolling them out.' },
+    ],
+  },
+  {
+    match:   '/admin/attendance/policy',
+    title:   'Attendance Policy',
+    summary: 'The rules that turn raw punches into present / late / half-day / LOP.',
+    why:     'These thresholds directly affect payroll — a wrong grace period can over- or under-pay.',
+    steps: [
+      { title: 'Set grace & late rules', detail: 'Define the **grace period** and when a late mark or half-day applies.' },
+      { title: 'Configure OT & LOP', detail: 'Overtime eligibility and loss-of-pay treatment.' },
+      { title: 'Save', detail: 'The next attendance processing run uses the new rules.' },
+    ],
+  },
+  {
+    match:   '/admin/shift-master',
+    title:   'Shifts',
+    summary: 'Define working-hour patterns that get assigned to employees and rosters.',
+    why:     'Shifts tell the system the expected in/out times, which attendance is measured against.',
+    steps: [
+      { title: 'Create a shift', detail: 'Set start/end time and break; mark it active.' },
+      { title: 'Assign via rosters', detail: 'Apply shifts to employees through the shift roster.' },
+    ],
+  },
+  {
+    match:   '/admin/holidays',
+    title:   'Holiday Calendar',
+    summary: 'Public holidays and weekly-offs for the year, grouped by location/policy.',
+    why:     'Holidays feed working-days and LOP calculations — keeping payroll accurate.',
+    steps: [
+      { title: 'Add holidays', detail: 'Enter the year’s public holidays.' },
+      { title: 'Use holiday groups', detail: 'Group holidays by region, then assign the group to employees.' },
+    ],
+  },
   {
     match:   '/admin/setup',
     title:   'Setup',
