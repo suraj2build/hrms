@@ -120,7 +120,7 @@ function ObservationCard({ obs }: { obs: Observation }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function WorkforceCommand() {
+export function WorkforceCommand({ embedded = false }: { embedded?: boolean } = {}) {
   const { data, isLoading, error, refetch, isFetching } = useQuery<{ data: WorkforceCommandData }>({
     queryKey: ['intelligence-workforce-command'],
     queryFn:  () => api.get('/intelligence/workforce-command'),
@@ -130,9 +130,36 @@ export function WorkforceCommand() {
   const d = data?.data
 
   return (
-    <PageContainer className="max-w-6xl">
+    <PageContainer className={embedded ? 'max-w-6xl p-0' : 'max-w-6xl'}>
 
-      {/* Gradient header */}
+      {/* Compact header bar when embedded (the parent center supplies the title band) */}
+      {embedded ? (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            {d && d.critical_count > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">
+                <AlertTriangle className="h-3 w-3" /> {d.critical_count} critical
+              </span>
+            )}
+            {d && d.high_count > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-warning/10 text-warning font-medium">
+                {d.high_count} high priority
+              </span>
+            )}
+            {d && d.critical_count === 0 && d.high_count === 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success/10 text-success font-medium">
+                <Shield className="h-3 w-3" /> All signals normal
+              </span>
+            )}
+            <span className="text-muted-foreground">Live workforce intelligence — derived from operational data</span>
+          </div>
+          <Button size="sm" variant="outline" className="flex-shrink-0" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={'h-3.5 w-3.5 mr-1.5' + (isFetching ? ' animate-spin' : '')} />
+            Refresh
+          </Button>
+        </div>
+      ) : (
+      /* Gradient header */
       <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5 flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-lg font-semibold">Workforce Command Center</h1>
@@ -168,6 +195,7 @@ export function WorkforceCommand() {
           Refresh
         </Button>
       </div>
+      )}
 
       {/* Loading */}
       {isLoading && (

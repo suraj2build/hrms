@@ -14,7 +14,7 @@
  */
 import { Link } from 'react-router-dom'
 import {
-  Brain, TrendingUp, Activity, DollarSign, Command,
+  TrendingUp, Activity, DollarSign, Command,
   BarChart3, Users, Search, FileText, CalendarClock,
   AlertTriangle, Target, Gauge, ShieldCheck, Sparkles,
   LineChart, ArrowRight,
@@ -70,9 +70,8 @@ const CATEGORIES: InsightCategory[] = [
     icon:  Users,
     accent: { tile: 'bg-indigo-500/10', text: 'text-indigo-600 dark:text-indigo-400', rail: 'group-hover:border-indigo-500/40' },
     cards: [
-      { title: 'Workforce Command',   description: 'Live, prioritised observations about your people — what changed and what to act on.', route: '/admin/intelligence/workforce-command', icon: Brain },
+      { title: 'Manpower Intelligence Center', description: 'Headcount analytics and live workforce signals in one place — distribution, reliability, movement and what to act on.', route: '/admin/insights/manpower', icon: LineChart, engine: 'Manpower Intelligence Center' },
       { title: 'Org Health',          description: 'Headcount by department, joiners vs exits, and the six-month growth trend.', route: '/admin/intelligence/org-health', icon: TrendingUp },
-      { title: 'Headcount Analytics', description: 'Deeper workforce analytics — distribution, reliability and movement patterns.', route: '/admin/analytics/workforce', icon: LineChart },
       { title: 'Action Center',       description: 'Suggestions triggered by recent events — new hires, separations, asset issues.', route: '/admin/intelligence/action-center', icon: Target },
       { title: 'Daily Digest',        description: 'A daily / weekly / monthly summary of workforce operations and metrics.', route: '/admin/intelligence/digest', icon: FileText },
       { title: 'People Search',       description: 'Find any employee with a plain-language search across the directory.', route: '/admin/intelligence/search', icon: Search },
@@ -112,10 +111,10 @@ const CATEGORIES: InsightCategory[] = [
     icon:  Command,
     accent: { tile: 'bg-sky-500/10', text: 'text-sky-600 dark:text-sky-400', rail: 'group-hover:border-sky-500/40' },
     cards: [
-      { title: 'Admin Control Center',  description: 'Exception-first home — system health, reconciliation and the operations feed.', route: '/admin/control-center', icon: Command },
-      { title: 'Workforce Ops Center',  description: 'People-operations cockpit — attention queue, onboarding pipeline and distribution.', route: '/admin/workforce/center', icon: Users },
-      { title: 'Attendance Ops Center', description: 'Attendance cockpit — KPI strip, insight cards and recent operational events.', route: '/admin/attendance/center', icon: CalendarClock },
-      { title: 'Payroll Control Center', description: 'The seven-step payroll execution cockpit, from pre-run checks to payout.', route: '/admin/payroll/center', icon: DollarSign },
+      { title: 'Command Center',         description: 'Exception-first home — system health, reconciliation and the operations feed.', route: '/admin/control-center', icon: Command },
+      { title: 'Workforce Operations',   description: 'People-operations cockpit — attention queue, onboarding pipeline and distribution.', route: '/admin/workforce/center', icon: Users },
+      { title: 'Attendance Operations',  description: 'Attendance cockpit — KPI strip, insight cards and recent operational events.', route: '/admin/attendance/center', icon: CalendarClock },
+      { title: 'Payroll Operations',     description: 'The seven-step payroll execution cockpit, from pre-run checks to payout.', route: '/admin/payroll/center', icon: DollarSign },
     ],
   },
 ]

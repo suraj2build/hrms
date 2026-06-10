@@ -597,7 +597,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'session-intelligence',  label: 'Attendance Sessions',  route: '/admin/attendance/intelligence-center', icon: Activity,   keywords: ['session data', 'biometric sessions', 'punch sessions', 'attendance sessions'] },
           { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap,        keywords: ['attendance health', 'health score', 'data quality', 'attendance quality'] },
-          { id: 'workforce-analytics',   label: 'Headcount Analytics',   route: '/admin/analytics/workforce',            icon: BarChart2,  keywords: ['headcount', 'strength', 'workforce data', 'employee analytics', 'manpower analytics'] },
+          { id: 'manpower-intelligence', label: 'Manpower Intelligence', route: '/admin/insights/manpower',               icon: BarChart2,  keywords: ['headcount analytics', 'workforce signals', 'workforce command', 'strength', 'workforce data', 'employee analytics', 'manpower analytics'] },
           { id: 'org-health',            label: 'Org Health',             route: '/admin/intelligence/org-health',        icon: TrendingUp, keywords: ['org pulse', 'organization health', 'company health', 'org score'] },
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity,   keywords: ['actions', 'pending actions', 'to-do', 'tasks', 'exceptions', 'action items'] },
           { id: 'workforce-digest',      label: 'Daily Digest',           route: '/admin/intelligence/digest',            icon: FileText,   keywords: ['AI summary', 'daily summary', 'briefing', 'workforce briefing', 'morning digest'] },

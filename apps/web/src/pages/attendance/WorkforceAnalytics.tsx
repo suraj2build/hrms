@@ -156,7 +156,7 @@ function defaultDrillRange(): { from: string; to: string } {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-function WorkforceAnalyticsInner() {
+function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
   const { profile } = useAuthStore()
   const isAdmin = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
@@ -371,11 +371,13 @@ function WorkforceAnalyticsInner() {
   }
 
   return (
-    <PageContainer>
-      <PageHeader
-        title="Workforce Analytics"
-        subtitle={`Attendance intelligence dashboard — ${monthLabel(month)}`}
-      />
+    <PageContainer className={embedded ? 'p-0' : undefined}>
+      {!embedded && (
+        <PageHeader
+          title="Workforce Analytics"
+          subtitle={`Attendance intelligence dashboard — ${monthLabel(month)}`}
+        />
+      )}
 
       {/* Month navigation */}
       <div className="flex items-center gap-2">
@@ -839,10 +841,10 @@ function WorkforceAnalyticsInner() {
   )
 }
 
-export function WorkforceAnalytics() {
+export function WorkforceAnalytics({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <ErrorBoundary title="Workforce Analytics">
-      <WorkforceAnalyticsInner />
+      <WorkforceAnalyticsInner embedded={embedded} />
     </ErrorBoundary>
   )
 }
