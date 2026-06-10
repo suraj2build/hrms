@@ -1107,6 +1107,7 @@ export async function validateImportRows(
     const tableMap: Record<string, string> = {
       sites:                 'sites',
       shifts:                'shifts',
+      rosters:               'rosters',
       departments:           'departments',
       designations:          'designations',
       work_locations:        'work_locations',

@@ -17,6 +17,7 @@ import Papa from 'papaparse'
 import {
   Users,
   Clock,
+  CalendarDays,
   Building2,
   Briefcase,
   MapPin,
@@ -72,6 +73,7 @@ type MasterType =
   | 'sites'
   | 'employees'
   | 'shifts'
+  | 'rosters'
   | 'departments'
   | 'designations'
   | 'work_locations'
@@ -416,6 +418,15 @@ const MASTER_CONFIGS: MasterConfig[] = [
     optionalFields: ['grace_minutes', 'is_night_shift'],
     group: 'people',
   },
+  {
+    type: 'rosters',
+    label: 'Rosters (Weekly-Off)',
+    description: 'Weekly-off / rotation policies — Mon-Fri, 6-day, custom patterns',
+    icon: CalendarDays,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'cycle_days', 'weekly_off_days', 'is_active'],
+    group: 'people',
+  },
   // ── Payroll & Leave ──────────────────────────────────────────────────────────
   {
     type: 'salary_components',
@@ -460,7 +471,7 @@ const MASTER_CONFIGS: MasterConfig[] = [
     description: 'Payroll processing cycles and payout schedules',
     icon: Layers,
     requiredFields: ['code', 'name'],
-    optionalFields: ['cycle_type', 'cutoff_day', 'payout_day', 'currency_code'],
+    optionalFields: ['cycle_type', 'cycle_start_day', 'cutoff_day', 'payout_day', 'currency_code'],
     group: 'enterprise',
   },
   {

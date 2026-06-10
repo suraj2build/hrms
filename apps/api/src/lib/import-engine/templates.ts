@@ -256,6 +256,79 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
     ],
   },
 
+  rosters: {
+    label: 'Rosters (Weekly-Off Policies)',
+    columns: [
+      {
+        key: 'code',
+        label: 'Code',
+        required: true,
+        type: 'string',
+        example: 'ROSTER-STD',
+        description: 'Unique code for the roster / weekly-off policy.',
+      },
+      {
+        key: 'name',
+        label: 'Name',
+        required: true,
+        type: 'string',
+        example: 'Standard 5-Day Week',
+        description: 'Display name of the roster policy.',
+      },
+      {
+        key: 'description',
+        label: 'Description',
+        required: false,
+        type: 'string',
+        example: 'Mon-Fri working, weekend off',
+        description: 'Optional description of the policy.',
+      },
+      {
+        key: 'cycle_days',
+        label: 'Cycle Days',
+        required: false,
+        type: 'enum',
+        enumValues: ['7', '14', '28'],
+        example: '7',
+        description: 'Length of the repeating cycle: 7, 14 or 28 days. Defaults to 7.',
+      },
+      {
+        key: 'weekly_off_days',
+        label: 'Weekly Off Days',
+        required: false,
+        type: 'string',
+        example: 'Sun,Sat',
+        description: 'Comma-separated weekly-off days. Use names (Sun,Mon,Tue,Wed,Thu,Fri,Sat) or numbers (0=Sun … 6=Sat).',
+      },
+      {
+        key: 'is_active',
+        label: 'Is Active',
+        required: false,
+        type: 'boolean',
+        example: 'true',
+        description: 'true or false. Defaults to true.',
+      },
+    ],
+    sampleRows: [
+      {
+        code: 'ROSTER-STD',
+        name: 'Standard 5-Day Week',
+        description: 'Mon-Fri working, weekend off',
+        cycle_days: '7',
+        weekly_off_days: 'Sun,Sat',
+        is_active: 'true',
+      },
+      {
+        code: 'ROSTER-6DAY',
+        name: '6-Day Week (Sunday Off)',
+        description: 'Mon-Sat working, Sunday off',
+        cycle_days: '7',
+        weekly_off_days: 'Sun',
+        is_active: 'true',
+      },
+    ],
+  },
+
   departments: {
     label: 'Departments',
     columns: [

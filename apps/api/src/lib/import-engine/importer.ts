@@ -25,6 +25,25 @@ interface TableConfig {
   mapRow: (tenantId: string, norm: Record<string, unknown>) => Record<string, unknown>
 }
 
+/** Map weekly-off day tokens (names or 0–6 numbers) to a sorted unique int array. */
+const DAY_NAME_TO_NUM: Record<string, number> = {
+  sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tuesday: 2, tues: 2,
+  wed: 3, wednesday: 3, thu: 4, thursday: 4, thur: 4, thurs: 4,
+  fri: 5, friday: 5, sat: 6, saturday: 6,
+}
+function parseWeeklyOffDays(input: unknown): number[] {
+  if (input == null || input === '') return []
+  const tokens = String(input).split(/[,;|/]+/).map((t) => t.trim()).filter(Boolean)
+  const out = new Set<number>()
+  for (const tok of tokens) {
+    const lower = tok.toLowerCase()
+    if (lower in DAY_NAME_TO_NUM) { out.add(DAY_NAME_TO_NUM[lower]); continue }
+    const n = Number(tok)
+    if (Number.isInteger(n) && n >= 0 && n <= 6) out.add(n)
+  }
+  return [...out].sort((a, b) => a - b)
+}
+
 const TABLE_MAP: Record<string, TableConfig> = {
   employees: {
     table: 'employees',
@@ -54,6 +73,22 @@ const TABLE_MAP: Record<string, TableConfig> = {
       is_night_shift: norm.is_night_shift ?? false,
       // weekly_off_days intentionally omitted — shifts carry timing rules only.
       // Configure weekly-off days on Roster templates instead.
+    }),
+  },
+
+  rosters: {
+    table: 'rosters',
+    uniqueColumn: 'code',
+    mapRow: (tenantId, norm) => ({
+      tenant_id:    tenantId,
+      code:         norm.code,
+      name:         norm.name,
+      description:  norm.description ?? null,
+      cycle_days:   Number(norm.cycle_days ?? 7) || 7,
+      is_active:    norm.is_active ?? true,
+      // pattern_json carries the weekly-off matrix; we populate the legacy
+      // weekly_off_days array which the roster engine reads for coverage.
+      pattern_json: { weekly_off_days: parseWeeklyOffDays(norm.weekly_off_days) },
     }),
   },
 
