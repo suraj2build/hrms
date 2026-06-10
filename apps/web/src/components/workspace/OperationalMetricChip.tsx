@@ -42,12 +42,13 @@ const SEVERITY_CLASSES: Record<MetricSeverity, {
   text:  string
   ring:  string
   icon:  string
+  bar:   string
 }> = {
-  critical: { bg: 'bg-destructive/10', text: 'text-destructive',       ring: 'ring-destructive/25',    icon: 'text-destructive' },
-  warning:  { bg: 'bg-warning/10',     text: 'text-warning',           ring: 'ring-warning/25',        icon: 'text-warning' },
-  info:     { bg: 'bg-info/10',        text: 'text-info',              ring: 'ring-info/20',           icon: 'text-info' },
-  success:  { bg: 'bg-success/10',     text: 'text-success',           ring: 'ring-success/20',        icon: 'text-success' },
-  neutral:  { bg: 'bg-muted/40',       text: 'text-muted-foreground',  ring: 'ring-border',            icon: 'text-muted-foreground' },
+  critical: { bg: 'bg-destructive/10', text: 'text-destructive',       ring: 'ring-destructive/25',    icon: 'text-destructive',      bar: 'bg-destructive' },
+  warning:  { bg: 'bg-warning/10',     text: 'text-warning',           ring: 'ring-warning/25',        icon: 'text-warning',          bar: 'bg-warning' },
+  info:     { bg: 'bg-info/10',        text: 'text-info',              ring: 'ring-info/20',           icon: 'text-info',             bar: 'bg-info' },
+  success:  { bg: 'bg-success/10',     text: 'text-success',           ring: 'ring-success/20',        icon: 'text-success',          bar: 'bg-success' },
+  neutral:  { bg: 'bg-muted/40',       text: 'text-muted-foreground',  ring: 'ring-border',            icon: 'text-muted-foreground', bar: 'bg-muted-foreground/40' },
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -96,15 +97,15 @@ export function OperationalMetricChip({
       onClick={onClick}
       disabled={!isClickable}
       className={cn(
-        'flex flex-col gap-0.5 rounded-lg px-3 py-2.5 ring-1',
-        'text-left transition-all duration-150 flex-shrink-0',
-        s.bg, s.ring,
-        isClickable && 'cursor-pointer hover:opacity-85 hover:scale-[1.01]',
-        !isClickable && 'cursor-default',
+        'surface-premium relative flex flex-col gap-0.5 overflow-hidden px-3 py-2.5',
+        'text-left flex-shrink-0',
+        isClickable ? 'lift-hover cursor-pointer' : 'cursor-default',
         className,
       )}
     >
-      <div className="flex items-center gap-1.5">
+      {/* severity accent wire */}
+      <span className={cn('absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl', s.bar)} />
+      <div className="flex items-center gap-1.5 pl-1">
         {Icon && <Icon className={cn('h-3.5 w-3.5 flex-shrink-0', s.icon)} />}
         <span className={cn('text-xl font-bold tabular-nums leading-none', s.text)}>
           {loading ? (
@@ -112,9 +113,9 @@ export function OperationalMetricChip({
           ) : value}
         </span>
       </div>
-      <span className="text-[11px] text-muted-foreground font-medium leading-tight">{label}</span>
+      <span className="pl-1 text-[11px] text-muted-foreground font-medium leading-tight">{label}</span>
       {sub && (
-        <span className="text-[10px] text-muted-foreground/60 leading-tight">{sub}</span>
+        <span className="pl-1 text-[10px] text-muted-foreground/60 leading-tight">{sub}</span>
       )}
     </button>
   )

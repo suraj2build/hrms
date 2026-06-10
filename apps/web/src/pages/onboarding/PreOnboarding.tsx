@@ -166,14 +166,14 @@ function StatCard({
   label, value, icon: Icon, accent,
 }: { label: string; value: number; icon: React.ElementType; accent: string }) {
   return (
-    <div className="flex flex-col gap-2 rounded-xl border bg-card p-5 shadow-sm">
+    <div className="surface-premium lift-hover flex flex-col gap-2 p-5">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent}`}>
+        <div className={`gloss-sheen flex h-9 w-9 items-center justify-center rounded-xl ring-1 ring-black/5 shadow-sm ${accent}`}>
           <Icon className="h-4 w-4" />
         </div>
       </div>
-      <p className="text-3xl font-bold tracking-tight">{value}</p>
+      <p className="text-3xl font-bold tracking-tight tabular-nums">{value}</p>
     </div>
   )
 }

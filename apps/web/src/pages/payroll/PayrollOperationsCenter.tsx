@@ -84,8 +84,8 @@ interface KpiChipProps {
 function KpiChip({ label, value, colorClass = 'text-foreground', href, loading }: KpiChipProps) {
   const inner = (
     <div className={cn(
-      'flex flex-col gap-0.5 p-3 rounded-lg border border-border bg-card hover:bg-accent/40 transition-colors',
-      href && 'cursor-pointer',
+      'surface-premium flex flex-col gap-0.5 p-3',
+      href && 'lift-hover cursor-pointer',
     )}>
       <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</span>
       <span className={cn(

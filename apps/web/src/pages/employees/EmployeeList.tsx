@@ -190,29 +190,13 @@ function StatsStrip({
   ]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
       {cards.map((c, i) => (
-        <div key={i} style={{
-          background: 'var(--card)',
-          borderRadius: 12,
-          border: '1px solid var(--border)',
-          borderTop: '3px solid var(--primary)',
-          borderLeft: `3px solid ${c.accent}`,
-          padding: '10px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 2,
-          boxShadow: '0 1px 3px rgba(0,0,0,.04)',
-        }}>
-          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
-            {c.label}
-          </span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.025em', fontFamily: '"Geist Mono",ui-monospace,monospace', lineHeight: 1.15 }}>
-            {c.value}
-          </div>
-          <div style={{ fontSize: 10.5, color: c.subColor, fontWeight: 500, marginTop: 1 }}>
-            {c.sub}
-          </div>
+        <div key={i} className="surface-premium lift-hover relative overflow-hidden px-3.5 py-2.5">
+          <span className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ background: c.accent }} />
+          <span className="block text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground">{c.label}</span>
+          <div className="mt-0.5 text-xl font-extrabold leading-tight tabular-nums tracking-tight text-foreground">{c.value}</div>
+          <div className="mt-0.5 text-[10.5px] font-medium" style={{ color: c.subColor }}>{c.sub}</div>
         </div>
       ))}
     </div>
