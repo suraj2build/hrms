@@ -35,31 +35,35 @@ export function LogoMark({ size = 32, className }: { size?: number; className?: 
       aria-hidden="true"
     >
       <defs>
-        {/* Ring: royal blue (lower-left) → teal (upper-right tail) */}
-        <linearGradient id="cognix-ring" x1="9" y1="40" x2="39" y2="9" gradientUnits="userSpaceOnUse">
-          <stop offset="0"    stopColor={BRAND_BLUE} />
-          <stop offset="0.62" stopColor="#2C8FCB" />
-          <stop offset="1"    stopColor={BRAND_TEAL} />
+        {/* Ring: deep navy-indigo → royal blue → electric blue */}
+        <linearGradient id="cognix-ring" x1="12" y1="38" x2="37" y2="10" gradientUnits="userSpaceOnUse">
+          <stop offset="0%"   stopColor="#112494" />
+          <stop offset="42%"  stopColor={BRAND_BLUE} />
+          <stop offset="100%" stopColor="#60A5FA" />
         </linearGradient>
-        {/* Inner figure: teal-dominant with a blue base */}
-        <linearGradient id="cognix-fig" x1="18" y1="36" x2="32" y2="13" gradientUnits="userSpaceOnUse">
-          <stop offset="0"   stopColor="#1E73C4" />
-          <stop offset="1"   stopColor={BRAND_TEAL} />
+        {/* Inner H+person: dark teal → bright cyan */}
+        <linearGradient id="cognix-fig" x1="24" y1="37" x2="24" y2="14" gradientUnits="userSpaceOnUse">
+          <stop offset="0%"   stopColor="#0B6B5A" />
+          <stop offset="55%"  stopColor="#0EA5A0" />
+          <stop offset="100%" stopColor="#22D3EE" />
         </linearGradient>
       </defs>
-      {/* Open "C" ring — cognition / a circle of people, open to the right */}
+      {/* Open "C" ring — center (24,24) r=16.8, gap ≈ 90° on the right */}
       <path
-        d="M33.4 11.2 A16 16 0 1 0 33.4 36.8"
+        d="M 35.9 12.1 A 16.8 16.8 0 1 0 35.9 35.9"
         fill="none"
         stroke="url(#cognix-ring)"
-        strokeWidth="5.2"
+        strokeWidth="5"
         strokeLinecap="round"
       />
-      {/* Inner H + person: left pillar (with head dot), crossbar, taller right pillar */}
-      <circle cx="20.4" cy="16.2" r="3" fill="url(#cognix-fig)" />
-      <rect x="18.1" y="20.4" width="4.6" height="13.8" rx="2.3" fill="url(#cognix-fig)" />
-      <rect x="26.9" y="15.8" width="4.6" height="18.4" rx="2.3" fill="url(#cognix-fig)" />
-      <rect x="18.1" y="24.4" width="13.4" height="4.2" rx="2.1" fill="url(#cognix-fig)" />
+      {/* Head dot */}
+      <circle cx="20.6" cy="16.3" r="2.2" fill="url(#cognix-fig)" />
+      {/* Left pillar (body of person + left H upright) */}
+      <rect x="18.8" y="19.4" width="3.6" height="16.3" rx="1.8" fill="url(#cognix-fig)" />
+      {/* Right pillar (right H upright, taller) */}
+      <rect x="25.0" y="15.6" width="3.6" height="20.2" rx="1.8" fill="url(#cognix-fig)" />
+      {/* H crossbar */}
+      <rect x="18.8" y="27.1" width="9.8" height="3.1" rx="1.5" fill="url(#cognix-fig)" />
     </svg>
   )
 }

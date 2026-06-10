@@ -1,19 +1,27 @@
-<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
   <defs>
-    <linearGradient id="r" x1="9" y1="40" x2="39" y2="9" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2E6FE6"/>
-      <stop offset="0.62" stop-color="#2C8FCB"/>
-      <stop offset="1" stop-color="#15B8A6"/>
+    <linearGradient id="r" x1="12" y1="38" x2="37" y2="10" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#112494"/>
+      <stop offset="42%"  stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
     </linearGradient>
-    <linearGradient id="f" x1="18" y1="36" x2="32" y2="13" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1E73C4"/>
-      <stop offset="1" stop-color="#15B8A6"/>
+    <linearGradient id="f" x1="24" y1="37" x2="24" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#0B6B5A"/>
+      <stop offset="55%"  stop-color="#0EA5A0"/>
+      <stop offset="100%" stop-color="#22D3EE"/>
     </linearGradient>
   </defs>
-  <rect width="48" height="48" rx="11" fill="#0B1A33"/>
-  <path d="M33.4 11.2 A16 16 0 1 0 33.4 36.8" fill="none" stroke="url(#r)" stroke-width="5.2" stroke-linecap="round"/>
-  <circle cx="20.4" cy="16.2" r="3" fill="url(#f)"/>
-  <rect x="18.1" y="20.4" width="4.6" height="13.8" rx="2.3" fill="url(#f)"/>
-  <rect x="26.9" y="15.8" width="4.6" height="18.4" rx="2.3" fill="url(#f)"/>
-  <rect x="18.1" y="24.4" width="13.4" height="4.2" rx="2.1" fill="url(#f)"/>
+  <!-- Navy tile background -->
+  <rect width="48" height="48" rx="10" fill="#0B1A33"/>
+  <!-- C ring (scaled 200→48, ×0.24): center(24,24) r=16.8 -->
+  <path d="M 35.9 12.1 A 16.8 16.8 0 1 0 35.9 35.9"
+        stroke="url(#r)" stroke-width="5" stroke-linecap="round"/>
+  <!-- Head dot -->
+  <circle cx="20.6" cy="16.3" r="2.2" fill="url(#f)"/>
+  <!-- Left pillar -->
+  <rect x="18.8" y="19.4" width="3.6" height="16.3" rx="1.8" fill="url(#f)"/>
+  <!-- Right pillar -->
+  <rect x="25.0" y="15.6" width="3.6" height="20.2" rx="1.8" fill="url(#f)"/>
+  <!-- Crossbar -->
+  <rect x="18.8" y="27.1" width="9.8" height="3.1" rx="1.5" fill="url(#f)"/>
 </svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <defs>
+    <!-- C ring: deep navy-indigo at bottom tail → royal blue mid → electric blue at top tail -->
+    <linearGradient id="ring" x1="50" y1="158" x2="155" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#112494"/>
+      <stop offset="42%"  stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </linearGradient>
+    <!-- H+person monogram: dark teal at bottom → bright cyan at top -->
+    <linearGradient id="mono" x1="100" y1="152" x2="100" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#0B6B5A"/>
+      <stop offset="55%"  stop-color="#0EA5A0"/>
+      <stop offset="100%" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Open C ring: center (100,100), r=70, opening ~90° on the right side -->
+  <!-- Start upper-right at -45°: (149.5, 50.5)  End lower-right at +45°: (149.5, 149.5) -->
+  <path d="M 149.5 50.5 A 70 70 0 1 0 149.5 149.5"
+        stroke="url(#ring)" stroke-width="21" stroke-linecap="round"/>
+
+  <!-- Head dot (top of left/person pillar) -->
+  <circle cx="86" cy="68" r="9" fill="url(#mono)"/>
+
+  <!-- Left pillar: body of person / left H upright -->
+  <rect x="78.5" y="81" width="15" height="68" rx="7.5" fill="url(#mono)"/>
+
+  <!-- Right pillar: right H upright (taller, no head) -->
+  <rect x="104" y="65" width="15" height="84" rx="7.5" fill="url(#mono)"/>
+
+  <!-- Crossbar: H crossbar connecting both pillars -->
+  <rect x="78.5" y="113" width="40.5" height="13" rx="6.5" fill="url(#mono)"/>
+</svg>

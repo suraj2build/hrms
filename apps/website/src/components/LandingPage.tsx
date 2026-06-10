@@ -31,18 +31,22 @@ function CognixMark({ size = 36, className }: { size?: number; className?: strin
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
       <defs>
-        <linearGradient id="cx-ring" x1="9" y1="40" x2="39" y2="9" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#2E6FE6" /><stop offset="0.62" stopColor="#2C8FCB" /><stop offset="1" stopColor="#15B8A6" />
+        <linearGradient id="cx-ring" x1="12" y1="38" x2="37" y2="10" gradientUnits="userSpaceOnUse">
+          <stop offset="0%"   stopColor="#112494" />
+          <stop offset="42%"  stopColor="#2E6FE6" />
+          <stop offset="100%" stopColor="#60A5FA" />
         </linearGradient>
-        <linearGradient id="cx-fig" x1="18" y1="36" x2="32" y2="13" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#1E73C4" /><stop offset="1" stopColor="#15B8A6" />
+        <linearGradient id="cx-fig" x1="24" y1="37" x2="24" y2="14" gradientUnits="userSpaceOnUse">
+          <stop offset="0%"   stopColor="#0B6B5A" />
+          <stop offset="55%"  stopColor="#0EA5A0" />
+          <stop offset="100%" stopColor="#22D3EE" />
         </linearGradient>
       </defs>
-      <path d="M33.4 11.2 A16 16 0 1 0 33.4 36.8" fill="none" stroke="url(#cx-ring)" strokeWidth="5.2" strokeLinecap="round" />
-      <circle cx="20.4" cy="16.2" r="3" fill="url(#cx-fig)" />
-      <rect x="18.1" y="20.4" width="4.6" height="13.8" rx="2.3" fill="url(#cx-fig)" />
-      <rect x="26.9" y="15.8" width="4.6" height="18.4" rx="2.3" fill="url(#cx-fig)" />
-      <rect x="18.1" y="24.4" width="13.4" height="4.2" rx="2.1" fill="url(#cx-fig)" />
+      <path d="M 35.9 12.1 A 16.8 16.8 0 1 0 35.9 35.9" fill="none" stroke="url(#cx-ring)" strokeWidth="5" strokeLinecap="round" />
+      <circle cx="20.6" cy="16.3" r="2.2" fill="url(#cx-fig)" />
+      <rect x="18.8" y="19.4" width="3.6" height="16.3" rx="1.8" fill="url(#cx-fig)" />
+      <rect x="25.0" y="15.6" width="3.6" height="20.2" rx="1.8" fill="url(#cx-fig)" />
+      <rect x="18.8" y="27.1" width="9.8" height="3.1" rx="1.5" fill="url(#cx-fig)" />
     </svg>
   );
 }
