@@ -756,6 +756,35 @@ function GuidanceSettingsCard({ canEdit }: { canEdit: boolean }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        {/* Prominent master show/hide toggle */}
+        {g && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-primary/20 bg-primary/5 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">In-app Guide &amp; Help</p>
+              <p className="text-xs text-muted-foreground">
+                Shows the floating <span className="font-medium text-primary">“?” Guide</span> and contextual help across the app. Turn off to hide it for everyone.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!g.features?.enable_help_framework}
+              aria-label="Toggle in-app Guide"
+              disabled={!canEdit || saving}
+              onClick={() => toggle('features', 'enable_help_framework', !g.features?.enable_help_framework)}
+              className={cn(
+                'relative h-6 w-11 flex-shrink-0 rounded-full transition-colors',
+                g.features?.enable_help_framework ? 'bg-[#1E5BA8]' : 'bg-muted',
+                (!canEdit || saving) && 'cursor-not-allowed opacity-60',
+              )}
+            >
+              <span className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                g.features?.enable_help_framework ? 'left-[1.375rem]' : 'left-0.5',
+              )} />
+            </button>
+          </div>
+        )}
         {!g ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : GUIDANCE_GROUPS.map(group => (
