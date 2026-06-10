@@ -5,7 +5,7 @@ import { governanceEvaluator }   from '../../platform/governance/evaluators/even
 export default async function adminRoutes(fastify: FastifyInstance) {
 
   // GET /enterprise/queue
-  fastify.get('/queue', async (_req, reply) => {
+  fastify.get('/queue', { preHandler: [fastify.authenticate] }, async (_req, reply) => {
     try {
       const sla_breaches   = slaService.scanBreaches()
       const pending_sla    = slaService.getTracked()
@@ -24,7 +24,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // POST /enterprise/sla/scan
-  fastify.post('/sla/scan', async (_req, reply) => {
+  fastify.post('/sla/scan', { preHandler: [fastify.authenticate] }, async (_req, reply) => {
     try {
       const breaches = slaService.scanBreaches()
       return reply.send({
@@ -39,7 +39,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // GET /enterprise/health
-  fastify.get('/health', async (_req, reply) => {
+  fastify.get('/health', { preHandler: [fastify.authenticate] }, async (_req, reply) => {
     try {
       const listeners     = governanceEvaluator.listenerHealth()
       const listenerCount = listeners.length
@@ -69,7 +69,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // POST /enterprise/listeners/:name/reset
-  fastify.post('/listeners/:name/reset', async (req, reply) => {
+  fastify.post('/listeners/:name/reset', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     try {
       const { name } = req.params as { name: string }
       governanceEvaluator.resetListener(name)

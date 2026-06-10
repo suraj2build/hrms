@@ -13,7 +13,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   // ── GET /governance/events ────────────────────────────────────────────────
   fastify.get('/events', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { limit = '30', offset = '0' } = req.query as Record<string, string>
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error, count } = await fastify.supabase
       .from('platform_events')
       .select('*', { count: 'exact' })
@@ -26,7 +26,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
   // ── GET /governance/compliance/alerts ─────────────────────────────────────
   fastify.get('/compliance/alerts', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('platform_events')
       .select('*')
@@ -40,7 +40,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
   // ── GET /governance/risk/summary ──────────────────────────────────────────
   fastify.get('/risk/summary', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('platform_events')
       .select('entity_type, entity_id, severity, event_type, timestamp')
@@ -81,7 +81,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   // ── GET /governance/incidents ─────────────────────────────────────────────
   fastify.get('/incidents', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { limit = '20' } = req.query as Record<string, string>
-    const tenantId = (req as any).user.tenant_id
+    const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('operational_incidents')
       .select('id, incident_type, severity, title, status, related_entity_type, created_at, metadata')

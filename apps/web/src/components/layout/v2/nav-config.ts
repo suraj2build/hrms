@@ -470,6 +470,12 @@ export const DOMAINS: Domain[] = [
           { id: 'filing-pack', label: 'Filing Pack', route: '/admin/payroll/filing-pack', icon: Archive, keywords: ['filing pack', 'ECR 2.0', 'ECR file', 'EPFO upload', '24Q', 'form 24Q', 'TDS return', 'challan sheet', 'ready to file', 'generate compliance files', 'statutory filing', 'compliance pack', 'ITNS 281', 'TDS challan'] },
         ],
       },
+      {
+        label: 'Filing Pack',
+        items: [
+          { id: 'filing-pack', label: 'Filing Pack', route: '/admin/payroll/filing-pack', icon: Archive, keywords: ['filing pack', 'ECR 2.0', 'ECR file', 'EPFO upload', '24Q', 'form 24Q', 'TDS return', 'challan sheet', 'ready to file', 'generate compliance files', 'statutory filing', 'compliance pack', 'ITNS 281', 'TDS challan'] },
+        ],
+      },
     ],
   },
 

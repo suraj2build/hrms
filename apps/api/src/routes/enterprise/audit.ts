@@ -3,10 +3,10 @@ import type { FastifyInstance } from 'fastify'
 export default async function auditRoutes(fastify: FastifyInstance) {
 
   // GET /enterprise/audit/export
-  fastify.get('/audit/export', async (req, reply) => {
+  fastify.get('/audit/export', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     try {
       const query = req.query as Record<string, string | undefined>
-      const org_id = (req as any).user?.org_id as string | undefined
+      const org_id = (req as any).tenantId as string | undefined
 
       const limit   = Math.min(Number(query.limit ?? 200), 1000)
       const format  = query.format === 'csv' ? 'csv' : 'json'
@@ -23,7 +23,8 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         .order('timestamp', { ascending: false })
         .limit(limit)
 
-      if (org_id)      qb = qb.eq('org_id', org_id)
+      // Tenant isolation is mandatory — never export another tenant's events.
+      qb = qb.eq('org_id', org_id)
       if (from)        qb = qb.gte('timestamp', from)
       if (to)          qb = qb.lte('timestamp', to)
       if (module_)     qb = qb.eq('module', module_)
@@ -73,10 +74,10 @@ export default async function auditRoutes(fastify: FastifyInstance) {
   })
 
   // GET /enterprise/audit/stats
-  fastify.get('/audit/stats', async (req, reply) => {
+  fastify.get('/audit/stats', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     try {
       const query  = req.query as Record<string, string | undefined>
-      const org_id = (req as any).user?.org_id as string | undefined
+      const org_id = (req as any).tenantId as string | undefined
 
       const to   = query.to   ?? new Date().toISOString()
       const from = query.from ?? new Date(Date.now() - 30 * 24 * 3_600_000).toISOString()
@@ -88,7 +89,8 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         .lte('timestamp', to)
         .limit(2000)
 
-      if (org_id) qb = qb.eq('org_id', org_id)
+      // Tenant isolation is mandatory.
+      qb = qb.eq('org_id', org_id)
 
       const { data, error } = await qb
 
