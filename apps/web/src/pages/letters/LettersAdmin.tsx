@@ -20,6 +20,7 @@ import {
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { SubTabs } from '@/components/ui/SubTabs'
 import { Button }             from '@/components/ui/button'
 import { Input }              from '@/components/ui/input'
 
@@ -878,28 +879,12 @@ export function LettersAdmin() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-0.5 px-6 border-b border-border/50 flex-shrink-0">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => { setTab(t.id); setSearch('') }}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors',
-              tab === t.id
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-            {!!t.badge && t.badge > 0 && (
-              <span className="bg-primary/15 text-primary text-[10px] font-semibold px-1.5 py-0.5 rounded-full tabular-nums">
-                {t.badge}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof tab>
+        tabs={TABS.map(t => ({ id: t.id, label: t.label, icon: t.icon, badge: t.badge }))}
+        value={tab}
+        onChange={(v) => { setTab(v); setSearch('') }}
+        className="px-6 flex-shrink-0"
+      />
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">

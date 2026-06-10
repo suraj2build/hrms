@@ -12,6 +12,7 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
+import { SubTabs } from '@/components/ui/SubTabs'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Badge } from '@/components/ui/badge'
@@ -1113,31 +1114,15 @@ export function HRReviewWorkspace() {
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
           {/* Tab bar */}
-          <div className="flex items-center gap-0 border-b border-border px-4 bg-card flex-shrink-0">
-            {(
-              [
-                { key: 'extracted', label: 'Extracted Data' },
-                { key: 'validation', label: 'Validation' },
-              ] as const
-            ).map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === key
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {label}
-                {key === 'validation' && validationResult?.validation_errors?.length ? (
-                  <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold">
-                    {validationResult.validation_errors.length}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
+          <SubTabs<typeof activeTab>
+            tabs={[
+              { id: 'extracted',  label: 'Extracted Data' },
+              { id: 'validation', label: 'Validation', badge: validationResult?.validation_errors?.length, badgeTone: 'danger' },
+            ]}
+            value={activeTab}
+            onChange={setActiveTab}
+            className="px-4 bg-card flex-shrink-0"
+          />
 
           {/* Tab content */}
           <div className="flex-1 overflow-y-auto p-4">

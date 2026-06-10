@@ -31,6 +31,7 @@ import {
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
@@ -796,22 +797,12 @@ export function OrchestrationConsole() {
       {isAdmin && (
         <>
           {/* Tab bar */}
-          <div className="flex items-center gap-1 border-b border-border pb-0 mb-4">
-            {TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={[
-                  'px-4 py-2 text-sm font-medium transition-colors rounded-t-md border-b-2 -mb-px',
-                  activeTab === tab.id
-                    ? 'border-primary text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground',
-                ].join(' ')}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <SubTabs<typeof activeTab>
+            tabs={TABS.map(t => ({ id: t.id, label: t.label }))}
+            value={activeTab}
+            onChange={setActiveTab}
+            className="mb-4"
+          />
 
           {/* Tab content */}
           {activeTab === 'workers' && <WorkersTab />}

@@ -32,6 +32,7 @@ import {
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
@@ -987,22 +988,14 @@ export function ManagerDashboard() {
       {/* Active / Closed tabs + Type filter */}
       <div className="space-y-3">
         {/* Tab row */}
-        <div className="flex items-center gap-1 border-b border-border/50">
-          {(['active', 'closed'] as ActiveTab[]).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                'px-4 py-2.5 text-sm font-medium capitalize transition-colors border-b-2 -mb-px',
-                activeTab === tab
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tab === 'active' ? `Active${pendingCount > 0 ? ` (${pendingCount})` : ''}` : 'Closed'}
-            </button>
-          ))}
-        </div>
+        <SubTabs<ActiveTab>
+          tabs={[
+            { id: 'active', label: `Active${pendingCount > 0 ? ` (${pendingCount})` : ''}` },
+            { id: 'closed', label: 'Closed' },
+          ]}
+          value={activeTab}
+          onChange={setActiveTab}
+        />
 
         {/* Type filter (active tab only) */}
         {activeTab === 'active' && (

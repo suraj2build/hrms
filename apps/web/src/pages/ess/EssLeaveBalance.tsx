@@ -32,6 +32,7 @@ import {
 import { api }               from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
 import { cn }                from '@/lib/utils'
+import { SubTabs }           from '@/components/ui/SubTabs'
 import {
   DataTable,
   TableToolbar,
@@ -668,41 +669,30 @@ export function EssLeaveBalance() {
       />
 
       {/* ── Horizontal tab bar ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 border-b border-border pb-0 -mb-2">
-        {([
-          { key: 'overview' as const, label: 'Overview',       icon: CalendarDays },
-          { key: 'ledger'   as const, label: 'Accrual Ledger', icon: BookOpen     },
-          { key: 'compoff'  as const, label: 'Comp-Off',       icon: CalendarPlus },
-        ] as const).map(({ key, label, icon: Icon }) => (
+      <SubTabs<typeof tab>
+        tabs={[
+          { id: 'overview', label: 'Overview',       icon: CalendarDays },
+          { id: 'ledger',   label: 'Accrual Ledger', icon: BookOpen     },
+          { id: 'compoff',  label: 'Comp-Off',       icon: CalendarPlus },
+        ]}
+        value={tab}
+        onChange={setTab}
+        className="-mb-2"
+        rightSlot={
           <button
-            key={key}
-            onClick={() => setTab(key)}
+            onClick={() => setTab('apply')}
             className={cn(
-              'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
-              tab === key
+              'flex items-center gap-1.5 border-b-2 -mb-px px-3.5 py-2 text-[13px] font-medium transition-colors',
+              tab === 'apply'
                 ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
+                : 'border-transparent text-primary/70 hover:text-primary hover:border-primary/40',
             )}
           >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
+            <Plus className="h-3.5 w-3.5" />
+            Apply Leave
           </button>
-        ))}
-
-        {/* Apply Leave — action tab, styled as a CTA */}
-        <button
-          onClick={() => setTab('apply')}
-          className={cn(
-            'ml-auto flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
-            tab === 'apply'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-primary/70 hover:text-primary hover:border-primary/40',
-          )}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Apply Leave
-        </button>
-      </div>
+        }
+      />
 
       {/* ── Tab content ─────────────────────────────────────────────────────── */}
       <div className="min-w-0 space-y-5 pt-4">

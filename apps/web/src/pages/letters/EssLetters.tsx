@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Label }  from '@/components/ui/label'
 import {
@@ -298,23 +299,12 @@ export function EssLetters() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-0.5 px-6 border-b border-border/50 flex-shrink-0">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors',
-              tab === t.id
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof tab>
+        tabs={TABS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
+        value={tab}
+        onChange={setTab}
+        className="px-6 flex-shrink-0"
+      />
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-6">

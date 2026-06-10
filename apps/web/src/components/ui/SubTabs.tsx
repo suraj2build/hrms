@@ -14,15 +14,19 @@ export interface SubTab<T extends string> {
   label: string
   icon?: React.ElementType
   badge?: number
+  /** Badge color — 'primary' (default) or 'danger' for error counts */
+  badgeTone?: 'primary' | 'danger'
 }
 
 export function SubTabs<T extends string>({
-  tabs, value, onChange, className,
+  tabs, value, onChange, className, rightSlot,
 }: {
   tabs: ReadonlyArray<SubTab<T>>
   value: T
   onChange: (v: T) => void
   className?: string
+  /** Optional content pinned to the right of the tab bar */
+  rightSlot?: React.ReactNode
 }) {
   return (
     <div className={cn('flex items-center gap-0.5 overflow-x-auto border-b border-border scrollbar-none', className)}>
@@ -46,7 +50,9 @@ export function SubTabs<T extends string>({
             {typeof tab.badge === 'number' && tab.badge > 0 && (
               <span className={cn(
                 'ml-0.5 rounded-full px-1.5 py-0 text-[10px] font-semibold leading-[1.6] tabular-nums',
-                active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                tab.badgeTone === 'danger'
+                  ? 'bg-destructive text-destructive-foreground'
+                  : active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
               )}>
                 {tab.badge}
               </span>
@@ -54,6 +60,7 @@ export function SubTabs<T extends string>({
           </button>
         )
       })}
+      {rightSlot && <div className="ml-auto flex items-center pl-2">{rightSlot}</div>}
     </div>
   )
 }

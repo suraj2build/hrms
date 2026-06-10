@@ -22,6 +22,7 @@ import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { toast }         from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -306,30 +307,11 @@ export function EssDocuments() {
       />
 
       {/* ── Tab strip ──────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 border-b border-border pb-0">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'px-4 py-2 text-xs font-medium border-b-2 transition-colors -mb-px flex items-center gap-1.5',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-            {t.count > 0 && (
-              <span className={cn(
-                'text-[10px] px-1.5 py-0.5 rounded-full',
-                activeTab === t.key ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
-              )}>
-                {t.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={tabs.map(t => ({ id: t.key, label: t.label, badge: t.count }))}
+        value={activeTab}
+        onChange={setActiveTab}
+      />
 
       {/* ── Documents tab ─────────────────────────────────────────────────── */}
       {activeTab === 'documents' && (
