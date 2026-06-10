@@ -97,8 +97,28 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   // GET /employees — HR admin / super_admin only
   // Employees and managers access their own or team data via scoped ESS/manager endpoints.
   fastify.get('/employees', hrAdminAuth, async (request, reply) => {
-    const { status, page = '1', limit = '100' } = request.query as Record<string, string>
+    const { status, page = '1', limit = '100', department_id, location_id, grade_id, designation_id } =
+      request.query as Record<string, string>
     const offset = (parseInt(page) - 1) * parseInt(limit)
+
+    // ── Dimension filters (used by Data Explorer drill-to-employee-list) ──────
+    // department / location / designation live on job_history (is_current);
+    // grade lives on the employees row directly.
+    let restrictIds: string[] | null = null
+    if (department_id || location_id || designation_id) {
+      let jhq = fastify.supabase
+        .from('job_history')
+        .select('employee_id')
+        .eq('tenant_id', request.tenantId)
+        .eq('is_current', true)
+      if (department_id)  jhq = jhq.eq('department_id', department_id)
+      if (location_id)    jhq = jhq.eq('work_location_id', location_id)
+      if (designation_id) jhq = jhq.eq('designation_id', designation_id)
+      const { data: jhRows, error: jhErr } = await jhq
+      if (jhErr) return reply.code(500).send({ error: 'DB_ERROR', message: jhErr.message })
+      restrictIds = (jhRows ?? []).map((r: any) => r.employee_id as string)
+      if (restrictIds.length === 0) return reply.send({ data: [], total: 0 })
+    }
 
     let query = fastify.supabase
       .from('employees')
@@ -113,6 +133,8 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     if (status && status !== 'all') {
       query = query.eq('status', status)
     }
+    if (grade_id)    query = query.eq('grade_id', grade_id)
+    if (restrictIds) query = query.in('id', restrictIds)
 
     const { data, error, count } = await query
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })

@@ -57,6 +57,7 @@ const Documents         = lazy(() => import('@/pages/documents/Documents').then(
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
 const AnalyticsStudio   = lazy(() => import('@/pages/reports/AnalyticsStudio').then(m => ({ default: m.AnalyticsStudio })))
+const DataExplorer      = lazy(() => import('@/pages/explorer/DataExplorer').then(m => ({ default: m.DataExplorer })))
 
 // Import + Onboarding
 const ImportWorkspace      = lazy(() => import('@/pages/import/ImportWorkspace').then(m => ({ default: m.ImportWorkspace })))
@@ -578,6 +579,7 @@ export default function App() {
                 {/* Reports */}
                 <Route path="/admin/reports"             element={<ReportingHub />} />
                 <Route path="/admin/reports/analytics"   element={<AnalyticsStudio />} />
+                <Route path="/admin/explorer"            element={<DataExplorer />} />
                 <Route path="/admin/reports/operational" element={<Reports />} />
 
                 {/* Leave (admin) */}

@@ -7,6 +7,7 @@ import employeesDataset    from './employees.js'
 import leaveDataset        from './leave.js'
 import compensationDataset from './compensation.js'
 import separationDataset   from './separation.js'
+import assetsDataset       from './assets.js'
 
 export default async function datasetsRoutes(fastify: FastifyInstance) {
   await fastify.register(headcountDataset,    { prefix: '/headcount'    })
@@ -17,4 +18,5 @@ export default async function datasetsRoutes(fastify: FastifyInstance) {
   await fastify.register(leaveDataset,        { prefix: '/leave'        })
   await fastify.register(compensationDataset, { prefix: '/compensation' })
   await fastify.register(separationDataset,   { prefix: '/separation'   })
+  await fastify.register(assetsDataset,       { prefix: '/assets'       })
 }

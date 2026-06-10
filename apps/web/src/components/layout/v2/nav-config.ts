@@ -501,6 +501,7 @@ export const DOMAINS: Domain[] = [
         label: 'Analytics',
         items: [
           { id: 'analytics-studio',    label: 'Analytics Studio',    route: '/admin/reports/analytics',               icon: Sparkles,  keywords: ['analytics studio', 'workforce analytics', 'payroll analytics', 'explore data', 'charts', 'trend', 'department analytics'] },
+          { id: 'data-explorer',       label: 'Data Explorer',       route: '/admin/explorer',                        icon: Search,    keywords: ['data explorer', 'explore', 'group by', 'drill down', 'pivot', 'employee list', 'absenteeism', 'compensation growth', 'export excel'] },
         ],
       },
       {

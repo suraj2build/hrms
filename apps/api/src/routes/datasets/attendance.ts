@@ -59,7 +59,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
       toDate     = q.to   ?? lastDayOf(curM)
     }
 
-    const deptFilter = q.department_id ?? null
+    const deptFilter = q.department_id ?? q.filter_department_id ?? null
 
     // ── Query: attendance rows in range ─────────────────────────────────────────
     const { data: attRows, error: attErr } = await fastify.supabase
@@ -90,13 +90,14 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
     const { data: employees } = await empQuery
 
     // ── Build employee map ──────────────────────────────────────────────────────
-    const empMap: Record<string, { code: string; name: string; dept: string; type: string }> = {}
+    const empMap: Record<string, { code: string; name: string; dept: string; deptId: string; type: string }> = {}
     for (const emp of (employees ?? []) as any[]) {
       const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
       empMap[emp.id] = {
         code: emp.employee_code,
         name: `${emp.first_name} ${emp.last_name}`.trim(),
         dept: (jh?.departments as { name?: string } | null)?.name ?? 'Unassigned',
+        deptId: (jh?.department_id as string | null) ?? '__none__',
         type: jh?.employment_type ?? 'unknown',
       }
     }
@@ -116,6 +117,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
       employee_code: string
       full_name: string
       department: string
+      department_id: string
       employment_type: string
       present_days: number
       absent_days: number
@@ -140,6 +142,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
           employee_code:    em.code,
           full_name:        em.name,
           department:       em.dept,
+          department_id:    em.deptId,
           employment_type:  em.type,
           present_days:     0,
           absent_days:      0,
@@ -200,6 +203,36 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
       : 0
 
     // ── Response ────────────────────────────────────────────────────────────────
+    // ── By department rollup (for Data Explorer / "highest absenteeism") ────────
+    type DeptAtt = {
+      key: string; label: string; employee_count: number
+      present: number; absent: number; lop: number; attSum: number
+    }
+    const deptAgg: Record<string, DeptAtt> = {}
+    for (const e of empList) {
+      const k = e.department_id || '__none__'
+      if (!deptAgg[k]) deptAgg[k] = { key: k, label: e.department, employee_count: 0, present: 0, absent: 0, lop: 0, attSum: 0 }
+      const d = deptAgg[k]
+      d.employee_count++
+      d.present += e.present_days + e.late_arrivals
+      d.absent  += e.absent_days
+      d.lop     += e.lop_days
+      d.attSum  += e.attendance_rate
+    }
+    const byDepartment = Object.values(deptAgg)
+      .map(d => ({
+        key:                 d.key,
+        label:               d.label,
+        employee_count:      d.employee_count,
+        avg_attendance_rate: d.employee_count > 0 ? r2(d.attSum / d.employee_count) : 0,
+        total_lop_days:      r2(d.lop),
+        total_absent_days:   d.absent,
+        absenteeism_pct:     (d.employee_count * workingDays) > 0
+          ? r2((d.absent / (d.employee_count * workingDays)) * 100)
+          : 0,
+      }))
+      .sort((a, b) => b.absenteeism_pct - a.absenteeism_pct)
+
     return reply.send({
       meta: {
         from:          fromDate,
@@ -208,6 +241,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
         department_id: deptFilter,
         generated_at:  new Date().toISOString(),
       },
+      by_department: byDepartment,
       summary: {
         employee_count:         empList.length,
         working_days:           workingDays,
