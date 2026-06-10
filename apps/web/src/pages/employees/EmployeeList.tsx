@@ -13,6 +13,7 @@
 import { useState, useMemo, memo } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { SignedImage } from '@/components/SignedImage'
+import { Button } from '@/components/ui/button'
 import { useQuery }          from '@tanstack/react-query'
 import {
   Search, Download, UserPlus, Building2, MapPin,
@@ -410,24 +411,21 @@ export function EmployeeList() {
               Live workforce operational stream — {allEmployees.length} people across {sites.length} site{sites.length !== 1 ? 's' : ''}
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--muted-foreground)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
-              <Bookmark className="w-3.5 h-3.5" />
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm">
+              <Bookmark className="h-3.5 w-3.5" />
               Saved Views
-            </button>
+            </Button>
             {isAdmin && (
               <>
-                <button style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--muted-foreground)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}>
-                  <Download className="w-3.5 h-3.5" />
+                <Button variant="outline" size="sm">
+                  <Download className="h-3.5 w-3.5" />
                   Export
-                </button>
-                <button
-                  style={{ height: 34, padding: '0 16px', borderRadius: 8, background: 'var(--primary)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'inherit' }}
-                  onClick={() => navigate(`${basePath}/employees/new`)}
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  + Add Employee
-                </button>
+                </Button>
+                <Button size="sm" onClick={() => navigate(`${basePath}/employees/new`)}>
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Add Employee
+                </Button>
               </>
             )}
           </div>
@@ -813,32 +811,26 @@ function EmployeeRow({
 
       {/* Actions */}
       <td style={{ padding: '8px 10px' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <button
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
             title="Send email"
             onClick={() => window.open(`mailto:${emp.email}`)}
-            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--muted-foreground)', flexShrink: 0 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--card)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
           >
-            <Mail className="w-3 h-3" />
-          </button>
-          <button
-            title="More options"
-            style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--muted-foreground)', flexShrink: 0 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--card)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--muted-foreground)' }}
-          >
-            <TrendingUp className="w-3 h-3 rotate-90" />
-          </button>
-          <button
+            <Mail className="h-3 w-3" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-7 w-7" title="More options">
+            <TrendingUp className="h-3 w-3 rotate-90" />
+          </Button>
+          <Button
+            size="sm"
+            className="h-7 px-2.5 text-[11px]"
             onClick={() => navigate(`${basePath}/employees/${emp.id}`)}
-            style={{ height: 26, padding: '0 9px', borderRadius: 6, background: 'var(--primary)', border: 'none', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#231645' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--primary)' }}
           >
-            → Open Profile
-          </button>
+            Open Profile
+          </Button>
         </div>
       </td>
     </tr>

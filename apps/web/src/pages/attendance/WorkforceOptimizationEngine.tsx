@@ -889,14 +889,14 @@ export function WorkforceOptimizationEngine() {
       />
 
       <Tabs defaultValue="fairness">
-        <TabsList className="flex-wrap h-auto gap-1 mb-4">
-          <TabsTrigger value="fairness"    className="text-xs gap-1.5"><BarChart2 className="h-3.5 w-3.5" />Fairness Balance</TabsTrigger>
-          <TabsTrigger value="consecutive" className="text-xs gap-1.5"><CalendarRange className="h-3.5 w-3.5" />Consecutive Shifts</TabsTrigger>
-          <TabsTrigger value="ot"          className="text-xs gap-1.5"><Clock className="h-3.5 w-3.5" />OT Distribution</TabsTrigger>
-          <TabsTrigger value="rest"        className="text-xs gap-1.5"><Activity className="h-3.5 w-3.5" />Rest Gaps</TabsTrigger>
-          <TabsTrigger value="overload"    className="text-xs gap-1.5"><AlertTriangle className="h-3.5 w-3.5" />Shift Overload</TabsTrigger>
-          <TabsTrigger value="staffing"    className="text-xs gap-1.5"><Users className="h-3.5 w-3.5" />Staffing Hints</TabsTrigger>
-          <TabsTrigger value="hints"       className="text-xs gap-1.5"><Lightbulb className="h-3.5 w-3.5" />Hints</TabsTrigger>
+        <TabsList className="flex-wrap h-auto gap-0.5 mb-4 rounded-none border-b border-border bg-transparent p-0">
+          <TabsTrigger value="fairness"    className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><BarChart2 className="h-3.5 w-3.5" />Fairness Balance</TabsTrigger>
+          <TabsTrigger value="consecutive" className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><CalendarRange className="h-3.5 w-3.5" />Consecutive Shifts</TabsTrigger>
+          <TabsTrigger value="ot"          className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><Clock className="h-3.5 w-3.5" />OT Distribution</TabsTrigger>
+          <TabsTrigger value="rest"        className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><Activity className="h-3.5 w-3.5" />Rest Gaps</TabsTrigger>
+          <TabsTrigger value="overload"    className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><AlertTriangle className="h-3.5 w-3.5" />Shift Overload</TabsTrigger>
+          <TabsTrigger value="staffing"    className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><Users className="h-3.5 w-3.5" />Staffing Hints</TabsTrigger>
+          <TabsTrigger value="hints"       className="gap-1.5 -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2 text-[13px] font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"><Lightbulb className="h-3.5 w-3.5" />Hints</TabsTrigger>
         </TabsList>
 
         <TabsContent value="fairness">
