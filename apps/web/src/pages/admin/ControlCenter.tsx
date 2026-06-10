@@ -628,7 +628,7 @@ export function ControlCenter() {
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Control Center</h1>
+          <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Command Center</h1>
           <p className="text-[11.5px] text-muted-foreground mt-0.5">
             Operational health · Last updated {lastUpdated}
             {oh && (

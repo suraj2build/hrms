@@ -158,10 +158,10 @@ export interface NavGroup {
 
 export const ADMIN_GROUPS: NavGroup[] = [
 
-  // ── 0. Control Center ────────────────────────────────────────────────────────
+  // ── 0. Command Center ────────────────────────────────────────────────────────
   {
     id:               'control-center',
-    label:            'Control Center',
+    label:            'Command Center',
     icon:             Command,
     section:          'admin',
     defaultExpanded:  true,
@@ -374,13 +374,13 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
 
   {
     id:          'control-center',
-    label:       'Control Center',
+    label:       'Command Center',
     route:       '/admin/control-center',
     icon:        Command,
     groupId:     'control-center',
     section:     'admin',
     exact:       true,
-    keywords:    ['home', 'overview', 'operations', 'health', 'exceptions', 'kpi'],
+    keywords:    ['home', 'overview', 'operations', 'control center', 'command center', 'health', 'exceptions', 'kpi'],
     description: 'Platform-wide operational command and live health monitoring',
   },
 

@@ -837,7 +837,7 @@ export function PayrollControlCenter(): JSX.Element {
             <PlayCircle className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="font-display text-lg font-semibold leading-tight">Payroll Control Center</h1>
+            <h1 className="font-display text-lg font-semibold leading-tight">Payroll Operations</h1>
             <p className="text-xs text-muted-foreground">
               7-step payroll execution workflow · follow each step in sequence
             </p>

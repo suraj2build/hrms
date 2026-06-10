@@ -185,7 +185,7 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Overview',
         items: [
-          { id: 'control-center',  label: 'Control Center',  route: '/admin/control-center', exact: true, icon: Command,  keywords: ['home', 'dashboard', 'overview', 'command center', 'ops', 'exceptions', 'kpi', 'health'] },
+          { id: 'control-center',  label: 'Command Center',  route: '/admin/control-center', exact: true, icon: Command,  keywords: ['home', 'dashboard', 'overview', 'control center', 'command center', 'ops', 'operations', 'exceptions', 'kpi', 'health'] },
           { id: 'insights-hub',    label: 'Insights Hub',    route: '/admin/insights',       exact: true, icon: Sparkles, keywords: ['analytics', 'intelligence', 'insights', 'charts', 'workforce data'] },
           { id: 'platform-health', label: 'Platform Health', route: '/admin/readiness',                   icon: Activity, keywords: ['readiness', 'system health', 'uat', 'certification', 'platform status'] },
         ],
@@ -236,7 +236,7 @@ export const DOMAINS: Domain[] = [
         label: 'Employees',
         items: [
           { id: 'employees',             label: 'Employee Directory',   route: '/admin/employees',             exact: true, icon: Users,        keywords: ['staff', 'people', 'employees list', 'headcount', 'employee database'] },
-          { id: 'workforce-ops',         label: 'Ops Center',           route: '/admin/workforce/center',                     icon: Activity,     keywords: ['workforce operations', 'employee ops', 'manpower center'] },
+          { id: 'workforce-ops',         label: 'Workforce Operations', route: '/admin/workforce/center',                     icon: Activity,     keywords: ['ops center', 'workforce operations', 'employee ops', 'manpower center', 'people ops'] },
           { id: 'admin-documents',       label: 'Documents',            route: '/admin/documents',                            icon: FileText,     keywords: ['employee documents', 'files', 'document management', 'document vault', 'upload document'] },
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
@@ -274,7 +274,7 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Operations',
         items: [
-          { id: 'att-center',     label: 'Ops Center',           route: '/admin/attendance/center',           icon: Activity,      keywords: ['attendance operations', 'daily attendance', 'attendance ops', 'attendance management'] },
+          { id: 'att-center',     label: 'Attendance Operations', route: '/admin/attendance/center',           icon: Activity,      keywords: ['ops center', 'attendance operations', 'daily attendance', 'attendance ops', 'attendance management'] },
           { id: 'att-workspace',  label: 'Attendance Workspace', route: '/admin/attendance-workspace', icon: Activity,      keywords: ['attendance data', 'time tracking', 'punch records', 'employee attendance', 'daily punches'] },
           { id: 'att-upload',     label: 'Punch Intake',         route: '/admin/attendance/upload-workspace', icon: Upload, keywords: ['upload attendance', 'import attendance', 'punch upload', 'biometric upload', 'swipe data', 'attendance import'] },
           { id: 'muster',         label: 'Muster Roll',          route: '/admin/attendance/muster',           icon: BookOpen,  keywords: ['daily attendance register', 'attendance report', 'present absent', 'muster'] },
@@ -376,7 +376,7 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Execution',
         items: [
-          { id: 'ops-center',       label: 'Operations Center', route: '/admin/payroll/center',      icon: Zap,       exact: true, keywords: ['payroll operations', 'payroll management', 'payroll center', 'payroll home', 'payroll overview'] },
+          { id: 'ops-center',       label: 'Payroll Operations', route: '/admin/payroll/center',      icon: Zap,       exact: true, keywords: ['operations center', 'control center', 'payroll operations', 'payroll management', 'payroll center', 'payroll home', 'payroll overview'] },
           { id: 'run-console',      label: 'Run Console',       route: '/admin/payroll/run-console', icon: Activity,               keywords: ['run payroll', 'process payroll', 'execute payroll', 'start payroll', 'payroll run console'] },
           { id: 'payroll-runs',     label: 'Payroll Runs',      route: '/admin/payroll',             icon: PlayCircle, exact: true, keywords: ['payroll history', 'past runs', 'salary runs', 'run list'] },
           { id: 'comp-revisions',   label: 'Comp Revisions',    route: '/admin/payroll/revisions',   icon: GitMerge,               keywords: ['salary revision', 'increment', 'hike', 'salary hike', 'appraisal', 'compensation change', 'pay revision', 'ctc revision', 'salary increment'] },
