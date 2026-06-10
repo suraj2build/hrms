@@ -25,7 +25,12 @@ export function useGuidanceConfig(): GuidanceConfig {
     staleTime: 60_000,
     placeholderData: DEFAULT_GUIDANCE_CONFIG,
   })
-  return data ?? DEFAULT_GUIDANCE_CONFIG
+  if (!data) return DEFAULT_GUIDANCE_CONFIG
+  return {
+    features: { ...DEFAULT_GUIDANCE_CONFIG.features, ...(data.features ?? {}) } as GuidanceConfig['features'],
+    roles:    { ...DEFAULT_GUIDANCE_CONFIG.roles,    ...(data.roles    ?? {}) } as GuidanceConfig['roles'],
+    modules:  { ...DEFAULT_GUIDANCE_CONFIG.modules,  ...(data.modules  ?? {}) } as GuidanceConfig['modules'],
+  }
 }
 
 export function useGuidance(module: GuidanceModule) {
