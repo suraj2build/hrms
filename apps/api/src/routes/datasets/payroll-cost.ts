@@ -13,6 +13,10 @@
 
 import type { FastifyInstance } from 'fastify'
 
+// Payroll slips advance finalized → processed → paid through the pay cycle.
+// All of these are "final" data for reporting; only 'draft' is excluded.
+const FINAL_SLIP_STATUSES = ['finalized', 'processed', 'paid', 'completed']
+
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
 function priorMonthStr(yyyyMM: string): string {
@@ -53,19 +57,19 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
   // any slip month, so it works even if run/slip status drift.
   fastify.get('/anchor', adminAuth, async (req: any, reply) => {
     const tid = req.tenantId
-    const latestSlipMonth = async (status?: string) => {
+    const latestSlipMonth = async (statuses?: string[]) => {
       let qb = fastify.supabase
         .from('payroll_slips')
         .select('month')
         .eq('tenant_id', tid)
         .order('month', { ascending: false })
         .limit(1)
-      if (status) qb = qb.eq('status', status)
+      if (statuses) qb = qb.in('status', statuses)
       const { data } = await qb.maybeSingle()
       return (data as any)?.month ?? null
     }
 
-    let month = await latestSlipMonth('finalized')
+    let month = await latestSlipMonth(FINAL_SLIP_STATUSES)
     if (!month) {
       const { data: run } = await fastify.supabase
         .from('payroll_runs')
@@ -122,7 +126,7 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
       `)
       .eq('tenant_id', tid)
       .eq('month', month)
-      .eq('status', 'finalized') as any
+      .in('status', FINAL_SLIP_STATUSES) as any
 
     const [runRes, priorRunRes] = await Promise.all([
       fastify.supabase

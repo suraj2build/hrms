@@ -12,6 +12,9 @@
 
 import type { FastifyInstance } from 'fastify'
 
+// Slips advance finalized → processed → paid; all count as final for reporting.
+const FINAL_SLIP_STATUSES = ['finalized', 'processed', 'paid', 'completed']
+
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
 export default async function statutoryDataset(fastify: FastifyInstance) {
@@ -177,7 +180,7 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tid)
         .eq('month', month)
-        .eq('status', 'finalized'),
+        .in('status', FINAL_SLIP_STATUSES),
 
       fastify.supabase
         .from('payroll_slips')
@@ -232,7 +235,7 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
       .select('employee_id, tds_deducted')
       .eq('tenant_id', tid)
       .eq('month', month)
-      .eq('status', 'finalized')
+      .in('status', FINAL_SLIP_STATUSES)
       .gt('tds_deducted', 0)
 
     const tdsSlipRows  = (tdsSlips ?? []) as any[]
