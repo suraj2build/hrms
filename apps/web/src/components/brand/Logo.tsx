@@ -29,31 +29,37 @@ export function LogoMark({ size = 32, className }: { size?: number; className?: 
     <svg
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="0 0 48 48"
       fill="none"
       className={className}
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id="cognix-grad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+        {/* Ring: royal blue (lower-left) → teal (upper-right tail) */}
+        <linearGradient id="cognix-ring" x1="9" y1="40" x2="39" y2="9" gradientUnits="userSpaceOnUse">
           <stop offset="0"    stopColor={BRAND_BLUE} />
-          <stop offset="0.55" stopColor="#2392C8" />
+          <stop offset="0.62" stopColor="#2C8FCB" />
           <stop offset="1"    stopColor={BRAND_TEAL} />
         </linearGradient>
+        {/* Inner figure: teal-dominant with a blue base */}
+        <linearGradient id="cognix-fig" x1="18" y1="36" x2="32" y2="13" gradientUnits="userSpaceOnUse">
+          <stop offset="0"   stopColor="#1E73C4" />
+          <stop offset="1"   stopColor={BRAND_TEAL} />
+        </linearGradient>
       </defs>
-      {/* Open "C" ring — cognition / circle of people */}
+      {/* Open "C" ring — cognition / a circle of people, open to the right */}
       <path
-        d="M24 7.6 A11 11 0 1 0 24 24.4"
+        d="M33.4 11.2 A16 16 0 1 0 33.4 36.8"
         fill="none"
-        stroke="url(#cognix-grad)"
-        strokeWidth="3.4"
+        stroke="url(#cognix-ring)"
+        strokeWidth="5.2"
         strokeLinecap="round"
       />
-      {/* H / person — two legs, a crossbar, and a head dot */}
-      <rect x="12.4" y="11.6" width="2.8" height="10.8" rx="1.4" fill="url(#cognix-grad)" />
-      <rect x="18.0" y="11.6" width="2.8" height="10.8" rx="1.4" fill="url(#cognix-grad)" />
-      <rect x="12.4" y="15.6" width="8.4" height="2.6"  rx="1.3" fill="url(#cognix-grad)" />
-      <circle cx="16.6" cy="9.4" r="2.25" fill="url(#cognix-grad)" />
+      {/* Inner H + person: left pillar (with head dot), crossbar, taller right pillar */}
+      <circle cx="20.4" cy="16.2" r="3" fill="url(#cognix-fig)" />
+      <rect x="18.1" y="20.4" width="4.6" height="13.8" rx="2.3" fill="url(#cognix-fig)" />
+      <rect x="26.9" y="15.8" width="4.6" height="18.4" rx="2.3" fill="url(#cognix-fig)" />
+      <rect x="18.1" y="24.4" width="13.4" height="4.2" rx="2.1" fill="url(#cognix-fig)" />
     </svg>
   )
 }
