@@ -1,7 +1,7 @@
 /**
- * PayrollOperationsCenter — /admin/payroll/center
+ * PayrollOperationsCenter — /admin/payroll/hub
  *
- * Payroll Operations Command Center — single-scroll operational workspace.
+ * Payroll Hub — single-scroll payroll command overview.
  *
  * Answers immediately:
  *   Is payroll ready? What is blocked? What validations failed?
@@ -28,11 +28,11 @@ import {
   Receipt, GitMerge, Layers,
   ChevronDown, ChevronRight,
   CheckCircle2, ArrowRight, Clock, Calendar,
-  AlertCircle, RefreshCw, BarChart2,
+  AlertCircle, RefreshCw, BarChart2, PlayCircle,
 } from 'lucide-react'
 
 import { PageContainer }       from '@/components/layout/PageContainer'
-import { PageHeader }          from '@/components/layout/PageHeader'
+import { PageHero }            from '@/components/layout/PageHero'
 import { SectionCard }         from '@/components/layout/SectionCard'
 import { OperationalTimeline } from '@/components/workspace/OperationalTimeline'
 import type { TimelineEvent }  from '@/components/workspace/OperationalTimeline'
@@ -301,13 +301,21 @@ export function PayrollOperationsCenter() {
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Payroll Operations"
-        subtitle={`Command center — runs, validations, reconciliation and compliance${stats?.current_run_month ? ` · ${stats.current_run_month}` : ''}`}
+      <PageHero
+        eyebrow={`Payroll · Command${stats?.current_run_month ? ` · ${stats.current_run_month}` : ''}`}
+        title="Payroll Hub"
+        subtitle="The payroll command overview — readiness, compensation coverage, blockers and every payroll tool in one place."
         actions={
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/admin/payroll')}>
-            Payroll Runs
-          </Button>
+          <>
+            <Button size="sm" variant="outline"
+              className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() => navigate('/admin/payroll')}>
+              Payroll Runs
+            </Button>
+            <Button size="sm" className="h-8 gap-1.5" onClick={() => navigate('/admin/payroll/center')}>
+              <PlayCircle className="h-3.5 w-3.5" /> Run Workflow
+            </Button>
+          </>
         }
       />
 
@@ -816,11 +824,13 @@ export function PayrollOperationsCenter() {
                       type="button"
                       onClick={() => navigate(qa.href)}
                       className={cn(
-                        'flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors',
+                        'group flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-all duration-200 hover:-translate-y-0.5',
                         ACCENT_CLASSES[qa.accent ?? 'neutral'],
                       )}
                     >
-                      <qa.icon className="h-3.5 w-3.5 text-muted-foreground/70 flex-shrink-0" />
+                      <span className="chip-grad flex h-7 w-7 items-center justify-center rounded-lg text-white shadow-sm flex-shrink-0">
+                        <qa.icon className="h-3.5 w-3.5" />
+                      </span>
                       <div>
                         <p className="text-[12px] font-medium text-foreground leading-tight">{qa.label}</p>
                         <p className="text-[10px] text-muted-foreground/60 leading-tight mt-0.5">{qa.description}</p>

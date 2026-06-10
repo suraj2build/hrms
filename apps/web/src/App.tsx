@@ -203,6 +203,7 @@ const ExecTrendsView     = lazy(() => import('@/pages/executive/TrendsView'))
 // Phase UX-6 — Payroll-First IA
 const DailyOperationsWorkspace = lazy(() => import('@/pages/workspace/DailyOperationsWorkspace').then(m => ({ default: m.DailyOperationsWorkspace })))
 const PayrollControlCenter     = lazy(() => import('@/pages/payroll/PayrollControlCenter').then(m => ({ default: m.PayrollControlCenter })))
+const PayrollHub               = lazy(() => import('@/pages/payroll/PayrollOperationsCenter').then(m => ({ default: m.PayrollOperationsCenter })))
 // Phase UX-7 — Queue-Driven Workforce Operations
 const MyWorkQueue              = lazy(() => import('@/pages/workspace/MyWorkQueue').then(m => ({ default: m.MyWorkQueue })))
 
@@ -535,6 +536,7 @@ export default function App() {
                 <Route path="/admin/workforce/center"  element={<WorkforceOperationsCenter />} />
                 <Route path="/admin/attendance/center" element={<AttendanceOperationsCenter />} />
                 <Route path="/admin/payroll/center"    element={<PayrollControlCenter />} />
+                <Route path="/admin/payroll/hub"       element={<PayrollHub />} />
 
                 {/* Readiness */}
                 <Route path="/admin/readiness"        element={<ReadinessDashboard />} />

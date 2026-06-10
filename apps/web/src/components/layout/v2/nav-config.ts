@@ -371,12 +371,13 @@ export const DOMAINS: Domain[] = [
       '/admin/payroll',            // catches all /admin/payroll/* not overridden below
       '/admin/payroll/run-console',
     ],
-    defaultRoute: '/admin/payroll/center',
+    defaultRoute: '/admin/payroll/hub',
     groups: [
       {
         label: 'Execution',
         items: [
-          { id: 'ops-center',       label: 'Payroll Operations', route: '/admin/payroll/center',      icon: Zap,       exact: true, keywords: ['operations center', 'control center', 'payroll operations', 'payroll management', 'payroll center', 'payroll home', 'payroll overview'] },
+          { id: 'payroll-hub',      label: 'Payroll Hub',        route: '/admin/payroll/hub',         icon: Command,   exact: true, keywords: ['payroll overview', 'payroll home', 'payroll command', 'readiness', 'coverage', 'payroll dashboard', 'all payroll tools'] },
+          { id: 'ops-center',       label: 'Payroll Operations', route: '/admin/payroll/center',      icon: Zap,       exact: true, keywords: ['operations center', 'control center', 'run workflow', 'execution', 'payroll operations', 'payroll management', 'payroll center', 'seven step', '7 step'] },
           { id: 'run-console',      label: 'Run Console',       route: '/admin/payroll/run-console', icon: Activity,               keywords: ['run payroll', 'process payroll', 'execute payroll', 'start payroll', 'payroll run console'] },
           { id: 'payroll-runs',     label: 'Payroll Runs',      route: '/admin/payroll',             icon: PlayCircle, exact: true, keywords: ['payroll history', 'past runs', 'salary runs', 'run list'] },
           { id: 'comp-revisions',   label: 'Comp Revisions',    route: '/admin/payroll/revisions',   icon: GitMerge,               keywords: ['salary revision', 'increment', 'hike', 'salary hike', 'appraisal', 'compensation change', 'pay revision', 'ctc revision', 'salary increment'] },
