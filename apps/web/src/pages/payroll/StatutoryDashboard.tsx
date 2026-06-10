@@ -17,7 +17,7 @@ import { useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Building2, ShieldCheck, MapPin, FileText, Wallet,
+  Building2, ShieldCheck, MapPin, FileText, Wallet, Coins,
   AlertTriangle, Clock, CheckCircle2, ChevronRight,
   CreditCard, Gauge, ArrowUpRight, ListChecks,
 } from 'lucide-react'
@@ -48,6 +48,7 @@ interface StatutoryData {
     esi:  { eligible: number; has_registration: boolean }
     ptax: { enrolled: number; states: string[]; missing_registrations: string[] }
     tds:  { employees_with_tds: number; missing_pan: number }
+    lwf:  { enrolled: number; states: string[] }
     payroll: { finalized: number; total: number; all_finalized: boolean }
   }
   totals: {
@@ -55,6 +56,7 @@ interface StatutoryData {
     esi:  { total_remittance: number }
     ptax: { amount: number }
     tds:  { total_deducted: number }
+    lwf:  { total_remittance: number }
     grand_total: number
   }
   readiness: { overall: boolean; issues: string[] }
@@ -309,11 +311,12 @@ export function StatutoryDashboard() {
       {/* ── Module liability breakdown ───────────────────────────────────── */}
       <div>
         <h2 className="mb-2 text-sm font-semibold text-foreground">Statutory Liability by Module</h2>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <ModuleCard label="EPF"  icon={Building2}   amount={statutory?.totals.epf.total_remittance ?? 0} covered={statutory?.coverage.epf.enrolled ?? 0}        ready={!!statutory?.coverage.epf.has_registration && (statutory?.coverage.epf.missing_uan ?? 0) === 0} onOpen={go('/admin/payroll/statutory/epf')} />
           <ModuleCard label="ESI"  icon={ShieldCheck} amount={statutory?.totals.esi.total_remittance ?? 0} covered={statutory?.coverage.esi.eligible ?? 0}          ready={(statutory?.coverage.esi.eligible ?? 0) === 0 || !!statutory?.coverage.esi.has_registration} onOpen={go('/admin/payroll/statutory/esi')} />
           <ModuleCard label="PTAX" icon={MapPin}      amount={statutory?.totals.ptax.amount ?? 0}          covered={statutory?.coverage.ptax.enrolled ?? 0}        ready={(statutory?.coverage.ptax.missing_registrations.length ?? 0) === 0} onOpen={go('/admin/payroll/statutory/ptax')} />
           <ModuleCard label="TDS"  icon={FileText}    amount={statutory?.totals.tds.total_deducted ?? 0}   covered={statutory?.coverage.tds.employees_with_tds ?? 0} ready={(statutory?.coverage.tds.missing_pan ?? 0) === 0} onOpen={go('/admin/payroll/statutory/tds')} />
+          <ModuleCard label="LWF"  icon={Coins}   amount={statutory?.totals.lwf.total_remittance ?? 0} covered={statutory?.coverage.lwf.enrolled ?? 0}         ready onOpen={go('/admin/payroll/statutory/lwf')} />
         </div>
       </div>
 

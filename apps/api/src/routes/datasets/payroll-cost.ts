@@ -47,18 +47,38 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
   }
 
   // ── GET /datasets/payroll-cost/anchor ───────────────────────────────────────
-  // Returns the latest month that has a finalized payroll run, so analytics /
-  // explorer can anchor their windows on real data instead of the wall clock.
+  // Returns the latest month that actually has finalized payroll SLIPS — the
+  // exact table the analytics/explorer read from — so the anchored window is
+  // guaranteed to land on data. Falls back to the latest finalized run, then
+  // any slip month, so it works even if run/slip status drift.
   fastify.get('/anchor', adminAuth, async (req: any, reply) => {
-    const { data } = await fastify.supabase
-      .from('payroll_runs')
-      .select('month, status')
-      .eq('tenant_id', req.tenantId)
-      .in('status', ['finalized', 'completed'])
-      .order('month', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    return reply.send({ month: (data as any)?.month ?? null })
+    const tid = req.tenantId
+    const latestSlipMonth = async (status?: string) => {
+      let qb = fastify.supabase
+        .from('payroll_slips')
+        .select('month')
+        .eq('tenant_id', tid)
+        .order('month', { ascending: false })
+        .limit(1)
+      if (status) qb = qb.eq('status', status)
+      const { data } = await qb.maybeSingle()
+      return (data as any)?.month ?? null
+    }
+
+    let month = await latestSlipMonth('finalized')
+    if (!month) {
+      const { data: run } = await fastify.supabase
+        .from('payroll_runs')
+        .select('month')
+        .eq('tenant_id', tid)
+        .in('status', ['finalized', 'completed'])
+        .order('month', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      month = (run as any)?.month ?? null
+    }
+    if (!month) month = await latestSlipMonth()   // any slip at all
+    return reply.send({ month })
   })
 
   fastify.get('/', adminAuth, async (req: any, reply) => {

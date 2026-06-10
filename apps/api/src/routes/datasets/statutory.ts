@@ -127,6 +127,7 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
       ptaxRegsRes,
       finalizedSlipsRes,
       allSlipsRes,
+      lwfRes,
     ] = await Promise.all([
       fastify.supabase
         .from('epf_contributions')
@@ -183,6 +184,12 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tid)
         .eq('month', month),
+
+      fastify.supabase
+        .from('lwf_contributions')
+        .select('employee_id, employee_contribution, employer_contribution, state_code')
+        .eq('tenant_id', tid)
+        .eq('contribution_month', month),
     ])
 
     if (epfRes.error) return reply.code(500).send({ error: 'DB_ERROR', message: epfRes.error.message })
@@ -190,6 +197,7 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     const epfRows  = (epfRes.data  ?? []) as any[]
     const esiRows  = (esiRes.data  ?? []) as any[]
     const ptaxRows = (ptaxRes.data ?? []) as any[]
+    const lwfRows  = (lwfRes.data  ?? []) as any[]
 
     const epfRegNum  = (epfRegRes.data  as any)?.registration_number ?? null
     const esiRegNum  = (esiRegRes.data  as any)?.registration_number ?? null
@@ -269,7 +277,12 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
 
     const sumTdsDeducted = r2(tdsSlipRows.reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0))
 
-    const grandTotal = r2(epfTotalRemittance + esiTotalRemittance + sumPtax + sumTdsDeducted)
+    const sumLwfEmp   = r2(lwfRows.reduce((s: number, r: any) => s + (r.employee_contribution ?? 0), 0))
+    const sumLwfEmpr  = r2(lwfRows.reduce((s: number, r: any) => s + (r.employer_contribution ?? 0), 0))
+    const lwfTotal    = r2(sumLwfEmp + sumLwfEmpr)
+    const lwfStates   = [...new Set(lwfRows.map((r: any) => r.state_code).filter(Boolean))] as string[]
+
+    const grandTotal = r2(epfTotalRemittance + esiTotalRemittance + sumPtax + sumTdsDeducted + lwfTotal)
 
     // ── Readiness ───────────────────────────────────────────────────────────────
     const epfReady     = epfRows.length > 0 && !!epfRegNum && missingUan === 0
@@ -325,6 +338,10 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
           employees_with_tds: employeesWithTds,
           missing_pan:        missingPan,
         },
+        lwf: {
+          enrolled: lwfRows.length,
+          states:   lwfStates,
+        },
         payroll: {
           finalized:     finalizedCount,
           total:         totalCount,
@@ -351,6 +368,11 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
         },
         tds: {
           total_deducted: sumTdsDeducted,
+        },
+        lwf: {
+          employee_contribution: sumLwfEmp,
+          employer_contribution: sumLwfEmpr,
+          total_remittance:      lwfTotal,
         },
         grand_total: grandTotal,
       },
