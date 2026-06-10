@@ -46,6 +46,7 @@ import {
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
+import { SubTabs }        from '@/components/ui/SubTabs'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -841,32 +842,20 @@ export function EssCompensation() {
       />
 
       {/* ── Tab switcher — underline tabs, horizontally scrollable ───────────── */}
-      <div className="-mx-1 overflow-x-auto border-b border-border scrollbar-none">
-        <div className="flex min-w-max gap-1 px-1">
-          {([
-            { key: 'overview', label: 'Overview',             icon: BarChart2    },
-            { key: 'salary',   label: 'Salary',               icon: Wallet       },
-            { key: 'payslips', label: 'Pay Slips',            icon: FileText     },
-            { key: 'bonuses',  label: 'Bonuses & Incentives', icon: Gift         },
-            { key: 'benefits', label: 'Benefits',             icon: ShieldCheck  },
-            { key: 'tax',      label: 'Tax',                  icon: Building2     },
-            { key: 'history',  label: 'History',              icon: HistoryIcon  },
-          ] as const).map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={cn(
-                'relative flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
-                tab === key
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="h-4 w-4" />{label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <SubTabs<typeof tab>
+        tabs={[
+          { id: 'overview', label: 'Overview',             icon: BarChart2   },
+          { id: 'salary',   label: 'Salary',               icon: Wallet      },
+          { id: 'payslips', label: 'Pay Slips',            icon: FileText    },
+          { id: 'bonuses',  label: 'Bonuses & Incentives', icon: Gift        },
+          { id: 'benefits', label: 'Benefits',             icon: ShieldCheck },
+          { id: 'tax',      label: 'Tax',                  icon: Building2    },
+          { id: 'history',  label: 'History',              icon: HistoryIcon },
+        ]}
+        value={tab}
+        onChange={setTab}
+        className="-mx-1"
+      />
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* TAB: OVERVIEW                                                       */}

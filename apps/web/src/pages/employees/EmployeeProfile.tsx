@@ -37,6 +37,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
+import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -1910,31 +1911,20 @@ export function EmployeeProfile() {
         </nav>
 
         {/* Single flat tab bar (replaces the former 2-level section + sub-tab nav) */}
-        <div className="flex items-center gap-0 border-b border-border overflow-x-auto flex-wrap">
-          {ALL_TABS.map(tab => {
-            const Icon = tab.icon
-            return (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  // Set the owning section too so the section-keyed `visited` set
-                  // still gates that section's lazy queries.
-                  setSection(tab.section)
-                  setVisited(v => new Set(v).add(tab.section))
-                  setSubTab(tab.key)
-                }}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
-                  subTab === tab.key
-                    ? 'text-primary border-primary'
-                    : 'text-muted-foreground border-transparent hover:text-foreground',
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />{tab.label}
-              </button>
-            )
-          })}
-        </div>
+        <SubTabs
+          tabs={ALL_TABS.map(t => ({ id: t.key, label: t.label, icon: t.icon }))}
+          value={subTab}
+          onChange={(key) => {
+            const t = ALL_TABS.find(x => x.key === key)
+            if (!t) return
+            // Set the owning section too so the section-keyed `visited` set
+            // still gates that section's lazy queries.
+            setSection(t.section)
+            setVisited(v => new Set(v).add(t.section))
+            setSubTab(t.key)
+          }}
+          className="flex-wrap"
+        />
 
         {/* ── Tab content ── */}
         <div className="space-y-4">

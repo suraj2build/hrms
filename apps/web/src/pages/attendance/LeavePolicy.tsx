@@ -29,6 +29,7 @@ import { Badge }                from '@/components/ui/badge'
 import { api }                  from '@/lib/api/client'
 import { useAuthStore }         from '@/stores/authStore'
 import { cn }                   from '@/lib/utils'
+import { SubTabs }              from '@/components/ui/SubTabs'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -170,11 +171,11 @@ const CALC_MODE_OPTIONS = [
   { value: 'attendance_aware', label: 'Attendance-Aware',  description: 'Detects existing attendance to avoid overlap' },
 ] as const
 
-const POLICY_TABS: { id: PolicyTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'accrual',   label: 'Accrual & Eligibility', icon: <Calendar className="h-3.5 w-3.5" /> },
-  { id: 'sessions',  label: 'Session Governance',    icon: <Clock className="h-3.5 w-3.5" /> },
-  { id: 'windows',   label: 'Application Windows',  icon: <Layers className="h-3.5 w-3.5" /> },
-  { id: 'lifecycle', label: 'Lifecycle & Payroll',   icon: <Shield className="h-3.5 w-3.5" /> },
+const POLICY_TABS: { id: PolicyTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'accrual',   label: 'Accrual & Eligibility', icon: Calendar },
+  { id: 'sessions',  label: 'Session Governance',    icon: Clock },
+  { id: 'windows',   label: 'Application Windows',    icon: Layers },
+  { id: 'lifecycle', label: 'Lifecycle & Payroll',   icon: Shield },
 ]
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -1254,25 +1255,12 @@ export function LeavePolicy() {
                     <div className="space-y-0">
 
                       {/* ── Tab bar ──────────────────────────────────────────── */}
-                      <div className="flex gap-1 border-b border-border -mx-1 mb-5 overflow-x-auto">
-                        {POLICY_TABS.map(tab => (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => setActiveTab(tab.id)}
-                            className={cn(
-                              'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap',
-                              'border-b-2 -mb-px transition-colors',
-                              activeTab === tab.id
-                                ? 'border-primary text-primary'
-                                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
-                            )}
-                          >
-                            {tab.icon}
-                            {tab.label}
-                          </button>
-                        ))}
-                      </div>
+                      <SubTabs<PolicyTab>
+                        tabs={POLICY_TABS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
+                        value={activeTab}
+                        onChange={setActiveTab}
+                        className="-mx-1 mb-5"
+                      />
 
                       {/* ── Tab content ──────────────────────────────────────── */}
                       {activeTab === 'accrual' && (
