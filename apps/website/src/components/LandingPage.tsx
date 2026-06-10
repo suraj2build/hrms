@@ -25,6 +25,28 @@ interface LandingPageProps {
   onLaunchDemo: (role: 'admin' | 'employee') => void;
 }
 
+/** CognixHR brand mark — open "C" ring cradling an H/person, blue→teal.
+ *  Mirrors apps/web Logo.tsx; swap this one SVG when the final asset lands. */
+function CognixMark({ size = 36, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id="cx-ring" x1="9" y1="40" x2="39" y2="9" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#2E6FE6" /><stop offset="0.62" stopColor="#2C8FCB" /><stop offset="1" stopColor="#15B8A6" />
+        </linearGradient>
+        <linearGradient id="cx-fig" x1="18" y1="36" x2="32" y2="13" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#1E73C4" /><stop offset="1" stopColor="#15B8A6" />
+        </linearGradient>
+      </defs>
+      <path d="M33.4 11.2 A16 16 0 1 0 33.4 36.8" fill="none" stroke="url(#cx-ring)" strokeWidth="5.2" strokeLinecap="round" />
+      <circle cx="20.4" cy="16.2" r="3" fill="url(#cx-fig)" />
+      <rect x="18.1" y="20.4" width="4.6" height="13.8" rx="2.3" fill="url(#cx-fig)" />
+      <rect x="26.9" y="15.8" width="4.6" height="18.4" rx="2.3" fill="url(#cx-fig)" />
+      <rect x="18.1" y="24.4" width="13.4" height="4.2" rx="2.1" fill="url(#cx-fig)" />
+    </svg>
+  );
+}
+
 export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
   const [employeeCount, setEmployeeCount] = useState<number>(100);
   const [selectedPlan, setSelectedPlan] = useState<'foundation' | 'strength' | 'growth'>('strength');
@@ -131,9 +153,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-10">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 via-blue-700 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/10">
-                <Zap className="w-5 h-5 fill-white text-white" />
-              </div>
+              <CognixMark size={38} />
               <div>
                 <span className="font-sans font-extrabold text-xl tracking-tight text-slate-900 block leading-tight">Cognix<span className="text-teal-500">HR</span></span>
               </div>
@@ -856,7 +876,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-teal-400 flex items-center justify-center text-white font-bold text-base">C</div>
+              <CognixMark size={32} />
               <span className="font-bold text-white tracking-tight text-base">Cognix<span className="text-teal-400">HR</span></span>
             </div>
             <p className="text-xs leading-normal">
