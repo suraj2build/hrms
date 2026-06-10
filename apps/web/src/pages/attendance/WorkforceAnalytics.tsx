@@ -130,9 +130,9 @@ function StatCard({ label, value, sub, trend, cls }: {
   trend?: 'up' | 'down'; cls?: string
 }) {
   return (
-    <SectionCard>
+    <div className="surface-premium lift-hover p-4">
       <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className={cn('text-2xl font-bold mt-0.5', cls)}>{value}</p>
+      <p className={cn('text-2xl font-bold mt-0.5 tabular-nums', cls)}>{value}</p>
       {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
       {trend && (
         <div className={cn('flex items-center gap-1 text-[10px] mt-1', trend === 'up' ? 'text-success' : 'text-destructive')}>
@@ -140,7 +140,7 @@ function StatCard({ label, value, sub, trend, cls }: {
           {trend === 'up' ? 'Improving' : 'Needs attention'}
         </div>
       )}
-    </SectionCard>
+    </div>
   )
 }
 
@@ -442,7 +442,7 @@ function WorkforceAnalyticsInner() {
                   !m && 'cursor-default',
                 )}
               >
-                <SectionCard className={cn(m && 'group-hover:border-primary/40 group-hover:bg-muted/30')}>
+                <div className={cn('surface-premium p-4 transition-all', m && 'group-hover:-translate-y-0.5 group-hover:ring-1 group-hover:ring-primary/30')}>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <Icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -452,14 +452,14 @@ function WorkforceAnalyticsInner() {
                       <Search className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                     )}
                   </div>
-                  <p className={cn('text-2xl font-bold', cls)}>{value}</p>
+                  <p className={cn('text-2xl font-bold tabular-nums', cls)}>{value}</p>
                   {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
                   {m && (
                     <p className="text-[10px] text-primary mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       Click to investigate →
                     </p>
                   )}
-                </SectionCard>
+                </div>
               </button>
             ))}
           </div>

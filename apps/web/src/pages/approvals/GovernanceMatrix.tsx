@@ -25,6 +25,7 @@ import {
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
+import { SubTabs }        from '@/components/ui/SubTabs'
 import { toast }          from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -1181,27 +1182,7 @@ export function GovernanceMatrix() {
       />
 
       {/* ── Tab bar ── */}
-      <div className="flex items-center gap-1 border-b border-border pb-0 overflow-x-auto">
-        {TABS.map(tab => {
-          const Icon = tab.icon
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap border-b-2 -mb-px',
-                activeTab === tab.id
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          )
-        })}
-      </div>
+      <SubTabs tabs={TABS} value={activeTab} onChange={setActiveTab} className="mb-3" />
 
       {/* ── Tab content ── */}
       <div className="pt-1">

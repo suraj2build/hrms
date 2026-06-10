@@ -112,9 +112,9 @@ const SECTIONS: ReportSection[] = [
 
 function StatTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2.5 min-w-0">
+    <div className="surface-premium lift-hover min-w-0 px-3.5 py-2.5">
       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</p>
-      <p className="text-lg font-bold text-foreground leading-tight mt-0.5">{value}</p>
+      <p className="text-lg font-bold text-foreground leading-tight mt-0.5 tabular-nums">{value}</p>
       {sub && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{sub}</p>}
     </div>
   )
