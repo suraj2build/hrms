@@ -20,7 +20,7 @@ import {
 import {
   BarChart3, LineChart as LineIcon, PieChart as PieIcon,
   Table2, LayoutGrid, Download, Bookmark, X,
-  Loader2, AlertTriangle, Sparkles,
+  Loader2, AlertTriangle, Sparkles, ChevronRight,
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -30,8 +30,8 @@ import { cn }             from '@/lib/utils'
 
 import {
   type AnalyticsQuery, type ChartData, type ChartTypeId,
-  type SavedView,
-  DATASET_CATALOG, TIME_RANGES, DEFAULT_QUERY,
+  type SavedView, type DrillStep,
+  DATASET_CATALOG, TIME_RANGES, DEFAULT_QUERY, DRILL_NEXT,
 } from '@/lib/analytics/types'
 import { resolveQuery, exportToCSV, fmtMonthLabel } from '@/lib/analytics/resolver'
 
@@ -115,6 +115,8 @@ function EmptyState({ label }: { label: string }) {
   )
 }
 
+type DrillHandler = (label: string, id: string) => void
+
 function TrendChart({ data }: { data: ChartData }) {
   const rows   = toRechartsRows(data)
   const axis   = getAxisStyle()
@@ -151,12 +153,19 @@ function TrendChart({ data }: { data: ChartData }) {
   )
 }
 
-function BarChartView({ data }: { data: ChartData }) {
+function BarChartView({ data, onDrill }: { data: ChartData; onDrill?: DrillHandler }) {
   const rows = toRechartsRows(data)
   const axis = getAxisStyle()
   const tip  = getTooltipStyle()
 
   const isGrouped = data.series.length > 1
+
+  function handleBarClick(barData: any, index: number) {
+    if (!onDrill) return
+    const label = String(barData?.label ?? '')
+    const id    = data.labelIds?.[index] ?? label
+    onDrill(label, id)
+  }
 
   return (
     <ResponsiveContainer width="100%" height={340}>
@@ -187,6 +196,8 @@ function BarChartView({ data }: { data: ChartData }) {
             fill={s.color}
             radius={idx === data.series.length - 1 ? [3, 3, 0, 0] : undefined}
             maxBarSize={40}
+            onClick={handleBarClick}
+            style={onDrill ? { cursor: 'pointer' } : undefined}
           />
         ))}
       </BarChart>
@@ -194,13 +205,15 @@ function BarChartView({ data }: { data: ChartData }) {
   )
 }
 
-function DonutChart({ data }: { data: ChartData }) {
+function DonutChart({ data, onDrill }: { data: ChartData; onDrill?: DrillHandler }) {
   const s = data.series[0]
   if (!s) return null
 
   const segments = data.labels.map((label, i) => ({
     name:  label,
+    id:    data.labelIds?.[i] ?? label,
     value: s.values[i] ?? 0,
+    origIdx: i,
   })).filter(seg => seg.value > 0)
 
   const COLORS = [
@@ -223,6 +236,8 @@ function DonutChart({ data }: { data: ChartData }) {
             outerRadius={110}
             paddingAngle={2}
             dataKey="value"
+            onClick={(seg: any) => onDrill && onDrill(seg.name, seg.id)}
+            style={onDrill ? { cursor: 'pointer' } : undefined}
           >
             {segments.map((_, i) => (
               <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -303,7 +318,7 @@ function HeatmapChart({ data }: { data: ChartData }) {
   )
 }
 
-function DataTableView({ data }: { data: ChartData }) {
+function DataTableView({ data, onDrill }: { data: ChartData; onDrill?: DrillHandler }) {
   const isMultiSeries = data.series.length > 1
 
   return (
@@ -322,7 +337,11 @@ function DataTableView({ data }: { data: ChartData }) {
         </thead>
         <tbody>
           {data.labels.map((label, i) => (
-            <tr key={label} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+            <tr
+              key={label}
+              className={cn('border-b border-border/50 hover:bg-muted/30 transition-colors', onDrill && 'cursor-pointer')}
+              onClick={onDrill ? () => onDrill(label, data.labelIds?.[i] ?? label) : undefined}
+            >
               <td className="p-2 text-foreground font-medium">{label}</td>
               {isMultiSeries
                 ? data.series.map(s => (
@@ -355,16 +374,64 @@ function DataTableView({ data }: { data: ChartData }) {
   )
 }
 
-function ChartDisplay({ data, chartType }: { data: ChartData; chartType: ChartTypeId }) {
+function ChartDisplay({ data, chartType, onDrill }: { data: ChartData; chartType: ChartTypeId; onDrill?: DrillHandler }) {
   if (data.isEmpty) return <EmptyState label={data.measureLabel} />
 
   switch (chartType) {
     case 'trend':   return <TrendChart   data={data} />
-    case 'bar':     return <BarChartView data={data} />
-    case 'donut':   return <DonutChart   data={data} />
-    case 'heatmap': return data.series.length > 1 ? <HeatmapChart data={data} /> : <BarChartView data={data} />
-    case 'table':   return <DataTableView data={data} />
+    case 'bar':     return <BarChartView data={data} onDrill={onDrill} />
+    case 'donut':   return <DonutChart   data={data} onDrill={onDrill} />
+    case 'heatmap': return data.series.length > 1 ? <HeatmapChart data={data} /> : <BarChartView data={data} onDrill={onDrill} />
+    case 'table':   return <DataTableView data={data} onDrill={onDrill} />
   }
+}
+
+// ── Drill breadcrumb ──────────────────────────────────────────────────────────
+
+function DrillBreadcrumb({
+  drillStack, onBack, onClear,
+}: {
+  drillStack: DrillStep[]
+  onBack:  () => void
+  onClear: () => void
+}) {
+  if (drillStack.length === 0) return null
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs mb-3">
+      <button
+        onClick={onClear}
+        className="text-muted-foreground hover:text-foreground transition-colors font-medium"
+      >
+        All
+      </button>
+      {drillStack.map((step, i) => (
+        <span key={i} className="flex items-center gap-1.5">
+          <ChevronRight className="h-3 w-3 text-muted-foreground" />
+          <button
+            onClick={() => i < drillStack.length - 1 && onBack()}
+            className={cn(
+              'transition-colors',
+              i === drillStack.length - 1
+                ? 'font-semibold text-primary'
+                : 'text-muted-foreground hover:text-foreground cursor-pointer',
+            )}
+          >
+            {step.dimensionLabel}
+          </button>
+        </span>
+      ))}
+      <span className="ml-auto flex items-center gap-1">
+        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{drillStack[drillStack.length - 1]?.dimensionId}</span>
+        <button
+          onClick={onClear}
+          className="ml-1 text-muted-foreground hover:text-destructive transition-colors"
+          title="Clear drill filter"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </span>
+    </div>
+  )
 }
 
 // ── Inline select helper ──────────────────────────────────────────────────────
@@ -401,6 +468,7 @@ export function AnalyticsStudio() {
   const [saveOpen, setSaveOpen]   = useState(false)
   const [saveName, setSaveName]   = useState('')
   const [showTable, setShowTable] = useState(false)
+  const [drillStack, setDrillStack] = useState<DrillStep[]>([])
   const { views, save, remove }   = useSavedViews()
 
   // ── Derived catalog state ─────────────────────────────────────────────────
@@ -412,20 +480,52 @@ export function AnalyticsStudio() {
     const newDs  = DATASET_CATALOG.find(d => d.id === id)!
     const newDim = newDs.dimensions[0]
     const newMsr = newDim.measures[0]
+    setDrillStack([])
     setQuery({ ...query, dataset: id, dimension: newDim.id, measure: newMsr.id })
   }
 
   function setDimension(id: typeof query.dimension) {
     const newDim = ds.dimensions.find(d => d.id === id)!
     const newMsr = newDim.measures[0]
+    setDrillStack([])
     setQuery({ ...query, dimension: id, measure: newMsr.id })
   }
+
+  // ── Drill-down handlers ───────────────────────────────────────────────────
+
+  function handleDrill(label: string, id: string) {
+    if (!id || query.dimension === 'time') return
+    const nextDimId = DRILL_NEXT[query.dimension]
+    const ds2 = DATASET_CATALOG.find(d => d.id === query.dataset)!
+    const nextDim = nextDimId ? ds2.dimensions.find(d => d.id === nextDimId) : null
+    const newStep: DrillStep = { dimensionId: query.dimension, dimensionValue: id, dimensionLabel: label }
+    setDrillStack(prev => [...prev, newStep])
+    if (nextDim) {
+      setQuery(prev => ({ ...prev, dimension: nextDim.id, measure: nextDim.measures[0].id }))
+    }
+  }
+
+  function handleDrillBack() {
+    setDrillStack(prev => {
+      const next = prev.slice(0, -1)
+      const removed = prev[prev.length - 1]
+      if (removed) {
+        const ds2 = DATASET_CATALOG.find(d => d.id === query.dataset)!
+        const prevDim = ds2.dimensions.find(d => d.id === removed.dimensionId)
+        if (prevDim) setQuery(q => ({ ...q, dimension: prevDim.id, measure: prevDim.measures[0].id }))
+      }
+      return next
+    })
+  }
+
+  // Only enable drill for categorical (non-time) dimensions
+  const drillEnabled = query.dimension !== 'time'
 
   // ── Data fetch ────────────────────────────────────────────────────────────
 
   const { data: chartData, isLoading, error } = useQuery<ChartData>({
-    queryKey: ['analytics', query.dataset, query.dimension, query.measure, query.timeRange],
-    queryFn:  () => resolveQuery(query),
+    queryKey: ['analytics', query.dataset, query.dimension, query.measure, query.timeRange, drillStack],
+    queryFn:  () => resolveQuery(query, drillStack),
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
@@ -572,6 +672,18 @@ export function AnalyticsStudio() {
         </button>
       </div>
 
+      {/* ── Drill breadcrumb ─────────────────────────────────────────────── */}
+      <DrillBreadcrumb
+        drillStack={drillStack}
+        onBack={handleDrillBack}
+        onClear={() => {
+          setDrillStack([])
+          const ds2 = DATASET_CATALOG.find(d => d.id === query.dataset)!
+          const firstDim = ds2.dimensions[0]
+          setQuery(q => ({ ...q, dimension: firstDim.id, measure: firstDim.measures[0].id }))
+        }}
+      />
+
       {/* ── Chart area ──────────────────────────────────────────────────── */}
       <div className="rounded-lg border border-border bg-card p-4 mb-3">
         {/* Chart header */}
@@ -580,12 +692,19 @@ export function AnalyticsStudio() {
             <p className="text-sm font-semibold text-foreground">{chartData?.measureLabel ?? '—'}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{chartTitle(query)}</p>
           </div>
-          {chartData && !chartData.isEmpty && (
-            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-shrink-0">
-              <span>{chartData.labels.length} {query.dimension === 'time' ? 'periods' : 'groups'}</span>
-              {chartData.series.length > 1 && <span>{chartData.series.length} series</span>}
-            </div>
-          )}
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-shrink-0">
+            {chartData && !chartData.isEmpty && (
+              <>
+                <span>{chartData.labels.length} {query.dimension === 'time' ? 'periods' : 'groups'}</span>
+                {chartData.series.length > 1 && <span>{chartData.series.length} series</span>}
+              </>
+            )}
+            {drillEnabled && !isLoading && chartData && !chartData.isEmpty && drillStack.length === 0 && (
+              <span className="text-[10px] text-primary/70 border border-primary/20 rounded px-1.5 py-0.5">
+                Click to drill ↓
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Chart content */}
@@ -601,7 +720,11 @@ export function AnalyticsStudio() {
             <p className="text-xs">Check that payroll data exists for the selected period</p>
           </div>
         ) : chartData ? (
-          <ChartDisplay data={chartData} chartType={query.chartType} />
+          <ChartDisplay
+            data={chartData}
+            chartType={query.chartType}
+            onDrill={drillEnabled ? handleDrill : undefined}
+          />
         ) : null}
       </div>
 
@@ -617,7 +740,7 @@ export function AnalyticsStudio() {
           </button>
           {showTable && (
             <div className="border-t border-border">
-              <DataTableView data={chartData} />
+              <DataTableView data={chartData} onDrill={drillEnabled ? handleDrill : undefined} />
             </div>
           )}
         </div>

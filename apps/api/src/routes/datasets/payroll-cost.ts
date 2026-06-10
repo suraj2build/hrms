@@ -58,6 +58,16 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     const includeTrends = q.include_trends === 'true'
     const priorMonth    = priorMonthStr(month)
 
+    type GroupByDim = 'department' | 'location' | 'grade' | 'designation'
+    const VALID_DIM = new Set(['department', 'location', 'grade', 'designation'])
+    const groupByDim: GroupByDim = VALID_DIM.has(q.group_by ?? '') ? (q.group_by as GroupByDim) : 'department'
+
+    // Drill-down filters (from R3.3)
+    const filterDeptId  = q.filter_department_id  ?? null
+    const filterLocId   = q.filter_location_id    ?? null
+    const filterGradeId = q.filter_grade_id       ?? null
+    const filterDesgId  = q.filter_designation_id ?? null
+
     // ── Parallel queries ────────────────────────────────────────────────────────
 
     // Current month: payroll run + slips
@@ -67,10 +77,11 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         employee_id, gross_pay, net_pay, total_deductions, lop_amount,
         component_breakdown,
         employees!inner(
-          id,
+          id, grade_id, designation_id,
           job_history!job_history_employee_id_fkey(
-            department_id, is_current,
-            departments(id, name)
+            department_id, work_location_id, is_current,
+            departments(id, name),
+            work_locations(id, name)
           )
         )
       `)
@@ -105,6 +116,10 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     if (deptFilter) {
       slipsQuery = slipsQuery.eq('employees.job_history.department_id', deptFilter)
     }
+    if (filterDeptId)  slipsQuery = slipsQuery.eq('employees.job_history.department_id', filterDeptId)
+    if (filterLocId)   slipsQuery = slipsQuery.eq('employees.job_history.work_location_id', filterLocId)
+    if (filterGradeId) slipsQuery = slipsQuery.eq('employees.grade_id', filterGradeId)
+    if (filterDesgId)  slipsQuery = slipsQuery.eq('employees.designation_id', filterDesgId)
     const { data: slipsData, error: slipsErr } = await slipsQuery
 
     if (slipsErr) return reply.code(500).send({ error: 'DB_ERROR', message: slipsErr.message })
@@ -188,6 +203,62 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
       }))
       .sort((a, b) => b.gross - a.gross)
 
+    // ── By group (location / grade / designation) — only when requested ──────────
+    type GroupAgg = { key: string; label: string; headcount: number; gross: number; net: number }
+    let byGroup: Array<{ key: string; label: string; headcount: number; gross: number; net: number; cost_share_pct: number }> | null = null
+
+    if (groupByDim !== 'department') {
+      // Lookup tables for grade / designation labels
+      const [{ data: gradesData }, { data: desgData }] = await Promise.all([
+        groupByDim === 'grade'
+          ? fastify.supabase.from('grades').select('id, name').eq('tenant_id', tid)
+          : Promise.resolve({ data: [] }),
+        groupByDim === 'designation'
+          ? fastify.supabase.from('designations').select('id, name').eq('tenant_id', tid)
+          : Promise.resolve({ data: [] }),
+      ])
+      const gradeMap = new Map<string, string>()
+      const desgMap  = new Map<string, string>()
+      for (const g of (gradesData ?? []) as any[]) gradeMap.set(g.id, g.name)
+      for (const d of (desgData  ?? []) as any[]) desgMap.set(d.id, d.name)
+
+      const gMap = new Map<string, GroupAgg>()
+      for (const slip of slips) {
+        const emp  = slip.employees as any
+        const jhArr = emp?.job_history ?? []
+        const jh    = Array.isArray(jhArr) ? jhArr.find((j: any) => j.is_current) ?? jhArr[0] : jhArr
+
+        let key: string; let label: string
+        if (groupByDim === 'location') {
+          key   = jh?.work_location_id ?? '__none__'
+          label = (jh?.work_locations as any)?.name ?? 'Unassigned'
+        } else if (groupByDim === 'grade') {
+          key   = emp?.grade_id ?? '__none__'
+          label = gradeMap.get(emp?.grade_id) ?? 'Unassigned'
+        } else {
+          key   = emp?.designation_id ?? '__none__'
+          label = desgMap.get(emp?.designation_id) ?? 'Unassigned'
+        }
+
+        if (!gMap.has(key)) gMap.set(key, { key, label, headcount: 0, gross: 0, net: 0 })
+        const entry = gMap.get(key)!
+        entry.headcount++
+        entry.gross += Number(slip.gross_pay ?? 0)
+        entry.net   += Number(slip.net_pay   ?? 0)
+      }
+
+      byGroup = Array.from(gMap.values())
+        .map(g => ({
+          key:            g.key,
+          label:          g.label,
+          headcount:      g.headcount,
+          gross:          r2(g.gross),
+          net:            r2(g.net),
+          cost_share_pct: totalGross > 0 ? r2((g.gross / totalGross) * 100) : 0,
+        }))
+        .sort((a, b) => b.gross - a.gross)
+    }
+
     // ── MOM Variance ─────────────────────────────────────────────────────────────
     let momVariance: {
       prior_month: string
@@ -251,6 +322,7 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         run_status:             run?.status ?? null,
       },
       by_department: byDepartment,
+      by_group:      byGroup,
       mom_variance:  momVariance,
       trends,
     })

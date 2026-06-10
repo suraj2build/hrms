@@ -9,7 +9,8 @@ import { api } from '@/lib/api/client'
 import {
   type AnalyticsQuery, type ChartData, type ChartSeries,
   type TimeRangeId, type MeasureId, type DatasetId, type DimensionId,
-  DATASET_CATALOG,
+  type DrillStep,
+  DATASET_CATALOG, DRILL_FILTER_PARAM,
 } from './types'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -50,9 +51,13 @@ function measureLabel(measure: MeasureId, dataset: DatasetId, dimension: Dimensi
 
 function measureFormat(measure: MeasureId): 'currency' | 'percent' | 'number' {
   switch (measure) {
-    case 'gross_cost': case 'net_cost': case 'avg_salary': return 'currency'
-    case 'attendance_pct': return 'percent'
-    default: return 'number'
+    case 'gross_cost': case 'net_cost': case 'avg_salary':
+    case 'total_ctc':  case 'avg_ctc':
+      return 'currency'
+    case 'attendance_pct':
+      return 'percent'
+    default:
+      return 'number'
   }
 }
 
@@ -60,19 +65,35 @@ function empty(label: string, fmt: 'currency' | 'percent' | 'number' = 'number')
   return { labels: [], series: [], format: fmt, measureLabel: label, isEmpty: true }
 }
 
+function buildFilterStr(drillFilters: Record<string, string>): string {
+  return Object.entries(drillFilters)
+    .map(([k, v]) => `&${k}=${encodeURIComponent(v)}`)
+    .join('')
+}
+
+function extractFilters(drillStack: DrillStep[]): Record<string, string> {
+  const filters: Record<string, string> = {}
+  for (const step of drillStack) {
+    const param = DRILL_FILTER_PARAM[step.dimensionId]
+    if (param) filters[param] = step.dimensionValue
+  }
+  return filters
+}
+
 // ── Payroll: by department ────────────────────────────────────────────────────
 // For trend/heatmap: fetch all N months in parallel, pivot by department.
 // For bar/donut/table: fetch only the latest month.
 
-async function payrollByDept(q: AnalyticsQuery, months: string[]): Promise<ChartData> {
+async function payrollByDept(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
   const label  = measureLabel(q.measure, q.dataset, q.dimension)
   const format = measureFormat(q.measure)
+  const fs     = buildFilterStr(drillFilters)
 
   const needsAllMonths = q.chartType === 'trend' || q.chartType === 'heatmap'
   const fetchMonths = needsAllMonths ? months : [months[months.length - 1]]
 
   const results = await Promise.all(
-    fetchMonths.map(m => api.get<any>(`/datasets/payroll-cost?month=${m}`).catch(() => null))
+    fetchMonths.map(m => api.get<any>(`/datasets/payroll-cost?month=${m}${fs}`).catch(() => null))
   )
 
   function deptVal(row: any): number {
@@ -87,13 +108,13 @@ async function payrollByDept(q: AnalyticsQuery, months: string[]): Promise<Chart
   }
 
   if (fetchMonths.length === 1) {
-    // Single-period view (bar, donut, table)
     const result = results[0]
     const depts = ([...(result?.by_department ?? [])] as any[])
       .sort((a, b) => (b.gross ?? 0) - (a.gross ?? 0))
       .slice(0, 12)
     return {
       labels:       depts.map(d => d.name),
+      labelIds:     depts.map(d => d.department_id ?? ''),
       series:       [{ name: label, color: seriesColor(0), values: depts.map(deptVal) }],
       format,
       measureLabel: label,
@@ -101,12 +122,11 @@ async function payrollByDept(q: AnalyticsQuery, months: string[]): Promise<Chart
     }
   }
 
-  // Multi-month: pivot department × month
-  const lastResult  = results[results.length - 1]
+  const lastResult = results[results.length - 1]
   const topDepts = ([...(lastResult?.by_department ?? [])] as any[])
     .sort((a, b) => (b.gross ?? 0) - (a.gross ?? 0))
     .slice(0, 8)
-    .map(d => ({ name: d.name }))
+    .map(d => ({ name: d.name, id: d.department_id ?? '' }))
 
   if (topDepts.length === 0) return empty(label, format)
 
@@ -119,23 +139,49 @@ async function payrollByDept(q: AnalyticsQuery, months: string[]): Promise<Chart
     }),
   }))
 
+  return { labels: fetchMonths.map(fmtMonthLabel), series, format, measureLabel: label, isEmpty: false }
+}
+
+// ── Payroll: by location / grade / designation (R3.2) ────────────────────────
+
+async function payrollByGroup(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
+  const label  = measureLabel(q.measure, q.dataset, q.dimension)
+  const format = measureFormat(q.measure)
+  const month  = months[months.length - 1]
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/payroll-cost?month=${month}&group_by=${q.dimension}${fs}`).catch(() => null)
+
+  const groups = ([...(result?.by_group ?? [])] as any[]).slice(0, 12)
+
+  function groupVal(g: any): number {
+    switch (q.measure) {
+      case 'gross_cost': return g.gross     ?? 0
+      case 'net_cost':   return g.net       ?? 0
+      case 'headcount':  return g.headcount ?? 0
+      case 'avg_salary': return g.headcount > 0 ? Math.round((g.gross / g.headcount)) : 0
+      default:           return 0
+    }
+  }
+
   return {
-    labels:       fetchMonths.map(fmtMonthLabel),
-    series,
+    labels:       groups.map(g => g.label),
+    labelIds:     groups.map(g => g.key ?? ''),
+    series:       [{ name: label, color: seriesColor(0), values: groups.map(groupVal) }],
     format,
     measureLabel: label,
-    isEmpty:      false,
+    isEmpty:      groups.length === 0,
   }
 }
 
 // ── Payroll: over time (aggregate totals) ─────────────────────────────────────
 
-async function payrollOverTime(q: AnalyticsQuery, months: string[]): Promise<ChartData> {
+async function payrollOverTime(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
   const label  = measureLabel(q.measure, q.dataset, q.dimension)
   const format = measureFormat(q.measure)
+  const fs     = buildFilterStr(drillFilters)
 
   const results = await Promise.all(
-    months.map(m => api.get<any>(`/datasets/payroll-cost?month=${m}`).catch(() => null))
+    months.map(m => api.get<any>(`/datasets/payroll-cost?month=${m}${fs}`).catch(() => null))
   )
 
   function totalVal(r: any): number {
@@ -157,13 +203,43 @@ async function payrollOverTime(q: AnalyticsQuery, months: string[]): Promise<Cha
   }
 }
 
-// ── Headcount: by department (current snapshot) ───────────────────────────────
+// ── Headcount: by location / grade / gender (R3.2) ───────────────────────────
 
-async function headcountByDept(q: AnalyticsQuery, months: string[]): Promise<ChartData> {
+async function headcountByGroup(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
   const label  = measureLabel(q.measure, q.dataset, q.dimension)
   const from   = months[0]
   const to     = months[months.length - 1]
-  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}`).catch(() => null)
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}&group_by=${q.dimension}${fs}`).catch(() => null)
+
+  const groups = ([...(result?.by_group ?? [])] as any[]).slice(0, 12)
+
+  function groupVal(g: any): number {
+    switch (q.measure) {
+      case 'headcount': return g.count   ?? 0
+      case 'joiners':   return g.joiners ?? 0
+      default:          return 0
+    }
+  }
+
+  return {
+    labels:       groups.map(g => g.label),
+    labelIds:     groups.map(g => g.key ?? ''),
+    series:       [{ name: label, color: seriesColor(1), values: groups.map(groupVal) }],
+    format:       'number',
+    measureLabel: label,
+    isEmpty:      groups.length === 0,
+  }
+}
+
+// ── Headcount: by department (current snapshot) ───────────────────────────────
+
+async function headcountByDept(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
+  const label  = measureLabel(q.measure, q.dataset, q.dimension)
+  const from   = months[0]
+  const to     = months[months.length - 1]
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}${fs}`).catch(() => null)
 
   const depts = ([...(result?.by_department ?? [])] as any[])
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
@@ -180,6 +256,7 @@ async function headcountByDept(q: AnalyticsQuery, months: string[]): Promise<Cha
 
   return {
     labels:       depts.map(d => d.name),
+    labelIds:     depts.map(d => d.id ?? ''),
     series:       [{ name: label, color: seriesColor(1), values: depts.map(deptVal) }],
     format:       'number',
     measureLabel: label,
@@ -189,10 +266,11 @@ async function headcountByDept(q: AnalyticsQuery, months: string[]): Promise<Cha
 
 // ── Headcount: by employment type (current snapshot) ─────────────────────────
 
-async function headcountByEmploymentType(q: AnalyticsQuery, months: string[]): Promise<ChartData> {
+async function headcountByEmploymentType(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
   const from   = months[0]
   const to     = months[months.length - 1]
-  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}`).catch(() => null)
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}${fs}`).catch(() => null)
 
   const types = (result?.by_employment_type ?? []) as any[]
 
@@ -200,6 +278,7 @@ async function headcountByEmploymentType(q: AnalyticsQuery, months: string[]): P
 
   return {
     labels:       types.map(t => capitalize(t.type ?? 'Unknown')),
+    labelIds:     types.map(t => t.type ?? ''),
     series:       [{ name: 'Headcount', color: seriesColor(1), values: types.map(t => t.count ?? 0) }],
     format:       'number',
     measureLabel: 'Headcount',
@@ -209,11 +288,12 @@ async function headcountByEmploymentType(q: AnalyticsQuery, months: string[]): P
 
 // ── Headcount: over time (monthly trend) ──────────────────────────────────────
 
-async function headcountOverTime(q: AnalyticsQuery, months: string[]): Promise<ChartData> {
+async function headcountOverTime(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
   const label  = measureLabel(q.measure, q.dataset, q.dimension)
   const from   = months[0]
   const to     = months[months.length - 1]
-  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}`).catch(() => null)
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/headcount?from=${from}&to=${to}${fs}`).catch(() => null)
 
   const trend    = (result?.monthly_trend ?? []) as any[]
   const trendMap = new Map<string, any>()
@@ -240,7 +320,7 @@ async function headcountOverTime(q: AnalyticsQuery, months: string[]): Promise<C
 
 // ── Attendance: over time ─────────────────────────────────────────────────────
 
-async function attendanceOverTime(q: AnalyticsQuery, months: string[]): Promise<ChartData> {
+async function attendanceOverTime(q: AnalyticsQuery, months: string[], _drillFilters: Record<string, string>): Promise<ChartData> {
   const label  = measureLabel(q.measure, q.dataset, q.dimension)
   const format = measureFormat(q.measure)
 
@@ -266,18 +346,171 @@ async function attendanceOverTime(q: AnalyticsQuery, months: string[]): Promise<
   }
 }
 
+// ── R3.1: Employees dataset (flexible group_by) ───────────────────────────────
+
+async function employeesByGroup(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
+  const label  = measureLabel(q.measure, q.dataset, q.dimension)
+  const from   = months[0]
+  const to     = months[months.length - 1]
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/employees?group_by=${q.dimension}&from=${from}&to=${to}${fs}`).catch(() => null)
+
+  const groups = ([...(result?.by_group ?? [])] as any[]).slice(0, 12)
+
+  function groupVal(g: any): number {
+    switch (q.measure) {
+      case 'headcount':         return g.headcount         ?? 0
+      case 'joiners':           return g.new_joiners       ?? 0
+      case 'avg_tenure_months': return g.avg_tenure_months ?? 0
+      case 'on_probation':      return g.on_probation      ?? 0
+      case 'confirmed':         return g.confirmed         ?? 0
+      default:                  return 0
+    }
+  }
+
+  return {
+    labels:       groups.map(g => g.label),
+    labelIds:     groups.map(g => g.key ?? ''),
+    series:       [{ name: label, color: seriesColor(3), values: groups.map(groupVal) }],
+    format:       'number',
+    measureLabel: label,
+    isEmpty:      groups.length === 0,
+  }
+}
+
+// ── R3.1: Leave dataset (flexible group_by) ───────────────────────────────────
+
+async function leaveByGroup(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
+  const label  = measureLabel(q.measure, q.dataset, q.dimension)
+  const from   = months[0]
+  const to     = months[months.length - 1]
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/leave?group_by=${q.dimension}&from=${from}&to=${to}${fs}`).catch(() => null)
+
+  const groups = ([...(result?.by_group ?? [])] as any[]).slice(0, 12)
+
+  function groupVal(g: any): number {
+    switch (q.measure) {
+      case 'leave_days':            return g.total_days            ?? 0
+      case 'request_count':         return g.request_count         ?? 0
+      case 'avg_days_per_employee': return g.avg_days_per_employee ?? 0
+      default:                      return 0
+    }
+  }
+
+  return {
+    labels:       groups.map(g => g.label),
+    labelIds:     groups.map(g => g.key ?? ''),
+    series:       [{ name: label, color: seriesColor(4), values: groups.map(groupVal) }],
+    format:       'number',
+    measureLabel: label,
+    isEmpty:      groups.length === 0,
+  }
+}
+
+// ── R3.1: Compensation dataset (flexible group_by) ────────────────────────────
+
+async function compensationByGroup(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
+  const label  = measureLabel(q.measure, q.dataset, q.dimension)
+  const format = measureFormat(q.measure)
+  const month  = months[months.length - 1]
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/compensation?group_by=${q.dimension}&month=${month}${fs}`).catch(() => null)
+
+  const groups = ([...(result?.by_group ?? [])] as any[]).slice(0, 12)
+
+  function groupVal(g: any): number {
+    switch (q.measure) {
+      case 'total_ctc': return g.total_ctc ?? 0
+      case 'avg_ctc':   return g.avg_ctc   ?? 0
+      case 'headcount': return g.headcount ?? 0
+      default:          return 0
+    }
+  }
+
+  return {
+    labels:       groups.map(g => g.label),
+    labelIds:     groups.map(g => g.key ?? ''),
+    series:       [{ name: label, color: seriesColor(0), values: groups.map(groupVal) }],
+    format,
+    measureLabel: label,
+    isEmpty:      groups.length === 0,
+  }
+}
+
+// ── R3.1: Separation dataset (flexible group_by) ──────────────────────────────
+
+async function separationByGroup(q: AnalyticsQuery, months: string[], drillFilters: Record<string, string>): Promise<ChartData> {
+  const label  = measureLabel(q.measure, q.dataset, q.dimension)
+  const from   = months[0]
+  const to     = months[months.length - 1]
+  const fs     = buildFilterStr(drillFilters)
+  const result = await api.get<any>(`/datasets/separation?group_by=${q.dimension}&from=${from}&to=${to}${fs}`).catch(() => null)
+
+  const groups = ([...(result?.by_group ?? [])] as any[]).slice(0, 12)
+
+  function groupVal(g: any): number {
+    switch (q.measure) {
+      case 'exits':               return g.exits                      ?? 0
+      case 'avg_notice_days':     return g.avg_notice_days            ?? 0
+      case 'avg_tenure_at_exit':  return g.avg_tenure_at_exit_months  ?? 0
+      default:                    return 0
+    }
+  }
+
+  return {
+    labels:       groups.map(g => g.label),
+    labelIds:     groups.map(g => g.key ?? ''),
+    series:       [{ name: label, color: seriesColor(1), values: groups.map(groupVal) }],
+    format:       'number',
+    measureLabel: label,
+    isEmpty:      groups.length === 0,
+  }
+}
+
 // ── Main entry ────────────────────────────────────────────────────────────────
 
-export async function resolveQuery(q: AnalyticsQuery): Promise<ChartData> {
-  const months = getMonths(q.timeRange)
+export async function resolveQuery(q: AnalyticsQuery, drillStack: DrillStep[] = []): Promise<ChartData> {
+  const months       = getMonths(q.timeRange)
+  const drillFilters = extractFilters(drillStack)
 
   switch (`${q.dataset}:${q.dimension}`) {
-    case 'payroll:department':      return payrollByDept(q, months)
-    case 'payroll:time':            return payrollOverTime(q, months)
-    case 'headcount:department':    return headcountByDept(q, months)
-    case 'headcount:employment_type': return headcountByEmploymentType(q, months)
-    case 'headcount:time':          return headcountOverTime(q, months)
-    case 'attendance:time':         return attendanceOverTime(q, months)
+    // Payroll
+    case 'payroll:department':    return payrollByDept(q, months, drillFilters)
+    case 'payroll:location':
+    case 'payroll:grade':
+    case 'payroll:designation':   return payrollByGroup(q, months, drillFilters)
+    case 'payroll:time':          return payrollOverTime(q, months, drillFilters)
+    // Headcount
+    case 'headcount:department':  return headcountByDept(q, months, drillFilters)
+    case 'headcount:location':
+    case 'headcount:grade':
+    case 'headcount:gender':      return headcountByGroup(q, months, drillFilters)
+    case 'headcount:employment_type': return headcountByEmploymentType(q, months, drillFilters)
+    case 'headcount:time':        return headcountOverTime(q, months, drillFilters)
+    // Attendance
+    case 'attendance:time':       return attendanceOverTime(q, months, drillFilters)
+    // R3.1 — Employees
+    case 'employees:department':
+    case 'employees:location':
+    case 'employees:designation':
+    case 'employees:grade':
+    case 'employees:gender':
+    case 'employees:employment_type': return employeesByGroup(q, months, drillFilters)
+    // R3.1 — Leave
+    case 'leave:leave_type':
+    case 'leave:department':
+    case 'leave:employment_type':    return leaveByGroup(q, months, drillFilters)
+    // R3.1 — Compensation
+    case 'compensation:department':
+    case 'compensation:grade':
+    case 'compensation:designation':
+    case 'compensation:location':    return compensationByGroup(q, months, drillFilters)
+    // R3.1 — Separation
+    case 'separation:exit_type':
+    case 'separation:department':
+    case 'separation:location':      return separationByGroup(q, months, drillFilters)
+
     default:
       return empty(q.measure, measureFormat(q.measure))
   }
