@@ -843,7 +843,26 @@ export function ImportWorkspace() {
    * This ensures re-uploads of downloaded templates work without manual editing.
    */
   function normaliseKey(k: string): string {
-    return k.replace(/\s*\*\s*$/, '').trim()
+    // Strip the trailing " *" required-marker, trim, and lower-case so header
+    // casing from third-party editors (e.g. "Employee_Code") still matches the
+    // lower-case snake_case keys every master template uses.
+    return k.replace(/\s*\*\s*$/, '').trim().toLowerCase()
+  }
+
+  /**
+   * Convert a parsed cell to a string. Excel stores dates as serial numbers;
+   * with cellDates:true SheetJS hands us JS Date objects, which we normalise to
+   * the YYYY-MM-DD the validator requires — otherwise an edited xlsx re-upload
+   * fails with "Invalid date format".
+   */
+  function cellToString(cell: unknown): string {
+    if (cell instanceof Date && !isNaN(cell.getTime())) {
+      const y = cell.getFullYear()
+      const m = String(cell.getMonth() + 1).padStart(2, '0')
+      const d = String(cell.getDate()).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+    return String(cell ?? '')
   }
 
   function parseFile(file: File) {
@@ -872,7 +891,7 @@ export function ImportWorkspace() {
       reader.onload = (e) => {
         const data = e.target?.result
         if (!data || !(data instanceof ArrayBuffer)) return
-        const wb = XLSX.read(new Uint8Array(data), { type: 'array' })
+        const wb = XLSX.read(new Uint8Array(data), { type: 'array', cellDates: true })
         const sheetName = wb.SheetNames[0]
         const ws = wb.Sheets[sheetName]
 
@@ -893,7 +912,7 @@ export function ImportWorkspace() {
 
         const rows: Record<string, string>[] = dataRows.map((row) => {
           const obj: Record<string, string> = {}
-          headers.forEach((h, i) => { obj[h] = String(row[i] ?? '') })
+          headers.forEach((h, i) => { obj[h] = cellToString(row[i]) })
           return obj
         })
         setParsedRows(rows)
