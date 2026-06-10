@@ -155,11 +155,13 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         employee_id, gross_pay, net_pay, total_deductions, lop_amount,
         component_breakdown,
         employees!inner(
-          id, grade_id, designation_id,
+          id,
           job_history!job_history_employee_id_fkey(
-            department_id, work_location_id, is_current,
+            department_id, work_location_id, grade_id, designation_id, is_current,
             departments(id, name),
-            work_locations(id, name)
+            work_locations(id, name),
+            grades(id, name),
+            designations(id, name)
           )
         )
       `)
@@ -176,8 +178,8 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     }
     if (filterDeptId)  slipsQuery = slipsQuery.eq('employees.job_history.department_id', filterDeptId)
     if (filterLocId)   slipsQuery = slipsQuery.eq('employees.job_history.work_location_id', filterLocId)
-    if (filterGradeId) slipsQuery = slipsQuery.eq('employees.grade_id', filterGradeId)
-    if (filterDesgId)  slipsQuery = slipsQuery.eq('employees.designation_id', filterDesgId)
+    if (filterGradeId) slipsQuery = slipsQuery.eq('employees.job_history.grade_id', filterGradeId)
+    if (filterDesgId)  slipsQuery = slipsQuery.eq('employees.job_history.designation_id', filterDesgId)
     const { data: slipsData, error: slipsErr } = await slipsQuery
 
     if (slipsErr) return reply.code(500).send({ error: 'DB_ERROR', message: slipsErr.message })
@@ -266,20 +268,6 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     let byGroup: Array<{ key: string; label: string; headcount: number; gross: number; net: number; cost_share_pct: number }> | null = null
 
     if (groupByDim !== 'department') {
-      // Lookup tables for grade / designation labels
-      const [{ data: gradesData }, { data: desgData }] = await Promise.all([
-        groupByDim === 'grade'
-          ? fastify.supabase.from('grades').select('id, name').eq('tenant_id', tid)
-          : Promise.resolve({ data: [] }),
-        groupByDim === 'designation'
-          ? fastify.supabase.from('designations').select('id, name').eq('tenant_id', tid)
-          : Promise.resolve({ data: [] }),
-      ])
-      const gradeMap = new Map<string, string>()
-      const desgMap  = new Map<string, string>()
-      for (const g of (gradesData ?? []) as any[]) gradeMap.set(g.id, g.name)
-      for (const d of (desgData  ?? []) as any[]) desgMap.set(d.id, d.name)
-
       const gMap = new Map<string, GroupAgg>()
       for (const slip of slips) {
         const emp  = slip.employees as any
@@ -291,11 +279,11 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
           key   = jh?.work_location_id ?? '__none__'
           label = (jh?.work_locations as any)?.name ?? 'Unassigned'
         } else if (groupByDim === 'grade') {
-          key   = emp?.grade_id ?? '__none__'
-          label = gradeMap.get(emp?.grade_id) ?? 'Unassigned'
+          key   = jh?.grade_id ?? '__none__'
+          label = (jh?.grades as any)?.name ?? 'Unassigned'
         } else {
-          key   = emp?.designation_id ?? '__none__'
-          label = desgMap.get(emp?.designation_id) ?? 'Unassigned'
+          key   = jh?.designation_id ?? '__none__'
+          label = (jh?.designations as any)?.name ?? 'Unassigned'
         }
 
         if (!gMap.has(key)) gMap.set(key, { key, label, headcount: 0, gross: 0, net: 0 })

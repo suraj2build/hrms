@@ -68,15 +68,18 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     // ── Parallel queries ────────────────────────────────────────────────────────
 
     // 1) All employees with current job history (for active snapshot + dept + type)
+    // gender lives on employee_personal_info, grade on job_history (lean employees, migration 016)
     let empQuery = fastify.supabase
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name,
-        joining_date, status, updated_at, gender, grade_id,
+        joining_date, status, updated_at,
+        employee_personal_info ( gender ),
         job_history!job_history_employee_id_fkey (
-          department_id, work_location_id, employment_type, is_current,
+          department_id, work_location_id, grade_id, employment_type, is_current,
           departments ( id, name ),
-          work_locations ( id, name )
+          work_locations ( id, name ),
+          grades ( id, name )
         )
       `)
       .eq('tenant_id', tid)
@@ -85,8 +88,8 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     if (deptFilter)      empQuery = empQuery.eq('job_history.department_id', deptFilter)
     if (filterDeptId)  empQuery = empQuery.eq('job_history.department_id', filterDeptId)
     if (filterLocId)   empQuery = empQuery.eq('job_history.work_location_id', filterLocId)
-    if (filterGradeId) empQuery = empQuery.eq('grade_id', filterGradeId)
-    if (filterGender)  empQuery = empQuery.eq('gender', filterGender)
+    if (filterGradeId) empQuery = empQuery.eq('job_history.grade_id', filterGradeId)
+    if (filterGender)  empQuery = empQuery.eq('employee_personal_info.gender', filterGender)
 
     // 2) Separations in range (for exits + monthly trend)
     let sepQuery = fastify.supabase
@@ -191,13 +194,13 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     let byGroup: HcGroupEntry[] | null = null
 
     if (groupByDim !== 'department') {
-      const gradeMap = new Map<string, string>()
-      if (groupByDim === 'grade') {
-        const { data: gradesData } = await fastify.supabase.from('grades').select('id, name').eq('tenant_id', tid)
-        for (const g of (gradesData ?? []) as any[]) gradeMap.set(g.id, g.name)
-      }
-
       const gMap = new Map<string, HcGroupEntry>()
+
+      const genderOf = (emp: any): string | null => {
+        const pi = emp.employee_personal_info
+        const rec = Array.isArray(pi) ? pi[0] : pi
+        return rec?.gender ?? null
+      }
 
       for (const emp of allEmployees) {
         if (emp.status === 'separated') continue
@@ -208,11 +211,12 @@ export default async function headcountDataset(fastify: FastifyInstance) {
           key   = jh?.work_location_id ?? '__none__'
           label = (jh?.work_locations as any)?.name ?? 'Unassigned'
         } else if (groupByDim === 'grade') {
-          key   = emp.grade_id ?? '__none__'
-          label = gradeMap.get(emp.grade_id) ?? 'Unassigned'
+          key   = jh?.grade_id ?? '__none__'
+          label = (jh?.grades as any)?.name ?? 'Unassigned'
         } else {
-          key   = emp.gender ?? 'not_specified'
-          label = emp.gender ? (emp.gender.charAt(0).toUpperCase() + emp.gender.slice(1)) : 'Not Specified'
+          const g = genderOf(emp)
+          key   = g ?? 'not_specified'
+          label = g ? (g.charAt(0).toUpperCase() + g.slice(1)) : 'Not Specified'
         }
 
         if (!gMap.has(key)) gMap.set(key, { key, label, count: 0, joiners: 0 })
@@ -227,9 +231,9 @@ export default async function headcountDataset(fastify: FastifyInstance) {
         if (groupByDim === 'location') {
           key = jh?.work_location_id ?? '__none__'
         } else if (groupByDim === 'grade') {
-          key = emp.grade_id ?? '__none__'
+          key = jh?.grade_id ?? '__none__'
         } else {
-          key = emp.gender ?? 'not_specified'
+          key = genderOf(emp) ?? 'not_specified'
         }
         if (gMap.has(key)) gMap.get(key)!.joiners++
       }

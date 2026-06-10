@@ -48,16 +48,19 @@ export default async function compensationDataset(fastify: FastifyInstance) {
     const month     = (q.month && /^\d{4}-\d{2}$/.test(q.month)) ? q.month : curYYYYMM
 
     // ── Compensation records for active employees ─────────────────────────────
+    // grade/designation live on job_history (lean employees, migration 016)
     let compQuery = fastify.supabase
       .from('employee_compensations')
       .select(`
         id, employee_id, ctc_annual,
         employees!inner (
-          id, status, designation_id, grade_id,
+          id, status,
           job_history!job_history_employee_id_fkey (
-            department_id, work_location_id, is_current,
+            department_id, work_location_id, grade_id, designation_id, is_current,
             departments ( id, name ),
-            work_locations ( id, name )
+            work_locations ( id, name ),
+            grades ( id, name ),
+            designations ( id, name )
           )
         )
       `)
@@ -66,23 +69,12 @@ export default async function compensationDataset(fastify: FastifyInstance) {
 
     if (filterDeptId)  compQuery = compQuery.eq('employees.job_history.department_id', filterDeptId)
     if (filterLocId)   compQuery = compQuery.eq('employees.job_history.work_location_id', filterLocId)
-    if (filterGradeId) compQuery = compQuery.eq('employees.grade_id', filterGradeId)
-    if (filterDesgId)  compQuery = compQuery.eq('employees.designation_id', filterDesgId)
+    if (filterGradeId) compQuery = compQuery.eq('employees.job_history.grade_id', filterGradeId)
+    if (filterDesgId)  compQuery = compQuery.eq('employees.job_history.designation_id', filterDesgId)
 
     const { data: compData, error: compErr } = await compQuery
 
     if (compErr) return reply.code(500).send({ error: 'DB_ERROR', message: compErr.message })
-
-    // ── Designation / grade lookup (separate query) ───────────────────────────
-    const [{ data: designations }, { data: grades }] = await Promise.all([
-      fastify.supabase.from('designations').select('id, name').eq('tenant_id', tid),
-      fastify.supabase.from('grades').select('id, name').eq('tenant_id', tid),
-    ])
-
-    const desgMap  = new Map<string, string>()
-    const gradeMap = new Map<string, string>()
-    for (const d of (designations ?? []) as any[]) desgMap.set(d.id, d.name)
-    for (const g of (grades ?? []) as any[]) gradeMap.set(g.id, g.name)
 
     const comps = (compData ?? []) as any[]
 
@@ -95,14 +87,13 @@ export default async function compensationDataset(fastify: FastifyInstance) {
 
     function getGroupKey(comp: any): { key: string; label: string } {
       const h   = jh(comp)
-      const emp = comp.employees as any
       switch (groupBy) {
         case 'department':
           return { key: h.department_id ?? '__none__', label: (h.departments as any)?.name ?? 'Unassigned' }
         case 'grade':
-          return { key: emp?.grade_id ?? '__none__', label: gradeMap.get(emp?.grade_id) ?? 'Unassigned' }
+          return { key: h.grade_id ?? '__none__', label: (h.grades as any)?.name ?? 'Unassigned' }
         case 'designation':
-          return { key: emp?.designation_id ?? '__none__', label: desgMap.get(emp?.designation_id) ?? 'Unassigned' }
+          return { key: h.designation_id ?? '__none__', label: (h.designations as any)?.name ?? 'Unassigned' }
         case 'location':
           return { key: h.work_location_id ?? '__none__', label: (h.work_locations as any)?.name ?? 'Unassigned' }
       }

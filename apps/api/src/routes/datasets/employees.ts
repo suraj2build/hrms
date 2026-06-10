@@ -63,26 +63,33 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     const fromFirst  = `${fromYYYYMM}-01`
     const toLast     = lastDayOf(toYYYYMM)
 
+    // grade/designation/confirmation_date live on job_history, gender on
+    // employee_personal_info (lean employees, migration 016).
+    const EMP_SELECT = `
+        id, joining_date, status,
+        employee_personal_info ( gender ),
+        job_history!job_history_employee_id_fkey (
+          department_id, work_location_id, grade_id, designation_id,
+          employment_type, confirmation_date, is_current,
+          departments ( id, name ),
+          work_locations ( id, name ),
+          grades ( id, name ),
+          designations ( id, name )
+        )
+      `
+
     // ── Active employees with job_history ─────────────────────────────────────
     let empQuery = fastify.supabase
       .from('employees')
-      .select(`
-        id, gender, joining_date, confirmation_date, status,
-        designation_id, grade_id,
-        job_history!job_history_employee_id_fkey (
-          department_id, work_location_id, employment_type, is_current,
-          departments ( id, name ),
-          work_locations ( id, name )
-        )
-      `)
+      .select(EMP_SELECT)
       .eq('tenant_id', tid)
       .neq('status', 'separated')
       .eq('job_history.is_current', true) as any
 
     if (filterDeptId)  empQuery = empQuery.eq('job_history.department_id', filterDeptId)
     if (filterLocId)   empQuery = empQuery.eq('job_history.work_location_id', filterLocId)
-    if (filterGradeId) empQuery = empQuery.eq('grade_id', filterGradeId)
-    if (filterGender)  empQuery = empQuery.eq('gender', filterGender)
+    if (filterGradeId) empQuery = empQuery.eq('job_history.grade_id', filterGradeId)
+    if (filterGender)  empQuery = empQuery.eq('employee_personal_info.gender', filterGender)
 
     const { data: empData, error: empErr } = await empQuery
 
@@ -91,29 +98,10 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     // ── New joiners in the date range ─────────────────────────────────────────
     const { data: joinerData } = await fastify.supabase
       .from('employees')
-      .select(`
-        id, gender, joining_date, status,
-        designation_id, grade_id,
-        job_history!job_history_employee_id_fkey (
-          department_id, work_location_id, employment_type, is_current,
-          departments ( id, name ),
-          work_locations ( id, name )
-        )
-      `)
+      .select(EMP_SELECT)
       .eq('tenant_id', tid)
       .gte('joining_date', fromFirst)
       .lte('joining_date', toLast)
-
-    // ── Designation / grade lookup (separate query to avoid deep join issues) ─
-    const [{ data: designations }, { data: grades }] = await Promise.all([
-      fastify.supabase.from('designations').select('id, name').eq('tenant_id', tid),
-      fastify.supabase.from('grades').select('id, name').eq('tenant_id', tid),
-    ])
-
-    const desgMap = new Map<string, string>()
-    const gradeMap = new Map<string, string>()
-    for (const d of (designations ?? []) as any[]) desgMap.set(d.id, d.name)
-    for (const g of (grades ?? []) as any[]) gradeMap.set(g.id, g.name)
 
     const employees = (empData ?? []) as any[]
     const joiners   = (joinerData ?? []) as any[]
@@ -122,6 +110,11 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     function jh(emp: any) {
       const arr = emp.job_history
       return (Array.isArray(arr) ? arr[0] : arr) ?? {}
+    }
+    function genderOf(emp: any): string | null {
+      const pi = emp.employee_personal_info
+      const rec = Array.isArray(pi) ? pi[0] : pi
+      return rec?.gender ?? null
     }
 
     function getGroupKey(emp: any): { key: string; label: string } {
@@ -132,11 +125,13 @@ export default async function employeesDataset(fastify: FastifyInstance) {
         case 'location':
           return { key: h.work_location_id ?? '__none__', label: (h.work_locations as any)?.name ?? 'Unassigned' }
         case 'designation':
-          return { key: emp.designation_id ?? '__none__', label: desgMap.get(emp.designation_id) ?? 'Unassigned' }
+          return { key: h.designation_id ?? '__none__', label: (h.designations as any)?.name ?? 'Unassigned' }
         case 'grade':
-          return { key: emp.grade_id ?? '__none__', label: gradeMap.get(emp.grade_id) ?? 'Unassigned' }
-        case 'gender':
-          return { key: emp.gender ?? 'not_specified', label: emp.gender ? titleCase(emp.gender) : 'Not Specified' }
+          return { key: h.grade_id ?? '__none__', label: (h.grades as any)?.name ?? 'Unassigned' }
+        case 'gender': {
+          const g = genderOf(emp)
+          return { key: g ?? 'not_specified', label: g ? titleCase(g) : 'Not Specified' }
+        }
         case 'employment_type':
           return { key: h.employment_type ?? 'unknown', label: h.employment_type ? titleCase(h.employment_type) : 'Unknown' }
       }
@@ -155,7 +150,7 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       if (!groupMap[key]) groupMap[key] = { key, label, headcount: 0, on_probation: 0, confirmed: 0, new_joiners: 0, total_tenure_days: 0 }
       const g = groupMap[key]
       g.headcount++
-      if (emp.confirmation_date) g.confirmed++; else g.on_probation++
+      if (jh(emp).confirmation_date) g.confirmed++; else g.on_probation++
       if (emp.joining_date) {
         g.total_tenure_days += Math.floor((now.getTime() - new Date(emp.joining_date).getTime()) / 86_400_000)
       }
@@ -191,8 +186,8 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       meta: { group_by: groupBy, from: fromYYYYMM, to: toYYYYMM, generated_at: new Date().toISOString() },
       summary: {
         total_headcount:    total,
-        total_confirmed:    employees.filter(e => e.confirmation_date).length,
-        total_probation:    employees.filter(e => !e.confirmation_date).length,
+        total_confirmed:    employees.filter(e => jh(e).confirmation_date).length,
+        total_probation:    employees.filter(e => !jh(e).confirmation_date).length,
         total_new_joiners:  joiners.length,
         avg_tenure_months:  total > 0 ? r2(totalTenureDays / total / 30.44) : 0,
       },

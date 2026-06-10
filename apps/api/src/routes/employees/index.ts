@@ -102,10 +102,10 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     const offset = (parseInt(page) - 1) * parseInt(limit)
 
     // ── Dimension filters (used by Data Explorer drill-to-employee-list) ──────
-    // department / location / designation live on job_history (is_current);
-    // grade lives on the employees row directly.
+    // department / location / designation / grade all live on job_history
+    // (is_current) after the lean-employees migration (016).
     let restrictIds: string[] | null = null
-    if (department_id || location_id || designation_id) {
+    if (department_id || location_id || designation_id || grade_id) {
       let jhq = fastify.supabase
         .from('job_history')
         .select('employee_id')
@@ -114,6 +114,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       if (department_id)  jhq = jhq.eq('department_id', department_id)
       if (location_id)    jhq = jhq.eq('work_location_id', location_id)
       if (designation_id) jhq = jhq.eq('designation_id', designation_id)
+      if (grade_id)       jhq = jhq.eq('grade_id', grade_id)
       const { data: jhRows, error: jhErr } = await jhq
       if (jhErr) return reply.code(500).send({ error: 'DB_ERROR', message: jhErr.message })
       restrictIds = (jhRows ?? []).map((r: any) => r.employee_id as string)
@@ -133,7 +134,6 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     if (status && status !== 'all') {
       query = query.eq('status', status)
     }
-    if (grade_id)    query = query.eq('grade_id', grade_id)
     if (restrictIds) query = query.in('id', restrictIds)
 
     const { data, error, count } = await query
