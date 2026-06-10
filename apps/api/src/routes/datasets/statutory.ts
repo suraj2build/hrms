@@ -28,6 +28,86 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     ],
   }
 
+  // ── GET /datasets/statutory/exceptions ──────────────────────────────────────
+  // Per-employee statutory identifier completeness — drives the compliance
+  // dashboard's "missing IDs" exception list. Reads from employee_bank_statutory
+  // (the SSOT for statutory identifiers). No new business logic.
+  fastify.get('/exceptions', adminAuth, async (req: any, reply) => {
+    const tid = req.tenantId
+
+    const FIELDS = [
+      { key: 'pan',     label: 'PAN',      col: 'pan_number'     },
+      { key: 'uan',     label: 'UAN',      col: 'uan_number'     },
+      { key: 'aadhaar', label: 'Aadhaar',  col: 'aadhaar_number' },
+      { key: 'esi',     label: 'ESI No.',  col: 'esi_number'     },
+      { key: 'bank',    label: 'Bank A/C', col: 'account_number' },
+      { key: 'ifsc',    label: 'IFSC',     col: 'ifsc_code'      },
+    ] as const
+
+    const { data: emps, error: empErr } = await fastify.supabase
+      .from('employees')
+      .select(`
+        id, employee_code, first_name, last_name,
+        job_history!job_history_employee_id_fkey ( is_current, departments ( name ) )
+      `)
+      .eq('tenant_id', tid)
+      .eq('status', 'active')
+      .eq('job_history.is_current', true)
+
+    if (empErr) return reply.code(500).send({ error: 'DB_ERROR', message: empErr.message })
+
+    const empList = (emps ?? []) as any[]
+    const ids = empList.map(e => e.id)
+
+    const bsMap = new Map<string, any>()
+    if (ids.length > 0) {
+      const { data: bs } = await fastify.supabase
+        .from('employee_bank_statutory')
+        .select('employee_id, pan_number, aadhaar_number, uan_number, esi_number, account_number, ifsc_code')
+        .eq('tenant_id', tid)
+        .in('employee_id', ids)
+      for (const r of (bs ?? []) as any[]) bsMap.set(r.employee_id, r)
+    }
+
+    const fieldMissing: Record<string, number> = {}
+    for (const f of FIELDS) fieldMissing[f.key] = 0
+
+    const has = (v: any) => v != null && String(v).trim() !== ''
+
+    const employees: Array<{ id: string; employee_code: string; name: string; department: string; missing: string[] }> = []
+    for (const e of empList) {
+      const rec = bsMap.get(e.id) ?? {}
+      const missing: string[] = []
+      for (const f of FIELDS) {
+        if (!has(rec[f.col])) { missing.push(f.label); fieldMissing[f.key]++ }
+      }
+      if (missing.length > 0) {
+        const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
+        employees.push({
+          id:            e.id,
+          employee_code: e.employee_code,
+          name:          `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
+          department:    (jh?.departments as any)?.name ?? 'Unassigned',
+          missing,
+        })
+      }
+    }
+
+    const total      = empList.length
+    const incomplete = employees.length
+
+    return reply.send({
+      summary: {
+        total_employees: total,
+        complete:        total - incomplete,
+        incomplete,
+        completeness_pct: total > 0 ? r2(((total - incomplete) / total) * 100) : 100,
+      },
+      by_field: FIELDS.map(f => ({ field: f.key, label: f.label, missing: fieldMissing[f.key] })),
+      employees: employees.sort((a, b) => b.missing.length - a.missing.length).slice(0, 200),
+    })
+  })
+
   fastify.get('/', adminAuth, async (req: any, reply) => {
     const tid = req.tenantId
     const q   = req.query as Record<string, string>
