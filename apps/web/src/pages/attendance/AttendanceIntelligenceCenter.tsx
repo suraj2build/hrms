@@ -25,6 +25,7 @@ import {
 import { toast }           from 'sonner'
 
 import { PageContainer }   from '@/components/layout/PageContainer'
+import { SubTabs }         from '@/components/ui/SubTabs'
 import { PageHeader }      from '@/components/layout/PageHeader'
 import { SectionCard }     from '@/components/layout/SectionCard'
 import { Button }          from '@/components/ui/button'
@@ -1461,15 +1462,15 @@ type TabKey =
   | 'ot-heatmap'
   | 'compliance'
 
-const TAB_LIST: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
-  { key: 'sessions',      label: 'Live Sessions',    icon: <Activity    className="h-3.5 w-3.5" /> },
-  { key: 'missing',       label: 'Missing Punches',  icon: <AlertTriangle className="h-3.5 w-3.5" /> },
-  { key: 'cross-midnight',label: 'Cross-Midnight',   icon: <Moon        className="h-3.5 w-3.5" /> },
-  { key: 'anomalies',     label: 'Anomalies',        icon: <Shield      className="h-3.5 w-3.5" /> },
-  { key: 'replay',        label: 'Session Replay',   icon: <Eye         className="h-3.5 w-3.5" /> },
-  { key: 'locks',         label: 'Payroll Locks',    icon: <Lock        className="h-3.5 w-3.5" /> },
-  { key: 'ot-heatmap',    label: 'OT Heatmap',       icon: <BarChart3   className="h-3.5 w-3.5" /> },
-  { key: 'compliance',    label: 'Compliance Risks',  icon: <Zap         className="h-3.5 w-3.5" /> },
+const TAB_LIST: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { key: 'sessions',      label: 'Live Sessions',    icon: Activity     },
+  { key: 'missing',       label: 'Missing Punches',  icon: AlertTriangle },
+  { key: 'cross-midnight',label: 'Cross-Midnight',   icon: Moon         },
+  { key: 'anomalies',     label: 'Anomalies',        icon: Shield       },
+  { key: 'replay',        label: 'Session Replay',   icon: Eye          },
+  { key: 'locks',         label: 'Payroll Locks',    icon: Lock         },
+  { key: 'ot-heatmap',    label: 'OT Heatmap',       icon: BarChart3    },
+  { key: 'compliance',    label: 'Compliance Risks', icon: Zap          },
 ]
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -1534,23 +1535,12 @@ export function AttendanceIntelligenceCenter() {
       />
 
       {/* ── Tab bar ── */}
-      <div className="flex flex-wrap gap-0 border-b border-border">
-        {TAB_LIST.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.icon}
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<TabKey>
+        tabs={TAB_LIST.map(t => ({ id: t.key, label: t.label, icon: t.icon }))}
+        value={activeTab}
+        onChange={setActiveTab}
+        className="flex-wrap"
+      />
 
       {/* ── Tab content ── */}
 

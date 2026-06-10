@@ -19,6 +19,7 @@ import {
   Landmark, CreditCard, Calculator, Users, ArrowRight,
 } from 'lucide-react'
 import { cn }                    from '@/lib/utils'
+import { SubTabs }               from '@/components/ui/SubTabs'
 import { api }                   from '@/lib/api/client'
 import { useAuthStore }          from '@/stores/authStore'
 import { PageContainer }         from '@/components/layout/PageContainer'
@@ -1558,20 +1559,12 @@ export function LoansAndAdvances() {
       </div>
 
       {/* Tab nav */}
-      <div className="flex border-b border-border mb-6 gap-1">
-        {TABS.map(t => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
-              tab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}>
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof tab>
+        tabs={TABS.map(t => ({ id: t.key, label: t.label, icon: t.icon }))}
+        value={tab}
+        onChange={setTab}
+        className="mb-6"
+      />
 
       {tab === 'advances' && <AdvancesTab isAdmin={isAdmin} />}
       {tab === 'loans'    && <LoansTab isAdmin={isAdmin} />}

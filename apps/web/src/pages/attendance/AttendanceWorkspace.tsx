@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
@@ -1064,14 +1065,14 @@ function TabReplay({ employees }: { employees: Employee[] }) {
 
 type TabKey = 'live' | 'sessions' | 'missing' | 'ot' | 'anomalies' | 'approvals' | 'replay'
 
-const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
-  { key: 'live',      label: 'Live',            icon: <Activity      className="h-3.5 w-3.5" /> },
-  { key: 'sessions',  label: 'Sessions',         icon: <Clock         className="h-3.5 w-3.5" /> },
-  { key: 'missing',   label: 'Missing Punches',  icon: <AlertTriangle className="h-3.5 w-3.5" /> },
-  { key: 'ot',        label: 'OT',               icon: <Timer         className="h-3.5 w-3.5" /> },
-  { key: 'anomalies', label: 'Anomalies',         icon: <Shield        className="h-3.5 w-3.5" /> },
-  { key: 'approvals', label: 'Approvals',         icon: <CheckSquare   className="h-3.5 w-3.5" /> },
-  { key: 'replay',    label: 'Replay',            icon: <Eye           className="h-3.5 w-3.5" /> },
+const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { key: 'live',      label: 'Live',             icon: Activity      },
+  { key: 'sessions',  label: 'Sessions',         icon: Clock         },
+  { key: 'missing',   label: 'Missing Punches',  icon: AlertTriangle },
+  { key: 'ot',        label: 'OT',               icon: Timer         },
+  { key: 'anomalies', label: 'Anomalies',        icon: Shield        },
+  { key: 'approvals', label: 'Approvals',        icon: CheckSquare   },
+  { key: 'replay',    label: 'Replay',           icon: Eye           },
 ]
 
 // ── Main Export ────────────────────────────────────────────────────────────────
@@ -1135,22 +1136,12 @@ export function AttendanceWorkspace() {
       <KpiStrip stats={stats} />
 
       {/* Tab bar */}
-      <div className="flex flex-wrap gap-1 mb-4 border-b border-border">
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.icon}{t.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<TabKey>
+        tabs={TABS.map(t => ({ id: t.key, label: t.label, icon: t.icon }))}
+        value={activeTab}
+        onChange={setActiveTab}
+        className="mb-4 flex-wrap"
+      />
 
       {/* Tab content */}
       {activeTab === 'live' && (
