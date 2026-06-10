@@ -55,8 +55,8 @@ const METRIC_LABELS: Record<string, Record<string, string>> = {
 function MetricCard({ label, value }: { label: string; value: number }) {
   const isNegative = value < 0
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1 min-w-[130px]">
-      <span className={`text-2xl font-bold ${isNegative ? 'text-red-600' : 'text-foreground'}`}>
+    <div className="surface-premium lift-hover px-4 py-3 flex flex-col gap-1 min-w-[130px]">
+      <span className={`text-2xl font-bold tabular-nums ${isNegative ? 'text-destructive' : 'text-foreground'}`}>
         {value > 0 && label === 'Net Change' ? '+' : ''}{value}
       </span>
       <span className="text-xs text-muted-foreground leading-tight">{label}</span>

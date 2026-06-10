@@ -235,9 +235,9 @@ function SummaryCard({
   label: string; value: string | number; sub?: string; colorCls?: string
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="surface-premium lift-hover p-4">
       <p className="text-xs text-muted-foreground font-medium">{label}</p>
-      <p className={cn('text-2xl font-bold mt-1', colorCls ?? 'text-foreground')}>{value}</p>
+      <p className={cn('text-2xl font-bold mt-1 tabular-nums', colorCls ?? 'text-foreground')}>{value}</p>
       {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   )

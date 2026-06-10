@@ -187,14 +187,14 @@ function KpiCard({
   accent: string
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="surface-premium lift-hover p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-          <p className="text-2xl font-bold text-foreground mt-1 leading-none">{value}</p>
+          <p className="text-2xl font-bold text-foreground mt-1 leading-none tabular-nums">{value}</p>
           {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
         </div>
-        <span className={cn('flex h-9 w-9 items-center justify-center rounded-lg flex-shrink-0', accent)}>
+        <span className={cn('gloss-sheen flex h-9 w-9 items-center justify-center rounded-xl ring-1 ring-black/5 shadow-sm flex-shrink-0', accent)}>
           <Icon className="h-4 w-4" />
         </span>
       </div>
