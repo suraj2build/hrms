@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 
 import { PageContainer }             from '@/components/layout/PageContainer'
-import { PageHeader }                from '@/components/layout/PageHeader'
+import { PageHero }                  from '@/components/layout/PageHero'
 import { SectionCard }               from '@/components/layout/SectionCard'
 import { WorkspaceCommandHeader }    from '@/components/workspace/WorkspaceCommandHeader'
 import { OperationalMetricChip }     from '@/components/workspace/OperationalMetricChip'
@@ -206,11 +206,14 @@ export function AttendanceOperationsCenter() {
 
   return (
     <PageContainer>
-      <PageHeader
+      <PageHero
+        eyebrow="Time & Attendance"
         title="Attendance Operations"
-        subtitle="Real-time operational state — anomalies, corrections, staffing and payroll continuity"
+        subtitle="Real-time operational state — anomalies, corrections, staffing and payroll continuity."
         actions={
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/admin/attendance')}>
+          <Button size="sm" variant="outline"
+            className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
+            onClick={() => navigate('/admin/attendance')}>
             Process Attendance
           </Button>
         }

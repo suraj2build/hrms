@@ -831,12 +831,13 @@ export function PayrollControlCenter(): JSX.Element {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Page header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-primary/[0.05] via-primary/[0.02] to-transparent">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <PlayCircle className="h-5 w-5 text-primary" />
+          <div className="gloss-sheen flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-elev-1" style={{ background: 'linear-gradient(145deg, #2260A8, #1A4D8F)' }}>
+            <PlayCircle className="h-5 w-5" />
           </div>
           <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/70">Payroll · Execution</p>
             <h1 className="font-display text-lg font-semibold leading-tight">Payroll Operations</h1>
             <p className="text-xs text-muted-foreground">
               7-step payroll execution workflow · follow each step in sequence

@@ -22,9 +22,10 @@ import { useMemo }              from 'react'
 import { useNavigate }          from 'react-router-dom'
 import { useQuery }             from '@tanstack/react-query'
 import { PageContainer }        from '@/components/layout/PageContainer'
+import { PageHero, HeroStat }    from '@/components/layout/PageHero'
 import {
   AlertTriangle, CheckCircle2, XCircle,
-  Zap, RefreshCw, AlertCircle, Info,
+  Zap, RefreshCw, AlertCircle, Wallet, Info,
   Database, Users,
   Radio,
   ExternalLink, GitMerge, Lock,
@@ -625,42 +626,58 @@ export function ControlCenter() {
   return (
     <PageContainer spacing="tight">
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Command Center</h1>
-          <p className="text-[11.5px] text-muted-foreground mt-0.5">
-            Operational health · Last updated {lastUpdated}
-            {oh && (
-              <span className={cn(
-                'ml-2 inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded',
-                overallHealth === 'critical' ? 'bg-destructive/10 text-destructive' :
-                overallHealth === 'degraded' ? 'bg-warning/10 text-warning' :
-                'bg-success/10 text-success',
-              )}>
-                <span className={cn('h-1.5 w-1.5 rounded-full',
-                  overallHealth === 'critical' ? 'bg-destructive' :
-                  overallHealth === 'degraded' ? 'bg-warning' : 'bg-success',
-                )} />
-                {overallHealth.toUpperCase()}
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground"
-            onClick={() => refetchOH()}>
-            <RefreshCw className="h-3 w-3" /> Refresh
-          </Button>
-          <Button size="sm" className="h-7 text-xs gap-1.5"
-            onClick={() => nav('/admin/employees/new')}>
-            + Add Employee
-          </Button>
-        </div>
-      </div>
+      {/* ── Hero header ─────────────────────────────────────────────────── */}
+      <PageHero
+        eyebrow={`Operations · ${overallHealth.toUpperCase()} · Updated ${lastUpdated}`}
+        title="Command Center"
+        subtitle="The single operational front door — workforce, payroll, reconciliation and automation at a glance."
+        actions={
+          <>
+            <Button variant="outline" size="sm"
+              className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() => refetchOH()}>
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            </Button>
+            <Button size="sm" className="h-8 gap-1.5"
+              onClick={() => nav('/admin/employees/new')}>
+              + Add Employee
+            </Button>
+          </>
+        }
+      >
+        <HeroStat
+          label="Total Employees"
+          value={String(dashStats?.total_employees ?? freshness?.total_active_employees ?? '—')}
+          sub="Active roster"
+          icon={Users}
+        />
+        <HeroStat
+          label="Active"
+          value={String(dashStats?.active_employees ?? freshness?.employees_with_data ?? '—')}
+          sub={dashStats?.active_employees && dashStats?.total_employees
+            ? `${Math.round((dashStats.active_employees / dashStats.total_employees) * 100)}% of roster`
+            : 'Synced'}
+          icon={UserCheck}
+          tone="success"
+        />
+        <HeroStat
+          label="Open Exceptions"
+          value={String(totalReconcIssues)}
+          sub={criticalIssues > 0 ? `${criticalIssues} critical` : totalReconcIssues > 0 ? 'Needs review' : 'All matched'}
+          icon={AlertTriangle}
+          tone={criticalIssues > 0 ? 'danger' : totalReconcIssues > 0 ? 'warning' : 'success'}
+        />
+        <HeroStat
+          label="Payroll"
+          value={payrollStatus === 'no_run' ? 'No run' : payrollStatus.charAt(0).toUpperCase() + payrollStatus.slice(1)}
+          sub={payroll?.current_month ?? 'Current cycle'}
+          icon={Wallet}
+          tone={payrollStatus === 'finalized' ? 'success' : payrollStatus === 'no_run' ? 'warning' : 'default'}
+        />
+      </PageHero>
 
-      {/* ── ROW 1: System Health + Employee counters ─────────────────────── */}
-      <div className="grid grid-cols-[1.6fr_1fr] gap-4">
+      {/* ── ROW 1: System Health (full width) ────────────────────────────── */}
+      <div>
 
         {/* System Health card */}
         <Card
@@ -703,34 +720,6 @@ export function ControlCenter() {
             </div>
           )}
         </Card>
-
-        {/* Employee KPI tiles */}
-        <div className="grid grid-cols-2 gap-3">
-          <KpiCard
-            label="Total Employees"
-            value={dashStats?.total_employees ?? freshness?.total_active_employees ?? '—'}
-            icon={Users}
-            iconBg="bg-cyan-50"
-            iconColor="text-cyan-600"
-            sub="Workforce roster →"
-            onClick={() => nav('/admin/employees')}
-          />
-          <KpiCard
-            label="Active"
-            value={dashStats?.active_employees ?? freshness?.employees_with_data ?? '—'}
-            icon={UserCheck}
-            iconBg="bg-emerald-50"
-            iconColor="text-emerald-600"
-            valueColor="text-emerald-700"
-            sub={
-              dashStats?.active_employees && dashStats?.total_employees
-                ? `${Math.round((dashStats.active_employees / dashStats.total_employees) * 100)}% of total`
-                : 'Synced'
-            }
-            trend={dashStats?.active_employees && dashStats?.total_employees ? `${Math.round((dashStats.active_employees / dashStats.total_employees) * 100)}%` : undefined}
-            trendPositive={true}
-          />
-        </div>
       </div>
 
       {/* ── Executive Intelligence Banner ────────────────────────────────── */}

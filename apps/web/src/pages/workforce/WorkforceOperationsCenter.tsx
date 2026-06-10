@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 
 import { PageContainer }       from '@/components/layout/PageContainer'
-import { PageHeader }          from '@/components/layout/PageHeader'
+import { PageHero }            from '@/components/layout/PageHero'
 import { SectionCard }         from '@/components/layout/SectionCard'
 import { OperationalTimeline } from '@/components/workspace/OperationalTimeline'
 import type { TimelineEvent }  from '@/components/workspace/OperationalTimeline'
@@ -434,11 +434,14 @@ export function WorkforceOperationsCenter() {
 
   return (
     <PageContainer>
-      <PageHeader
+      <PageHero
+        eyebrow="People & Workforce"
         title="Workforce Operations"
-        subtitle="Organizational command center — headcount, onboarding, risk, and people signals"
+        subtitle="Headcount, onboarding, attrition risk and people signals — the daily operating picture for your workforce."
         actions={
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => navigate('/admin/employees/new')}>
+          <Button size="sm" variant="outline"
+            className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
+            onClick={() => navigate('/admin/employees/new')}>
             <UserPlus className="h-3.5 w-3.5" />
             Add Employee
           </Button>
