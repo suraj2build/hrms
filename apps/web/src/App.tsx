@@ -235,6 +235,7 @@ const OperationalInbox      = lazy(() => import('@/pages/notifications/Operation
 // ESS payroll
 const EssReimbursements     = lazy(() => import('@/pages/ess/EssReimbursements').then(m => ({ default: m.EssReimbursements })))
 const EssLoansAdvances      = lazy(() => import('@/pages/ess/EssLoansAdvances').then(m => ({ default: m.EssLoansAdvances })))
+const ManagerLoanApprovals  = lazy(() => import('@/pages/manager/ManagerLoanApprovals').then(m => ({ default: m.ManagerLoanApprovals })))
 
 // ESS tax tools (IT Tax Planner, IT Statement, YTD Statement, Phase 2)
 const TaxPlanner            = lazy(() => import('@/pages/ess/TaxPlanner').then(m => ({ default: m.TaxPlanner })))
@@ -750,6 +751,7 @@ export default function App() {
                 <Route path="/manager/team/leave-balances"   element={<TeamLeaveBalances />} />
                 <Route path="/manager/team/who-is-in"        element={<WhoIsIn />} />
                 <Route path="/manager/team/performance"      element={<ManagerTeamPerformance />} />
+                <Route path="/manager/loans-approvals"       element={<ManagerLoanApprovals />} />
 
                 {/* Self Service (legacy paths — kept for backward compat) */}
                 <Route path="/manager/my-attendance"         element={<MyAttendance />} />
@@ -767,6 +769,7 @@ export default function App() {
                 <Route path="/manager/self/compensation"                 element={<EssCompensation />} />
                 <Route path="/manager/self/declarations"                 element={<Navigate to="/manager/self/salary/tax-planner" replace />} />
                 <Route path="/manager/self/reimbursements"               element={<EssReimbursements />} />
+                <Route path="/manager/self/loans"                        element={<EssLoansAdvances />} />
                 <Route path="/manager/self/documents"                    element={<EssDocuments />} />
                 <Route path="/manager/self/letters"                      element={<EssLetters />} />
                 <Route path="/manager/self/policies"                     element={<EssPolicies />} />

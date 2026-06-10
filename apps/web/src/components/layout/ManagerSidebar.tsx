@@ -44,6 +44,7 @@ import {
   Radio,
   Calculator,
   ScrollText,
+  Wallet,
 } from 'lucide-react'
 import { cn }         from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
@@ -115,6 +116,7 @@ const BASE_SECTIONS: NavSection[] = [
           { label: 'HRA Declaration',   icon: FileCheck,  href: '/manager/self/salary/hra'                      },
           { label: 'Previous Employer', icon: FileText,   href: '/manager/self/salary/previous-employer'        },
           { label: 'Reimbursements',    icon: CreditCard, href: '/manager/self/reimbursements'                  },
+          { label: 'Loans & Advances',  icon: Wallet,     href: '/manager/self/loans'                           },
         ],
       },
       {
@@ -139,6 +141,7 @@ const BASE_SECTIONS: NavSection[] = [
       { label: 'Who Is In',        icon: Radio,           href: '/manager/team/who-is-in'                   },
       { label: 'Team Attendance',  icon: CalendarDays,    href: '/manager/team/attendance'                  },
       { label: 'Approvals',        icon: CheckSquare,     href: '/manager/approvals'                        },
+      { label: 'Loan Approvals',   icon: Wallet,          href: '/manager/loans-approvals'                  },
       { label: 'Leave Balances',   icon: Scale,           href: '/manager/team/leave-balances'              },
       { label: 'Performance',      icon: TrendingUp,      href: '/manager/team/performance'                 },
       { label: 'Team Reports',     icon: BarChart3,       href: '/manager/reports/team'                     },

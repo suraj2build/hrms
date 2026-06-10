@@ -112,6 +112,7 @@ const MANAGER_QUICK_ITEMS: NavItem[] = [
   { label: 'Manager Console', icon: LayoutDashboard, href: '/manager/dashboard', exact: true },
   { label: 'Team Attendance', icon: CalendarDays,    href: '/manager/team/attendance'         },
   { label: 'Approvals',       icon: CheckSquare,     href: '/manager/approvals'               },
+  { label: 'Loan Approvals',  icon: Wallet,          href: '/manager/loans-approvals'         },
   { label: 'Team Reports',    icon: BarChart3,        href: '/manager/reports/team'            },
 ]
 
