@@ -40,6 +40,15 @@ const toneText: Record<Tone, string> = {
   info: 'text-info',
 }
 
+// Glossy gradient chip per tone
+const toneChip: Record<Tone, string> = {
+  primary:     'linear-gradient(145deg, #2260A8, #1A4D8F)',
+  success:     'linear-gradient(145deg, #1FA968, #1A8050)',
+  warning:     'linear-gradient(145deg, #E0A53B, #B07B18)',
+  destructive: 'linear-gradient(145deg, #E5564B, #C93535)',
+  info:        'linear-gradient(145deg, #3B82F6, #2260A8)',
+}
+
 export function KpiCard({
   label, value, delta, deltaLabel, hint, icon: Icon, tone = 'primary', spark, onClick,
 }: KpiCardProps) {
@@ -51,8 +60,8 @@ export function KpiCard({
     <button
       onClick={onClick}
       className={cn(
-        'group relative w-full overflow-hidden rounded-xl border bg-card p-5 text-left shadow-[var(--shadow-card)] transition-all',
-        'hover:-translate-y-0.5 hover:shadow-[var(--shadow-elegant)] focus:outline-none focus:ring-2 focus:ring-ring/40',
+        'surface-premium lift-hover group w-full overflow-hidden p-5 text-left',
+        'focus:outline-none focus:ring-2 focus:ring-primary/30',
       )}
     >
       <div className={cn('pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br opacity-70 blur-2xl', toneRing[tone])} />
@@ -62,8 +71,9 @@ export function KpiCard({
           <div className="text-2xl font-semibold tracking-tight text-foreground tabular-nums">{value}</div>
         </div>
         {Icon && (
-          <div className={cn('rounded-lg border bg-background/60 p-2 backdrop-blur', toneText[tone])}>
-            <Icon className="h-4 w-4" />
+          <div className="gloss-sheen flex h-9 w-9 items-center justify-center rounded-xl ring-1 ring-black/5 shadow-sm"
+               style={{ background: toneChip[tone] }}>
+            <Icon className="h-4 w-4 text-white" />
           </div>
         )}
       </div>

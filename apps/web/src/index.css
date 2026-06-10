@@ -174,9 +174,9 @@
   --primary-glow:    oklch(0.62  0.09  185);
 
   /* ── Elevation 2.0 — softer, tighter floats + hairline ring ── */
-  --elev-1: 0 1px 2px  rgba(16,24,40,0.06), 0 0 0 1px rgba(16,24,40,0.04);
-  --elev-2: 0 2px 8px  rgba(16,24,40,0.08), 0 1px 2px rgba(16,24,40,0.04);
-  --elev-3: 0 12px 28px rgba(16,24,40,0.10), 0 2px 6px rgba(16,24,40,0.05);
+  --elev-1: 0 1px 2px rgba(16,24,40,0.05), 0 8px 20px -12px rgba(16,24,40,0.12), 0 0 0 1px rgba(16,24,40,0.035);
+  --elev-2: 0 2px 6px rgba(16,24,40,0.06), 0 14px 32px -14px rgba(16,24,40,0.16), 0 0 0 1px rgba(16,24,40,0.03);
+  --elev-3: 0 10px 24px rgba(16,24,40,0.08), 0 32px 60px -24px rgba(16,24,40,0.22), 0 0 0 1px rgba(16,24,40,0.03);
 
   /* ── Gradients ───────────────────────────────────────────────── */
   --grad-hero:    linear-gradient(135deg, oklch(0.18 0.120 292) 0%, oklch(0.30 0.140 292) 100%);
@@ -357,6 +357,75 @@
 
   /* ── Operational canvas default padding ──────────────────────────── */
   .op-canvas { padding: 1.25rem 1.5rem; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     PREMIUM / GLOSSY DESIGN UTILITIES (bold & glossy refresh)
+     ════════════════════════════════════════════════════════════════════ */
+
+  /* Atmospheric app canvas — soft brand glows over the base page color */
+  .app-canvas {
+    background:
+      radial-gradient(60% 48% at 100% 0%,  rgba(34,96,168,0.07), transparent 70%),
+      radial-gradient(48% 40% at 0% 100%,  rgba(26,128,80,0.055), transparent 72%),
+      var(--color-background);
+  }
+
+  /* Premium light surface — subtle vertical gradient, soft floating shadow,
+     hairline border and a faint top gloss highlight */
+  .surface-premium {
+    position: relative;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+    border: 1px solid rgba(16,24,40,0.06);
+    border-radius: var(--radius-xl);
+    box-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 14px 30px -16px rgba(16,24,40,0.16);
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .surface-premium::before {
+    content: '';
+    position: absolute; inset: 0 0 auto 0; height: 42%;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.75), rgba(255,255,255,0));
+    opacity: .6; pointer-events: none;
+  }
+  .surface-premium > * { position: relative; }
+  .lift-hover:hover { transform: translateY(-3px); box-shadow: 0 2px 4px rgba(16,24,40,0.05), 0 24px 44px -18px rgba(16,24,40,0.24); }
+
+  /* Navy brand hero band — gradient + faint grid + gloss, for page heroes */
+  .hero-band {
+    position: relative; overflow: hidden;
+    border-radius: var(--radius-2xl);
+    background: linear-gradient(135deg, #0E2A4E 0%, #1A4D8F 55%, #11335E 100%);
+    box-shadow: 0 24px 56px -22px rgba(26,77,143,0.55);
+    color: #fff;
+  }
+  .hero-band::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .16;
+    background-image:
+      linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px);
+    background-size: 40px 40px;
+    -webkit-mask-image: radial-gradient(120% 90% at 82% 8%, #000 25%, transparent 78%);
+    mask-image: radial-gradient(120% 90% at 82% 8%, #000 25%, transparent 78%);
+  }
+  .hero-band::after {
+    content: ''; position: absolute; top: -30%; right: -10%;
+    width: 360px; height: 360px; border-radius: 50%;
+    background: rgba(59,130,246,0.28); filter: blur(70px); pointer-events: none;
+  }
+
+  /* Gradient icon chip — navy → azure with a glossy top sheen */
+  .chip-grad {
+    background: linear-gradient(145deg, #2260A8 0%, #1A4D8F 100%);
+    color: #fff;
+    box-shadow: 0 6px 14px -6px rgba(26,77,143,0.55), inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+
+  /* Glossy top sheen for colored elements (buttons, chips, dark cards) */
+  .gloss-sheen { position: relative; overflow: hidden; }
+  .gloss-sheen::before {
+    content: ''; position: absolute; inset: 0 0 55% 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.30), rgba(255,255,255,0));
+  }
   :root[data-density="compact"] .op-canvas  { padding: 1rem 1.25rem; }
   :root[data-density="dense"]   .op-canvas  { padding: 0.5rem 0.75rem; }
 

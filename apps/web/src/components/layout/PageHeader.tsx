@@ -65,14 +65,21 @@ export function PageHeader({ title, subtitle, breadcrumb, actions, className }: 
           </nav>
         )}
 
-        {/* Title */}
-        <h1 className="font-display text-2xl font-semibold text-foreground leading-tight truncate">
-          {title}
-        </h1>
+        {/* Title with brand-gradient accent bar */}
+        <div className="flex items-center gap-2.5">
+          <span
+            className="h-6 w-1 flex-shrink-0 rounded-full"
+            style={{ background: 'linear-gradient(180deg, #2260A8, #1A4D8F)' }}
+            aria-hidden
+          />
+          <h1 className="font-display text-2xl font-semibold leading-tight truncate text-foreground">
+            {title}
+          </h1>
+        </div>
 
         {/* Subtitle */}
         {subtitle && (
-          <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
+          <p className="text-sm text-muted-foreground mt-0.5 pl-[14px]">{subtitle}</p>
         )}
       </div>
 

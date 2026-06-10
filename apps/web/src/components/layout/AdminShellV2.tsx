@@ -115,7 +115,7 @@ export function AdminShellV2() {
           <ContextualSidebar />
 
           {/* Fullscreen page canvas */}
-          <main className="flex-1 overflow-y-auto bg-background op-canvas">
+          <main className="flex-1 overflow-y-auto app-canvas op-canvas">
             <EventToast />
             <Suspense fallback={<ShellPageLoader />}>
               <Outlet />
