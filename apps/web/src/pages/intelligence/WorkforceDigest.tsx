@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import { Loader2, RefreshCw, Database } from 'lucide-react'
+import { SubTabs } from '@/components/ui/SubTabs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -183,22 +184,11 @@ export function WorkforceDigest() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={[
-              'px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
-              activeTab === tab.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            ].join(' ')}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={TABS.map(t => ({ id: t.key, label: t.label }))}
+        value={activeTab}
+        onChange={setActiveTab}
+      />
 
       {/* Active tab content — remounts on switch to auto-refresh */}
       <DigestTab key={activeTab} tab={activeTab} />

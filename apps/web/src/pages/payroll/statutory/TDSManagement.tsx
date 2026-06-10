@@ -16,6 +16,7 @@ import {
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
+import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
@@ -764,27 +765,11 @@ export function TDSManagement() {
       />
 
       {/* Tab Navigation */}
-      <div className="flex items-center gap-1 border-b border-border pb-0">
-        {TABS.map(tab => {
-          const Icon = tab.icon
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px',
-                activeTab === tab.id
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          )
-        })}
-      </div>
+      <SubTabs<typeof activeTab>
+        tabs={TABS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
+        value={activeTab}
+        onChange={setActiveTab}
+      />
 
       {/* Tab Content */}
       <SectionCard

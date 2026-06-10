@@ -5,6 +5,7 @@ import { Bell, ExternalLink, CheckCheck, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { api } from '@/lib/api/client'
@@ -163,34 +164,12 @@ export function OperationalInbox() {
       />
 
       {/* Filter Tabs */}
-      <div className="flex gap-1 border-b border-border mb-6">
-        {filterTabs.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveFilter(tab.key)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-              activeFilter === tab.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {tab.label}
-            {tab.count !== undefined && tab.count > 0 && (
-              <span
-                className={cn(
-                  'rounded-full px-1.5 py-0.5 text-xs font-semibold',
-                  tab.key === 'unread'
-                    ? 'bg-primary text-primary-foreground'   // was text-white — use token
-                    : 'bg-muted text-muted-foreground'
-                )}
-              >
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <SubTabs<typeof activeFilter>
+        tabs={filterTabs.map(t => ({ id: t.key, label: t.label, badge: t.count }))}
+        value={activeFilter}
+        onChange={setActiveFilter}
+        className="mb-6"
+      />
 
       {/* Loading skeleton */}
       {isLoading && (
