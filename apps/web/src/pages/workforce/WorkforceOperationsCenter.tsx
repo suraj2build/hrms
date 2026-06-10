@@ -170,8 +170,8 @@ interface KpiChipProps {
 function KpiChip({ label, value, colorClass = 'text-foreground', href, loading }: KpiChipProps) {
   const inner = (
     <div className={cn(
-      'flex flex-col gap-0.5 p-3 rounded-lg border border-border bg-card hover:bg-accent/40 transition-colors',
-      href && 'cursor-pointer',
+      'surface-premium flex flex-col gap-0.5 p-3',
+      href && 'lift-hover cursor-pointer',
     )}>
       <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</span>
       <span className={cn(
@@ -256,7 +256,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   { label: 'People Directory',    description: 'Search and manage employee records',         href: '/admin/employees',              icon: Users,        accent: 'neutral'  },
   { label: 'AI Onboarding',       description: 'AI-powered bulk employee onboarding',        href: '/admin/onboarding',             icon: UserPlus,     accent: 'warning'  },
   { label: 'Organization Chart',  description: 'Visual org structure and hierarchy',         href: '/admin/organization',           icon: Building2,    accent: 'neutral'  },
-  { label: 'Workforce Analytics', description: 'Headcount trends, attrition, retention',     href: '/admin/analytics/workforce',    icon: BarChart2,    accent: 'neutral'  },
+  { label: 'Manpower Intelligence', description: 'Headcount analytics & live workforce signals', href: '/admin/insights/manpower',    icon: BarChart2,    accent: 'neutral'  },
   { label: 'Intelligence',        description: 'Risk scores, anomalies, at-risk employees',  href: '/admin/intelligence',           icon: Brain,        accent: 'warning'  },
   { label: 'Executive Intel',     description: 'C-suite workforce intelligence reports',      href: '/admin/analytics/executive',    icon: PieChart,     accent: 'neutral'  },
   { label: 'Master Import',       description: 'Bulk data import via CSV',                   href: '/admin/import',                 icon: FolderUp,     accent: 'neutral'  },
@@ -604,11 +604,11 @@ export function WorkforceOperationsCenter() {
                   return (
                     <Link key={action.href} to={action.href} className="block group">
                       <div className={cn(
-                        'flex items-start gap-3 p-3 rounded-lg border transition-colors',
+                        'flex items-start gap-3 p-3 rounded-lg border transition-all duration-200 group-hover:-translate-y-0.5',
                         ACCENT_CLASSES[action.accent ?? 'neutral'],
                       )}>
-                        <div className="rounded-md p-1.5 bg-background/60 flex-shrink-0">
-                          <Icon className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                        <div className="chip-grad flex h-7 w-7 items-center justify-center rounded-lg flex-shrink-0 text-white shadow-sm">
+                          <Icon className="h-3.5 w-3.5" />
                         </div>
                         <div className="min-w-0">
                           <p className="text-[11.5px] font-semibold text-foreground truncate">{action.label}</p>

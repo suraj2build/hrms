@@ -316,9 +316,11 @@ export function AttendanceOperationsCenter() {
                   key={qa.href}
                   type="button"
                   onClick={() => navigate(qa.href)}
-                  className={`flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors ${ACCENT_CLASSES[qa.accent ?? 'neutral']}`}
+                  className={`group flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 ${ACCENT_CLASSES[qa.accent ?? 'neutral']}`}
                 >
-                  <qa.icon className="h-3.5 w-3.5 text-muted-foreground/70 flex-shrink-0" />
+                  <span className="chip-grad flex h-7 w-7 items-center justify-center rounded-lg text-white shadow-sm flex-shrink-0">
+                    <qa.icon className="h-3.5 w-3.5" />
+                  </span>
                   <div>
                     <p className="text-[12px] font-medium text-foreground leading-tight">{qa.label}</p>
                     <p className="text-[10px] text-muted-foreground/60 leading-tight mt-0.5">{qa.description}</p>

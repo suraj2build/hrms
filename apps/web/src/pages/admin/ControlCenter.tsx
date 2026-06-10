@@ -266,7 +266,7 @@ function Card({ title, action, children, className, noPad }: {
   className?: string; noPad?: boolean
 }) {
   return (
-    <div className={cn('rounded-2xl bg-card shadow-card flex flex-col', className)}>
+    <div className={cn('surface-premium flex flex-col', className)}>
       {title && (
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 flex-shrink-0">
           <p className="font-display text-[13.5px] font-bold text-foreground">{title}</p>
