@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
-import { PageHeader }     from '@/components/layout/PageHeader'
+import { PageHero }       from '@/components/layout/PageHero'
 import { getAxisStyle, getGridStyle, getTooltipStyle } from '@/components/ui/chart'
 import { cn }             from '@/lib/utils'
 
@@ -541,10 +541,10 @@ export function AnalyticsStudio() {
 
   return (
     <PageContainer>
-      <PageHeader
+      <PageHero
+        eyebrow="Reports · Analytics"
         title="Analytics Studio"
         subtitle="Answer workforce questions instantly — no exports, no reports required"
-        breadcrumb={[{ label: 'Reports', href: '/admin/reports' }, { label: 'Analytics Studio' }]}
       />
 
       {/* ── Saved views ─────────────────────────────────────────────────── */}

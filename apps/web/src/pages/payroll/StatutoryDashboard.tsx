@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { api } from '@/lib/api/client'
 import { useUIStore } from '@/stores/uiStore'
 import { useStatutoryMonth, StatutoryMonthPicker } from '@/components/compliance/StatutoryMonthPicker'
+import { PageHero, HeroStat } from '@/components/layout/PageHero'
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -269,22 +270,34 @@ export function StatutoryDashboard() {
 
   return (
     <div className="space-y-5">
-      {/* ── Header ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-foreground">Compliance Cockpit</h1>
-          <p className="text-xs text-muted-foreground">Statutory health, liabilities and exceptions — at a glance</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatutoryMonthPicker />
-          <button
-            onClick={go('/admin/payroll/filing-pack')}
-            className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity"
-          >
-            <FileText className="h-3.5 w-3.5" /> Filing Pack
-          </button>
-        </div>
-      </div>
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <PageHero
+        eyebrow="Compliance"
+        title="Compliance Cockpit"
+        subtitle="Statutory health, liabilities and exceptions — at a glance"
+        actions={
+          <>
+            <StatutoryMonthPicker />
+            <button
+              onClick={go('/admin/payroll/filing-pack')}
+              className="gloss-sheen flex h-8 items-center gap-1.5 rounded-lg bg-white/15 px-3 text-xs font-semibold text-white ring-1 ring-white/20 backdrop-blur-sm transition-colors hover:bg-white/25"
+            >
+              <FileText className="h-3.5 w-3.5" /> Filing Pack
+            </button>
+          </>
+        }
+      >
+        <HeroStat label="Statutory Liability" value={inr(grand)} sub="EPF + ESI + PT + TDS" icon={Wallet}
+                  tone={grand > 0 ? 'success' : 'warning'} />
+        <HeroStat label="Modules Ready" value={`${modulesReady.ready}/${modulesReady.total}`}
+                  sub={statutory?.readiness.overall ? 'All clear to file' : 'Action needed'} icon={Gauge}
+                  tone={modulesReady.ready === modulesReady.total ? 'success' : 'warning'} />
+        <HeroStat label="Open Exceptions" value={num(exceptionList.length)} sub="Need a fix" icon={ListChecks}
+                  tone={exceptionList.length === 0 ? 'success' : exceptionList.some(e => e.sev === 'critical') ? 'danger' : 'warning'} />
+        <HeroStat label="ID Completeness" value={`${idPct}%`}
+                  sub={exceptions ? `${num(exceptions.summary.complete)} of ${num(exceptions.summary.total_employees)}` : '—'} icon={CreditCard}
+                  tone={idPct >= 99 ? 'success' : idPct >= 90 ? 'warning' : 'danger'} />
+      </PageHero>
 
       {/* ── Deadline alert ───────────────────────────────────────────────── */}
       {criticalDeadline && (
@@ -293,20 +306,6 @@ export function StatutoryDashboard() {
           Statutory filing deadline in {stats!.critical_deadline_days} day{stats!.critical_deadline_days === 1 ? '' : 's'} — submit pending filings.
         </div>
       )}
-
-      {/* ── KPI hero ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Statutory Liability" value={inr(grand)} sub="EPF + ESI + PT + TDS this month" icon={Wallet}
-             tone={grand > 0 ? 'success' : 'warning'} />
-        <Kpi label="Modules Ready" value={`${modulesReady.ready}/${modulesReady.total}`}
-             sub={statutory?.readiness.overall ? 'All clear to file' : 'Action needed'} icon={Gauge}
-             tone={modulesReady.ready === modulesReady.total ? 'success' : modulesReady.ready >= 3 ? 'warning' : 'critical'} />
-        <Kpi label="Open Exceptions" value={num(exceptionList.length)} sub="Issues needing a fix" icon={ListChecks}
-             tone={exceptionList.length === 0 ? 'success' : exceptionList.some(e => e.sev === 'critical') ? 'critical' : 'warning'} />
-        <Kpi label="ID Completeness" value={`${idPct}%`}
-             sub={exceptions ? `${num(exceptions.summary.complete)} of ${num(exceptions.summary.total_employees)} complete` : '—'} icon={CreditCard}
-             tone={idPct >= 99 ? 'success' : idPct >= 90 ? 'warning' : 'critical'} />
-      </div>
 
       {/* ── Module liability breakdown ───────────────────────────────────── */}
       <div>

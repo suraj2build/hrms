@@ -13,6 +13,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { PageHero } from '@/components/layout/PageHero'
 import {
   Users, UserCheck, Clock, AlertTriangle,
   ArrowRight, RefreshCw,
@@ -247,29 +248,28 @@ export function AdminDashboard() {
   return (
     <div className="space-y-5">
 
-      {/* ── Header ───────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-base font-semibold text-foreground leading-tight">
-            {tenant?.name ?? 'Workspace'} Overview
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm" variant="outline" className="h-7 text-xs gap-1.5"
-            onClick={() => { refetchStats() }}
-          >
-            <RefreshCw className="h-3 w-3" /> Refresh
-          </Button>
-          <Button
-            size="sm" className="h-7 text-xs gap-1.5"
-            onClick={() => navigate('/admin/employees/new')}
-          >
-            <UserPlus className="h-3 w-3" /> Add Employee
-          </Button>
-        </div>
-      </div>
+      {/* ── Hero ─────────────────────────────────────────────────────── */}
+      <PageHero
+        eyebrow="Command Center"
+        title={`${tenant?.name ?? 'Workspace'} Overview`}
+        subtitle={label}
+        actions={
+          <>
+            <button
+              onClick={() => { refetchStats() }}
+              className="gloss-sheen flex h-8 items-center gap-1.5 rounded-lg bg-white/10 px-3 text-xs font-medium text-white ring-1 ring-white/20 backdrop-blur-sm transition-colors hover:bg-white/20"
+            >
+              <RefreshCw className="h-3 w-3" /> Refresh
+            </button>
+            <button
+              onClick={() => navigate('/admin/employees/new')}
+              className="gloss-sheen flex h-8 items-center gap-1.5 rounded-lg bg-white/15 px-3 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur-sm transition-colors hover:bg-white/25"
+            >
+              <UserPlus className="h-3 w-3" /> Add Employee
+            </button>
+          </>
+        }
+      />
 
       {/* ── Processing / system status banner ────────────────────────── */}
       {(runFailed || isStale || lastRun) && (

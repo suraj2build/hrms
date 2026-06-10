@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
-import { PageHeader }    from '@/components/layout/PageHeader'
+import { PageHero }      from '@/components/layout/PageHero'
 import { cn }            from '@/lib/utils'
 
 import {
@@ -242,10 +242,10 @@ export function DataExplorer() {
 
   return (
     <PageContainer>
-      <PageHeader
+      <PageHero
+        eyebrow="Reports · Explorer"
         title="Data Explorer"
         subtitle="Slice any workforce dataset, drill to the employee, export — without leaving Emvora"
-        breadcrumb={[{ label: 'Reports', href: '/admin/reports' }, { label: 'Data Explorer' }]}
       />
 
       {/* ── Saved views ─────────────────────────────────────────────────── */}
