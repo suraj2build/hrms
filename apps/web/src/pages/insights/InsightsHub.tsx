@@ -1,6 +1,6 @@
 /**
  * InsightsHub — the single front door for every read-only intelligence,
- * analytics and health surface in Emvora.
+ * analytics and health surface in CognixHR.
  * /admin/insights
  *
  * This is a NAVIGATION / DIRECTORY page only. It introduces no new data,

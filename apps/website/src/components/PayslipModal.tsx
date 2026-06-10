@@ -93,10 +93,10 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
                 E
               </div>
               <div>
-                <h2 className="text-lg font-extrabold text-slate-950 uppercase tracking-wide">Emvora Technologies Private Limited</h2>
+                <h2 className="text-lg font-extrabold text-slate-950 uppercase tracking-wide">CognixHR Technologies Private Limited</h2>
                 <p className="text-[10px] text-slate-400 leading-normal max-w-[320px]">
                   B-Block, 4th Floor, Sector 62, Noida, NCR, India.<br />
-                  CIN: U74999DL2026PTC334512 | contact@emvora.co
+                  CIN: U74999DL2026PTC334512 | contact@cognixhr.co
                 </p>
               </div>
             </div>
@@ -232,10 +232,10 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[10px] text-slate-400 gap-4 pt-4">
             <div className="max-w-[400px]">
               <span className="font-semibold block">Declaration Note:</span>
-              <p className="leading-relaxed">This slip represents a digitally generated tax credit invoice, authenticated by Emvora HR Services. No manual signature validation is legally required under standard IT compliance codes.</p>
+              <p className="leading-relaxed">This slip represents a digitally generated tax credit invoice, authenticated by CognixHR HR Services. No manual signature validation is legally required under standard IT compliance codes.</p>
             </div>
             <div className="text-right font-serif opacity-30 select-none text-2xl font-bold tracking-widest uppercase border border-dashed border-slate-400 px-4 py-1">
-              Emvora SECURE
+              CognixHR SECURE
             </div>
           </div>
 

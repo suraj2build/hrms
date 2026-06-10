@@ -3,7 +3,7 @@
  *
  * Config via env (set in Railway):
  *   RESEND_API_KEY   — Resend API key (required to actually send)
- *   EMAIL_FROM       — sender, e.g. "Emvora <noreply@yourdomain.com>"
+ *   EMAIL_FROM       — sender, e.g. "CognixHR <noreply@yourdomain.com>"
  *                      defaults to Resend's shared test sender
  *   APP_PUBLIC_URL   — public web app base, e.g. https://hrms-web-alpha.vercel.app
  *                      (used to build candidate links)
@@ -17,7 +17,7 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 export const APP_PUBLIC_URL =
   process.env.APP_PUBLIC_URL ?? 'https://hrms-web-alpha.vercel.app'
 
-const DEFAULT_FROM = process.env.EMAIL_FROM ?? 'Emvora <onboarding@resend.dev>'
+const DEFAULT_FROM = process.env.EMAIL_FROM ?? 'CognixHR <onboarding@resend.dev>'
 
 export interface SendEmailInput {
   to:      string | string[]
@@ -77,14 +77,14 @@ function shell(bodyHtml: string): string {
   <div style="margin:0;padding:0;background:#f4f6fb;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
     <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
       <div style="text-align:center;margin-bottom:24px;">
-        <div style="display:inline-block;width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#047857 0%,#0F766E 50%,#1E40AF 100%);"></div>
-        <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:8px;letter-spacing:-0.5px;">emvora</div>
+        <div style="display:inline-block;width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#2E6FE6 0%,#2392C8 50%,#15B8A6 100%);"></div>
+        <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:8px;letter-spacing:-0.5px;">Cognix<span style="color:#15B8A6;">HR</span></div>
       </div>
       <div style="background:#ffffff;border-radius:16px;padding:32px;border:1px solid #e2e8f0;">
         ${bodyHtml}
       </div>
       <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:20px;">
-        Emvora — Workforce Intelligence Platform
+        CognixHR — Smarter Workforce. Stronger Future.
       </p>
     </div>
   </div>`

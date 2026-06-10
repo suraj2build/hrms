@@ -115,10 +115,10 @@ export function Signup() {
           {/* Logo */}
           <div className="mb-7 flex items-center gap-2.5">
             <LogoMark size={34} />
-            <span className="text-lg font-bold tracking-tight text-slate-900">Emvora</span>
+            <span className="text-lg font-bold tracking-tight text-slate-900">Cognix<span className="text-[#15B8A6]">HR</span></span>
           </div>
 
-          <h1 className="text-[24px] font-bold tracking-tight text-slate-900">Set up your Emvora workspace</h1>
+          <h1 className="text-[24px] font-bold tracking-tight text-slate-900">Set up your CognixHR workspace</h1>
           <p className="mt-1.5 text-sm text-slate-500">Get started in 2 minutes</p>
 
           {/* Step indicators */}
@@ -169,7 +169,7 @@ export function Signup() {
             <form onSubmit={form2.handleSubmit(onStep2Submit)} className="mt-6 space-y-4">
               <div>
                 <p className="text-[15px] font-semibold text-slate-900">Tell us about your company</p>
-                <p className="text-xs text-slate-500">This helps us configure Emvora for your needs.</p>
+                <p className="text-xs text-slate-500">This helps us configure CognixHR for your needs.</p>
               </div>
 
               <Field label="Company Name" icon={Building2} error={form2.formState.errors.company_name?.message}>
@@ -220,7 +220,7 @@ export function Signup() {
               </div>
               <h3 className="mt-4 text-lg font-semibold text-slate-900">You're all set!</h3>
               <p className="mt-1 text-sm text-slate-500">
-                Your Emvora workspace is ready. Check your email to verify your account, then sign in.
+                Your CognixHR workspace is ready. Check your email to verify your account, then sign in.
               </p>
               <div className="mt-5">
                 <PrimaryButton type="button" onClick={() => navigate('/login')}>Go to Sign In</PrimaryButton>
@@ -236,7 +236,7 @@ export function Signup() {
           )}
 
           <p className="mt-8 text-center text-[11px] text-slate-400">
-            © {new Date().getFullYear()} Emvora · All rights reserved · Terms · Privacy Policy
+            © {new Date().getFullYear()} CognixHR · All rights reserved · Terms · Privacy Policy
           </p>
         </div>
       </div>

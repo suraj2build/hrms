@@ -1,12 +1,14 @@
 /**
- * Emvora brand logo.
+ * CognixHR brand logo.
  *
- *   <Logo />                  → mark + "emvora" wordmark (default)
- *   <Logo variant="mark" />   → just the gradient tile mark
+ *   <Logo />                  → mark + "CognixHR" wordmark (default)
+ *   <Logo variant="mark" />   → just the gradient mark
  *   <Logo size={40} />        → custom mark size (px)
  *
- * Brand gradient: dark green #1A4D8F → dark teal #1E5BA8 → dark blue #2260A8
- * The mark is three ascending bars = growth + workforce intelligence.
+ * Brand: "Smarter Workforce. Stronger Future." — a Saar HRMS application.
+ * Gradient: royal blue #2E6FE6 → teal #15B8A6.
+ * The mark is an open "C" ring cradling an H / person figure =
+ * Cognix (cognition) + HR (people).
  */
 import { cn } from '@/lib/utils'
 
@@ -14,9 +16,13 @@ interface LogoProps {
   variant?: 'full' | 'mark'
   size?:    number
   className?: string
-  /** Wordmark colour — defaults to currentColor so it adapts to dark/light. */
+  /** Wordmark colour for the "Cognix" half — defaults to currentColor (adapts to dark/light). */
   wordClassName?: string
 }
+
+/** Brand colours, exported for use in non-SVG brand contexts. */
+export const BRAND_BLUE = '#2E6FE6'
+export const BRAND_TEAL = '#15B8A6'
 
 export function LogoMark({ size = 32, className }: { size?: number; className?: string }) {
   return (
@@ -29,17 +35,25 @@ export function LogoMark({ size = 32, className }: { size?: number; className?: 
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id="emvora-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop offset="0"   stopColor="#1A4D8F" />
-          <stop offset="0.5" stopColor="#1E5BA8" />
-          <stop offset="1"   stopColor="#2260A8" />
+        <linearGradient id="cognix-grad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+          <stop offset="0"    stopColor={BRAND_BLUE} />
+          <stop offset="0.55" stopColor="#2392C8" />
+          <stop offset="1"    stopColor={BRAND_TEAL} />
         </linearGradient>
       </defs>
-      <rect width="32" height="32" rx="8" fill="url(#emvora-grad)" />
-      {/* ascending bars — growth / intelligence */}
-      <rect x="7.5"  y="18"   width="3.5" height="6.5"  rx="1.75" fill="#fff" fillOpacity="0.85" />
-      <rect x="14.25" y="12.5" width="3.5" height="12"   rx="1.75" fill="#fff" />
-      <rect x="21"   y="7.5"  width="3.5" height="17"   rx="1.75" fill="#fff" fillOpacity="0.95" />
+      {/* Open "C" ring — cognition / circle of people */}
+      <path
+        d="M24 7.6 A11 11 0 1 0 24 24.4"
+        fill="none"
+        stroke="url(#cognix-grad)"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+      />
+      {/* H / person — two legs, a crossbar, and a head dot */}
+      <rect x="12.4" y="11.6" width="2.8" height="10.8" rx="1.4" fill="url(#cognix-grad)" />
+      <rect x="18.0" y="11.6" width="2.8" height="10.8" rx="1.4" fill="url(#cognix-grad)" />
+      <rect x="12.4" y="15.6" width="8.4" height="2.6"  rx="1.3" fill="url(#cognix-grad)" />
+      <circle cx="16.6" cy="9.4" r="2.25" fill="url(#cognix-grad)" />
     </svg>
   )
 }
@@ -49,9 +63,10 @@ export function Logo({ variant = 'full', size = 32, className, wordClassName }: 
     <div className={cn('flex items-center gap-2.5', className)}>
       <LogoMark size={size} />
       {variant === 'full' && (
-        <span className={cn('font-display font-bold tracking-tight leading-none', wordClassName)}
+        <span className="font-display font-bold tracking-tight leading-none"
               style={{ fontSize: size * 0.56 }}>
-          emvora
+          <span className={cn(wordClassName)}>Cognix</span>
+          <span style={{ color: BRAND_TEAL }}>HR</span>
         </span>
       )}
     </div>

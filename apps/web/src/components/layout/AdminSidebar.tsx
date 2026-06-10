@@ -293,7 +293,7 @@ export function AdminSidebar() {
           <div className="flex items-center gap-2.5">
             <LogoMark size={32} />
             <div>
-              <p className="text-[13px] font-bold text-foreground leading-none tracking-tight">Emvora</p>
+              <p className="text-[13px] font-bold text-foreground leading-none tracking-tight">Cognix<span className="text-[#15B8A6]">HR</span></p>
               <p className="text-[10px] text-muted-foreground/70 mt-0.5 leading-none">Admin Portal</p>
             </div>
           </div>

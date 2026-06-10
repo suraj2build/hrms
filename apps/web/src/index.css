@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Emvora Brand — HRMS Design System 2.0
+ * CognixHR Brand — HRMS Design System 2.0
  * Professional, premium, conservative next-gen visual system.
  * Palette: navy #1A4D8F primary, navy→azure gradient brand, #F3F5F8 cool-gray canvas,
  *          Inter font, 12px (0.75rem) base radius. Single navy accent across all
@@ -309,7 +309,7 @@
   /* Display font utility — Sora for headings & KPI numbers */
   .font-display { font-family: var(--font-display); }
 
-  /* Emvora brand gradient text — navy → azure */
+  /* CognixHR brand gradient text — navy → azure */
   .brand-gradient-text {
     background: linear-gradient(135deg, #1A4D8F 0%, #1E5BA8 45%, #2260A8 100%);
     -webkit-background-clip: text;

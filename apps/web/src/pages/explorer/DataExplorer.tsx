@@ -245,7 +245,7 @@ export function DataExplorer() {
       <PageHero
         eyebrow="Reports · Explorer"
         title="Data Explorer"
-        subtitle="Slice any workforce dataset, drill to the employee, export — without leaving Emvora"
+        subtitle="Slice any workforce dataset, drill to the employee, export — without leaving CognixHR"
       />
 
       {/* ── Saved views ─────────────────────────────────────────────────── */}

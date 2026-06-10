@@ -32,7 +32,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
 
   const [activeTab, setActiveTab] = useState<'payroll' | 'attendance' | 'performance' | 'talent'>('payroll');
 
-  // Calculates the monthly cost structure dynamically based on Emvora's Indian Rupee pricing structure
+  // Calculates the monthly cost structure dynamically based on CognixHR's Indian Rupee pricing structure
   const calculateCost = () => {
     const baseCap = 100;
     let baseRate = 9999;
@@ -135,7 +135,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
                 <Zap className="w-5 h-5 fill-white text-white" />
               </div>
               <div>
-                <span className="font-sans font-extrabold text-xl tracking-tight text-slate-900 block leading-tight">emvora</span>
+                <span className="font-sans font-extrabold text-xl tracking-tight text-slate-900 block leading-tight">Cognix<span className="text-teal-500">HR</span></span>
               </div>
             </div>
 
@@ -204,7 +204,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
             transition={{ duration: 0.5, delay: 0.2 }}
             className="text-base md:text-lg text-slate-300 max-w-3xl mx-auto leading-relaxed mb-8"
           >
-            Emvora unifies payroll, attendance, compliance and AI-driven workforce intelligence on one platform — built ground-up for Indian enterprises.
+            CognixHR unifies payroll, attendance, compliance and AI-driven workforce intelligence on one platform — built ground-up for Indian enterprises.
           </motion.p>
 
           <motion.div 
@@ -254,7 +254,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
                 <div className="w-3 h-3 rounded-full bg-red-400" />
                 <div className="w-3 h-3 rounded-full bg-yellow-400" />
                 <div className="w-3 h-3 rounded-full bg-green-400" />
-                <span className="text-xs text-slate-400 font-mono ml-2">emvora-cloud-hrms.co/portal</span>
+                <span className="text-xs text-slate-400 font-mono ml-2">cognixhr-cloud-hrms.co/portal</span>
               </div>
               <div className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-md text-[10px] font-bold font-mono">
                 STAGE: Sandbox Environment
@@ -468,7 +468,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
         </div>
       </section>
 
-      {/* Comparisons/Why Emvora Section */}
+      {/* Comparisons/Why CognixHR Section */}
       <section id="why-section" className="py-24 bg-slate-900 text-white relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,rgba(99,102,241,0.15),transparent)] pointer-events-none" />
         <div className="max-w-7xl mx-auto px-6">
@@ -478,7 +478,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
               An HR portal employees actually love opening
             </h2>
             <p className="text-slate-400 mt-4">
-              Typical database systems focus on data logs, ignoring human connection. Emvora focuses on peer engagement, transparency, and high usability.
+              Typical database systems focus on data logs, ignoring human connection. CognixHR focuses on peer engagement, transparency, and high usability.
             </p>
           </div>
 
@@ -658,7 +658,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
                 name: 'Strength Plan',
                 basePrice: 9999,
                 extraPrice: 90,
-                tagline: 'Emvora recommended choice',
+                tagline: 'CognixHR recommended choice',
                 desc: 'Adds advanced attendance, geofenced GPS tracking, expense management, and timesheets.',
                 colorClasses: {
                   card: 'border-blue-500 bg-blue-950/20 shadow-lg relative ring-2 ring-blue-600/15',
@@ -856,14 +856,14 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-base">E</div>
-              <span className="font-bold text-white tracking-tight text-base">emvora</span>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-teal-400 flex items-center justify-center text-white font-bold text-base">C</div>
+              <span className="font-bold text-white tracking-tight text-base">Cognix<span className="text-teal-400">HR</span></span>
             </div>
             <p className="text-xs leading-normal">
               Next-generation modern HR, Payroll, Geofenced time sheets and ATS, modeled on transparent corporate alignment.
             </p>
             <p className="text-[10px] text-slate-500 font-mono">
-              © 2026 Emvora HR Technology. All rights reserved.
+              © 2026 CognixHR HR Technology. All rights reserved.
             </p>
           </div>
 
@@ -880,9 +880,9 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
           <div className="space-y-3">
             <h4 className="text-xs font-bold text-slate-200 tracking-wider uppercase">Comparison</h4>
             <ul className="text-xs space-y-2">
-              <li><a href="#" className="hover:text-white transition-colors">Emvora vs Competitors</a></li>
-              <li><a href="#" className="hover:text-white transition-colors">Emvora vs Darwinbox</a></li>
-              <li><a href="#" className="hover:text-white transition-colors">Emvora vs BambooHR</a></li>
+              <li><a href="#" className="hover:text-white transition-colors">CognixHR vs Competitors</a></li>
+              <li><a href="#" className="hover:text-white transition-colors">CognixHR vs Darwinbox</a></li>
+              <li><a href="#" className="hover:text-white transition-colors">CognixHR vs BambooHR</a></li>
             </ul>
           </div>
 

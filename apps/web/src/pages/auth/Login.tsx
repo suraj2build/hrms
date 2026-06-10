@@ -83,11 +83,11 @@ export function Login() {
           {/* Logo */}
           <div className="mb-8 flex items-center gap-2.5">
             <LogoMark size={34} />
-            <span className="text-lg font-bold tracking-tight text-slate-900">Emvora</span>
+            <span className="text-lg font-bold tracking-tight text-slate-900">Cognix<span className="text-[#15B8A6]">HR</span></span>
           </div>
 
           {/* Heading */}
-          <h1 className="text-[26px] font-bold tracking-tight text-slate-900">Welcome to Emvora</h1>
+          <h1 className="text-[26px] font-bold tracking-tight text-slate-900">Welcome to CognixHR</h1>
           <p className="mt-1.5 text-sm text-slate-500">
             Sign in to your workforce workspace — payroll, attendance and people in one place.
           </p>
@@ -205,7 +205,7 @@ export function Login() {
 
           {/* Footer */}
           <p className="mt-8 text-center text-[11px] text-slate-400">
-            © {new Date().getFullYear()} Emvora · All rights reserved · Terms · Privacy Policy
+            © {new Date().getFullYear()} CognixHR · All rights reserved · Terms · Privacy Policy
           </p>
         </div>
       </div>

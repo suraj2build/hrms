@@ -99,7 +99,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
           <LogoMark size={26} />
         </span>
         <span className="font-display font-bold text-[13px] text-white hidden md:block tracking-tight">
-          Emvora
+          Cognix<span className="text-[#2DD4BF]">HR</span>
         </span>
       </button>
 

@@ -401,7 +401,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
           {/* Slogan */}
           <div className="flex items-center gap-2">
-            <span className="font-extrabold text-indigo-400 font-sans text-sm tracking-tight">EMVORA PLATFORM CONSOLE</span>
+            <span className="font-extrabold text-indigo-400 font-sans text-sm tracking-tight">COGNIXHR PLATFORM CONSOLE</span>
             <span className="text-[9px] px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded-md font-mono font-bold">V1.5-SANDBOX</span>
           </div>
         </div>
@@ -579,7 +579,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
           <div className="px-6 space-y-3.5 text-xs text-slate-400">
             <div className="p-3 bg-indigo-50 text-indigo-700 rounded-xl font-medium border border-indigo-100">
               <span className="font-bold uppercase tracking-wider text-[9px] block mb-1">Interactive Sandbox</span>
-              You have loaded Emvora's fully interactive product showcase with pre-populated records. Feel free to run operations!
+              You have loaded CognixHR's fully interactive product showcase with pre-populated records. Feel free to run operations!
             </div>
           </div>
         </aside>
@@ -1652,7 +1652,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     <input
                       type="email"
                       required
-                      placeholder="rahul.sen@emvora.co"
+                      placeholder="rahul.sen@cognixhr.co"
                       value={employeeForm.email}
                       onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
                       className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500"

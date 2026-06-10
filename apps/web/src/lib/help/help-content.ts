@@ -346,7 +346,7 @@ export const HELP_CONTENT: HelpEntry[] = [
 /** Default shown when no specific entry matches the route. */
 export const DEFAULT_HELP: HelpEntry = {
   match:   '',
-  title:   'Getting around Emvora',
+  title:   'Getting around CognixHR',
   summary: 'Every screen has guidance like this. Here’s how to find your way.',
   steps: [
     { title: 'Use the top tabs', detail: 'The top navigation switches between domains (Operations, Workforce, Attendance, Payroll, Compliance, Reports…). The left sidebar shows pages within the current domain.' },

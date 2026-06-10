@@ -106,14 +106,20 @@ export function AuthShowcase() {
 
         {/* Tagline */}
         <div className="max-w-[440px]">
-          <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/20 backdrop-blur-md">
-            <LogoMark size={26} />
+          <div className="mb-4 flex items-center gap-3">
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/20 backdrop-blur-md">
+              <LogoMark size={26} />
+            </span>
+            <div className="leading-none">
+              <p className="font-display text-xl font-bold text-white">Cognix<span className="text-[#2DD4BF]">HR</span></p>
+              <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.2em] text-white/55">Smarter Workforce · Stronger Future</p>
+            </div>
           </div>
           <h2 className="text-2xl font-bold leading-tight text-white xl:text-[28px]">
             A Unified Hub for Smarter<br />Workforce Decisions
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-white/65">
-            Emvora gives HR, payroll and people teams a single command center —
+            CognixHR gives HR, payroll and people teams a single command center —
             deep insights, statutory compliance and a 360° view of your entire workforce.
           </p>
           <div className="mt-6 flex items-center gap-1.5">

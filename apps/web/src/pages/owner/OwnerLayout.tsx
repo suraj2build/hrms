@@ -140,7 +140,7 @@ export function OwnerLayout() {
             className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-teal-700 hover:bg-slate-100/70 transition-colors"
           >
             <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
-            <span>Open Emvora App</span>
+            <span>Open CognixHR App</span>
           </a>
         </div>
 

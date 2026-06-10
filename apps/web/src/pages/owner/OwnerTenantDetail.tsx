@@ -562,7 +562,7 @@ export function OwnerTenantDetail() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-xs text-slate-500">
-              Creates a Supabase auth account + Emvora profile. The admin can log in immediately with these credentials.
+              Creates a Supabase auth account + CognixHR profile. The admin can log in immediately with these credentials.
             </p>
 
             <div className="space-y-1.5">
