@@ -27,15 +27,35 @@ export function seriesColor(idx: number): string {
   return SERIES_COLORS[idx % SERIES_COLORS.length]
 }
 
-export function getMonths(range: TimeRangeId): string[] {
+export function getMonths(range: TimeRangeId, anchor?: string | null): string[] {
   const n = range === 'current_month' ? 1 : range === 'last_3m' ? 3 : range === 'last_6m' ? 6 : 12
-  const now = new Date()
+  // Anchor the window on the latest month with data (e.g. last finalized payroll
+  // run) when available — otherwise fall back to the current calendar month.
+  let endY: number, endM0: number
+  if (anchor && /^\d{4}-\d{2}$/.test(anchor)) {
+    const [ay, am] = anchor.split('-').map(Number)
+    endY = ay; endM0 = am - 1
+  } else {
+    const now = new Date()
+    endY = now.getFullYear(); endM0 = now.getMonth()
+  }
   const months: string[] = []
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const d = new Date(endY, endM0 - i, 1)
     months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
   return months
+}
+
+/** Latest month with finalized payroll data, cached per session. Falls back to null. */
+let _anchorPromise: Promise<string | null> | null = null
+export function getAnchorMonth(): Promise<string | null> {
+  if (!_anchorPromise) {
+    _anchorPromise = api.get<{ month: string | null }>('/datasets/payroll-cost/anchor')
+      .then(r => r?.month ?? null)
+      .catch(() => null)
+  }
+  return _anchorPromise
 }
 
 export function fmtMonthLabel(yyyyMM: string): string {
@@ -471,7 +491,8 @@ async function separationByGroup(q: AnalyticsQuery, months: string[], drillFilte
 // ── Main entry ────────────────────────────────────────────────────────────────
 
 export async function resolveQuery(q: AnalyticsQuery, drillStack: DrillStep[] = []): Promise<ChartData> {
-  const months       = getMonths(q.timeRange)
+  const anchor       = await getAnchorMonth()
+  const months       = getMonths(q.timeRange, anchor)
   const drillFilters = extractFilters(drillStack)
 
   switch (`${q.dataset}:${q.dimension}`) {

@@ -46,6 +46,21 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     ],
   }
 
+  // ── GET /datasets/payroll-cost/anchor ───────────────────────────────────────
+  // Returns the latest month that has a finalized payroll run, so analytics /
+  // explorer can anchor their windows on real data instead of the wall clock.
+  fastify.get('/anchor', adminAuth, async (req: any, reply) => {
+    const { data } = await fastify.supabase
+      .from('payroll_runs')
+      .select('month, status')
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['finalized', 'completed'])
+      .order('month', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    return reply.send({ month: (data as any)?.month ?? null })
+  })
+
   fastify.get('/', adminAuth, async (req: any, reply) => {
     const tid = req.tenantId
     const q   = req.query as Record<string, string>

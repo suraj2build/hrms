@@ -45,19 +45,38 @@ export interface EmployeeRow {
 
 // ── Date helpers ────────────────────────────────────────────────────────────────
 
-function rangeMonths(range: DateRangeId): { from: string; to: string; month: string } {
+function rangeMonths(range: DateRangeId, anchor?: string | null): { from: string; to: string; month: string } {
   const n = range === 'current_month' ? 1 : range === 'last_3m' ? 3 : range === 'last_6m' ? 6 : 12
-  const now = new Date()
-  const to  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const start = new Date(now.getFullYear(), now.getMonth() - (n - 1), 1)
+  // Anchor on the latest month with data (finalized payroll) when available.
+  let endY: number, endM0: number
+  if (anchor && /^\d{4}-\d{2}$/.test(anchor)) {
+    const [ay, am] = anchor.split('-').map(Number)
+    endY = ay; endM0 = am - 1
+  } else {
+    const now = new Date()
+    endY = now.getFullYear(); endM0 = now.getMonth()
+  }
+  const to    = `${endY}-${String(endM0 + 1).padStart(2, '0')}`
+  const start = new Date(endY, endM0 - (n - 1), 1)
   const from  = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`
   return { from, to, month: to }
 }
 
+/** Latest month with finalized payroll data, cached per session. */
+let _anchorPromise: Promise<string | null> | null = null
+function getAnchorMonth(): Promise<string | null> {
+  if (!_anchorPromise) {
+    _anchorPromise = api.get<{ month: string | null }>('/datasets/payroll-cost/anchor')
+      .then(r => r?.month ?? null)
+      .catch(() => null)
+  }
+  return _anchorPromise
+}
+
 // ── Query building ──────────────────────────────────────────────────────────────
 
-function buildDateParams(surface: SurfaceConfig, range: DateRangeId): string {
-  const { from, to, month } = rangeMonths(range)
+function buildDateParams(surface: SurfaceConfig, range: DateRangeId, anchor: string | null): string {
+  const { from, to, month } = rangeMonths(range, anchor)
   switch (surface.paramStyle) {
     case 'from_to': return `from=${from}&to=${to}`
     case 'month':   return `month=${month}`
@@ -85,9 +104,10 @@ export async function resolveExplorer(
   range:      DateRangeId,
   drillStack: DrillStep[],
 ): Promise<ExplorerResult> {
+  const anchor = await getAnchorMonth()
   const qs = join(
     `group_by=${dimension.id}`,
-    buildDateParams(surface, range),
+    buildDateParams(surface, range, anchor),
     buildDrillParams(drillStack),
   )
 
