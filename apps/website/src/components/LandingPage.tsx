@@ -148,9 +148,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
           <div className="flex items-center gap-10">
             <div className="flex items-center gap-3">
               <CognixMark size={38} />
-              <div>
-                <span className="font-sans font-extrabold text-xl tracking-tight text-slate-900 block leading-tight">Cognix<span className="text-teal-500">HR</span></span>
-              </div>
+              <img src="/brand/cognixhr-wordmark.png" alt="CognixHR" draggable={false} className="h-5 w-auto block" />
             </div>
 
             <div className="hidden lg:flex items-center gap-8">
@@ -871,7 +869,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <CognixMark size={32} />
-              <span className="font-bold text-white tracking-tight text-base">Cognix<span className="text-teal-400">HR</span></span>
+              <img src="/brand/cognixhr-wordmark-light.png" alt="CognixHR" draggable={false} className="h-4 w-auto block" />
             </div>
             <p className="text-xs leading-normal">
               Next-generation modern HR, Payroll, Geofenced time sheets and ATS, modeled on transparent corporate alignment.

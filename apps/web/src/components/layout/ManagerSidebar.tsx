@@ -38,7 +38,6 @@ import {
   HelpCircle,
   ChevronLeft,
   ChevronRight,
-  Building2,
   UserCircle2,
   ShieldCheck,
   Radio,
@@ -47,6 +46,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { cn }         from '@/lib/utils'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { useUIStore } from '@/stores/uiStore'
 import { api }        from '@/lib/api/client'
 import { Button }     from '@/components/ui/button'
@@ -261,13 +261,11 @@ export function ManagerSidebar() {
           sidebarCollapsed ? 'justify-center px-0' : 'px-4 gap-2.5',
         )}
       >
-        <div className="w-8 h-8 rounded-lg bg-amber-500 flex items-center justify-center flex-shrink-0">
-          <Building2 className="h-4 w-4 text-white" />
-        </div>
+        <LogoMark size={32} className="flex-shrink-0" />
         {!sidebarCollapsed && (
           <div className="leading-tight">
-            <p className="text-sm font-bold text-sidebar-foreground">Cognix<span className="text-[#15B8A6]">HR</span></p>
-            <p className="text-[10px] text-sidebar-foreground/65">Manager Console</p>
+            <Wordmark height={15} />
+            <p className="text-[10px] text-sidebar-foreground/65 mt-1">Manager Console</p>
           </div>
         )}
       </div>

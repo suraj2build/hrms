@@ -13,6 +13,7 @@ import {
   Receipt, PieChart, Banknote,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useBasePath } from '@/lib/routing'
@@ -507,17 +508,13 @@ export function Sidebar() {
         sidebarCollapsed && 'justify-center px-2',
       )}>
         {sidebarCollapsed ? (
-          <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
-            <Building2 className="h-3.5 w-3.5 text-primary-foreground" />
-          </div>
+          <LogoMark size={28} />
         ) : (
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center flex-shrink-0">
-              <Building2 className="h-3.5 w-3.5 text-primary-foreground" />
-            </div>
+            <LogoMark size={28} className="flex-shrink-0" />
             <div>
-              <p className="text-[12px] font-bold text-foreground leading-none tracking-tight">Cognix<span className="text-[#15B8A6]">HR</span></p>
-              <p className="text-[10px] text-muted-foreground/60 mt-0.5 leading-none">HR Platform</p>
+              <Wordmark height={13} />
+              <p className="text-[10px] text-muted-foreground/60 mt-1 leading-none">HR Platform</p>
             </div>
           </div>
         )}

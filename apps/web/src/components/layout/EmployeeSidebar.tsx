@@ -18,7 +18,6 @@ import {
   Mail,
   CheckSquare,
   Users,
-  Building2,
   HelpCircle,
   LifeBuoy,
   BookMarked,
@@ -34,6 +33,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { useUIStore }    from '@/stores/uiStore'
 import { useAuthStore }  from '@/stores/authStore'
 import { Button }        from '@/components/ui/button'
@@ -221,13 +221,11 @@ export function EmployeeSidebar() {
           sidebarCollapsed ? 'justify-center px-0' : 'px-4 gap-2.5',
         )}
       >
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-          <Building2 className="h-4 w-4 text-primary-foreground" />
-        </div>
+        <LogoMark size={32} className="flex-shrink-0" />
         {!sidebarCollapsed && (
           <div className="leading-tight">
-            <p className="text-sm font-bold text-sidebar-foreground">Cognix<span className="text-[#15B8A6]">HR</span></p>
-            <p className="text-[10px] text-sidebar-foreground/65">Employee Portal</p>
+            <Wordmark height={15} />
+            <p className="text-[10px] text-sidebar-foreground/65 mt-1">Employee Portal</p>
           </div>
         )}
       </div>

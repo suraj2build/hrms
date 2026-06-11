@@ -15,7 +15,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Sun, Moon, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
-import { LogoMark } from '@/components/brand/Logo'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { getVisibleDomains, getDomainForPath, getExecutiveDomainForPath, EXECUTIVE_DOMAINS } from './nav-config'
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
@@ -95,12 +95,8 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         onClick={() => navigate('/admin/intelligence/workforce-command')}
         className="flex items-center gap-2 shrink-0 px-4 group border-r border-white/15 hover:bg-white/10 transition-colors"
       >
-        <span className="rounded-lg ring-1 ring-white/25 shadow-sm flex items-center justify-center">
-          <LogoMark size={26} />
-        </span>
-        <span className="font-display font-bold text-[13px] text-white hidden md:block tracking-tight">
-          Cognix<span className="text-[#2DD4BF]">HR</span>
-        </span>
+        <LogoMark size={28} tile />
+        <Wordmark height={15} tone="light" className="hidden md:block" />
       </button>
 
       {/* ── Domain tabs — clean flat underline tabs ────────────── */}

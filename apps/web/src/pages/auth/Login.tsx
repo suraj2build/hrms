@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Loader2, Eye, EyeOff, Mail, Lock } from 'lucide-react'
-import { LogoMark } from '@/components/brand/Logo'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -83,7 +83,7 @@ export function Login() {
           {/* Logo */}
           <div className="mb-8 flex items-center gap-2.5">
             <LogoMark size={34} />
-            <span className="text-lg font-bold tracking-tight text-slate-900">Cognix<span className="text-[#15B8A6]">HR</span></span>
+            <Wordmark height={20} />
           </div>
 
           {/* Heading */}

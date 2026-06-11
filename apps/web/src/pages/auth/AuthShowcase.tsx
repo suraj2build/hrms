@@ -3,7 +3,7 @@
  * Navy brand gradient with floating glassy 3D HR cards.
  */
 import { Users, Wallet, CalendarCheck, TrendingUp } from 'lucide-react'
-import { LogoMark } from '@/components/brand/Logo'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 
 export function FloatKeyframes() {
   // Animate the `translate` property (independent of `transform`) so the cards'
@@ -107,12 +107,10 @@ export function AuthShowcase() {
         {/* Tagline */}
         <div className="max-w-[440px]">
           <div className="mb-4 flex items-center gap-3">
-            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/20 backdrop-blur-md">
-              <LogoMark size={26} />
-            </span>
+            <LogoMark size={48} tile />
             <div className="leading-none">
-              <p className="font-display text-xl font-bold text-white">Cognix<span className="text-[#2DD4BF]">HR</span></p>
-              <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.2em] text-white/55">Smarter Workforce · Stronger Future</p>
+              <Wordmark height={22} tone="light" />
+              <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.2em] text-white/55">Smarter Workforce · Stronger Future</p>
             </div>
           </div>
           <h2 className="text-2xl font-bold leading-tight text-white xl:text-[28px]">

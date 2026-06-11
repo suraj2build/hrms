@@ -15,7 +15,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, ChevronDown, Inbox } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { cn }           from '@/lib/utils'
-import { LogoMark }     from '@/components/brand/Logo'
+import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { useUIStore }   from '@/stores/uiStore'
 import { api }          from '@/lib/api/client'
 import { Button }       from '@/components/ui/button'
@@ -293,8 +293,8 @@ export function AdminSidebar() {
           <div className="flex items-center gap-2.5">
             <LogoMark size={32} />
             <div>
-              <p className="text-[13px] font-bold text-foreground leading-none tracking-tight">Cognix<span className="text-[#15B8A6]">HR</span></p>
-              <p className="text-[10px] text-muted-foreground/70 mt-0.5 leading-none">Admin Portal</p>
+              <Wordmark height={15} />
+              <p className="text-[10px] text-muted-foreground/70 mt-1 leading-none">Admin Portal</p>
             </div>
           </div>
         )}
