@@ -33,6 +33,7 @@ import {
   UserCheck, UserPlus, UserX, Play, CheckSquare,
   CalendarCheck, FileSearch, ClipboardList, ArrowRight,
   Activity, BarChart3, TrendingUp, ChevronRight,
+  CalendarDays, Server, LayoutGrid,
 } from 'lucide-react'
 import { InsightChart, EmptyWorkspaceState } from '@/components/dashboard'
 import { OperationalTable } from '@/components/dashboard/primitives'
@@ -356,6 +357,59 @@ const EVENT_META: Record<string, { icon: React.ComponentType<{ className?: strin
   proof_rejected:      { icon: XCircle,       color: 'text-destructive' },
   carry_forward:       { icon: ArrowUpRight,  color: 'text-success' },
   anomaly_detected:    { icon: AlertTriangle, color: 'text-warning' },
+}
+
+/** Module hub tile — clickable card linking to a major app section */
+function ModuleCard({
+  icon: Icon, label, stat, status,
+  iconBg, iconColor, badge, onClick,
+}: {
+  icon:       React.ComponentType<{ className?: string }>
+  label:      string
+  stat:       string
+  status:     'healthy' | 'degraded' | 'critical' | 'unknown'
+  iconBg:     string
+  iconColor:  string
+  badge?:     number | null
+  onClick:    () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex flex-col gap-3 p-4 rounded-xl border bg-card text-left transition-all hover:shadow-md group',
+        status === 'critical' ? 'border-destructive/30 hover:border-destructive/50' :
+        status === 'degraded' ? 'border-warning/30   hover:border-warning/50' :
+                                'border-border        hover:border-primary/30',
+      )}
+    >
+      <div className="flex items-start justify-between">
+        <span className={cn('h-9 w-9 rounded-xl flex items-center justify-center', iconBg)}>
+          <Icon className={cn('h-4 w-4', iconColor)} />
+        </span>
+        <div className="flex items-center gap-1.5">
+          {badge != null && badge > 0 && (
+            <span className="text-[9px] font-bold bg-warning/15 text-warning px-1.5 py-0.5 rounded-full tabular-nums">
+              {badge}
+            </span>
+          )}
+          <span className={cn(
+            'h-2 w-2 rounded-full',
+            status === 'healthy'  ? 'bg-success' :
+            status === 'critical' ? 'bg-destructive animate-pulse' :
+            status === 'degraded' ? 'bg-warning' : 'bg-muted-foreground/30',
+          )} />
+        </div>
+      </div>
+      <div className="flex-1">
+        <p className="text-[13px] font-semibold text-foreground group-hover:text-primary transition-colors leading-none">
+          {label}
+        </p>
+        <p className="text-[11px] text-muted-foreground mt-1 leading-tight">{stat}</p>
+      </div>
+      <ChevronRight className="h-3 w-3 text-muted-foreground/30 group-hover:text-primary/60 transition-all group-hover:translate-x-0.5 self-end" />
+    </button>
+  )
 }
 
 // ── ControlCenter ─────────────────────────────────────────────────────────────
@@ -722,25 +776,96 @@ export function ControlCenter() {
         </Card>
       </div>
 
+      {/* ── Critical Alert Strip — only when there are actionable issues ───── */}
+      {criticalIssues > 0 && (
+        <div className="rounded-xl bg-destructive/5 border border-destructive/20 px-5 py-3 flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 animate-pulse" />
+          <p className="text-[13px] font-semibold text-destructive flex-1">
+            {criticalIssues} critical issue{criticalIssues > 1 ? 's' : ''} detected — immediate attention required
+          </p>
+          <Button size="sm" variant="destructive" className="h-7 text-xs shrink-0"
+            onClick={() => nav('/admin/attendance/center')}>
+            View issues →
+          </Button>
+        </div>
+      )}
+
+      {/* ── Module Hub — primary navigation grid ─────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <LayoutGrid className="h-3.5 w-3.5 text-muted-foreground" />
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Module Overview</p>
+          </div>
+          <p className="text-[10.5px] text-muted-foreground/60">Click any tile to navigate</p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <ModuleCard
+            icon={Users} label="Employees"
+            stat={`${dashStats?.total_employees ?? freshness?.total_active_employees ?? '—'} active`}
+            status="healthy"
+            iconBg="bg-sky-50" iconColor="text-sky-600"
+            onClick={() => nav('/admin/employees')}
+          />
+          <ModuleCard
+            icon={CalendarCheck} label="Attendance"
+            stat={freshness?.health === 'healthy' ? 'All synced' : `${freshness?.employees_missing ?? 0} missing data`}
+            status={(freshness?.health ?? 'unknown') as any}
+            iconBg="bg-violet-50" iconColor="text-violet-600"
+            badge={(freshness?.employees_missing ?? 0) > 0 ? freshness!.employees_missing : null}
+            onClick={() => nav('/admin/attendance/center')}
+          />
+          <ModuleCard
+            icon={CalendarDays} label="Leave"
+            stat={regList.length > 0 ? `${regList.length} pending approval` : 'All approved'}
+            status={regList.length > 0 ? 'degraded' : 'healthy'}
+            iconBg="bg-emerald-50" iconColor="text-emerald-600"
+            badge={regList.length > 0 ? regList.length : null}
+            onClick={() => nav('/admin/leave/balances')}
+          />
+          <ModuleCard
+            icon={Wallet} label="Payroll"
+            stat={payroll?.current_run?.status
+              ? `${payroll.current_month} · ${payroll.current_run.status.charAt(0).toUpperCase() + payroll.current_run.status.slice(1)}`
+              : (payroll?.current_month ?? 'No run yet')}
+            status={payrollHealth as any}
+            iconBg="bg-amber-50" iconColor="text-amber-600"
+            onClick={() => nav('/admin/payroll/center')}
+          />
+          <ModuleCard
+            icon={BarChart3} label="Analytics"
+            stat="CEO · CHRO · Workforce views"
+            status="healthy"
+            iconBg="bg-blue-50" iconColor="text-blue-600"
+            onClick={() => nav('/admin/executive')}
+          />
+          <ModuleCard
+            icon={Server} label="System"
+            stat={schedulers.length > 0
+              ? `${schedulers.filter(s => !s.is_stale).length}/${schedulers.length} engines healthy`
+              : overallHealth.charAt(0).toUpperCase() + overallHealth.slice(1)}
+            status={(schedulers.some(s => s.is_stale) ? 'degraded' : overallHealth === 'healthy' ? 'healthy' : overallHealth) as any}
+            iconBg="bg-slate-50" iconColor="text-slate-600"
+            badge={schedulers.filter(s => s.is_stale).length || null}
+            onClick={() => nav('/admin/system/observability')}
+          />
+        </div>
+      </div>
+
       {/* ── Executive Intelligence Banner ────────────────────────────────── */}
       <button
         className="w-full text-left rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 via-primary/[0.03] to-transparent px-5 py-3.5 flex items-center gap-4 hover:border-primary/40 hover:from-primary/10 hover:via-primary/[0.06] transition-all duration-200 group"
         onClick={() => nav('/admin/executive')}
       >
-        {/* Icon */}
         <div className="flex-shrink-0 h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
           <BarChart3 className="h-4.5 w-4.5 text-primary" />
         </div>
-
-        {/* Text */}
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-semibold text-foreground leading-tight">Executive Intelligence Center</p>
           <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
             CEO &amp; CHRO strategic view · workforce, financial, compliance &amp; trend analytics
           </p>
         </div>
-
-        {/* Right side: trend indicator + arrow */}
         <div className="flex items-center gap-3 flex-shrink-0">
           <div className="hidden sm:flex items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground">
             <TrendingUp className="h-3.5 w-3.5 text-primary/60" />
@@ -1008,12 +1133,13 @@ export function ControlCenter() {
           </div>
           <div className="flex-1">
             {[
-              { icon: Play,          label: 'Process Attendance',       href: '/admin/attendance/center',       badge: null },
-              { icon: CheckSquare,   label: 'Review Regularisation',    href: '/admin/attendance/regularisation', badge: regList.length > 0 ? `${regList.length} pending` : null },
-              { icon: CalendarCheck, label: 'Muster Roll',              href: '/admin/attendance/muster',       badge: null },
-              { icon: FileSearch,    label: 'Leave Balances',           href: '/admin/leave/balances',          badge: null },
-              { icon: UserCheck,     label: 'People Directory',         href: '/admin/employees',               badge: null },
-              { icon: ClipboardList, label: 'Attendance Anomalies',     href: '/admin/attendance/anomalies',    badge: anomalyCount > 0 ? `${anomalyCount} open` : null },
+              { icon: Play,          label: 'Process Attendance',    href: '/admin/attendance/center',         badge: null },
+              { icon: CheckSquare,   label: 'Review Regularisation', href: '/admin/attendance/regularisation', badge: regList.length > 0 ? `${regList.length}` : null },
+              { icon: Wallet,        label: 'Payroll Center',        href: '/admin/payroll/center',            badge: null },
+              { icon: CalendarDays,  label: 'Leave Management',      href: '/admin/leave/balances',            badge: null },
+              { icon: UserCheck,     label: 'People Directory',      href: '/admin/employees',                 badge: null },
+              { icon: ClipboardList, label: 'Attendance Anomalies',  href: '/admin/attendance/anomalies',      badge: anomalyCount > 0 ? `${anomalyCount}` : null },
+              { icon: BarChart3,     label: 'Analytics & Reports',   href: '/admin/executive',                 badge: null },
             ].map(item => (
               <button
                 key={item.href}
@@ -1177,72 +1303,66 @@ export function ControlCenter() {
         </div>
       )}
 
-      {/* ── ROW 7: Bottom stats strip ─────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* ── ROW 7: Corrections KPI + Operations Timeline ─────────────────── */}
+      <div className="grid grid-cols-[1fr_2fr] gap-4">
 
         {/* Corrections */}
         <KpiCard
-          label="Corrections"
+          label="Pending Corrections"
           value={correctionsCount}
           icon={CheckSquare}
           iconBg={correctionsCount > 0 ? 'bg-orange-50' : 'bg-emerald-50'}
           iconColor={correctionsCount > 0 ? 'text-orange-500' : 'text-emerald-600'}
           valueColor={correctionsCount > 0 ? 'text-orange-500' : undefined}
-          sub="Today's edits"
+          sub={correctionsCount > 0 ? 'Awaiting approval' : 'All corrections clear'}
           trend={correctionsCount > 0 ? `${correctionsCount} pending` : 'All clear'}
           trendPositive={correctionsCount === 0}
           onClick={() => nav('/admin/attendance/corrections')}
         />
 
-        {/* Pending Approvals */}
-        <KpiCard
-          label="Pending Approvals"
-          value={regList.length}
-          icon={ClipboardList}
-          iconBg={regList.length > 0 ? 'bg-violet-50' : 'bg-muted'}
-          iconColor={regList.length > 0 ? 'text-violet-600' : 'text-muted-foreground'}
-          valueColor={regList.length > 0 ? 'text-violet-600' : undefined}
-          sub="Awaiting admin"
-          trend={regList.length > 0 ? `${regList.length} waiting` : undefined}
-          trendPositive={false}
-          onClick={() => nav('/admin/attendance/regularisation')}
-        />
-
-        {/* Operations Timeline */}
-        <div className="rounded-2xl bg-card shadow-card px-5 py-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="font-display text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Operations Timeline</p>
-            <button
-              className="text-xs text-primary font-semibold hover:underline"
+        {/* Operations Timeline — wider, shows more events */}
+        <Card
+          title="Operations Timeline"
+          action={
+            <button className="text-xs text-primary font-semibold hover:underline flex items-center gap-1"
               onClick={() => nav('/admin/system/event-governance')}>
-              Full log →
+              Full log <ExternalLink className="h-2.5 w-2.5" />
             </button>
-          </div>
+          }
+        >
           {evLoading ? (
-            <div className="h-8 rounded bg-muted animate-pulse" />
+            <ZoneSkeleton rows={4} />
           ) : eventLog.length === 0 ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Inbox className="h-3.5 w-3.5" /> No recent events
+            <div className="flex flex-col items-center gap-2 py-8 text-center">
+              <Inbox className="h-6 w-6 text-muted-foreground/30" />
+              <p className="text-xs text-muted-foreground">No recent events recorded</p>
             </div>
           ) : (
-            <div className="space-y-1.5">
-              {eventLog.slice(0, 3).map(entry => {
+            <div className="divide-y divide-border/40">
+              {eventLog.slice(0, 6).map(entry => {
                 const meta  = EVENT_META[entry.event_type]
                 const Icon  = meta?.icon ?? Activity
                 const color = meta?.color ?? 'text-muted-foreground'
                 const label = (entry.event_type ?? '').replace(/_/g, ' ')
-                const time  = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                const time  = fmtDateTime(entry.created_at)
                 return (
-                  <div key={entry.id} className="flex items-center gap-2">
-                    <Icon className={cn('h-3 w-3 flex-shrink-0', color)} />
-                    <span className="text-[11px] text-foreground/80 capitalize flex-1 truncate">{label}</span>
-                    <span className="text-[10px] text-muted-foreground tabular-nums flex-shrink-0">{time}</span>
+                  <div key={entry.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className={cn('h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-muted/60')}>
+                      <Icon className={cn('h-3.5 w-3.5', color)} />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-medium text-foreground/80 capitalize truncate">{label}</p>
+                      {entry.status && (
+                        <p className="text-[10px] text-muted-foreground capitalize">{entry.status}</p>
+                      )}
+                    </div>
+                    <span className="text-[10.5px] text-muted-foreground tabular-nums flex-shrink-0">{time}</span>
                   </div>
                 )
               })}
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* ── Escalated Corrections (SLA breached) — conditional ───────────── */}
