@@ -711,6 +711,28 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Ownership: the claim must exist in this tenant, and non-admins can only
+    // attach files to their own claims.
+    const { data: claim } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!claim) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      const { data: profile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+      if (profile?.employee_id !== claim.employee_id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only attach files to your own claims' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('reimbursement_attachments')
       .insert({

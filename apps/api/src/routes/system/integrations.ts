@@ -298,6 +298,11 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
   // ── POST /system/integrations/:id/health-check ────────────────────────────
   fastify.post('/system/integrations/:id/health-check', auth, async (req: any, reply) => {
+    // Probes the stored endpoint (outbound fetch) and mutates registry stats —
+    // admin-only like every other mutation in this file.
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
     const { id } = req.params as { id: string }
 
     const { data: integration, error: fetchError } = await fastify.supabase

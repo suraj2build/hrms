@@ -48,9 +48,25 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
     done()
   }
 
+  /** Admins may view any employee; everyone else only their own records. */
+  async function canViewEmployee(req: any, employeeId: string): Promise<boolean> {
+    if (['super_admin', 'hr_admin'].includes(req.userRole)) return true
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+    return profile?.employee_id === employeeId
+  }
+
   // ── GET /payroll/ledger/employee/:employeeId ──────────────────────────────────
+  //    HR admins: any employee in tenant. Others: only their own ledger.
   fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
+    if (!await canViewEmployee(req, employeeId)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own payroll ledger' })
+    }
 
     const querySchema = z.object({
       from: z.string().optional(),
@@ -94,7 +110,8 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/ledger/run/:runId ────────────────────────────────────────────
-  fastify.get('/run/:runId', auth, async (req: any, reply) => {
+  //    Run-wide ledger spans every employee in the run — HR admin only.
+  fastify.get('/run/:runId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { runId } = req.params as { runId: string }
 
     const { data, error } = await fastify.supabase
@@ -147,8 +164,12 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/ledger/summary/:employeeId ───────────────────────────────────
+  //    HR admins: any employee in tenant. Others: only their own summary.
   fastify.get('/summary/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
+    if (!await canViewEmployee(req, employeeId)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own payroll ledger' })
+    }
 
     const querySchema = z.object({
       month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),

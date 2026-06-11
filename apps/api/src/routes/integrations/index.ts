@@ -6,9 +6,13 @@ import {
   isIntegrationEnabled,
 } from '../../platform/integrations/index.js'
 import type { AccountingFormat, PayrollExportInput } from '../../platform/integrations/index.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function integrationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  // PAN verification (paid external PII lookup) and accounting export
+  // (tenant-wide financial data) are HR-admin actions.
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // -------------------------------------------------------------------------
   // GET /integrations/status
@@ -27,7 +31,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
   // -------------------------------------------------------------------------
   // POST /integrations/pan/verify
   // -------------------------------------------------------------------------
-  fastify.post('/integrations/pan/verify', auth, async (req, reply) => {
+  fastify.post('/integrations/pan/verify', hrAdminAuth, async (req, reply) => {
     const body = req.body as { pan?: string }
     if (!body.pan || typeof body.pan !== 'string') {
       return reply.status(400).send({ error: 'pan is required' })
@@ -58,7 +62,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
   // -------------------------------------------------------------------------
   // POST /integrations/accounting/export
   // -------------------------------------------------------------------------
-  fastify.post('/integrations/accounting/export', auth, async (req, reply) => {
+  fastify.post('/integrations/accounting/export', hrAdminAuth, async (req, reply) => {
     const body = req.body as {
       format?:   string
       period?:   string

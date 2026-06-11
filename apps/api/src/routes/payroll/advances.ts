@@ -59,6 +59,19 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Self-scoping: non-admins may only raise an advance for themselves.
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      const { data: profile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+      if (profile?.employee_id !== parsed.data.employee_id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only request an advance for yourself' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('advance_salary_requests')
       .insert({

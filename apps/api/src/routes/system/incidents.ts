@@ -698,6 +698,10 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
 
   // ── POST /system/incidents/:id/comments ───────────────────────────────────
   fastify.post('/system/incidents/:id/comments', auth, async (req: any, reply) => {
+    // Incident management is an admin console — match the rest of this file.
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
     const { id } = req.params as { id: string }
 
     const parsed = commentBodySchema.safeParse(req.body)

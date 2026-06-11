@@ -204,7 +204,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
   // ── PATCH /employees/:id/separation-clearances/:clearanceId ──────────────
 
-  fastify.patch('/employees/:id/separation-clearances/:clearanceId', auth, async (req: any, reply) => {
+  fastify.patch('/employees/:id/separation-clearances/:clearanceId', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
