@@ -8,7 +8,7 @@
  * Access: hr_admin and super_admin only.
  */
 
-import React, { useState }                    from 'react'
+import React, { useState, useMemo }           from 'react'
 import { useQuery }                           from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Circle, Activity } from 'lucide-react'
 import { PageContainer }                      from '@/components/layout/PageContainer'
@@ -273,8 +273,8 @@ function PayrollExceptionsDrawer({ run, onClose }: PayrollExceptionsDrawerProps)
     enabled:  !!run && (run.held_count > 0 || run.warning_count > 0),
   })
 
-  const heldSlips    = data?.data?.filter(s => s.status === 'held')     ?? []
-  const warningSlips = data?.data?.filter(s => s.status !== 'held' && s.warning) ?? []
+  const heldSlips    = useMemo(() => data?.data?.filter(s => s.status === 'held')              ?? [], [data])
+  const warningSlips = useMemo(() => data?.data?.filter(s => s.status !== 'held' && s.warning) ?? [], [data])
 
   return (
     <Dialog open={!!run} onOpenChange={open => { if (!open) onClose() }}>

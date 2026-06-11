@@ -754,7 +754,8 @@ export function HRReviewWorkspace() {
     staleTime: 30_000,
     // While an extraction is running, poll so per-document status updates
     // (pending → processing → extracted/failed) appear live in the UI.
-    refetchInterval: isExtracting ? 1200 : false,
+    // 3s is responsive enough for document OCR while keeping API load sane at scale.
+    refetchInterval: isExtracting ? 3000 : false,
   })
 
   const session = sessionData?.data

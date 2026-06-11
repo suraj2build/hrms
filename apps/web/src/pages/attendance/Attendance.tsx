@@ -580,8 +580,8 @@ export function Attendance() {
     queryFn:  () => api.get<ProcessStatus>('/attendance/process/status'),
     enabled:  isAdmin,
     refetchInterval: (query) =>
-      query.state.data?.is_running ? 4_000 : 15_000,
-    staleTime: 3_000,
+      query.state.data?.is_running ? 8_000 : 30_000,
+    staleTime: 6_000,
   })
 
   const isJobRunning = processStatus?.is_running ?? false
