@@ -56,10 +56,14 @@ export const componentCreateSchema = z.object({
 export const componentUpdateSchema = componentCreateSchema.partial()
 
 export const structureSchema = z.object({
-  name:        z.string().min(1, 'Name is required').max(200),
-  code:        z.string().min(1, 'Code is required').max(50),
-  description: z.string().optional(),
-  is_active:   z.boolean().optional().default(true),
+  name:            z.string().min(1, 'Name is required').max(200),
+  code:            z.string().min(1, 'Code is required').max(50),
+  description:     z.string().optional(),
+  is_active:       z.boolean().optional().default(true),
+  pf_applicable:   z.boolean().optional().default(true),
+  esi_applicable:  z.boolean().optional().default(true),
+  tds_applicable:  z.boolean().optional().default(true),
+  pf_ceiling_mode: z.enum(['capped', 'actual', 'follow_policy']).optional().default('follow_policy'),
 })
 export const structureUpdateSchema = structureSchema.partial()
 

@@ -38,6 +38,7 @@ interface SalaryStructure {
   pf_applicable?:   boolean
   esi_applicable?:  boolean
   tds_applicable?:  boolean
+  pf_ceiling_mode?: 'capped' | 'actual' | 'follow_policy'
   employee_count?:  number
   salary_structure_components?: { count: number }[]
 }
@@ -93,14 +94,17 @@ interface CtcPreview {
   residual_annual: number
 }
 
+type PfCeilingMode = 'capped' | 'actual' | 'follow_policy'
+
 interface StructureForm {
-  name:           string
-  code:           string
-  description:    string
-  is_active:      boolean
-  pf_applicable:  boolean
-  esi_applicable: boolean
-  tds_applicable: boolean
+  name:            string
+  code:            string
+  description:     string
+  is_active:       boolean
+  pf_applicable:   boolean
+  esi_applicable:  boolean
+  tds_applicable:  boolean
+  pf_ceiling_mode: PfCeilingMode
 }
 
 interface AddComponentForm {
@@ -112,6 +116,7 @@ interface AddComponentForm {
 const EMPTY_STRUCTURE_FORM: StructureForm = {
   name: '', code: '', description: '', is_active: true,
   pf_applicable: true, esi_applicable: true, tds_applicable: true,
+  pf_ceiling_mode: 'follow_policy',
 }
 
 const EMPTY_ADD_FORM: AddComponentForm = {
@@ -224,13 +229,14 @@ function StructureDialog({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border p-3 space-y-2">
-            <p className="text-xs font-semibold text-foreground">Statutory Overrides</p>
-            <p className="text-[11px] text-muted-foreground">
-              By default, PF/ESI/TDS applicability is governed by the employee's statutory group and tenant policy.
-              Use these only to <span className="font-medium text-foreground">exclude</span> a deduction for this structure
-              (e.g. contractor roles that skip PF). Leave all checked to follow group defaults.
-            </p>
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-foreground">Statutory Configuration</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                The structure is the single source of truth for PF/ESI/TDS applicability.
+                Uncheck to exclude a scheme for this employee category (e.g. contractors skip PF).
+              </p>
+            </div>
             <div className="flex gap-5 flex-wrap">
               {([
                 ['pf_applicable',  'PF / EPF'],
@@ -248,6 +254,20 @@ function StructureDialog({
                 </label>
               ))}
             </div>
+            {form.pf_applicable && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">PF Ceiling Mode</label>
+                <select
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50"
+                  value={form.pf_ceiling_mode}
+                  onChange={e => set('pf_ceiling_mode', e.target.value as PfCeilingMode)}
+                >
+                  <option value="follow_policy">Follow tenant EPF policy (statutory default)</option>
+                  <option value="capped">Capped — restrict to wage ceiling (₹15,000 or configured)</option>
+                  <option value="actual">Actual — PF on full wages, no ceiling (senior / CXO)</option>
+                </select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -555,13 +575,14 @@ export function CompensationMaster() {
 
   function openEdit(s: SalaryStructure) {
     setStructureForm({
-      name:           s.name,
-      code:           s.code,
-      description:    s.description ?? '',
-      is_active:      s.is_active,
-      pf_applicable:  s.pf_applicable ?? true,
-      esi_applicable: s.esi_applicable ?? true,
-      tds_applicable: s.tds_applicable ?? true,
+      name:            s.name,
+      code:            s.code,
+      description:     s.description ?? '',
+      is_active:       s.is_active,
+      pf_applicable:   s.pf_applicable  ?? true,
+      esi_applicable:  s.esi_applicable ?? true,
+      tds_applicable:  s.tds_applicable ?? true,
+      pf_ceiling_mode: s.pf_ceiling_mode ?? 'follow_policy',
     })
     setEditStructureId(s.id)
     setStructureDialogOpen(true)

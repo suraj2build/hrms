@@ -399,21 +399,29 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       }
     })
 
-    // ── Fetch employee PF flags ───────────────────────────────────────────────
-    // Read from epf_eligibility_overrides — this is what the frontend writes
-    // (employee Bank & Statutory tab → EPF section). employee_bank_statutory.pf_capped
-    // is legacy and never updated by the UI.
-    const { data: epfEligRow } = await fastify.supabase
-      .from('epf_eligibility_overrides')
-      .select('is_epf_applicable, restrict_pf_to_ceiling')
-      .eq('employee_id', req.params.id)
-      .eq('tenant_id', req.tenantId)
-      .maybeSingle()
+    // ── Fetch PF flags from salary structure (single source of truth) ───────────
+    // pf_applicable and pf_ceiling_mode live on salary_structures. The structure
+    // assigned at compensation time drives the engine — no per-employee PF flags.
+    const structureId = compensationData.salary_structure_id
+    let pf_enabled = true
+    let pf_capped  = true  // statutory default: ceiling applies
 
-    const employee = {
-      pf_enabled: epfEligRow?.is_epf_applicable   ?? true,
-      pf_capped:  epfEligRow?.restrict_pf_to_ceiling ?? true,
+    if (structureId) {
+      const { data: structRow } = await fastify.supabase
+        .from('salary_structures')
+        .select('pf_applicable, pf_ceiling_mode')
+        .eq('id', structureId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+
+      pf_enabled = structRow?.pf_applicable ?? true
+      const mode = structRow?.pf_ceiling_mode ?? 'follow_policy'
+      if (mode === 'actual') pf_capped = false
+      else if (mode === 'capped') pf_capped = true
+      // 'follow_policy' → keep pf_capped = true (statutory default: ceiling on)
     }
+
+    const employee = { pf_enabled, pf_capped }
 
     // ── Fetch tenant compensation policy ─────────────────────────────────────
     const policy = await fetchCompensationPolicy(fastify, req.tenantId)

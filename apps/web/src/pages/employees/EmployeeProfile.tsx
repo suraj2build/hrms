@@ -52,15 +52,12 @@ import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
 import { SignedImage } from '@/components/SignedImage'
 import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import {
-  PFModeBadge,
   ESIStatusBadge,
   StatutoryExplainer,
   StatutoryEmptyNote,
   InfoTooltip,
   TooltipProvider,
-  PF_MODE_TOOLTIP,
   ESI_STATUS_TOOLTIP,
-  type PFMode,
   type ESIStatusType,
 } from '@/components/payroll/StatutoryBadges'
 
@@ -621,16 +618,8 @@ export function EmployeeProfile() {
   })
 
   // ── Statutory eligibility (lazy — bank sub-tab only) ────────────────────────
-  // EPF eligibility override: PF mode, ceiling restriction, international worker
-  const { data: epfEligData } = useQuery<{ data: any[] }>({
-    queryKey: ['epf-elig-profile', id],
-    queryFn:  () => api.get(`/payroll/statutory/epf/eligibility`),
-    enabled:  !!id && visited.has('compensation'),
-    staleTime: 120_000,
-    select: (res: any) => ({
-      data: (res.data ?? []).filter((r: any) => r.employee_id === id),
-    }),
-  })
+  // PF configuration is now driven by the salary structure (pf_applicable, pf_ceiling_mode).
+  // ESI eligibility override is still per-employee (continuation periods, manual exemptions).
   const { data: esiEligData } = useQuery<{ data: any[] }>({
     queryKey: ['esi-elig-profile', id],
     queryFn:  () => api.get(`/payroll/statutory/esi/eligibility?employee_id=${id}&active_only=true`),
@@ -638,17 +627,7 @@ export function EmployeeProfile() {
     staleTime: 120_000,
   })
 
-  const epfOverride = epfEligData?.data?.[0] ?? null
-  const esiEligRow  = esiEligData?.data?.[0] ?? null
-
-  // Tenant EPF config — ceiling amount for the PF Wage Basis dropdown label
-  const { data: epfConfigData } = useQuery<{ employee_contribution_pct: number; wage_ceiling: number; is_wage_ceiling_applicable: boolean }>({
-    queryKey: ['epf-config'],
-    queryFn:  () => api.get('/payroll/statutory/epf/config').then((r: any) => r?.data ?? r),
-    enabled:  !!id && visited.has('compensation'),
-    staleTime: 5 * 60_000,
-  })
-  const epfCeilingAmt = epfConfigData?.wage_ceiling ?? 15000
+  const esiEligRow = esiEligData?.data?.[0] ?? null
 
   // Holiday groups (for employee holiday calendar group tag)
   const { data: holidayGroupsData } = useQuery<{ data: any[] }>({
@@ -658,15 +637,6 @@ export function EmployeeProfile() {
     staleTime: 5 * 60_000,
   })
   const holidayGroups = (holidayGroupsData?.data ?? []).filter((g: any) => g.is_active !== false)
-
-  // Derive PF mode for display
-  const profilePfMode: PFMode | null = epfOverride
-    ? (epfOverride.restrict_pf_to_ceiling === true
-        ? 'capped'
-        : epfOverride.restrict_pf_to_ceiling === false
-          ? 'actual'
-          : (epfOverride.higher_pf_opted ? 'actual' : null))
-    : null
 
   // Derive ESI status for display
   const profileToday = new Date().toISOString().slice(0, 10)
@@ -1498,9 +1468,7 @@ export function EmployeeProfile() {
     pan_number: '', aadhaar_number: '', uan_number: '', pf_number: '',
     esi_number: '', pt_applicable: false, lwf_applicable: false,
     tax_regime: 'new' as 'old' | 'new',
-    // EPF/ESI applicability — central schemes, per-employee Yes/No
-    epf_applicable: true,
-    pf_wage_basis: 'default' as 'capped' | 'actual' | 'default',
+    // ESI applicability — override only (salary threshold auto-determines eligibility)
     esi_applicable: true,
     pt_state_code:    '',
     lwf_state_code:   '',
@@ -1525,15 +1493,9 @@ export function EmployeeProfile() {
       pt_applicable:  bs?.pt_applicable  ?? false,
       lwf_applicable: bs?.lwf_applicable ?? false,
       tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
-      // EPF: default applicable=true unless an override says false.
-      epf_applicable: epfOverride ? (epfOverride.is_exempt ? false : (epfOverride.is_epf_applicable ?? true)) : true,
-      // PF wage basis from restrict_pf_to_ceiling: true→capped, false→actual, null→default.
-      pf_wage_basis:  epfOverride?.restrict_pf_to_ceiling === true ? 'capped'
-                    : epfOverride?.restrict_pf_to_ceiling === false ? 'actual'
-                    : 'default',
       // ESI: applicable unless the latest timeline row says false.
       esi_applicable: esiEligRow ? (esiEligRow.is_esi_applicable !== false) : true,
-      // PT state: from bank-statutory response (merged from ptax_state_config).
+      // PT / LWF state: from bank-statutory response (merged from state config).
       pt_state_code:    (bs as any)?.pt_state_code    ?? '',
       lwf_state_code:   (bs as any)?.lwf_state_code   ?? '',
       holiday_group_id: (bs as any)?.holiday_group_id ?? '',
@@ -1566,20 +1528,9 @@ export function EmployeeProfile() {
       if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
 
       const today = new Date().toISOString().slice(0, 10)
-      // PF wage basis → restrict_pf_to_ceiling: capped→true, actual→false, default→null.
-      const restrict = bankForm.pf_wage_basis === 'capped' ? true
-                     : bankForm.pf_wage_basis === 'actual' ? false
-                     : null
       return Promise.all([
         api.put(`/employees/${id}/bank-statutory`, body),
-        // EPF applicability + wage basis (central scheme, per-employee).
-        api.put(`/payroll/statutory/epf/eligibility/${id}`, {
-          is_epf_applicable:      bankForm.epf_applicable,
-          restrict_pf_to_ceiling: restrict,
-          override_reason:        'Set from employee master',
-          effective_from:         today,
-        }),
-        // ESI applicability (idempotent toggle).
+        // ESI applicability override (salary threshold auto-determines; override for exceptions).
         api.put(`/payroll/statutory/esi/eligibility/${id}`, {
           is_esi_applicable: bankForm.esi_applicable,
           effective_from:    today,
@@ -3793,59 +3744,15 @@ export function EmployeeProfile() {
 
                       <TooltipProvider>
                       {/* EPF compliance status card */}
-                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                            EPF Status
-                            {profilePfMode && <InfoTooltip text={PF_MODE_TOOLTIP[profilePfMode]} />}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            {epfOverride?.is_exempt && (
-                              <Badge variant="secondary" className="rounded-full text-[10px]">Exempt</Badge>
-                            )}
-                            {epfOverride?.higher_pf_opted && (
-                              <Badge variant="outline" className="rounded-full text-[10px] text-blue-600 border-blue-200">Higher PF</Badge>
-                            )}
-                            {profilePfMode && <PFModeBadge mode={profilePfMode} />}
-                          </div>
-                        </div>
-                        {epfOverride ? (
-                          <div className="space-y-1">
-                            {/* "Why?" only for exceptions */}
-                            {profilePfMode && profilePfMode !== 'actual' && (
-                              <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80 leading-snug pb-0.5">
-                                {profilePfMode === 'capped' ? 'PF restricted to statutory wage ceiling.' : 'Employee-level PF override differs from organisation policy.'}
-                              </p>
-                            )}
-                            {epfOverride.is_international_worker && (
-                              <StatutoryExplainer label="Worker Type" value="International worker" />
-                            )}
-                            {epfOverride.higher_pf_opted && epfOverride.higher_pf_pct && (
-                              <StatutoryExplainer
-                                label="Higher PF Rate"
-                                value={`${epfOverride.higher_pf_pct}% on actual wages`}
-                                tooltip="Employee has opted for PF on actual wages above the statutory ceiling."
-                              />
-                            )}
-                            {epfOverride.restrict_pf_to_ceiling === true && (
-                              <StatutoryExplainer label="Ceiling" value="Always capped to ₹15,000" tooltip="Employee-level override: PF ceiling always applied regardless of organisation policy." />
-                            )}
-                            {epfOverride.restrict_pf_to_ceiling === false && (
-                              <StatutoryExplainer label="Ceiling" value="No ceiling (override)" tooltip="Employee-level override: PF ceiling never applied. Typical for international workers or CXO agreements." />
-                            )}
-                            {epfOverride.restrict_pf_to_ceiling === null && !epfOverride.higher_pf_opted && (
-                              <StatutoryEmptyNote text="Follows organisation PF policy." />
-                            )}
-                            {epfOverride.voluntary_pf_pct > 0 && (
-                              <StatutoryExplainer label="Voluntary PF" value={`${epfOverride.voluntary_pf_pct}% additional`} />
-                            )}
-                            {epfOverride.effective_from && (
-                              <StatutoryExplainer label="Override effective" value={epfOverride.effective_from} muted />
-                            )}
-                          </div>
-                        ) : (
-                          <StatutoryEmptyNote text="Employee follows organisation PF policy — no individual override." />
-                        )}
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">EPF Status</span>
+                        <p className="text-xs text-muted-foreground">
+                          PF applicability and ceiling mode are configured in the assigned salary structure.
+                          {fpData?.compensation?.structure
+                            ? <> Current structure: <span className="font-medium text-foreground">{fpData.compensation.structure.name}</span>. Edit via the Compensation tab.</>
+                            : <> No salary structure is assigned yet.</>
+                          }
+                        </p>
                       </div>
 
                       {/* ESI compliance status card */}
@@ -5092,30 +4999,8 @@ export function EmployeeProfile() {
                 Scheme Applicability
               </p>
               <p className="text-[10px] text-muted-foreground mb-3 ml-6">
-                Defaults flow from the employee's statutory group. Use these only to override for individual exceptions.
+                PF applicability and ceiling mode are set in the employee's salary structure. ESI is auto-determined by salary (≤₹21,000); PT and LWF follow the statutory group and work location.
               </p>
-
-              {/* EPF row */}
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
-                  <Switch checked={bankForm.epf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,epf_applicable:v}))} />
-                  <div>
-                    <p className="text-xs font-medium">EPF Enrolled</p>
-                    <p className="text-[10px] text-muted-foreground">Off = exclude from PF regardless of group setting</p>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">PF Wage Basis</Label>
-                  <select
-                    className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none disabled:opacity-50"
-                    value={bankForm.pf_wage_basis} disabled={!bankForm.epf_applicable}
-                    onChange={e=>setBankForm(f=>({...f,pf_wage_basis:e.target.value as 'capped'|'actual'|'default'}))}>
-                    <option value="default">Follow statutory group</option>
-                    <option value="capped">Capped (ceiling ₹{epfCeilingAmt.toLocaleString('en-IN')})</option>
-                    <option value="actual">Actual (full wages, no ceiling)</option>
-                  </select>
-                </div>
-              </div>
 
               {/* ESI row */}
               <div className="grid grid-cols-2 gap-3 mb-3">
