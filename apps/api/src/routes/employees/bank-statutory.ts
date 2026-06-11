@@ -75,15 +75,24 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       .order('effective_from', { ascending: false }).limit(1).maybeSingle()
     const { data: empRow } = await fastify.supabase
       .from('employees')
-      .select('holiday_group_id')
+      .select('holiday_group_id, site_id')
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    // Fetch the site's state_code so the UI can show "Auto from site (KA)"
+    let siteStateCode: string | null = null
+    if ((empRow as any)?.site_id) {
+      const { data: siteRow } = await fastify.supabase
+        .from('sites').select('state_code')
+        .eq('id', (empRow as any).site_id).maybeSingle()
+      siteStateCode = (siteRow as any)?.state_code ?? null
+    }
     return reply.send({ data: {
       ...(data ?? {}),
-      pt_state_code:    (ptRow   as any)?.state_code      ?? null,
-      lwf_state_code:   (lwfRow  as any)?.state_code      ?? null,
+      pt_state_code:    (ptRow   as any)?.state_code       ?? null,
+      lwf_state_code:   (lwfRow  as any)?.state_code       ?? null,
       holiday_group_id: (empRow  as any)?.holiday_group_id ?? null,
+      site_state_code:  siteStateCode,
     } })
   })
 

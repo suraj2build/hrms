@@ -246,12 +246,16 @@ export async function fetchFullProfile(
         pt_state_code:         null as string | null,
         lwf_state_code:        null as string | null,
         holiday_group_id:      null as string | null,
+        // site's state_code — fallback for PT/LWF when no per-employee override
+        site_state_code:       null as string | null,
       }
     : null
 
   // ── 4b. Merge per-employee PT/LWF state + holiday group into bank_statutory ──
   // These are stored in separate tables (ptax_state_config, lwf_state_config,
   // employees.holiday_group_id), not in employee_bank_statutory.
+  // site_state_code: the site's state_code (fallback used when no per-employee
+  // override is set — allows admins to configure PT/LWF once per site).
   if (bank_statutory && !light) {
     const [ptRow, lwfRow, empRow] = await Promise.all([
       sb.from('ptax_state_config')
@@ -277,6 +281,16 @@ export async function fetchFullProfile(
     bank_statutory.pt_state_code    = (ptRow.data  as any)?.state_code       ?? null
     bank_statutory.lwf_state_code   = (lwfRow.data as any)?.state_code       ?? null
     bank_statutory.holiday_group_id = (empRow.data as any)?.holiday_group_id ?? null
+
+    // Fetch site's state_code so the UI can show "Auto from site (KA)"
+    const siteId = (employee as any).site_id
+    if (siteId) {
+      const { data: siteRow } = await sb.from('sites')
+        .select('state_code')
+        .eq('id', siteId)
+        .maybeSingle()
+      bank_statutory.site_state_code = (siteRow as any)?.state_code ?? null
+    }
   }
 
   // ── 5. Shape job_info ──────────────────────────────────────────────────────

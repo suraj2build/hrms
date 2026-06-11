@@ -31,12 +31,14 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 
 const SELECT_COLS =
-  'id, name, location, timezone, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, holiday_group_id, created_at'
+  'id, name, location, timezone, state_code, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, holiday_group_id, created_at'
 
 const schema = z.object({
   name:                        z.string().min(1, 'Name is required').max(120),
   location:                    z.string().max(255).optional(),
   timezone:                    z.string().max(100).default('Asia/Kolkata'),
+  /** migration 166 — state code (ISO 3166-2 sub-region) for PT/LWF jurisdiction */
+  state_code:                  z.string().max(3).optional().nullable(),
   /** migration 217 — holiday group this site observes (NULL = all-India only) */
   holiday_group_id:            z.string().uuid().optional().nullable(),
   default_roster_id:           z.string().uuid().optional().nullable(),

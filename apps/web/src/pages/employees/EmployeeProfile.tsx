@@ -126,6 +126,8 @@ interface FullProfile {
     aadhaar_masked: string | null; uan: string | null; pf_number: string | null
     esi_number: string | null; pt_applicable: boolean; lwf_applicable: boolean
     tax_regime: string | null
+    pt_state_code: string | null; lwf_state_code: string | null
+    site_state_code: string | null
   } | null
 }
 
@@ -3725,15 +3727,15 @@ export function EmployeeProfile() {
                           </Badge>
                           {bs.tax_regime && <Badge variant="outline" className="rounded-full text-[10px] capitalize">{bs.tax_regime} Regime</Badge>}
                         </div>
-                        {/* PT state — show override or auto label */}
+                        {/* PT state — override > site > auto */}
                         <KV
                           label="PT State"
-                          value={(bs as any).pt_state_code || 'Auto (from work location)'}
+                          value={bs.pt_state_code || (bs.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Not configured')}
                         />
-                        {/* LWF state — show override or auto label */}
+                        {/* LWF state — override > site > auto */}
                         <KV
                           label="LWF State"
-                          value={(bs as any).lwf_state_code || 'Auto (from work location)'}
+                          value={bs.lwf_state_code || (bs.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Not configured')}
                         />
                         {/* Holiday group */}
                         {(bs as any).holiday_group_id && holidayGroups.length > 0 && (
@@ -5026,7 +5028,7 @@ export function EmployeeProfile() {
                   <Label className="text-xs text-muted-foreground">PT State Override</Label>
                   <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
                     value={bankForm.pt_state_code} onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}>
-                    <option value="">Auto (from work location / statutory group)</option>
+                    <option value="">{bs?.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Auto (no site state set)'}</option>
                     {[['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
                       ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
                       ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
@@ -5051,7 +5053,7 @@ export function EmployeeProfile() {
                   <Label className="text-xs text-muted-foreground">LWF State Override</Label>
                   <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
                     value={bankForm.lwf_state_code} onChange={e => setBankForm(f => ({ ...f, lwf_state_code: e.target.value }))}>
-                    <option value="">Auto (from work location / statutory group)</option>
+                    <option value="">{bs?.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Auto (no site state set)'}</option>
                     {[['AP','Andhra Pradesh'],['CG','Chhattisgarh'],['GA','Goa'],['GJ','Gujarat'],
                       ['HR','Haryana'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
                       ['MH','Maharashtra'],['OR','Odisha'],['PB','Punjab'],

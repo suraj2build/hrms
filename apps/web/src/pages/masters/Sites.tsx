@@ -39,12 +39,22 @@ import { cn }               from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+const INDIA_STATES: [string, string][] = [
+  ['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
+  ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
+  ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
+  ['MH','Maharashtra'],['MN','Manipur'],['ML','Meghalaya'],['MZ','Mizoram'],
+  ['NL','Nagaland'],['OR','Odisha'],['PB','Punjab'],['SK','Sikkim'],
+  ['TN','Tamil Nadu'],['TS','Telangana'],['TR','Tripura'],['WB','West Bengal'],
+]
+
 interface Site {
   id:                           string
   name:                         string
   code:                         string | null
   location:                     string | null
   timezone:                     string
+  state_code:                   string | null
   default_roster_id:            string | null
   default_rotation_policy_id:   string | null
   default_leave_policy_id:      string | null
@@ -71,6 +81,7 @@ const EMPTY_FORM = {
   name:                       '',
   location:                   '',
   timezone:                   'Asia/Kolkata',
+  state_code:                 '',
   default_roster_id:          '',
   default_rotation_policy_id: '',
   default_leave_policy_id:    '',
@@ -376,6 +387,7 @@ export function Sites() {
       name:                       s.name,
       location:                   s.location ?? '',
       timezone:                   s.timezone,
+      state_code:                 s.state_code ?? '',
       default_roster_id:          s.default_roster_id ?? '',
       default_rotation_policy_id: s.default_rotation_policy_id ?? '',
       default_leave_policy_id:    s.default_leave_policy_id ?? '',
@@ -391,6 +403,7 @@ export function Sites() {
         name:                       body.name,
         location:                   body.location                   || null,
         timezone:                   body.timezone                   || 'Asia/Kolkata',
+        state_code:                 body.state_code                 || null,
         default_roster_id:          body.default_roster_id          || null,
         default_rotation_policy_id: body.default_rotation_policy_id || null,
         default_leave_policy_id:    body.default_leave_policy_id    || null,
@@ -544,6 +557,22 @@ export function Sites() {
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Location</label>
               <Input value={form.location} onChange={e => setForm(p => ({ ...p, location: e.target.value }))} placeholder="Mumbai, Maharashtra" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                State
+                <span className="text-muted-foreground/50">(PT/LWF jurisdiction for all employees at this site)</span>
+              </label>
+              <select
+                value={form.state_code}
+                onChange={e => setForm(p => ({ ...p, state_code: e.target.value }))}
+                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="">— Not set (employees need individual state override) —</option>
+                {INDIA_STATES.map(([code, name]) => (
+                  <option key={code} value={code}>{name} ({code})</option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Timezone (IANA)</label>
