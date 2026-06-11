@@ -1619,7 +1619,7 @@ export const ESS_NAV_ITEMS: NavItem[] = [
   {
     id:          'ess-comp-off',
     label:       'Comp-Off',
-    route:       '/ess/comp-off',
+    route:       '/ess/leave/balance',  // comp-off merged into Leave & Comp-Off (old /ess/comp-off only redirects)
     icon:        CalendarCheck,
     groupId:     'ess-main',
     section:     'ess',
@@ -1629,7 +1629,7 @@ export const ESS_NAV_ITEMS: NavItem[] = [
   {
     id:          'ess-payslips',
     label:       'My Payslips',
-    route:       '/ess/payroll/my-slips',
+    route:       '/ess/compensation',  // payslips live in Pay & Compensation (old /ess/payroll/my-slips only redirects)
     icon:        DollarSign,
     groupId:     'ess-main',
     section:     'ess',
@@ -1649,7 +1649,7 @@ export const ESS_NAV_ITEMS: NavItem[] = [
   {
     id:          'ess-tax-declarations',
     label:       'Tax Declarations',
-    route:       '/ess/declarations',
+    route:       '/ess/salary/tax-planner',  // declarations live in Tax Planner (old /ess/declarations only redirects)
     icon:        Landmark,
     groupId:     'ess-main',
     section:     'ess',

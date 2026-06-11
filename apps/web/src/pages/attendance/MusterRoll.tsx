@@ -370,6 +370,21 @@ export function MusterRoll() {
     })
   }, [allEmployees, search, statusFilter, todayStr])
 
+  // ── Row windowing ──────────────────────────────────────────────────────────
+  // The grid renders ~31 cells per employee; at 500+ employees that's 15k+ DOM
+  // nodes and the page crawls. Render at most MUSTER_PAGE_SIZE rows at a time.
+  const MUSTER_PAGE_SIZE = 50
+  const [musterPage, setMusterPage] = useState(0)
+  const musterPageCount = Math.max(1, Math.ceil(employees.length / MUSTER_PAGE_SIZE))
+  // Clamp + reset when filters shrink the list below the current page
+  useEffect(() => {
+    if (musterPage >= musterPageCount) setMusterPage(0)
+  }, [musterPage, musterPageCount])
+  const pagedEmployees = useMemo(
+    () => employees.slice(musterPage * MUSTER_PAGE_SIZE, (musterPage + 1) * MUSTER_PAGE_SIZE),
+    [employees, musterPage],
+  )
+
   // All days in month (from first employee's days array)
   const days: DayRecord[] = allEmployees[0]?.days ?? []
   const dates = days.map(d => d.date)
@@ -800,7 +815,7 @@ export function MusterRoll() {
                           </tr>
                         </thead>
                         <tbody>
-                          {employees.map((emp, eIdx) => {
+                          {pagedEmployees.map((emp, eIdx) => {
                             const dayMap  = new Map(emp.days.map(d => [d.date, d]))
                             const summary = computeSummary(emp.days)
                             const payable = computePayableDays(emp.days)
@@ -949,6 +964,26 @@ export function MusterRoll() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Row pager — keeps the DOM small for large workforces */}
+                    {employees.length > MUSTER_PAGE_SIZE && (
+                      <div className="flex items-center justify-between px-4 py-2 border-t border-border text-xs text-muted-foreground">
+                        <span>
+                          Showing {musterPage * MUSTER_PAGE_SIZE + 1}–{Math.min((musterPage + 1) * MUSTER_PAGE_SIZE, employees.length)} of {employees.length} employees
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <Button variant="outline" size="sm" className="h-7 px-2" disabled={musterPage === 0}
+                                  onClick={() => setMusterPage(p => p - 1)}>
+                            Previous
+                          </Button>
+                          <span className="px-2 tabular-nums">{musterPage + 1} / {musterPageCount}</span>
+                          <Button variant="outline" size="sm" className="h-7 px-2" disabled={musterPage >= musterPageCount - 1}
+                                  onClick={() => setMusterPage(p => p + 1)}>
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Phase 3 — Legend: extended with operational states */}
                     <div className="flex flex-wrap gap-3 mt-4 pt-3 px-4 pb-3 border-t border-border text-xs text-muted-foreground">

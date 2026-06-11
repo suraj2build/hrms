@@ -60,7 +60,8 @@ const BASE_GROUPS: NavGroup[] = [
   {
     label: 'Main',
     items: [
-      { label: 'Dashboard', icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
+      { label: 'Dashboard',   icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
+      { label: 'My Insights', icon: BarChart3,       href: '/ess/operational-center'     },
     ],
   },
   {

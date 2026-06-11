@@ -41,6 +41,25 @@ function apiProxy(extra?: object): NonNullable<NonNullable<ServerOptions['proxy'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    // Split the few very heavy vendor libraries out of the main bundle so the
+    // initial load only pulls what every page needs. Pages already lazy-load;
+    // this addresses the shared vendor chunk (~1.4 MB before splitting).
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('recharts') || id.includes('d3-')) return 'vendor-charts'
+          if (id.includes('xlsx'))                            return 'vendor-xlsx'
+          if (id.includes('@supabase'))                       return 'vendor-supabase'
+          if (id.includes('react-dom') || id.includes('react-router') || id.includes('/react/')) return 'vendor-react'
+          if (id.includes('@tanstack'))                       return 'vendor-query'
+          if (id.includes('lucide-react'))                    return 'vendor-icons'
+          return undefined // everything else stays in the shared chunk
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
