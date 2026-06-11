@@ -25,29 +25,19 @@ interface LandingPageProps {
   onLaunchDemo: (role: 'admin' | 'employee') => void;
 }
 
-/** CognixHR brand mark — open "C" ring cradling an H/person, blue→teal.
- *  Mirrors apps/web Logo.tsx; swap this one SVG when the final asset lands. */
+/** CognixHR brand mark — canonical brand raster (public/brand/cognixhr-icon.png),
+ *  so it matches the official artwork pixel-for-pixel. */
 function CognixMark({ size = 36, className }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
-      <defs>
-        <linearGradient id="cx-ring" x1="12" y1="38" x2="37" y2="10" gradientUnits="userSpaceOnUse">
-          <stop offset="0%"   stopColor="#112494" />
-          <stop offset="42%"  stopColor="#2E6FE6" />
-          <stop offset="100%" stopColor="#60A5FA" />
-        </linearGradient>
-        <linearGradient id="cx-fig" x1="24" y1="37" x2="24" y2="14" gradientUnits="userSpaceOnUse">
-          <stop offset="0%"   stopColor="#0B6B5A" />
-          <stop offset="55%"  stopColor="#0EA5A0" />
-          <stop offset="100%" stopColor="#22D3EE" />
-        </linearGradient>
-      </defs>
-      <path d="M 35.9 12.1 A 16.8 16.8 0 1 0 35.9 35.9" fill="none" stroke="url(#cx-ring)" strokeWidth="5" strokeLinecap="round" />
-      <circle cx="20.6" cy="16.3" r="2.2" fill="url(#cx-fig)" />
-      <rect x="18.8" y="19.4" width="3.6" height="16.3" rx="1.8" fill="url(#cx-fig)" />
-      <rect x="25.0" y="15.6" width="3.6" height="20.2" rx="1.8" fill="url(#cx-fig)" />
-      <rect x="18.8" y="27.1" width="9.8" height="3.1" rx="1.5" fill="url(#cx-fig)" />
-    </svg>
+    <img
+      src="/brand/cognixhr-icon.png"
+      width={size}
+      height={size}
+      className={className}
+      alt="CognixHR"
+      draggable={false}
+      style={{ display: 'block' }}
+    />
   );
 }
 

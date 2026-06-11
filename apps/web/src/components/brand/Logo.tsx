@@ -2,18 +2,18 @@
  * CognixHR brand logo.
  *
  *   <Logo />                  → mark + "CognixHR" wordmark (default)
- *   <Logo variant="mark" />   → just the gradient mark
+ *   <Logo variant="mark" />   → just the brand mark
+ *   <Logo variant="lockup" /> → full brand lockup image (mark + wordmark + tagline)
  *   <Logo size={40} />        → custom mark size (px)
  *
  * Brand: "Smarter Workforce. Stronger Future." — a Saar HRMS application.
- * Gradient: royal blue #2E6FE6 → teal #15B8A6.
- * The mark is an open "C" ring cradling an H / person figure =
- * Cognix (cognition) + HR (people).
+ * The mark/lockup render the canonical brand raster (apps/web/public/brand/*),
+ * so they match the official artwork pixel-for-pixel everywhere.
  */
 import { cn } from '@/lib/utils'
 
 interface LogoProps {
-  variant?: 'full' | 'mark'
+  variant?: 'full' | 'mark' | 'lockup'
   size?:    number
   className?: string
   /** Wordmark colour for the "Cognix" half — defaults to currentColor (adapts to dark/light). */
@@ -24,51 +24,36 @@ interface LogoProps {
 export const BRAND_BLUE = '#2E6FE6'
 export const BRAND_TEAL = '#15B8A6'
 
+/** Public paths to the canonical brand assets. */
+export const BRAND_ICON_SRC   = '/brand/cognixhr-icon.png'
+export const BRAND_LOCKUP_SRC  = '/brand/cognixhr-lockup.png'
+
 export function LogoMark({ size = 32, className }: { size?: number; className?: string }) {
   return (
-    <svg
+    <img
+      src={BRAND_ICON_SRC}
       width={size}
       height={size}
-      viewBox="0 0 48 48"
-      fill="none"
       className={className}
-      aria-hidden="true"
-    >
-      <defs>
-        {/* Ring: deep navy-indigo → royal blue → electric blue */}
-        <linearGradient id="cognix-ring" x1="12" y1="38" x2="37" y2="10" gradientUnits="userSpaceOnUse">
-          <stop offset="0%"   stopColor="#112494" />
-          <stop offset="42%"  stopColor={BRAND_BLUE} />
-          <stop offset="100%" stopColor="#60A5FA" />
-        </linearGradient>
-        {/* Inner H+person: dark teal → bright cyan */}
-        <linearGradient id="cognix-fig" x1="24" y1="37" x2="24" y2="14" gradientUnits="userSpaceOnUse">
-          <stop offset="0%"   stopColor="#0B6B5A" />
-          <stop offset="55%"  stopColor="#0EA5A0" />
-          <stop offset="100%" stopColor="#22D3EE" />
-        </linearGradient>
-      </defs>
-      {/* Open "C" ring — center (24,24) r=16.8, gap ≈ 90° on the right */}
-      <path
-        d="M 35.9 12.1 A 16.8 16.8 0 1 0 35.9 35.9"
-        fill="none"
-        stroke="url(#cognix-ring)"
-        strokeWidth="5"
-        strokeLinecap="round"
-      />
-      {/* Head dot */}
-      <circle cx="20.6" cy="16.3" r="2.2" fill="url(#cognix-fig)" />
-      {/* Left pillar (body of person + left H upright) */}
-      <rect x="18.8" y="19.4" width="3.6" height="16.3" rx="1.8" fill="url(#cognix-fig)" />
-      {/* Right pillar (right H upright, taller) */}
-      <rect x="25.0" y="15.6" width="3.6" height="20.2" rx="1.8" fill="url(#cognix-fig)" />
-      {/* H crossbar */}
-      <rect x="18.8" y="27.1" width="9.8" height="3.1" rx="1.5" fill="url(#cognix-fig)" />
-    </svg>
+      alt="CognixHR"
+      draggable={false}
+      style={{ display: 'block' }}
+    />
   )
 }
 
 export function Logo({ variant = 'full', size = 32, className, wordClassName }: LogoProps) {
+  if (variant === 'lockup') {
+    return (
+      <img
+        src={BRAND_LOCKUP_SRC}
+        className={className}
+        alt="CognixHR — Smarter Workforce. Stronger Future."
+        draggable={false}
+        style={{ height: size, width: 'auto', display: 'block' }}
+      />
+    )
+  }
   return (
     <div className={cn('flex items-center gap-2.5', className)}>
       <LogoMark size={size} />
