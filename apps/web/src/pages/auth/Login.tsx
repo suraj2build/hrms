@@ -81,9 +81,14 @@ export function Login() {
       <div className="flex min-h-screen items-center justify-center px-5 py-10 lg:min-h-0">
         <div className="w-full max-w-[400px]">
           {/* Logo */}
-          <div className="mb-8 flex items-center gap-2.5">
-            <LogoMark size={34} />
-            <Wordmark height={20} />
+          <div className="mb-8 flex items-center gap-3">
+            <LogoMark size={40} tile />
+            <div>
+              <Wordmark height={20} />
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.15em] text-slate-400">
+                Smarter Workforce · Stronger Future
+              </p>
+            </div>
           </div>
 
           {/* Heading */}
