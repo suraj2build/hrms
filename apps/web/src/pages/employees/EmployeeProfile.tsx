@@ -641,6 +641,15 @@ export function EmployeeProfile() {
   const epfOverride = epfEligData?.data?.[0] ?? null
   const esiEligRow  = esiEligData?.data?.[0] ?? null
 
+  // Tenant EPF config — ceiling amount for the PF Wage Basis dropdown label
+  const { data: epfConfigData } = useQuery<{ employee_contribution_pct: number; wage_ceiling: number; is_wage_ceiling_applicable: boolean }>({
+    queryKey: ['epf-config'],
+    queryFn:  () => api.get('/payroll/statutory/epf/config').then((r: any) => r?.data ?? r),
+    enabled:  !!id && visited.has('compensation'),
+    staleTime: 5 * 60_000,
+  })
+  const epfCeilingAmt = epfConfigData?.wage_ceiling ?? 15000
+
   // Holiday groups (for employee holiday calendar group tag)
   const { data: holidayGroupsData } = useQuery<{ data: any[] }>({
     queryKey: ['holiday-groups-list'],
@@ -5102,7 +5111,7 @@ export function EmployeeProfile() {
                     value={bankForm.pf_wage_basis} disabled={!bankForm.epf_applicable}
                     onChange={e=>setBankForm(f=>({...f,pf_wage_basis:e.target.value as 'capped'|'actual'|'default'}))}>
                     <option value="default">Follow statutory group</option>
-                    <option value="capped">Capped (ceiling ₹15,000)</option>
+                    <option value="capped">Capped (ceiling ₹{epfCeilingAmt.toLocaleString('en-IN')})</option>
                     <option value="actual">Actual (full wages, no ceiling)</option>
                   </select>
                 </div>
