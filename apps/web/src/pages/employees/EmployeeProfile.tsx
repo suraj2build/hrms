@@ -922,6 +922,8 @@ export function EmployeeProfile() {
       salary_component_id: string; calculation_type: string; value: string
     }>,
   })
+  // Set to true when user explicitly picks/changes a structure — triggers auto-load of defaults
+  const pendingAutoLoadRef = useRef(false)
 
   const { data: salaryStructuresData } = useQuery<{ data: Array<{ id: string; name: string; code: string }> }>({
     queryKey: ['salary-structures-list'],
@@ -937,7 +939,7 @@ export function EmployeeProfile() {
     staleTime: 120_000,
   })
 
-  // When a structure is selected, offer to auto-load its component templates
+  // Auto-load structure component defaults when user picks a structure
   const { data: structureComponentsData } = useQuery<{
     data: Array<{ salary_component_id: string; calculation_type: string; default_value: number }>
   }>({
@@ -946,6 +948,23 @@ export function EmployeeProfile() {
     enabled:  !!setupCompForm.salary_structure_id && setupCompOpen,
     staleTime: 120_000,
   })
+
+  useEffect(() => {
+    if (!pendingAutoLoadRef.current) return
+    if (!structureComponentsData) return
+    pendingAutoLoadRef.current = false
+    const scs = structureComponentsData.data ?? []
+    if (scs.length > 0) {
+      setSetupCompForm(f => ({
+        ...f,
+        components: scs.map(c => ({
+          salary_component_id: c.salary_component_id,
+          calculation_type:    c.calculation_type ?? 'fixed',
+          value:               String(c.default_value ?? ''),
+        })),
+      }))
+    }
+  }, [structureComponentsData])
 
   const deleteCompMutation = useMutation({
     mutationFn: (compId: string) => api.delete(`/employees/${id}/compensation/${compId}`),
@@ -959,7 +978,7 @@ export function EmployeeProfile() {
 
   const setupCompMutation = useMutation({
     mutationFn: () => api.post(`/employees/${id}/compensation`, {
-      ...(setupCompForm.salary_structure_id ? { salary_structure_id: setupCompForm.salary_structure_id } : {}),
+      salary_structure_id: setupCompForm.salary_structure_id,
       ctc_annual:     Number(setupCompForm.ctc_annual),
       effective_from: setupCompForm.effective_from,
       components: setupCompForm.components
@@ -3135,11 +3154,13 @@ export function EmployeeProfile() {
                     <div className="flex gap-1.5">
                       <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
                         onClick={() => {
+                          pendingAutoLoadRef.current = false
                           setSetupCompForm(f => ({
                             ...f,
-                            ctc_annual:     comp?.ctc_annual ? String(comp.ctc_annual) : '',
-                            effective_from: today,
-                            components:     comp?.components?.length
+                            salary_structure_id: comp?.structure?.id ?? '',
+                            ctc_annual:          comp?.ctc_annual ? String(comp.ctc_annual) : '',
+                            effective_from:      today,
+                            components:          comp?.components?.length
                               ? comp.components.map(c => ({
                                   salary_component_id: c.id,
                                   calculation_type:    c.calculation_type ?? 'fixed',
@@ -3517,35 +3538,16 @@ export function EmployeeProfile() {
               <div className="space-y-3 max-h-[62vh] overflow-y-auto pr-1">
                 {/* Salary Structure */}
                 <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-muted-foreground">Salary Structure (optional)</label>
-                    {setupCompForm.salary_structure_id && (structureComponentsData?.data?.length ?? 0) > 0 && (
-                      <Button
-                        type="button" size="sm" variant="outline" className="h-5 text-[10px] px-2"
-                        onClick={() => {
-                          const scs = structureComponentsData?.data ?? []
-                          if (scs.length > 0) {
-                            setSetupCompForm(f => ({
-                              ...f,
-                              components: scs.map(c => ({
-                                salary_component_id: c.salary_component_id,
-                                calculation_type:    c.calculation_type ?? 'fixed',
-                                value:               String(c.default_value ?? ''),
-                              })),
-                            }))
-                          }
-                        }}
-                      >
-                        Load from structure
-                      </Button>
-                    )}
-                  </div>
+                  <label className="text-xs font-medium text-muted-foreground">Salary Structure *</label>
                   <select
                     value={setupCompForm.salary_structure_id}
-                    onChange={e => setSetupCompForm(p => ({ ...p, salary_structure_id: e.target.value }))}
+                    onChange={e => {
+                      pendingAutoLoadRef.current = true
+                      setSetupCompForm(p => ({ ...p, salary_structure_id: e.target.value }))
+                    }}
                     className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-1 ring-primary/50"
                   >
-                    <option value="">— None / Custom —</option>
+                    <option value="">— Select a structure —</option>
                     {(salaryStructuresData?.data ?? []).map(s => (
                       <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                     ))}
@@ -3647,6 +3649,7 @@ export function EmployeeProfile() {
                   size="sm"
                   disabled={
                     setupCompMutation.isPending ||
+                    !setupCompForm.salary_structure_id ||
                     !setupCompForm.ctc_annual ||
                     !setupCompForm.effective_from ||
                     !setupCompForm.components.some(c => c.salary_component_id && c.value)
