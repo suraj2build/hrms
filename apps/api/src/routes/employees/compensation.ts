@@ -453,7 +453,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     }
 
     // ── Build DB rows from engine output ──────────────────────────────────────
-    const componentRows = result.components.map(c => {
+    const rawRows = result.components.map(c => {
       let salaryComponentId = c.salary_component_id
       if (c.salary_component_id === PF_EMPLOYEE_SENTINEL) salaryComponentId = pfIdMap.get(PF_EMPLOYEE_CODE) ?? ''
       if (c.salary_component_id === PF_EMPLOYER_SENTINEL) salaryComponentId = pfIdMap.get(PF_EMPLOYER_CODE) ?? ''
@@ -468,6 +468,15 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
         tenant_id:           req.tenantId,
       }
     }).filter(r => r.salary_component_id)  // drop if PF ID resolution failed
+
+    // Deduplicate by salary_component_id — engine-generated PF entries are appended
+    // last and must win over any identical component that came from the structure.
+    const seenIds = new Set<string>()
+    const componentRows = [...rawRows].reverse().filter(r => {
+      if (seenIds.has(r.salary_component_id)) return false
+      seenIds.add(r.salary_component_id)
+      return true
+    }).reverse()
 
     // ── Supersede the prior active compensation ───────────────────────────────
     // Only one active compensation per employee is allowed (uidx_comp_one_active).
@@ -507,7 +516,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     if (compCompErr) {
       // Rollback header
       await fastify.supabase.from('employee_compensations').delete().eq('id', comp.id)
-      return reply.code(500).send({ error: 'DB_ERROR', message: compCompErr.message })
+      // 23505 = unique_violation (duplicate salary_component_id in this compensation)
+      const status = compCompErr.code === '23505' ? 409 : 500
+      return reply.code(status).send({ error: 'DB_ERROR', message: compCompErr.message })
     }
 
     // ── Return full shaped record ──────────────────────────────────────────────
