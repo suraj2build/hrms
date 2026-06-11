@@ -64,7 +64,29 @@ export function OperationalInbox() {
 
   const { data: items = [], isLoading } = useQuery<InboxItem[]>({
     queryKey:        ['notifications', 'inbox'],
-    queryFn:         () => api.get('/notifications/inbox').then((r: any) => r.data),
+    // The inbox_items table uses summary/severity/status/action_route. Map those
+    // onto this component's model (body/priority/is_read/action_url) so filters,
+    // unread count and action buttons work — the raw fields didn't exist before,
+    // so every item showed unread and the Urgent/Action tabs were always empty.
+    queryFn:         () => api.get('/notifications/inbox').then((r: any) => {
+      const SEV_TO_PRIORITY: Record<string, InboxItem['priority']> = {
+        critical: 'urgent', error: 'high', warning: 'normal', info: 'low',
+      }
+      return (Array.isArray(r.data) ? r.data : []).map((row: any): InboxItem => ({
+        id:              row.id,
+        recipient_id:    row.recipient_id,
+        title:           row.title,
+        body:            row.summary ?? row.body ?? '',
+        priority:        SEV_TO_PRIORITY[row.severity] ?? 'normal',
+        item_type:       row.entity_type ?? row.item_type ?? '',
+        is_read:         (row.status ?? 'unread') !== 'unread',
+        action_required: !!(row.action_route ?? row.action_url),
+        action_url:      row.action_route ?? row.action_url ?? null,
+        expires_at:      row.expires_at ?? null,
+        escalated:       row.escalated ?? false,
+        created_at:      row.created_at,
+      }))
+    }),
     // Poll every 60 s so approval notifications appear without manual refresh.
     // staleTime === refetchInterval: prevents a mount-refetch firing every navigation
     // while the cached value is still within the 60 s polling window.
@@ -73,7 +95,8 @@ export function OperationalInbox() {
   })
 
   const markRead = useMutation({
-    mutationFn: (id: string) => api.put(`/notifications/inbox/${id}/read`, {}),
+    // Backend is POST /notifications/inbox/:id/read (not PUT).
+    mutationFn: (id: string) => api.post(`/notifications/inbox/${id}/read`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
     },
@@ -81,7 +104,8 @@ export function OperationalInbox() {
   })
 
   const markAllRead = useMutation({
-    mutationFn: () => api.put('/notifications/inbox/read-all', {}),
+    // Backend bulk endpoint is POST /notifications/inbox/bulk-read (there is no read-all).
+    mutationFn: () => api.post('/notifications/inbox/bulk-read', {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       toast.success('All notifications marked as read')

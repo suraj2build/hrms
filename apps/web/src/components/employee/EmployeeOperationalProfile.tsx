@@ -573,8 +573,18 @@ export function EmployeeOperationalProfile({
 
   const { data: employee, isLoading: empLoading } = useQuery({
     queryKey: ['emp-profile-basic', employeeId],
+    // GET /employees/:id returns a BARE row (no { data } wrapper) with
+    // first_name/last_name/joining_date — there is no full_name column. Map it.
     queryFn:  () =>
-      api.get<{ data: EmployeeBasic }>(`/employees/${employeeId}`).then(r => r.data),
+      api.get<Record<string, any>>(`/employees/${employeeId}`).then((row): EmployeeBasic => ({
+        id:              row.id,
+        full_name:       [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || (row.employee_code ?? 'Employee'),
+        employee_code:   row.employee_code,
+        status:          row.status,
+        email:           row.email,
+        phone:           row.phone,
+        date_of_joining: row.joining_date ?? row.date_of_joining,
+      })),
     enabled:   !!employeeId,
     staleTime: 5 * 60_000,
   })

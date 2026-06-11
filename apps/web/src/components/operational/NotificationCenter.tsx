@@ -218,12 +218,25 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
   const { data: rawNotifications, isLoading } = useQuery<Notification[]>({
     queryKey:  ['notifications'],
     queryFn:   () =>
-      api.get<{ data: Notification[] }>('/notifications?limit=30').then(r => r.data),
+      // Backend rows are { id, title, body, link, is_read, created_at, event_id }.
+      // Map them onto the component's model so the unread badge, timestamps and
+      // action links work (previously read `n.read`/`n.type`/`n.timestamp`, which
+      // the API never sends — the badge counted every item as unread).
+      api.get<{ data: Array<Record<string, any>> }>('/notifications?limit=30').then(r =>
+        (Array.isArray(r.data) ? r.data : []).map((n): Notification => ({
+          id:          n.id,
+          type:        (n.type as NotificationType) ?? 'info',
+          title:       n.title,
+          body:        n.body ?? undefined,
+          timestamp:   n.created_at ?? n.timestamp ?? new Date().toISOString(),
+          read:        n.is_read ?? n.read ?? false,
+          actionRoute: n.link ?? n.actionRoute ?? undefined,
+          actionLabel: n.actionLabel ?? undefined,
+        })),
+      ),
     staleTime: 30_000,
     enabled:   open,
   })
-  // Guard: ensure notifications is always an array even if the API returns
-  // an envelope object or undefined (prevents ".filter is not a function" crash).
   const notifications: Notification[] = Array.isArray(rawNotifications) ? rawNotifications : []
 
   // ── Mutations ─────────────────────────────────────────────────────────────

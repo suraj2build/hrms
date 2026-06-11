@@ -122,6 +122,20 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
     return reply.send({ updated: (data ?? []).length })
   })
 
+  // DELETE /notifications/:id — dismiss a notification (scoped to the recipient)
+  fastify.delete('/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { error } = await fastify.supabase
+      .from('notifications')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('recipient_id', req.userId)
+
+    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete notification' })
+    return reply.code(204).send()
+  })
+
   // GET /notifications/channels — delivery channel config (shape matches NotifChannel interface)
   fastify.get('/channels', auth, async (_req: any, reply) => {
     return reply.send({

@@ -125,14 +125,15 @@ function RunValidationDialog({
   const [error, setError] = useState<string | null>(null)
 
   const mutation = useMutation({
+    // POST /payroll/runs returns a top-level object { run_id, month, ... } (no { data } wrapper).
     mutationFn: (m: string) =>
-      api.post('/payroll/runs', { month: m }).then((r: any) => r.data),
+      api.post<{ run_id?: string; id?: string }>('/payroll/runs', { month: m }),
     onSuccess: (data, _m) => {
       queryClient.invalidateQueries({ queryKey: ['payroll-runs-history'] })
       onOpenChange(false)
       setMonth(todayYM)
       setError(null)
-      const runId = data?.id ?? data?.data?.id
+      const runId = data?.run_id ?? data?.id
       toast.success('Payroll run started', {
         description: `Month: ${_m}`,
         action: runId
