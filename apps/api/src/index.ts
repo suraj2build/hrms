@@ -109,6 +109,8 @@ import compOffRoute                   from './routes/attendance/comp-off.js'
 import overtimeRoutes                 from './routes/attendance/overtime.js'
 import leaveCollisionRoutes               from './routes/attendance/leave-collision.js'
 import attendanceQueueActionsRoute        from './routes/attendance/queue-actions.js'
+import attendanceContextRoutes           from './routes/attendance/context.js'
+import rosterContextRoutes               from './routes/attendance/roster-context.js'
 import leaveDurationRoutes               from './routes/attendance/leave-duration.js'
 import leaveAccrualLifecycleRoutes       from './routes/attendance/leave-accrual-lifecycle.js'
 import notificationsRoutes                from './routes/notifications/index.js'
@@ -135,6 +137,7 @@ import anomalyReconcileRoute              from './routes/attendance/anomaly-reco
 
 // Routes — Payroll
 import payrollRoutes                       from './routes/payroll/index.js'
+import payrollContextRoutes                from './routes/payroll/context.js'
 import payrollInvestigateRoute             from './routes/payroll/investigate.js'
 import payrollLedgerRoute                  from './routes/payroll/ledger.js'
 import payrollCostRoute                    from './routes/payroll/cost.js'
@@ -538,6 +541,8 @@ async function start() {
   await fastify.register(compOffRoute)                   // /attendance/comp-off/*
   await fastify.register(overtimeRoutes)                 // /overtime/*
   await fastify.register(leaveCollisionRoutes)           // /leave/collision/* + /leave/optional-holidays/*
+  await fastify.register(attendanceContextRoutes)        // GET /attendance/active-now|missing-punches/today|ot-spike-employees
+  await fastify.register(rosterContextRoutes)            // GET /roster/uncovered-shifts|weekly-off-conflicts, GET /holidays
   await fastify.register(attendanceQueueActionsRoute)    // POST /attendance/queue/:id/(resolve|escalate|snooze)
   await fastify.register(leaveDurationRoutes)            // POST /leave/duration/preview + GET /leave/duration/explain/:id
   await fastify.register(leaveAccrualLifecycleRoutes)    // /leave/lifecycle/status + /leave/lifecycle/freeze + /leave/lifecycle/tiers
@@ -567,6 +572,7 @@ async function start() {
 
   // ── Payroll Routes ───────────────────────────────────────────
   await fastify.register(payrollRoutes)                  // POST /payroll/runs, GET /payroll/runs, etc.
+  await fastify.register(payrollContextRoutes)           // GET /payroll/blockers|variance-summary|readiness|pending-locks
   await fastify.register(payrollLedgerRoute)             // GET/POST /payroll/ledger/*
   await fastify.register(payrollInvestigateRoute)        // GET /payroll/investigate/:employeeId
   await fastify.register(payrollCostRoute)               // GET /analytics/payroll/cost, /trends, /insights, /departments

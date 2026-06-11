@@ -159,6 +159,66 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // POST /notifications/escalate — mark inbox items as escalated
+  fastify.post('/escalate', auth, async (req: any, reply) => {
+    const body = req.body as { item_ids?: string[] }
+    if (!Array.isArray(body?.item_ids) || body.item_ids.length === 0) {
+      return reply.code(400).send({ error: 'INVALID_BODY', message: 'item_ids array is required' })
+    }
+    if (body.item_ids.length > 100) {
+      return reply.code(400).send({ error: 'TOO_MANY_IDS', message: 'Max 100 IDs per request' })
+    }
+    try {
+      const { data, error } = await fastify.supabase
+        .from('inbox_items')
+        .update({ escalated: true, escalated_at: new Date().toISOString() })
+        .in('id', body.item_ids)
+        .eq('tenant_id', req.tenantId)
+        .select('id')
+
+      if (error) {
+        fastify.log.warn({ event: 'notifications.escalate_failed', err: error.message })
+        return reply.send({ escalated: 0 })
+      }
+      return reply.send({ escalated: (data ?? []).length })
+    } catch (err) {
+      fastify.log.error({ err }, 'notifications/escalate: unexpected error')
+      return reply.send({ escalated: 0 })
+    }
+  })
+
+  // POST /notifications/notes — add an operational note for a queue item / employee
+  fastify.post('/notes', auth, async (req: any, reply) => {
+    const body = req.body as { employee_id?: string; queue_item_id?: string; note?: string; created_by?: string }
+    if (!body?.employee_id || !body?.note?.trim()) {
+      return reply.code(400).send({ error: 'INVALID_BODY', message: 'employee_id and note are required' })
+    }
+    try {
+      const { data, error } = await fastify.supabase
+        .from('operational_notes')
+        .insert({
+          tenant_id:     req.tenantId,
+          employee_id:   body.employee_id,
+          queue_item_id: body.queue_item_id ?? null,
+          note:          body.note.trim(),
+          created_by:    body.created_by ?? req.userId,
+          created_at:    new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        // Table may not exist yet — acknowledge so the UI doesn't break
+        fastify.log.warn({ event: 'notifications.notes_failed', err: error.message })
+        return reply.code(201).send({ id: null, saved: false })
+      }
+      return reply.code(201).send({ id: (data as any).id, saved: true })
+    } catch (err) {
+      fastify.log.error({ err }, 'notifications/notes: unexpected error')
+      return reply.code(201).send({ id: null, saved: false })
+    }
+  })
+
   // NOTE: /notifications/templates/* is served by notificationTemplatesRoute
   // (registered separately at prefix '/notifications/templates' in index.ts).
   // Do NOT add template routes here — it causes Fastify duplicate-route crash.
