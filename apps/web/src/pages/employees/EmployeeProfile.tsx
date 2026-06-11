@@ -51,15 +51,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter } 
 import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
 import { SignedImage } from '@/components/SignedImage'
 import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
-import {
-  ESIStatusBadge,
-  StatutoryExplainer,
-  StatutoryEmptyNote,
-  InfoTooltip,
-  TooltipProvider,
-  ESI_STATUS_TOOLTIP,
-  type ESIStatusType,
-} from '@/components/payroll/StatutoryBadges'
+import { TooltipProvider } from '@/components/payroll/StatutoryBadges'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -640,16 +632,9 @@ export function EmployeeProfile() {
   })
   const holidayGroups = (holidayGroupsData?.data ?? []).filter((g: any) => g.is_active !== false)
 
-  // Derive ESI status for display
+  // Continuation period — operational data shown read-only on ESI status card
   const profileToday = new Date().toISOString().slice(0, 10)
   const esiContinuationActive = !!(esiEligRow?.continuation_until && esiEligRow.continuation_until >= profileToday)
-  const profileEsiStatus: ESIStatusType | null = esiEligRow
-    ? (esiEligRow.is_esi_applicable === false
-        ? 'not_applicable'
-        : esiContinuationActive
-          ? 'continuation'
-          : 'eligible')
-    : null
   const { data: docsData } = useQuery<{ data: any[] }>({
     queryKey: ['emp-docs', id], queryFn: () => api.get(`/employees/${id}/documents`),
     enabled: !!id && visited.has('documents'), staleTime: 30_000,
@@ -1470,8 +1455,6 @@ export function EmployeeProfile() {
     pan_number: '', aadhaar_number: '', uan_number: '', pf_number: '',
     esi_number: '', pt_applicable: false, lwf_applicable: false,
     tax_regime: 'new' as 'old' | 'new',
-    // ESI applicability — override only (salary threshold auto-determines eligibility)
-    esi_applicable: true,
     pt_state_code:    '',
     lwf_state_code:   '',
     holiday_group_id: '',
@@ -1495,8 +1478,6 @@ export function EmployeeProfile() {
       pt_applicable:  bs?.pt_applicable  ?? false,
       lwf_applicable: bs?.lwf_applicable ?? false,
       tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
-      // ESI: applicable unless the latest timeline row says false.
-      esi_applicable: esiEligRow ? (esiEligRow.is_esi_applicable !== false) : true,
       // PT / LWF state: from bank-statutory response (merged from state config).
       pt_state_code:    (bs as any)?.pt_state_code    ?? '',
       lwf_state_code:   (bs as any)?.lwf_state_code   ?? '',
@@ -1529,15 +1510,7 @@ export function EmployeeProfile() {
       if (bankForm.account_number.trim()) body.account_number = bankForm.account_number.trim()
       if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
 
-      const today = new Date().toISOString().slice(0, 10)
-      return Promise.all([
-        api.put(`/employees/${id}/bank-statutory`, body),
-        // ESI applicability override (salary threshold auto-determines; override for exceptions).
-        api.put(`/payroll/statutory/esi/eligibility/${id}`, {
-          is_esi_applicable: bankForm.esi_applicable,
-          effective_from:    today,
-        }),
-      ])
+      return api.put(`/employees/${id}/bank-statutory`, body)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
@@ -3758,36 +3731,23 @@ export function EmployeeProfile() {
                       </div>
 
                       {/* ESI compliance status card */}
-                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                            ESI Status
-                            {profileEsiStatus && <InfoTooltip text={ESI_STATUS_TOOLTIP[profileEsiStatus]} />}
-                          </span>
-                          {profileEsiStatus
-                            ? <ESIStatusBadge status={profileEsiStatus} />
-                            : <Badge variant="secondary" className="rounded-full text-[10px]">Not configured</Badge>
-                          }
-                        </div>
-                        {esiEligRow ? (
-                          <div className="space-y-1">
-                            {/* Continuation banner — exception only */}
-                            {esiContinuationActive && esiEligRow.continuation_until && (
-                              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2.5 py-1.5">
-                                <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-snug">
-                                  ESI continues until <span className="font-semibold">{esiEligRow.continuation_until}</span> — contribution period continuation is active.
-                                </p>
-                              </div>
-                            )}
-                            {esiEligRow.effective_from && (
-                              <StatutoryExplainer label="Effective From" value={esiEligRow.effective_from} muted />
-                            )}
-                            {esiEligRow.reason && (
-                              <StatutoryExplainer label="Reason" value={esiEligRow.reason} muted />
-                            )}
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">ESI Status</span>
+                        <p className="text-xs text-muted-foreground">
+                          ESI applicability is set on the assigned salary structure
+                          {fpData?.compensation?.structure
+                            ? <> (<span className="font-medium text-foreground">{fpData.compensation.structure.name}</span>)</>
+                            : ' (no structure assigned yet)'}
+                          . Ceiling and rates are configured on the{' '}
+                          <a href="/admin/payroll/statutory/esi" className="text-primary underline underline-offset-2">ESI compliance page</a>.
+                        </p>
+                        {/* Continuation period — genuinely per-employee operational data */}
+                        {esiContinuationActive && esiEligRow?.continuation_until && (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2.5 py-1.5 mt-1">
+                            <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-snug">
+                              ESI contributions continue until <span className="font-semibold">{esiEligRow.continuation_until}</span> — salary crossed threshold mid-period.
+                            </p>
                           </div>
-                        ) : (
-                          <StatutoryEmptyNote text="Employee not enrolled in ESI for this period." />
                         )}
                       </div>
                       </TooltipProvider>
@@ -5003,17 +4963,6 @@ export function EmployeeProfile() {
               <p className="text-[10px] text-muted-foreground mb-3 ml-6">
                 PF applicability and ceiling mode are set in the employee's salary structure. ESI is auto-determined by salary (≤₹21,000); PT and LWF follow the statutory group and work location.
               </p>
-
-              {/* ESI row */}
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
-                  <Switch checked={bankForm.esi_applicable} onCheckedChange={v=>setBankForm(f=>({...f,esi_applicable:v}))} />
-                  <div>
-                    <p className="text-xs font-medium">ESI Eligible</p>
-                    <p className="text-[10px] text-muted-foreground">Auto-determined by salary (≤₹21,000/mo). Override only if needed.</p>
-                  </div>
-                </div>
-              </div>
 
               {/* PT row */}
               <div className="grid grid-cols-2 gap-3 mb-3">
