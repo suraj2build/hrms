@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { fetchFullProfile } from '../../lib/employee-profile.js'
 import { SLOW_THRESHOLD_MS } from '../../lib/constants.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Request schema ─────────────────────────────────────────────────────────────
 const fullCreateSchema = z.object({
@@ -27,7 +28,8 @@ const fullCreateSchema = z.object({
 type FullCreateBody = z.infer<typeof fullCreateSchema>
 
 export default async function fullCreateRoute(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  // Creating an employee + job history is HR-admin only (mirrors POST /employees).
+  const auth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   /**
    * POST /employees/full-create

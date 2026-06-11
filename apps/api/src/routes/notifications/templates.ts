@@ -206,7 +206,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
   })
 
   // ── POST /notifications/templates/send ─────────────────────────────────────
-  fastify.post('/send', auth, async (req: any, reply) => {
+  fastify.post('/send', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const schema = z.object({
       template_code: z.string().optional(),
       body: z.string().optional(),

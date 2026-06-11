@@ -559,6 +559,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .from('generated_letters')
       .update({ approval_status: newStatus, current_level: newLevel })
       .eq('id', letterId)
+      .eq('tenant_id', tenantId)
 
     return { success: true, fully_approved: isLastLevel }
   })

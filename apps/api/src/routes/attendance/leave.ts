@@ -361,6 +361,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         approved_at: new Date().toISOString(),
       })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     if (updateError) {
       req.log.error({ err: updateError }, 'leave approve update failed')
@@ -586,6 +587,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .from('leave_applications')
       .update({ status: 'rejected' })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     if (error) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to reject application' })

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { slaService }            from '../../platform/operations/sla/sla.service.js'
 import { governanceEvaluator }   from '../../platform/governance/evaluators/event-evaluator.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function adminRoutes(fastify: FastifyInstance) {
 
@@ -24,7 +25,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // POST /enterprise/sla/scan
-  fastify.post('/sla/scan', { preHandler: [fastify.authenticate] }, async (_req, reply) => {
+  fastify.post('/sla/scan', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (_req, reply) => {
     try {
       const breaches = slaService.scanBreaches()
       return reply.send({
@@ -69,7 +70,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // POST /enterprise/listeners/:name/reset
-  fastify.post('/listeners/:name/reset', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/listeners/:name/reset', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, reply) => {
     try {
       const { name } = req.params as { name: string }
       governanceEvaluator.resetListener(name)

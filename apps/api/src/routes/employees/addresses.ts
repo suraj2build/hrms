@@ -37,7 +37,7 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
   })
 
   // POST/PUT: upsert by address_type
-  fastify.post('/employees/:id/addresses', auth, async (req: any, reply) => {
+  fastify.post('/employees/:id/addresses', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.safeParse(req.body)

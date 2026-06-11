@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   identity_type_id: z.string().uuid('Invalid identity type'),
@@ -18,6 +19,8 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 
 export default async function identityRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  // Government-ID PII: writes/deletes are HR-admin only.
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/identity', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -32,7 +35,7 @@ export default async function identityRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/employees/:id/identity', auth, async (req: any, reply) => {
+  fastify.post('/employees/:id/identity', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.safeParse(req.body)
@@ -46,7 +49,7 @@ export default async function identityRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.delete('/employees/:id/identity/:identityId', auth, async (req: any, reply) => {
+  fastify.delete('/employees/:id/identity/:identityId', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('employee_identity')
       .delete()

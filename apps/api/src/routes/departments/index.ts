@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -23,6 +24,8 @@ const gradeSchema = z.object({
 
 export default async function orgRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  // Reads stay open to any authenticated user (dropdowns); mutations are HR-admin only.
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── Departments ───────────────────────────────────────────────────────────
   fastify.get('/departments', auth, async (req, reply) => {
@@ -61,7 +64,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.send({ data: { job_history, child_departments, total: job_history + child_departments } })
   })
 
-  fastify.post('/departments', auth, async (req, reply) => {
+  fastify.post('/departments', hrAdminAuth, async (req, reply) => {
     const parsed = deptSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
 
@@ -90,7 +93,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/departments/:id', auth, async (req, reply) => {
+  fastify.put('/departments/:id', hrAdminAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
     const parsed = deptSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
@@ -101,7 +104,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/departments/:id', auth, async (req, reply) => {
+  fastify.delete('/departments/:id', hrAdminAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
     const tenantId = req.tenantId
     const merge_to = (req.body as any)?.merge_to as string | undefined
@@ -183,7 +186,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.send({ data: { job_history, total: job_history } })
   })
 
-  fastify.post('/designations', auth, async (req, reply) => {
+  fastify.post('/designations', hrAdminAuth, async (req, reply) => {
     const parsed = desigSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
 
@@ -193,7 +196,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/designations/:id', auth, async (req, reply) => {
+  fastify.put('/designations/:id', hrAdminAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
     const parsed = desigSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
@@ -204,7 +207,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/designations/:id', auth, async (req, reply) => {
+  fastify.delete('/designations/:id', hrAdminAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
     const tenantId = req.tenantId
     const merge_to = (req.body as any)?.merge_to as string | undefined
@@ -270,7 +273,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.send({ data: { job_history, total: job_history } })
   })
 
-  fastify.post('/grades', auth, async (req, reply) => {
+  fastify.post('/grades', hrAdminAuth, async (req, reply) => {
     const parsed = gradeSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
 
@@ -283,7 +286,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/grades/:id', auth, async (req, reply) => {
+  fastify.put('/grades/:id', hrAdminAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
     const parsed = gradeSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
@@ -294,7 +297,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/grades/:id', auth, async (req, reply) => {
+  fastify.delete('/grades/:id', hrAdminAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
     const tenantId = req.tenantId
     const merge_to = (req.body as any)?.merge_to as string | undefined

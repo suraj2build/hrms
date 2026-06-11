@@ -299,6 +299,10 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
 
   // POST /overtime/requests — manually create (admin can generate for any employee)
   fastify.post('/overtime/requests', auth, async (req: any, reply) => {
+    // Raising an OT request (for any employee_id) is a manager/admin action,
+    // matching the approve/reject siblings below. Prevents an employee seeding
+    // pay claims for themselves or colleagues.
+    if (!requireManagerOrAdmin(req, reply)) return
     const schema = z.object({
       employee_id:     z.string().uuid(),
       attendance_date: z.string().regex(dateRe),

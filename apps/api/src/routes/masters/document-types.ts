@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -12,6 +13,7 @@ const schema = z.object({
 
 export default async function documentTypesRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
@@ -23,7 +25,7 @@ export default async function documentTypesRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/', auth, async (req: any, reply) => {
+  fastify.post('/', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -36,7 +38,7 @@ export default async function documentTypesRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(data)
   })
 
-  fastify.put('/:id', auth, async (req: any, reply) => {
+  fastify.put('/:id', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -52,7 +54,7 @@ export default async function documentTypesRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
-  fastify.delete('/:id', auth, async (req: any, reply) => {
+  fastify.delete('/:id', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('document_types')
       .delete()

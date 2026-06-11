@@ -16,6 +16,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ const POLICY_COLS = 'id, tenant_id, name, description, is_active, created_at, up
 
 export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET / — list ─────────────────────────────────────────────────────────────
 
@@ -117,7 +119,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
   // ── POST / — create ───────────────────────────────────────────────────────────
 
-  fastify.post('/', auth, async (req: any, reply) => {
+  fastify.post('/', hrAdminAuth, async (req: any, reply) => {
     const parsed = policySchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -182,7 +184,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
   // ── PUT /:id — full update (metadata + rules) ─────────────────────────────────
 
-  fastify.put('/:id', auth, async (req: any, reply) => {
+  fastify.put('/:id', hrAdminAuth, async (req: any, reply) => {
     const parsed = policySchema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -251,7 +253,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
   // ── DELETE /:id ────────────────────────────────────────────────────────────────
 
-  fastify.delete('/:id', auth, async (req: any, reply) => {
+  fastify.delete('/:id', hrAdminAuth, async (req: any, reply) => {
     // Safety check — refuse if any employees or sites reference this policy
     const { count: empCount } = await fastify.supabase
       .from('employees')
@@ -315,7 +317,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
   // ── POST /:id/duplicate ────────────────────────────────────────────────────────
 
-  fastify.post('/:id/duplicate', auth, async (req: any, reply) => {
+  fastify.post('/:id/duplicate', hrAdminAuth, async (req: any, reply) => {
     const { data: source, error: se } = await fastify.supabase
       .from('rotation_policies')
       .select(POLICY_COLS)

@@ -1708,6 +1708,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .from('payroll_runs')
       .update({ status: 'finalized', finalized_by: req.userId, finalized_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     if (runFinalizeErr) {
       // Slips are finalized; run status is not.  Retrying finalization is safe:
@@ -2322,6 +2323,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         resolution_note: resolution_note ?? null,
       })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     if (updateErr) {
       req.log.error({ err: updateErr, blocker_id: id }, 'payroll blockers: resolve update failed')
@@ -3862,6 +3864,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .from('payroll_financial_ledgers')
       .update({ ledger_status: 'posted', posted_at: new Date().toISOString(), posted_by: req.userId })
       .eq('id', ledgerId)
+      .eq('tenant_id', req.tenantId)
 
     if (updErr) return reply.code(500).send({ error: 'POST_FAILED', message: updErr.message })
 
