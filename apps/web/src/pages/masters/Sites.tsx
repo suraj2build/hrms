@@ -39,14 +39,6 @@ import { cn }               from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-const INDIA_STATES: [string, string][] = [
-  ['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
-  ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
-  ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
-  ['MH','Maharashtra'],['MN','Manipur'],['ML','Meghalaya'],['MZ','Mizoram'],
-  ['NL','Nagaland'],['OR','Odisha'],['PB','Punjab'],['SK','Sikkim'],
-  ['TN','Tamil Nadu'],['TS','Telangana'],['TR','Tripura'],['WB','West Bengal'],
-]
 
 interface Site {
   id:                           string
@@ -343,6 +335,24 @@ export function Sites() {
     queryFn:  () => api.get('/masters/holiday-groups'),
     staleTime: 120_000,
   })
+  const { data: ptaxStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+    queryKey: ['ptax-states'],
+    queryFn:  () => api.get('/payroll/statutory/ptax/states'),
+    staleTime: 5 * 60_000,
+  })
+  const { data: lwfStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+    queryKey: ['lwf-states'],
+    queryFn:  () => api.get('/payroll/statutory/lwf/states'),
+    staleTime: 5 * 60_000,
+  })
+
+  // Union of enabled PT and LWF states — these are the states the tenant has configured
+  const configuredStates = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of ptaxStatesData?.data ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
+    for (const s of lwfStatesData?.data ?? [])  if (s.enabled) map.set(s.state_code, s.state_name)
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]))
+  }, [ptaxStatesData, lwfStatesData])
 
   const sites            = sitesData?.data         ?? []
   const rosters          = rostersData?.data       ?? []
@@ -568,11 +578,21 @@ export function Sites() {
                 onChange={e => setForm(p => ({ ...p, state_code: e.target.value }))}
                 className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
               >
-                <option value="">— Not set (employees need individual state override) —</option>
-                {INDIA_STATES.map(([code, name]) => (
-                  <option key={code} value={code}>{name} ({code})</option>
-                ))}
+                <option value="">— Not set —</option>
+                {configuredStates.length > 0
+                  ? configuredStates.map(([code, name]) => (
+                      <option key={code} value={code}>{name} ({code})</option>
+                    ))
+                  : <option disabled value="">No states configured — set up PT or LWF first</option>
+                }
               </select>
+              {configuredStates.length === 0 && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Configure states in{' '}
+                  <a href="/admin/payroll/statutory/ptax" className="text-primary underline">PT</a> or{' '}
+                  <a href="/admin/payroll/statutory/lwf" className="text-primary underline">LWF</a> compliance pages first.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Timezone (IANA)</label>

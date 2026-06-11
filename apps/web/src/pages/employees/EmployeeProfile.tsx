@@ -632,6 +632,27 @@ export function EmployeeProfile() {
   })
   const holidayGroups = (holidayGroupsData?.data ?? []).filter((g: any) => g.is_active !== false)
 
+  // Configured PT + LWF states — used for state override dropdowns (only show
+  // states the tenant has actually set up, not the full list of 28)
+  const { data: ptaxStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+    queryKey: ['ptax-states'],
+    queryFn:  () => api.get('/payroll/statutory/ptax/states'),
+    enabled:  !!id && visited.has('compensation'),
+    staleTime: 5 * 60_000,
+  })
+  const { data: lwfStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+    queryKey: ['lwf-states'],
+    queryFn:  () => api.get('/payroll/statutory/lwf/states'),
+    enabled:  !!id && visited.has('compensation'),
+    staleTime: 5 * 60_000,
+  })
+  const configuredPtLwfStates = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of ptaxStatesData?.data ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
+    for (const s of lwfStatesData?.data  ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]))
+  }, [ptaxStatesData, lwfStatesData])
+
   // Continuation period — operational data shown read-only on ESI status card
   const profileToday = new Date().toISOString().slice(0, 10)
   const esiContinuationActive = !!(esiEligRow?.continuation_until && esiEligRow.continuation_until >= profileToday)
@@ -4961,56 +4982,58 @@ export function EmployeeProfile() {
                 Scheme Applicability
               </p>
               <p className="text-[10px] text-muted-foreground mb-3 ml-6">
-                PF applicability and ceiling mode are set in the employee's salary structure. ESI is auto-determined by salary (≤₹21,000); PT and LWF follow the statutory group and work location.
+                PF / ESI follow the salary structure. PT and LWF state auto-derive from the assigned site
+                {bs?.site_state_code ? <> (<span className="font-medium text-foreground">{bs.site_state_code}</span>)</> : ' — configure state on the site first'}.
+                Toggle off to exempt this individual.
               </p>
 
-              {/* PT row */}
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
                   <Switch checked={bankForm.pt_applicable} onCheckedChange={v=>setBankForm(f=>({...f,pt_applicable:v}))} />
                   <div>
                     <p className="text-xs font-medium">PT Applicable</p>
-                    <p className="text-[10px] text-muted-foreground">Follows statutory group. Off = exempt this employee.</p>
+                    <p className="text-[10px] text-muted-foreground">Off = exempt from Professional Tax.</p>
                   </div>
                 </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">PT State Override</Label>
-                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
-                    value={bankForm.pt_state_code} onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}>
-                    <option value="">{bs?.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Auto (no site state set)'}</option>
-                    {[['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
-                      ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
-                      ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
-                      ['MH','Maharashtra'],['MN','Manipur'],['ML','Meghalaya'],['MZ','Mizoram'],
-                      ['NL','Nagaland'],['OR','Odisha'],['PB','Punjab'],['SK','Sikkim'],
-                      ['TN','Tamil Nadu'],['TS','Telangana'],['TR','Tripura'],['WB','West Bengal'],
-                    ].map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* LWF row */}
-              <div className="grid grid-cols-2 gap-3">
                 <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
                   <Switch checked={bankForm.lwf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,lwf_applicable:v}))} />
                   <div>
                     <p className="text-xs font-medium">LWF Applicable</p>
-                    <p className="text-[10px] text-muted-foreground">Follows statutory group. Off = exempt this employee.</p>
+                    <p className="text-[10px] text-muted-foreground">Off = exempt from Labour Welfare Fund.</p>
                   </div>
                 </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">LWF State Override</Label>
-                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
-                    value={bankForm.lwf_state_code} onChange={e => setBankForm(f => ({ ...f, lwf_state_code: e.target.value }))}>
-                    <option value="">{bs?.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Auto (no site state set)'}</option>
-                    {[['AP','Andhra Pradesh'],['CG','Chhattisgarh'],['GA','Goa'],['GJ','Gujarat'],
-                      ['HR','Haryana'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
-                      ['MH','Maharashtra'],['OR','Odisha'],['PB','Punjab'],
-                      ['TN','Tamil Nadu'],['TS','Telangana'],['WB','West Bengal'],
-                    ].map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
-                  </select>
-                </div>
               </div>
+
+              {/* State override — for employees working in a different state than their site */}
+              {(bankForm.pt_state_code || bankForm.lwf_state_code || !bs?.site_state_code) && (
+                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/50 mt-1">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">PT State Override</Label>
+                    <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                      value={bankForm.pt_state_code} onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}>
+                      <option value="">{bs?.site_state_code ? `Auto from site (${bs.site_state_code})` : '— No site state —'}</option>
+                      {configuredPtLwfStates.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">LWF State Override</Label>
+                    <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
+                      value={bankForm.lwf_state_code} onChange={e => setBankForm(f => ({ ...f, lwf_state_code: e.target.value }))}>
+                      <option value="">{bs?.site_state_code ? `Auto from site (${bs.site_state_code})` : '— No site state —'}</option>
+                      {configuredPtLwfStates.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              {bs?.site_state_code && !bankForm.pt_state_code && !bankForm.lwf_state_code && (
+                <p className="text-[10px] text-muted-foreground mt-2">
+                  State overrides hidden — auto using site state <span className="font-medium text-foreground">{bs.site_state_code}</span>.{' '}
+                  <button type="button" className="text-primary underline underline-offset-2"
+                    onClick={() => setBankForm(f => ({ ...f, pt_state_code: bs.site_state_code ?? '', lwf_state_code: bs.site_state_code ?? '' }))}>
+                    Override
+                  </button>
+                </p>
+              )}
             </div>
 
             {/* ── Section 4: Calendar ───────────────────────────────────── */}
