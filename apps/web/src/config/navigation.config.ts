@@ -954,6 +954,18 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     keywords:    ['tax governance', 'IT window', 'declaration window', 'regime policy', 'proof settings', 'compliance', '80C'],
     description: 'IT declaration window, regime policy, proof settings, and compliance dashboard',
   },
+  {
+    id:          'statutory-groups',
+    label:       'Statutory Groups',
+    breadcrumbLabel: 'Statutory Groups',
+    route:       '/admin/payroll/statutory-groups',
+    icon:        Landmark,
+    groupId:     'payroll-statutory',
+    section:     'admin',
+    permission:  'payroll:view',
+    keywords:    ['statutory groups', 'PF state', 'ESI state', 'PT state', 'LWF', 'wage ceiling', 'state applicability'],
+    description: 'Per-state PF / ESI / PT / LWF applicability and wage ceiling overrides',
+  },
 
   // ════════════════════════════════════════════════════════════════════════════
   // 8. EMPLOYEE FINANCIAL OPS

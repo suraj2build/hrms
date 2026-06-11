@@ -1,27 +1,20 @@
 /**
  * CompensationSetup — /admin/payroll/setup
  *
- * SINGLE front-door hub for all salary / compensation configuration.
+ * SINGLE front-door hub for salary / compensation configuration.
  *
- * Consolidates the previously-scattered config surfaces into one tabbed
- * workspace. Each tab embeds the EXISTING config page component unchanged —
- * no business logic, API, or data-flow changes. Only the active tab mounts
- * (Radix Tabs unmounts inactive content), so embedded pages keep their own
- * data fetching with zero duplicate work.
+ *   Tab 1 — Salary Components   (component library)     → SalaryComponents
+ *   Tab 2 — Salary Structures   (structure builder)     → CompensationMaster
+ *   Tab 3 — Statutory Policy    (NLC · PF switch · TDS) → StatutoryPolicy
  *
- *   Tab 1 — Salary Components   (component library)        → SalaryComponents
- *   Tab 2 — Salary Structures   (structure builder)        → CompensationMaster
- *   Tab 3 — Statutory Mappings  (per-state PF/ESI/PT/LWF)  → StatutoryGroups
- *   Tab 4 — Statutory Policy    (tenant PF rates / NLC)    → StatutoryPolicy
- *
- * The active tab is synced to the URL (?tab=) so links / refresh / back-button
- * land on the right section.
+ * Statutory Groups (per-state PF/ESI/PT/LWF applicability) is a geographic
+ * master — it lives under Statutory Compliance in the sidebar, not here.
  *
  * Access: hr_admin / super_admin (each embedded page enforces its own guard).
  */
 
 import { useSearchParams } from 'react-router-dom'
-import { Layers, GitMerge, Landmark, ShieldCheck } from 'lucide-react'
+import { Layers, GitMerge, ShieldCheck } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -29,16 +22,14 @@ import { cn }            from '@/lib/utils'
 
 import { SalaryComponents }   from '@/pages/payroll/SalaryComponents'
 import { CompensationMaster } from '@/pages/payroll/CompensationMaster'
-import { StatutoryGroups }    from '@/pages/masters/StatutoryGroups'
 import { StatutoryPolicy }    from '@/pages/payroll/StatutoryPolicy'
 
 // ── Tab registry ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'components', label: 'Salary Components',  icon: Layers,      hint: 'Pay component library', Component: SalaryComponents   },
-  { id: 'structures', label: 'Salary Structures',  icon: GitMerge,    hint: 'CTC structure builder', Component: CompensationMaster },
-  { id: 'statutory',  label: 'Statutory Mappings', icon: Landmark,    hint: 'Per-state PF/ESI/PT/LWF', Component: StatutoryGroups   },
-  { id: 'policy',     label: 'Statutory Policy',   icon: ShieldCheck, hint: 'PF rates · NLC',         Component: StatutoryPolicy    },
+  { id: 'components', label: 'Salary Components', icon: Layers,      hint: 'Pay component library', Component: SalaryComponents   },
+  { id: 'structures', label: 'Salary Structures', icon: GitMerge,    hint: 'CTC structure builder', Component: CompensationMaster },
+  { id: 'policy',     label: 'Statutory Policy',  icon: ShieldCheck, hint: 'NLC · PF · TDS policy', Component: StatutoryPolicy    },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']

@@ -679,6 +679,7 @@ export default function App() {
                 <Route path="/admin/payroll/statutory/ptax"           element={<PTAXManagement />} />
                 <Route path="/admin/payroll/statutory/tds"            element={<TDSManagement />} />
                 <Route path="/admin/payroll/statutory/lwf"            element={<LWFManagement />} />
+                <Route path="/admin/payroll/statutory-groups"         element={<StatutoryGroups />} />
                 <Route path="/admin/payroll/tax-governance"           element={<TaxGovernance />} />
                 <Route path="/admin/payroll/tax-governance-admin"    element={<TaxGovernanceAdmin />} />
                 {/* Phase 14 — Enterprise Payroll Operationalization */}

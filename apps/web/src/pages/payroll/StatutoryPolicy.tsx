@@ -18,14 +18,14 @@
 
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ShieldCheck, Loader2, Save, Info, Landmark, Scale } from 'lucide-react'
+import { ShieldCheck, Loader2, Save, Info, Landmark, Scale, ArrowRight } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
-import { Input }         from '@/components/ui/input'
-import { Label }         from '@/components/ui/label'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
@@ -41,17 +41,21 @@ interface CompensationPolicy {
   is_configured:    boolean
 }
 
+interface EpfConfig {
+  employee_contribution_pct:  number
+  employer_pf_pct:            number
+  employer_eps_pct:           number
+  wage_ceiling:               number
+  is_wage_ceiling_applicable: boolean
+}
+
 interface PolicyForm {
-  nlc_enabled:      boolean
-  pf_enabled:       boolean
-  pf_employee_rate: string
-  pf_employer_rate: string
-  pf_cap_amount:    string
+  nlc_enabled: boolean
+  pf_enabled:  boolean
 }
 
 const DEFAULT_FORM: PolicyForm = {
   nlc_enabled: true, pf_enabled: false,
-  pf_employee_rate: '12', pf_employer_rate: '12', pf_cap_amount: '15000',
 }
 
 // ── Toggle row ──────────────────────────────────────────────────────────────────
@@ -105,16 +109,19 @@ export function StatutoryPolicy() {
     staleTime: 60_000,
   })
 
+  const { data: epfData } = useQuery<EpfConfig>({
+    queryKey: ['epf-config'],
+    queryFn:  () => api.get('/payroll/statutory/epf/config').then((r: any) => r?.data ?? r),
+    staleTime: 60_000,
+  })
+
   const policy = data?.data
 
   useEffect(() => {
     if (policy) {
       setForm({
-        nlc_enabled:      policy.nlc_enabled,
-        pf_enabled:       policy.pf_enabled,
-        pf_employee_rate: String(policy.pf_employee_rate),
-        pf_employer_rate: String(policy.pf_employer_rate),
-        pf_cap_amount:    String(policy.pf_cap_amount),
+        nlc_enabled: policy.nlc_enabled,
+        pf_enabled:  policy.pf_enabled,
       })
     }
   }, [policy])
@@ -151,26 +158,9 @@ export function StatutoryPolicy() {
   })
 
   function handleSave() {
-    const empRate = Number(form.pf_employee_rate)
-    const erRate  = Number(form.pf_employer_rate)
-    const cap     = Number(form.pf_cap_amount)
-
-    if ([empRate, erRate, cap].some(n => Number.isNaN(n))) {
-      toast.error('Rates and cap must be numbers')
-      return
-    }
-    if (empRate < 0 || empRate > 30 || erRate < 0 || erRate > 30) {
-      toast.error('PF rates must be between 0 and 30%')
-      return
-    }
-    if (cap < 0) { toast.error('PF cap cannot be negative'); return }
-
     save.mutate({
-      nlc_enabled:      form.nlc_enabled,
-      pf_enabled:       form.pf_enabled,
-      pf_employee_rate: empRate,
-      pf_employer_rate: erRate,
-      pf_cap_amount:    cap,
+      nlc_enabled: form.nlc_enabled,
+      pf_enabled:  form.pf_enabled,
     })
   }
 
@@ -216,51 +206,53 @@ export function StatutoryPolicy() {
       {/* Provident Fund */}
       <SectionCard
         title="Provident Fund (PF / EPF)"
-        description="Tenant-level PF switch and contribution rates. Per-employee PF enrolment is still required."
+        description="Master switch for PF across all payroll runs. Contribution rates and wage ceiling are configured in EPF Management."
         icon={<Landmark className="h-4 w-4 text-muted-foreground" />}
       >
         <ToggleRow
           label="Enable PF"
-          hint="Master switch. PF is also gated per employee (employee.pf_enabled)."
+          hint="Master switch. PF is also gated per employee (employee.pf_enabled) and per statutory group."
           checked={form.pf_enabled}
           disabled={!isAdmin}
           onChange={v => setForm(f => ({ ...f, pf_enabled: v }))}
         />
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="pf-emp">Employee rate (%)</Label>
-            <Input
-              id="pf-emp" type="number" step="0.01" min="0" max="30"
-              value={form.pf_employee_rate}
-              disabled={!isAdmin}
-              onChange={e => setForm(f => ({ ...f, pf_employee_rate: e.target.value }))}
-            />
+        {/* Read-only rate summary — single source of truth is EPF Management */}
+        <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-foreground">Current rates (from EPF Management)</p>
+            <Link
+              to="/admin/payroll/statutory/epf"
+              className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Configure rates <ArrowRight className="h-3 w-3" />
+            </Link>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pf-er">Employer rate (%)</Label>
-            <Input
-              id="pf-er" type="number" step="0.01" min="0" max="30"
-              value={form.pf_employer_rate}
-              disabled={!isAdmin}
-              onChange={e => setForm(f => ({ ...f, pf_employer_rate: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pf-cap">Monthly wage cap (₹)</Label>
-            <Input
-              id="pf-cap" type="number" step="1" min="0"
-              value={form.pf_cap_amount}
-              disabled={!isAdmin}
-              onChange={e => setForm(f => ({ ...f, pf_cap_amount: e.target.value }))}
-            />
-          </div>
+          {epfData ? (
+            <div className="grid grid-cols-3 gap-3 text-xs">
+              <div>
+                <p className="text-muted-foreground">Employee</p>
+                <p className="font-semibold text-foreground">{epfData.employee_contribution_pct}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Employer (EPF+EPS)</p>
+                <p className="font-semibold text-foreground">{epfData.employer_pf_pct}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Wage ceiling</p>
+                <p className="font-semibold text-foreground">
+                  {epfData.is_wage_ceiling_applicable
+                    ? `₹${epfData.wage_ceiling.toLocaleString('en-IN')}`
+                    : 'No cap'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Defaults: 12% / 12%, capped at ₹15,000/month (EPF Act).
+            </p>
+          )}
         </div>
-
-        <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5">
-          <Info className="h-3 w-3" />
-          Statutory default: 12% / 12% on Basic, capped at ₹15,000/month (EPF Act ceiling).
-        </p>
       </SectionCard>
 
       {/* TDS (Income Tax) — payroll statutory settings */}

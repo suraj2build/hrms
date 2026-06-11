@@ -225,8 +225,12 @@ function StructureDialog({
           </div>
 
           <div className="rounded-lg border border-border p-3 space-y-2">
-            <p className="text-xs font-semibold text-foreground">Statutory Applicability</p>
-            <p className="text-[11px] text-muted-foreground">Which statutory deductions apply to employees on this structure?</p>
+            <p className="text-xs font-semibold text-foreground">Statutory Overrides</p>
+            <p className="text-[11px] text-muted-foreground">
+              By default, PF/ESI/TDS applicability is governed by the employee's statutory group and tenant policy.
+              Use these only to <span className="font-medium text-foreground">exclude</span> a deduction for this structure
+              (e.g. contractor roles that skip PF). Leave all checked to follow group defaults.
+            </p>
             <div className="flex gap-5 flex-wrap">
               {([
                 ['pf_applicable',  'PF / EPF'],
