@@ -258,6 +258,10 @@ const fastify = Fastify({
   logger: process.env.NODE_ENV === 'development'
     ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
     : true,
+  // Bulk imports (muster/attendance/master spreadsheets parsed to JSON client-side)
+  // can exceed Fastify's 1 MB default. 16 MB is generous for those payloads while
+  // still bounding request size to prevent unbounded-body DoS.
+  bodyLimit: 16 * 1024 * 1024,
 })
 
 async function start() {

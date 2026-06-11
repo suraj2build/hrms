@@ -15,6 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { ssrfCheck }            from '../../lib/ssrf-guard.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -336,7 +337,9 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
         return reply.send({ health_status: 'unhealthy', latency_ms: null, error: 'Invalid endpoint URL' })
       }
 
-      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      const ssrfReason = ssrfCheck(integration.endpoint_url)
+      if (!['http:', 'https:'].includes(parsedUrl.protocol) || ssrfReason) {
+        if (ssrfReason) req.log.warn({ integrationId: id, reason: ssrfReason }, 'health-check blocked by SSRF guard')
         health_status = 'unhealthy'
       } else {
         const startedAt  = Date.now()
@@ -347,6 +350,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
           const timer      = setTimeout(() => controller.abort(), 10_000)
 
           const response = await fetch(integration.endpoint_url, {
+            redirect: 'manual', // don't follow redirects into a private host
             method:  'GET',
             headers: { 'User-Agent': 'HRMS-HealthCheck/1.0' },
             signal:  controller.signal,

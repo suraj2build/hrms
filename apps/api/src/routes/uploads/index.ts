@@ -146,6 +146,16 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
 
     const { storage_path, ...rest } = parsed.data
 
+    // The session's storage_path is signed on read — it must live under this
+    // tenant's prefix so an admin can't register (and later sign) a path that
+    // points at another tenant's object.
+    if (storage_path && !storage_path.startsWith(`${req.tenantId}/`)) {
+      return reply.code(400).send({
+        error:   'INVALID_STORAGE_PATH',
+        message: 'storage_path must be within your tenant namespace',
+      })
+    }
+
     const initialStatus = storage_path ? 'uploaded' : 'pending'
 
     const { data, error } = await (fastify as any).supabase

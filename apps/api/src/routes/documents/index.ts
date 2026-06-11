@@ -154,6 +154,17 @@ export default async function documentRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // ── 4b. Storage path must live under this tenant's prefix ─────────────────
+    // The metadata row carries the correct tenant_id, but the referenced object
+    // is signed later — so the path itself must be inside `{tenantId}/` to stop
+    // an admin from registering (and later signing) another tenant's file.
+    if (parsed.data.storage_path && !parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
+      return reply.code(400).send({
+        error:   'INVALID_STORAGE_PATH',
+        message: 'storage_path must be within your tenant namespace',
+      })
+    }
+
     // ── 5. Persist metadata ──────────────────────────────────────────────────
     const { data, error } = await (fastify as any).supabase
       .from('documents')

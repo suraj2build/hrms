@@ -975,6 +975,18 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     const { document_type, file_name, storage_path, mime_type, file_size } = parsed.data
 
+    // The candidate can only register a path inside their own invitation's
+    // namespace (the prefix the upload-url endpoint hands out). Without this a
+    // valid token could point a "document" at any object in the shared bucket,
+    // which is later disclosed via signed URL → cross-tenant file read.
+    const expectedPrefix = `pre-onboarding/${invitation.tenant_id}/${invitation.id}/`
+    if (!storage_path.startsWith(expectedPrefix)) {
+      return reply.code(400).send({
+        error:   'INVALID_STORAGE_PATH',
+        message: 'storage_path must be within your onboarding namespace',
+      })
+    }
+
     const { error } = await fastify.supabase
       .from('pre_joinee_documents')
       .upsert(
