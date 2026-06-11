@@ -3757,18 +3757,24 @@ export function EmployeeProfile() {
                         <KV label="PF Number" value={bs.pf_number} />
                         <KV label="ESI"       value={bs.esi_number} />
                         <div className="flex flex-wrap gap-2 sm:col-span-2">
-                          <Badge variant={bs.pt_applicable  ? 'success' : 'secondary'} className="rounded-full text-[10px]">PT {bs.pt_applicable  ? 'Applicable' : 'N/A'}</Badge>
-                          <Badge variant={bs.lwf_applicable ? 'success' : 'secondary'} className="rounded-full text-[10px]">LWF {bs.lwf_applicable ? 'Applicable' : 'N/A'}</Badge>
+                          <Badge variant={bs.pt_applicable  ? 'success' : 'secondary'} className="rounded-full text-[10px]">
+                            PT {bs.pt_applicable ? 'Applicable' : 'Exempt'}
+                          </Badge>
+                          <Badge variant={bs.lwf_applicable ? 'success' : 'secondary'} className="rounded-full text-[10px]">
+                            LWF {bs.lwf_applicable ? 'Applicable' : 'Exempt'}
+                          </Badge>
                           {bs.tax_regime && <Badge variant="outline" className="rounded-full text-[10px] capitalize">{bs.tax_regime} Regime</Badge>}
                         </div>
-                        {/* PT state */}
-                        {(bs as any).pt_state_code && (
-                          <KV label="PT State" value={(bs as any).pt_state_code} />
-                        )}
-                        {/* LWF state */}
-                        {(bs as any).lwf_state_code && (
-                          <KV label="LWF State" value={(bs as any).lwf_state_code} />
-                        )}
+                        {/* PT state — show override or auto label */}
+                        <KV
+                          label="PT State"
+                          value={(bs as any).pt_state_code || 'Auto (from work location)'}
+                        />
+                        {/* LWF state — show override or auto label */}
+                        <KV
+                          label="LWF State"
+                          value={(bs as any).lwf_state_code || 'Auto (from work location)'}
+                        />
                         {/* Holiday group */}
                         {(bs as any).holiday_group_id && holidayGroups.length > 0 && (
                           <KV label="Holiday Group"
@@ -5076,15 +5082,17 @@ export function EmployeeProfile() {
                 <span className="inline-flex h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] items-center justify-center font-bold">3</span>
                 Scheme Applicability
               </p>
-              <p className="text-[10px] text-muted-foreground mb-3 ml-6">EPF &amp; ESI are central. PT/LWF are state-based. Assign states below.</p>
+              <p className="text-[10px] text-muted-foreground mb-3 ml-6">
+                Defaults flow from the employee's statutory group. Use these only to override for individual exceptions.
+              </p>
 
               {/* EPF row */}
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
                   <Switch checked={bankForm.epf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,epf_applicable:v}))} />
                   <div>
-                    <p className="text-xs font-medium">EPF Applicable</p>
-                    <p className="text-[10px] text-muted-foreground">Provident Fund deduction</p>
+                    <p className="text-xs font-medium">EPF Enrolled</p>
+                    <p className="text-[10px] text-muted-foreground">Off = exclude from PF regardless of group setting</p>
                   </div>
                 </div>
                 <div>
@@ -5093,7 +5101,7 @@ export function EmployeeProfile() {
                     className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none disabled:opacity-50"
                     value={bankForm.pf_wage_basis} disabled={!bankForm.epf_applicable}
                     onChange={e=>setBankForm(f=>({...f,pf_wage_basis:e.target.value as 'capped'|'actual'|'default'}))}>
-                    <option value="default">Follow tenant default</option>
+                    <option value="default">Follow statutory group</option>
                     <option value="capped">Capped (ceiling ₹15,000)</option>
                     <option value="actual">Actual (full wages, no ceiling)</option>
                   </select>
@@ -5105,8 +5113,8 @@ export function EmployeeProfile() {
                 <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
                   <Switch checked={bankForm.esi_applicable} onCheckedChange={v=>setBankForm(f=>({...f,esi_applicable:v}))} />
                   <div>
-                    <p className="text-xs font-medium">ESI Applicable</p>
-                    <p className="text-[10px] text-muted-foreground">Health insurance (below ₹21k)</p>
+                    <p className="text-xs font-medium">ESI Eligible</p>
+                    <p className="text-[10px] text-muted-foreground">Auto-determined by salary (≤₹21,000/mo). Override only if needed.</p>
                   </div>
                 </div>
               </div>
@@ -5117,14 +5125,14 @@ export function EmployeeProfile() {
                   <Switch checked={bankForm.pt_applicable} onCheckedChange={v=>setBankForm(f=>({...f,pt_applicable:v}))} />
                   <div>
                     <p className="text-xs font-medium">PT Applicable</p>
-                    <p className="text-[10px] text-muted-foreground">Professional Tax (state)</p>
+                    <p className="text-[10px] text-muted-foreground">Follows statutory group. Off = exempt this employee.</p>
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground">PT State</Label>
+                  <Label className="text-xs text-muted-foreground">PT State Override</Label>
                   <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
                     value={bankForm.pt_state_code} onChange={e => setBankForm(f => ({ ...f, pt_state_code: e.target.value }))}>
-                    <option value="">Auto (from site)</option>
+                    <option value="">Auto (from work location / statutory group)</option>
                     {[['AP','Andhra Pradesh'],['AS','Assam'],['BR','Bihar'],['CG','Chhattisgarh'],
                       ['GA','Goa'],['GJ','Gujarat'],['HR','Haryana'],['HP','Himachal Pradesh'],
                       ['JH','Jharkhand'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
@@ -5142,14 +5150,14 @@ export function EmployeeProfile() {
                   <Switch checked={bankForm.lwf_applicable} onCheckedChange={v=>setBankForm(f=>({...f,lwf_applicable:v}))} />
                   <div>
                     <p className="text-xs font-medium">LWF Applicable</p>
-                    <p className="text-[10px] text-muted-foreground">Labour Welfare Fund (state)</p>
+                    <p className="text-[10px] text-muted-foreground">Follows statutory group. Off = exempt this employee.</p>
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground">LWF State</Label>
+                  <Label className="text-xs text-muted-foreground">LWF State Override</Label>
                   <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
                     value={bankForm.lwf_state_code} onChange={e => setBankForm(f => ({ ...f, lwf_state_code: e.target.value }))}>
-                    <option value="">Auto (from site)</option>
+                    <option value="">Auto (from work location / statutory group)</option>
                     {[['AP','Andhra Pradesh'],['CG','Chhattisgarh'],['GA','Goa'],['GJ','Gujarat'],
                       ['HR','Haryana'],['KA','Karnataka'],['KL','Kerala'],['MP','Madhya Pradesh'],
                       ['MH','Maharashtra'],['OR','Odisha'],['PB','Punjab'],
