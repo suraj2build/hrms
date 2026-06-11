@@ -853,7 +853,9 @@ export default function App() {
               <Route path="/leave/apply"       element={<Navigate to="/ess/leave/apply"        replace />} />
               <Route path="/leave/my-requests" element={<Navigate to="/ess/leave/my-requests" replace />} />
               <Route path="/my-profile"        element={<Navigate to="/ess/profile"           replace />} />
-              <Route path="/ess/compensation"  element={<Navigate to="/ess/payroll/my-slips"  replace />} />
+              {/* NOTE: do NOT add a /ess/compensation → /ess/payroll/my-slips redirect here.
+                  /ess/payroll/my-slips already redirects to /ess/compensation (line ~819);
+                  the reverse would form an infinite redirect loop. */}
               <Route path="/manager-dashboard" element={<Navigate to="/manager/dashboard"     replace />} />
               {/* All other legacy paths: prepend /admin/ and land in V2 shell */}
               <Route path="/*" element={<LegacyAdminRedirect />} />

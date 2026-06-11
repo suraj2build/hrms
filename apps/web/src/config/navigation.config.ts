@@ -778,7 +778,9 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     id:          'payroll-resolution-center',
     label:       'Resolution Center',
     breadcrumbLabel: 'Resolution',
-    route:       '/admin/payroll/blockers',
+    // Blockers are per-run (/admin/payroll/blockers/:runId). Land on the runs
+    // list so the user can pick a run; the bare /admin/payroll/blockers has no page.
+    route:       '/admin/payroll',
     icon:        ShieldAlert,
     groupId:     'payroll-operations',
     section:     'admin',
