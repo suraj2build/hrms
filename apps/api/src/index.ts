@@ -263,23 +263,41 @@ const fastify = Fastify({
 async function start() {
   // Security
   await fastify.register(helmet, { global: true })
-  // CORS — allow the configured web URL(s), any *.vercel.app deploy, and
-  // localhost in dev. Uses a function so a stray WEB_URL='*' can't break it
-  // and preview/branch deploys still work. Auth is Bearer-token based.
+  // CORS — allow the configured web URL(s), this project's own *.vercel.app
+  // deploys (production + preview/branch), and localhost in dev. Uses a function
+  // so a stray WEB_URL='*' can't break it. Auth is Bearer-token based.
+  //
+  // We deliberately do NOT allow *every* *.vercel.app origin (that let any
+  // third-party Vercel site issue credentialed requests). Instead we match only
+  // subdomains belonging to this project's deploys, configurable via
+  // VERCEL_PROJECT_PREFIXES (comma-separated), defaulting to hrms-web/hrms-website.
   const allowedExact = new Set(
     (process.env.WEB_URL ?? '')
       .split(',')
       .map(s => s.trim())
       .filter(s => s && s !== '*'),
   )
+  const projectPrefixes = (process.env.VERCEL_PROJECT_PREFIXES ?? 'hrms-web,hrms-website')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  const isOwnVercelDeploy = (hostname: string): boolean => {
+    if (!hostname.endsWith('.vercel.app')) return false
+    const sub = hostname.slice(0, -'.vercel.app'.length).toLowerCase()
+    return projectPrefixes.some(p => sub === p || sub.startsWith(p + '-'))
+  }
   await fastify.register(cors, {
     origin: (origin, cb) => {
       // Non-browser / same-origin / curl (no Origin header) → allow
       if (!origin) return cb(null, true)
-      const ok =
-        allowedExact.has(origin) ||
-        /\.vercel\.app$/.test(new URL(origin).hostname) ||
-        /^https?:\/\/localhost(:\d+)?$/.test(origin)
+      let ok = false
+      try {
+        const hostname = new URL(origin).hostname
+        ok =
+          allowedExact.has(origin) ||
+          isOwnVercelDeploy(hostname) ||
+          /^https?:\/\/localhost(:\d+)?$/.test(origin)
+      } catch {
+        ok = false
+      }
       cb(null, ok)
     },
     credentials: true,

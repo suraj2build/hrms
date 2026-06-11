@@ -34,6 +34,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Label }    from '@/components/ui/label'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -567,7 +568,7 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
             </div>
             <div
               className="border rounded-md p-4 text-xs prose prose-sm max-w-none max-h-48 overflow-y-auto"
-              dangerouslySetInnerHTML={{ __html: generated.body_html ?? '' }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(generated.body_html) }}
             />
           </div>
         )}
@@ -682,7 +683,7 @@ function LetterDetailDialog({
             {/* Body preview */}
             <div
               className="border rounded-md p-4 text-xs prose prose-sm max-w-none max-h-52 overflow-y-auto"
-              dangerouslySetInnerHTML={{ __html: letter.body_html ?? '' }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(letter.body_html) }}
             />
 
             {/* Approval chain */}

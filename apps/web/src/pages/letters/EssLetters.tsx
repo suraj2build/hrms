@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Label }  from '@/components/ui/label'
+import { sanitizeHtml } from '@/lib/sanitize'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -126,7 +127,7 @@ function LetterViewDialog({ letterId, onClose }: { letterId: string; onClose: ()
         ) : letter ? (
           <div
             className="prose prose-sm max-w-none text-foreground border rounded-md p-6 min-h-[300px]"
-            dangerouslySetInnerHTML={{ __html: letter.body_html }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(letter.body_html) }}
           />
         ) : (
           <div className="py-8 text-center text-sm text-muted-foreground">Letter not found</div>
