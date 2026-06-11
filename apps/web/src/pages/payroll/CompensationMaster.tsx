@@ -38,6 +38,7 @@ interface SalaryStructure {
   pf_applicable?:   boolean
   esi_applicable?:  boolean
   tds_applicable?:  boolean
+  employee_count?:  number
   salary_structure_components?: { count: number }[]
 }
 
@@ -715,6 +716,14 @@ export function CompensationMaster() {
                           </span>
                         )}
                       </div>
+                      <div className="flex items-center gap-1 mt-1">
+                        <span className={cn(
+                          'text-[10px] font-medium',
+                          (s.employee_count ?? 0) > 0 ? 'text-foreground' : 'text-muted-foreground',
+                        )}>
+                          {s.employee_count ?? 0} employee{(s.employee_count ?? 0) !== 1 ? 's' : ''} assigned
+                        </span>
+                      </div>
                       <div className="flex gap-1 mt-1.5 flex-wrap">
                         <StatFlag label="PF"  active={s.pf_applicable} />
                         <StatFlag label="ESI" active={s.esi_applicable} />
@@ -787,6 +796,11 @@ export function CompensationMaster() {
                 <StatFlag label="PF"  active={selectedStructure?.pf_applicable} />
                 <StatFlag label="ESI" active={selectedStructure?.esi_applicable} />
                 <StatFlag label="TDS" active={selectedStructure?.tds_applicable} />
+                {(selectedStructure?.employee_count ?? 0) > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    · {selectedStructure!.employee_count} employee{selectedStructure!.employee_count !== 1 ? 's' : ''} on this structure
+                  </span>
+                )}
                 {selectedStructure?.description && (
                   <span className="text-xs text-muted-foreground">{selectedStructure.description}</span>
                 )}

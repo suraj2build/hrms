@@ -206,6 +206,25 @@ export async function listStructures(
     .eq('tenant_id', tenantId)
     .order('name', { ascending: true })
   if (error) return dbFail(error)
+
+  if (shape === 'count') {
+    // Fetch count of active employee compensations per structure
+    const { data: empRows } = await supabase
+      .from('employee_compensations')
+      .select('salary_structure_id')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .not('salary_structure_id', 'is', null)
+
+    const empCountMap: Record<string, number> = {}
+    for (const row of empRows ?? []) {
+      if (row.salary_structure_id)
+        empCountMap[row.salary_structure_id] = (empCountMap[row.salary_structure_id] ?? 0) + 1
+    }
+
+    return ok((data ?? []).map((s: any) => ({ ...s, employee_count: empCountMap[s.id] ?? 0 })))
+  }
+
   return ok(data ?? [])
 }
 
