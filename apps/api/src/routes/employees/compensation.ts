@@ -222,9 +222,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
   const policySchema = z.object({
     nlc_enabled:      z.boolean(),
     pf_enabled:       z.boolean(),
-    pf_employee_rate: z.number().min(0).max(30),  // DB CHECK: BETWEEN 0 AND 30
-    pf_employer_rate: z.number().min(0).max(30),   // DB CHECK: BETWEEN 0 AND 30
-    pf_cap_amount:    z.number().min(0),
+    pf_employee_rate: z.number().min(0).max(30).optional(),
+    pf_employer_rate: z.number().min(0).max(30).optional(),
+    pf_cap_amount:    z.number().min(0).optional(),
   })
 
   fastify.put('/compensation-policy', auth, async (req: any, reply) => {
@@ -400,16 +400,19 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     })
 
     // ── Fetch employee PF flags ───────────────────────────────────────────────
-    const { data: bankRow } = await fastify.supabase
-      .from('employee_bank_statutory')
-      .select('pf_enabled, pf_capped')
+    // Read from epf_eligibility_overrides — this is what the frontend writes
+    // (employee Bank & Statutory tab → EPF section). employee_bank_statutory.pf_capped
+    // is legacy and never updated by the UI.
+    const { data: epfEligRow } = await fastify.supabase
+      .from('epf_eligibility_overrides')
+      .select('is_epf_applicable, restrict_pf_to_ceiling')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
     const employee = {
-      pf_enabled: bankRow?.pf_enabled ?? false,
-      pf_capped:  bankRow?.pf_capped  ?? true,
+      pf_enabled: epfEligRow?.is_epf_applicable   ?? true,
+      pf_capped:  epfEligRow?.restrict_pf_to_ceiling ?? true,
     }
 
     // ── Fetch tenant compensation policy ─────────────────────────────────────

@@ -435,6 +435,7 @@ export const DOMAINS: Domain[] = [
     icon:         ShieldCheck,
     matchPrefixes: [
       '/admin/payroll/statutory',        // longer than /admin/payroll — wins
+      '/admin/payroll/statutory-groups', // statutory groups page
       '/admin/payroll/tax-governance',   // exact match for governance pages
       '/admin/payroll/tax-governance-admin',
       '/admin/payroll/filing-pack',      // Filing Pack Center
@@ -455,6 +456,7 @@ export const DOMAINS: Domain[] = [
           { id: 'pt',        label: 'Prof. Tax',       route: '/admin/payroll/statutory/ptax',           icon: Landmark,   keywords: ['professional tax', 'PTAX', 'state tax', 'PT deduction', 'profession tax'] },
           { id: 'tds',       label: 'TDS',             route: '/admin/payroll/statutory/tds',            icon: Landmark,   keywords: ['tax deducted at source', 'income tax', 'form 16', 'TDS return', 'IT deduction', '24Q'] },
           { id: 'lwf',       label: 'LWF',             route: '/admin/payroll/statutory/lwf',            icon: Landmark,   keywords: ['labour welfare fund', 'welfare fund', 'LWF contribution', 'labour fund'] },
+          { id: 'statutory-groups', label: 'Statutory Groups', route: '/admin/payroll/statutory-groups', icon: Landmark, keywords: ['statutory groups', 'PF state', 'ESI state', 'PT state', 'LWF state', 'wage ceiling', 'statutory mapping'] },
           { id: 'stat-recon',label: 'Statutory Recon', route: '/admin/payroll/statutory-reconciliation', icon: ScrollText, keywords: ['statutory reconciliation', 'statutory match', 'filing reconciliation'] },
         ],
       },
