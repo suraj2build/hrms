@@ -136,7 +136,7 @@ export const AttendanceContextPanel = React.memo(function AttendanceContextPanel
 
   const missingData = missingPunchesQuery.data?.data
   const missingCount = missingData?.count ?? 0
-  const missingEmployees = missingData?.employees.slice(0, 3) ?? []
+  const missingEmployees = missingData?.employees?.slice(0, 3) ?? []
 
   // ── Section 3: Anomalies ─────────────────────────────────────────────────
 

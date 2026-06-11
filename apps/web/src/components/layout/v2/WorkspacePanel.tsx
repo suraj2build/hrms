@@ -56,7 +56,7 @@ export function WorkspacePanel() {
 
   // Flatten all items across groups for the current domain
   const items = useMemo(
-    () => domain?.groups.flatMap(g => g.items) ?? [],
+    () => domain?.groups?.flatMap(g => g.items) ?? [],
     [domain],
   )
 

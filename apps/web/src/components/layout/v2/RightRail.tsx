@@ -144,9 +144,9 @@ export function RightRail({ show = true }: RightRailProps) {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const anomalyCount     = anomalyResp?.total     ?? (Array.isArray(anomalyResp?.data)     ? anomalyResp!.data.length     : 0)
-  const correctionsCount = correctionsResp?.total ?? (Array.isArray(correctionsResp?.data) ? correctionsResp!.data.length : 0)
-  const regCount         = Array.isArray(regResp?.data) ? (regResp!.data?.length ?? 0) : 0
+  const anomalyCount     = anomalyResp?.total     ?? (Array.isArray(anomalyResp?.data)     ? anomalyResp.data.length     : 0)
+  const correctionsCount = correctionsResp?.total ?? (Array.isArray(correctionsResp?.data) ? correctionsResp.data.length : 0)
+  const regCount         = Array.isArray(regResp?.data) ? (regResp.data?.length ?? 0) : 0
 
   const upcomingHolidays = (holidaysResp?.data ?? [])
     .filter(h => h.date >= today)

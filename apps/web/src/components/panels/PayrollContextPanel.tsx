@@ -299,7 +299,7 @@ export const PayrollContextPanel = React.memo(function PayrollContextPanel() {
             </p>
             {(pendingLocks?.departments ?? []).length > 0 && (
               <p className="text-xs text-muted-foreground truncate">
-                {pendingLocks?.departments.join(', ')}
+                {pendingLocks?.departments?.join(', ')}
               </p>
             )}
             <Link

@@ -209,7 +209,7 @@ export function InvestigationPanel({ target, onClose }: InvestigationPanelProps)
             </div>
           )}
 
-          {!isLoading && !isError && data?.employees.length === 0 && (
+          {!isLoading && !isError && data?.employees?.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
               <CheckCircle2 className="h-8 w-8 opacity-30" />
               <p className="text-sm font-medium text-foreground">No employees match</p>

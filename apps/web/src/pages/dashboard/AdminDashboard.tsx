@@ -171,7 +171,7 @@ export function AdminDashboard() {
 
   const todayAbsent = (() => {
     const emps = musterResp?.employees ?? []
-    return emps.filter(e => e.days.find(d => d.date === today)?.status === 'absent').length
+    return emps.filter(e => e.days?.find(d => d.date === today)?.status === 'absent').length
   })()
 
   // Sparkline data for KPI cards (absent 14d)
@@ -204,7 +204,7 @@ export function AdminDashboard() {
       id:           r.id,
       employee:     r.employee_name ? `${r.employee_name}${r.employee_code ? ` · ${r.employee_code}` : ''}` : 'Employee',
       date_display: fmtDate(r.date),
-      reason:       r.reason.slice(0, 55) + (r.reason.length > 55 ? '…' : ''),
+      reason:       (r.reason ?? '').slice(0, 55) + ((r.reason ?? '').length > 55 ? '…' : ''),
       submitted:    fmtDate(r.created_at),
       age_label:    ageDays === 1 ? '1 day' : `${ageDays} days`,
     }

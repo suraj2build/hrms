@@ -456,8 +456,8 @@ function ApprovalsQueue({
     const leaves: CombinedItem[] = leaveRequests.map(r => ({
       type:      'leave',
       id:        r.id,
-      name:      `${r.employees.first_name} ${r.employees.last_name}`,
-      code:      r.employees.employee_code,
+      name:      `${r.employees?.first_name ?? ''} ${r.employees?.last_name ?? ''}`.trim() || 'Employee',
+      code:      r.employees?.employee_code ?? '',
       reqType:   r.leave_types?.name ?? 'Leave',
       reqSub:    'Leave Request',
       dateRange: r.from_date === r.to_date
@@ -471,8 +471,8 @@ function ApprovalsQueue({
     const regs: CombinedItem[] = regularisations.map(r => ({
       type:      'reg',
       id:        r.id,
-      name:      `${r.employees.first_name} ${r.employees.last_name}`,
-      code:      r.employees.employee_code,
+      name:      `${r.employees?.first_name ?? ''} ${r.employees?.last_name ?? ''}`.trim() || 'Employee',
+      code:      r.employees?.employee_code ?? '',
       reqType:   regType(r),
       reqSub:    'Regularisation Request',
       dateRange: fmtDateFull(r.date),

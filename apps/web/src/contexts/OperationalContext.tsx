@@ -240,10 +240,10 @@ export function OperationalContextProvider({ children }: { children: ReactNode }
     // On error keep previous data — React Query does this by default
   })
 
-  const pendingApprovalsCount    = countsData?.data.pending_approvals    ?? 0
-  const unresolvedAnomaliesCount = countsData?.data.unresolved_anomalies ?? 0
-  const payrollBlockersCount     = countsData?.data.payroll_blockers     ?? 0
-  const missingPunchesCount      = countsData?.data.missing_punches      ?? 0
+  const pendingApprovalsCount    = countsData?.data?.pending_approvals    ?? 0
+  const unresolvedAnomaliesCount = countsData?.data?.unresolved_anomalies ?? 0
+  const payrollBlockersCount     = countsData?.data?.payroll_blockers     ?? 0
+  const missingPunchesCount      = countsData?.data?.missing_punches      ?? 0
 
   // ── Action callbacks ───────────────────────────────────────────────────────
   const setSelectedEmployee = useCallback(

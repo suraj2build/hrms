@@ -105,7 +105,7 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         style={{ scrollbarWidth: 'none' }}
         aria-label="Domain navigation"
       >
-        {visibleDomains.map(domain => {
+        {(visibleDomains ?? []).map(domain => {
           const isActive = activeDomain?.id === domain.id
           const Icon = domain.icon
           return (

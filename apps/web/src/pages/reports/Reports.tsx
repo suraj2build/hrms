@@ -1342,7 +1342,7 @@ function MusterRollReport({ departments, basePath }: { departments: Department[]
   // Derive dates from data
   const dates = useMemo(() => {
     if (!employees[0]) return []
-    return employees[0].days.map(d => d.date)
+    return employees[0]?.days?.map(d => d.date) ?? []
   }, [employees])
 
   // Per-employee summary counts for the preview table

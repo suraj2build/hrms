@@ -170,7 +170,7 @@ export function WhoIsIn() {
     ), [data, q])
 
   const outOfOfficeEmps = useMemo(() =>
-    (data?.out_of_office.employees ?? []).filter(e =>
+    (data?.out_of_office?.employees ?? []).filter(e =>
       !q || e.name.toLowerCase().includes(q) || e.employee_code.toLowerCase().includes(q)
     ), [data, q])
 

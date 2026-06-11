@@ -765,7 +765,7 @@ export function AttendanceTimeline() {
     })
   }, [data, catFilter, severityFilter, anomaliesOnly])
 
-  const warnCount  = useMemo(() => data?.timeline.filter(e => e.severity === 'warning' || e.severity === 'error').length ?? 0, [data])
+  const warnCount  = useMemo(() => data?.timeline?.filter(e => e.severity === 'warning' || e.severity === 'error').length ?? 0, [data])
   const statusInfo = data?.daily_record ? STATUS_BADGE[data.daily_record.status] : null
 
   if (!isAdmin) {

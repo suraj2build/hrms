@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster, toast } from 'sonner'
+import { ErrorBoundary } from '@/components/error-boundary/ErrorBoundary'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/lib/api/client'
@@ -487,6 +488,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_relativeSplatPath: true }}>
         <AuthProvider>
+          <ErrorBoundary>
           <Suspense fallback={<PageLoader />}>
             <Routes>
 
@@ -862,6 +864,7 @@ export default function App() {
 
             </Routes>
           </Suspense>
+          </ErrorBoundary>
           <Toaster richColors position="top-right" />
         </AuthProvider>
       </BrowserRouter>

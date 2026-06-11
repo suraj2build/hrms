@@ -69,8 +69,8 @@ export function FbpReconciliation() {
     queryFn:  () => api.get(`/payroll/fbp/reconciliation?financial_year=${fy}&quarter=${quarter}`),
     enabled:  isAdmin,
   })
-  const rows = reconQ.data?.data.rows ?? []
-  const totalTaxable = reconQ.data?.data.total_taxable ?? 0
+  const rows = reconQ.data?.data?.rows ?? []
+  const totalTaxable = reconQ.data?.data?.total_taxable ?? 0
   const anyLocked = rows.some(r => r.status === 'locked')
 
   const subsQ = useQuery<{ data: Submission[] }>({

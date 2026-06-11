@@ -273,8 +273,8 @@ function PayrollExceptionsDrawer({ run, onClose }: PayrollExceptionsDrawerProps)
     enabled:  !!run && (run.held_count > 0 || run.warning_count > 0),
   })
 
-  const heldSlips    = data?.data.filter(s => s.status === 'held')     ?? []
-  const warningSlips = data?.data.filter(s => s.status !== 'held' && s.warning) ?? []
+  const heldSlips    = data?.data?.filter(s => s.status === 'held')     ?? []
+  const warningSlips = data?.data?.filter(s => s.status !== 'held' && s.warning) ?? []
 
   return (
     <Dialog open={!!run} onOpenChange={open => { if (!open) onClose() }}>

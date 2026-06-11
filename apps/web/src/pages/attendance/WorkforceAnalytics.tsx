@@ -302,7 +302,7 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
       .sort((a, b) => b.value - a.value)
 
     // Daily attendance trend (count of present per day)
-    const allDates = employees[0]?.days.map(d => d.date) ?? []
+    const allDates = employees[0]?.days?.map(d => d.date) ?? []
     const dailyTrend = allDates.map(date => {
       const p = employees.filter(e => {
         const d = e.days.find(d => d.date === date)
@@ -484,7 +484,7 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
               data={absenteeismData.buckets}
               onClick={(payload) => {
                 if (!payload?.activePayload?.[0]) return
-                const week = (payload.activePayload[0].payload as { week: string }).week
+                const week = (payload.activePayload?.[0]?.payload as { week: string } | undefined)?.week
                 const bucket = absenteeismData.buckets.find(b => b.week === week)
                 if (!bucket) return
                 // Compute approximate date bounds from week label
