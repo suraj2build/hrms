@@ -98,7 +98,7 @@ interface FullProfile {
     id: string; ctc_annual: number; ctc_monthly: number
     structure: { id: string; name: string; code: string } | null
     components: Array<{
-      id: string; sequence: number; calculation_type: string; value: number
+      id: string; salary_component_id: string | null; sequence: number; calculation_type: string; value: number
       name: string | null; code: string | null
       component_type: 'earning' | 'deduction' | 'employer_contribution' | null
       is_basic: boolean; affects_pf: boolean; affects_nlc: boolean
@@ -3162,7 +3162,7 @@ export function EmployeeProfile() {
                             effective_from:      today,
                             components:          comp?.components?.length
                               ? comp.components.map(c => ({
-                                  salary_component_id: c.id,
+                                  salary_component_id: c.salary_component_id ?? c.id,
                                   calculation_type:    c.calculation_type ?? 'fixed',
                                   value:               String(c.value),
                                 }))

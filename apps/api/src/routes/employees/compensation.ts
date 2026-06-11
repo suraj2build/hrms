@@ -146,7 +146,7 @@ async function resolvePfSalaryComponents(
 
 // ── Compensation component SELECT fragment ────────────────────────────────────
 const COMP_COMPONENT_SELECT =
-  'id, calculation_type, value, computed_monthly, computed_annual, sequence, ' +
+  'id, salary_component_id, calculation_type, value, computed_monthly, computed_annual, sequence, ' +
   'salary_components(id, name, code, component_type, is_basic, affects_pf, affects_nlc, display_order)'
 
 // ── Helper: shape components for API response ─────────────────────────────────
@@ -154,18 +154,19 @@ function shapeComponents(rawComponents: any[]): any[] {
   return (rawComponents ?? [])
     .sort((a: any, b: any) => a.sequence - b.sequence)
     .map((c: any) => ({
-      id:               c.id,
-      name:             c.salary_components?.name              ?? null,
-      code:             c.salary_components?.code              ?? null,
-      component_type:   c.salary_components?.component_type    ?? null,
-      is_basic:         c.salary_components?.is_basic          ?? false,
-      affects_pf:       c.salary_components?.affects_pf        ?? false,
-      affects_nlc:      c.salary_components?.affects_nlc       ?? false,
-      calculation_type: c.calculation_type,
-      value:            c.value,
-      sequence:         c.sequence,
-      monthly_amount:   c.computed_monthly,
-      annual_amount:    c.computed_annual,
+      id:                   c.id,
+      salary_component_id:  c.salary_component_id ?? c.salary_components?.id ?? null,
+      name:                 c.salary_components?.name              ?? null,
+      code:                 c.salary_components?.code              ?? null,
+      component_type:       c.salary_components?.component_type    ?? null,
+      is_basic:             c.salary_components?.is_basic          ?? false,
+      affects_pf:           c.salary_components?.affects_pf        ?? false,
+      affects_nlc:          c.salary_components?.affects_nlc       ?? false,
+      calculation_type:     c.calculation_type,
+      value:                c.value,
+      sequence:             c.sequence,
+      monthly_amount:       c.computed_monthly,
+      annual_amount:        c.computed_annual,
     }))
 }
 
@@ -382,10 +383,17 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     const scMap = new Map<string, any>((scRows ?? []).map((r: any) => [r.id, r]))
 
     // Build ComponentInput for the engine
-    const engineInputs: ComponentInput[] = reqComponents.map(rc => {
+    const engineInputs: ComponentInput[] = []
+    for (const rc of reqComponents) {
       const sc = scMap.get(rc.salary_component_id)
-      if (!sc) throw new Error(`Salary component ${rc.salary_component_id} not found`)
-      return {
+      if (!sc) {
+        return reply.code(422).send({
+          error: 'COMPONENT_NOT_FOUND',
+          message: `Salary component ${rc.salary_component_id} not found — it may have been deleted`,
+          field: 'components',
+        })
+      }
+      engineInputs.push({
         salary_component_id: rc.salary_component_id,
         name:                sc.name,
         code:                sc.code,
@@ -396,8 +404,8 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
         is_basic:            sc.is_basic    ?? false,
         affects_pf:          sc.affects_pf  ?? false,
         affects_nlc:         sc.affects_nlc ?? false,
-      }
-    })
+      })
+    }
 
     // ── Fetch PF flags from salary structure (single source of truth) ───────────
     // pf_applicable and pf_ceiling_mode live on salary_structures. The structure
