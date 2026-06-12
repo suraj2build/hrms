@@ -1274,6 +1274,83 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
+  // ── Offer Letter Data ─────────────────────────────────────────────────────
+  // Returns structured data for the frontend to render + print the offer letter.
+
+  fastify.get('/offers/:appId', auth, async (req: any, reply) => {
+    const { appId } = req.params as { appId: string }
+
+    const { data: app } = await fastify.supabase
+      .from('applications')
+      .select(`
+        id, status, created_at,
+        candidates(first_name, last_name, email),
+        job_requisitions(title, departments(name))
+      `)
+      .eq('id', appId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!app) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const { data: tenant } = await fastify.supabase
+      .from('tenants').select('name').eq('id', req.tenantId).single()
+
+    const cand = (app as any).candidates
+    const reqn = (app as any).job_requisitions
+
+    return reply.send({
+      data: {
+        id:              appId,
+        status:          (app as any).status,
+        candidate_name:  `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim(),
+        first_name:      cand?.first_name ?? '',
+        candidate_email: cand?.email ?? '',
+        job_title:       reqn?.title ?? '',
+        department:      reqn?.departments?.name ?? '',
+        company_name:    (tenant as any)?.name ?? '',
+        applied_at:      (app as any).created_at,
+      },
+    })
+  })
+
+  // Send the generated offer letter HTML to the candidate via email
+  fastify.post('/offers/:appId/send', hrAdminAuth, async (req: any, reply) => {
+    const { appId } = req.params as { appId: string }
+    const { letter_html, recipient_email, candidate_name, job_title, company_name } = req.body as any
+
+    if (!recipient_email || !letter_html) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'recipient_email and letter_html are required' })
+    }
+
+    // Verify app belongs to tenant
+    const { data: app } = await fastify.supabase
+      .from('applications').select('id').eq('id', appId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!app) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const { sendEmail } = await import('../../lib/email-service.js')
+    const result = await sendEmail({
+      to:      recipient_email,
+      subject: `Offer Letter — ${job_title} at ${company_name}`,
+      html:    letter_html,
+    })
+
+    if (!result.sent && !result.skipped) {
+      return reply.code(500).send({ error: 'EMAIL_FAILED', message: result.error })
+    }
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'applications',
+      recordId:    appId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { offer_letter_sent_to: recipient_email },
+    })
+
+    return reply.send({ sent: true })
+  })
+
   // ── Public Candidate Portal ───────────────────────────────────────────────
   // No authentication — application UUID acts as the access token.
   // Returns only safe public fields; no scores, notes, or rejection reasons.

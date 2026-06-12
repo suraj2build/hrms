@@ -29,9 +29,10 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { api }           from '@/lib/api/client'
-import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { api }                from '@/lib/api/client'
+import { useAuthStore }      from '@/stores/authStore'
+import { cn }                from '@/lib/utils'
+import { OfferLetterDialog } from './OfferLetterDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -136,6 +137,7 @@ export function AdminCandidates() {
 
   const [detailOpen,   setDetailOpen]   = useState(false)
   const [detailCand,   setDetailCand]   = useState<Candidate | null>(null)
+  const [offerAppId,   setOfferAppId]   = useState<string | null>(null)
 
   const PAGE_SIZE = 50
 
@@ -649,7 +651,7 @@ export function AdminCandidates() {
                                 </p>
                               )}
                             </div>
-                            <div className="flex flex-col items-end gap-1 shrink-0">
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
                               <Badge variant="outline" className={cn('text-[10px]', statusMeta.className)}>
                                 {statusMeta.label}
                               </Badge>
@@ -658,6 +660,16 @@ export function AdminCandidates() {
                                   <Star className="h-2.5 w-2.5 fill-current text-amber-500" />
                                   {app.overall_score}/10
                                 </span>
+                              )}
+                              {(app.status === 'offer' || app.status === 'hired') && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px] gap-1"
+                                  onClick={e => { e.stopPropagation(); setOfferAppId(app.id) }}
+                                >
+                                  <FileText className="h-3 w-3" />Offer Letter
+                                </Button>
                               )}
                             </div>
                           </div>
@@ -677,6 +689,13 @@ export function AdminCandidates() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Offer Letter Dialog */}
+      <OfferLetterDialog
+        appId={offerAppId}
+        open={!!offerAppId}
+        onOpenChange={v => { if (!v) setOfferAppId(null) }}
+      />
     </PageContainer>
   )
 }
