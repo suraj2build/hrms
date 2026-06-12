@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { Employee360Tab } from '@/pages/intelligence/Employee360Tab'
 import { LifecycleTimeline } from '@/components/onboarding/LifecycleTimeline'
+import { ReadinessCard }    from '@/components/onboarding/ReadinessCard'
 import {
   SeverityBadge,
   RiskIndicator,
@@ -2060,6 +2061,8 @@ export function EmployeeProfile() {
                 <h2 className="text-base font-semibold">Journey Timeline</h2>
                 <p className="text-xs text-white/75 mt-0.5">Chronological onboarding journey — sourced from lifecycle audit trail</p>
               </div>
+              {/* O3 — Readiness summary at top of journey tab */}
+              <ReadinessCard employeeId={id} compact />
               <LifecycleTimeline employeeId={id} />
             </div>
           )}

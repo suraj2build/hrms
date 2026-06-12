@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { OnboardingReadiness } from '@/pages/intelligence/OnboardingReadiness'
+import { ReadinessCard }       from '@/components/onboarding/ReadinessCard'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FileText, Upload, AlertTriangle, CheckCircle2, XCircle,
@@ -1447,7 +1448,14 @@ export function HRReviewWorkspace() {
               </div>
             )}
 
-            {/* Onboarding readiness intelligence (read-only) */}
+            {/* O3 — Deterministic readiness card (primary workspace view) */}
+            {sessionId && (
+              <div className="pt-2 border-t border-border">
+                <ReadinessCard sessionId={sessionId} />
+              </div>
+            )}
+
+            {/* Legacy LLM readiness summary (supplementary) */}
             {sessionId && (
               <div className="pt-2 border-t border-border">
                 <OnboardingReadiness sessionId={sessionId} />

@@ -43,6 +43,11 @@ export interface ReadinessDimensions {
   joining:      DimensionScore
 }
 
+export interface TrustSignal {
+  score:    number
+  severity: string
+}
+
 export interface ReadinessResult {
   session_id:      string | null
   employee_id:     string | null
@@ -52,6 +57,7 @@ export interface ReadinessResult {
   blocking_items:  string[]
   completed_items: string[]
   last_updated:    string
+  trust_signal:    TrustSignal | null  // independent — never merged into overall_score
 }
 
 export interface ReadinessOpts {
@@ -90,7 +96,7 @@ export async function computeReadiness(
   }
 
   // Fetch all data in parallel
-  const [sessionRow, documents, checklistData, lifecycleEvents] = await Promise.all([
+  const [sessionRow, documents, checklistData, lifecycleEvents, trustRow] = await Promise.all([
     sessionId
       ? supabase.from('onboarding_sessions').select('id, status').eq('id', sessionId).eq('tenant_id', tenantId).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -118,6 +124,16 @@ export async function computeReadiness(
           ])
           .eq(sessionId ? 'session_id' : 'employee_id', (sessionId ?? employeeId) as string)
       : Promise.resolve({ data: [] }),
+
+    // Trust signal — separate, never merged into readiness score
+    sessionId
+      ? supabase.from('workforce_trust_scores')
+          .select('score, severity')
+          .eq('tenant_id', tenantId)
+          .eq('entity_id', sessionId)
+          .eq('score_type', 'onboarding')
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ])
 
   const session      = (sessionRow as any).data
@@ -125,6 +141,7 @@ export async function computeReadiness(
   const checklist    = (checklistData as any).data as ChecklistRow | null
   const events       = ((lifecycleEvents as any).data ?? []) as EventRow[]
   const eventTypes   = new Set(events.map((e: EventRow) => e.event_type))
+  const trustData    = (trustRow as any).data as { score: number; severity: string } | null
 
   const now = new Date().toISOString()
 
@@ -175,6 +192,9 @@ export async function computeReadiness(
     blocking_items,
     completed_items,
     last_updated:    now,
+    trust_signal:    trustData
+      ? { score: Math.round(Number(trustData.score) * 100), severity: trustData.severity }
+      : null,
   }
 }
 

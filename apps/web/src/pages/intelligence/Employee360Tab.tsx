@@ -12,6 +12,7 @@ import {
   CalendarDays, Briefcase, LogOut, AlertTriangle,
 } from 'lucide-react'
 import { LifecycleTimeline } from '@/components/onboarding/LifecycleTimeline'
+import { ReadinessCard }    from '@/components/onboarding/ReadinessCard'
 
 interface LeaveBalance { leave_type: string; balance: number; used: number }
 
@@ -170,6 +171,12 @@ export function Employee360Tab({ employeeId }: { employeeId: string }) {
           </div>
         </div>
       )}
+
+      {/* O3 — Readiness Card (primary consumer) */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Onboarding Readiness</h3>
+        <ReadinessCard employeeId={employeeId} />
+      </div>
 
       {/* O2 — Journey Timeline */}
       <div className="space-y-2">

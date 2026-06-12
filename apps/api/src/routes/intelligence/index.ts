@@ -133,10 +133,91 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // KPIs
+      // 6. O3 — Sessions with no documents uploaded > 24h (missing mandatory docs)
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+      const { data: emptyDocSessions } = await fastify.supabase
+        .from('onboarding_sessions')
+        .select('id, candidate_name, created_at')
+        .eq('tenant_id', tenantId)
+        .in('status', ['active', 'extracting'])
+        .lt('created_at', oneDayAgo)
+        .limit(50)
+      // Filter: sessions with zero documents
+      let noDocCount = 0
+      const noDocSamples: string[] = []
+      if (emptyDocSessions && emptyDocSessions.length > 0) {
+        for (const s of emptyDocSessions as any[]) {
+          const { count: docCount } = await fastify.supabase
+            .from('onboarding_documents').select('id', { count: 'exact', head: true })
+            .eq('session_id', s.id).eq('tenant_id', tenantId)
+          if ((docCount ?? 0) === 0) {
+            noDocCount++
+            if (noDocSamples.length < 3) noDocSamples.push(s.candidate_name || s.id.slice(0, 8))
+          }
+        }
+      }
+      if (noDocCount > 0) {
+        observations.push({
+          id: 'readiness-missing-documents', category: 'onboarding',
+          severity: noDocCount > 3 ? 'high' : 'medium',
+          title: noDocCount + ' onboarding session' + (noDocCount > 1 ? 's' : '') + ' missing documents (>24h)',
+          body: 'Candidates have not uploaded any documents more than 24 hours after session creation. Documents are required to proceed with extraction and approval.',
+          source_records: [{ table: 'onboarding_sessions', count: noDocCount, sample: noDocSamples.join(', ') }],
+          generated_at: now.toISOString(),
+        })
+      }
+
+      // 7. O3 — Sessions in hr_review > 3 days (approvals over SLA)
+      const { data: slaBreached } = await fastify.supabase
+        .from('onboarding_sessions')
+        .select('id, candidate_name')
+        .eq('tenant_id', tenantId)
+        .in('status', ['hr_review', 'validation_pending'])
+        .lt('updated_at', threeDaysAgo)
+        .limit(50)
+      if (slaBreached && slaBreached.length > 0) {
+        observations.push({
+          id: 'readiness-approval-sla', category: 'onboarding',
+          severity: slaBreached.length > 3 ? 'high' : 'medium',
+          title: slaBreached.length + ' onboarding approval' + (slaBreached.length > 1 ? 's' : '') + ' pending > 3 days',
+          body: 'Onboarding sessions awaiting HR review or validation for more than 3 days. Delayed approvals block employee joining and onboarding checklist assignment.',
+          source_records: [{ table: 'onboarding_sessions', count: slaBreached.length, sample: (slaBreached as any[]).slice(0, 3).map((s: any) => s.candidate_name || s.id.slice(0, 8)).join(', ') }],
+          generated_at: now.toISOString(),
+        })
+      }
+
+      // 8. O3 — Employees with incomplete checklists > 14 days post-approval
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString()
+      const { data: overdueChecklists } = await fastify.supabase
+        .from('employee_onboarding_checklists')
+        .select('id, employee_id')
+        .eq('tenant_id', tenantId)
+        .neq('status', 'completed')
+        .lt('start_date', fourteenDaysAgo.slice(0, 10))
+        .limit(50)
+      if (overdueChecklists && overdueChecklists.length > 0) {
+        observations.push({
+          id: 'readiness-checklist-overdue', category: 'onboarding',
+          severity: overdueChecklists.length > 5 ? 'high' : 'medium',
+          title: overdueChecklists.length + ' onboarding checklist' + (overdueChecklists.length > 1 ? 's' : '') + ' overdue (>14 days)',
+          body: 'Employees have incomplete onboarding checklists more than 14 days after checklist assignment. Incomplete checklists reduce onboarding readiness scores.',
+          source_records: [{ table: 'employee_onboarding_checklists', count: overdueChecklists.length }],
+          generated_at: now.toISOString(),
+        })
+      }
+
+      // KPIs (existing + O3 readiness KPIs derived from session status)
       const { count: activeCount }      = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active')
       const { count: joinersThisMonth } = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('joining_date', monthStart)
       const { count: onNotice }         = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'on_notice')
+
+      // O3 readiness distribution — derived from session status (no per-employee score computation)
+      const { count: readyCount }   = await fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'employee_created')
+      const { count: rejCount }     = await fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'rejected')
+      const { count: activeOnb }    = await fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).not('status', 'in', '("employee_created","rejected","archived")')
+      const readyPct   = (readyCount ?? 0) + (rejCount ?? 0) + (activeOnb ?? 0) > 0
+        ? Math.round(((readyCount ?? 0) / ((readyCount ?? 0) + (rejCount ?? 0) + (activeOnb ?? 0))) * 100)
+        : null
 
       observations.sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3))
 
@@ -147,13 +228,20 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           high_count:     observations.filter(o => o.severity === 'high').length,
           observations,
           kpis: {
-            active_headcount:    activeCount       ?? 0,
-            joiners_this_month:  joinersThisMonth  ?? 0,
-            on_notice:           onNotice          ?? 0,
-            stalled_onboarding:  stalledSessions?.length ?? 0,
-            pending_separations: pendingSep?.length ?? 0,
-            assets_at_risk:      assetsAtRiskCount,
-            probation_due:       probationDue?.length ?? 0,
+            active_headcount:           activeCount              ?? 0,
+            joiners_this_month:         joinersThisMonth         ?? 0,
+            on_notice:                  onNotice                 ?? 0,
+            stalled_onboarding:         stalledSessions?.length  ?? 0,
+            pending_separations:        pendingSep?.length        ?? 0,
+            assets_at_risk:             assetsAtRiskCount,
+            probation_due:              probationDue?.length      ?? 0,
+            // O3 readiness KPIs
+            onboarding_ready:           readyCount               ?? 0,
+            onboarding_blocked:         rejCount                 ?? 0,
+            onboarding_in_progress:     activeOnb                ?? 0,
+            onboarding_ready_pct:       readyPct,
+            onboarding_approval_sla:    slaBreached?.length       ?? 0,
+            onboarding_checklist_overdue: overdueChecklists?.length ?? 0,
           },
           generated_at: now.toISOString(),
         },
