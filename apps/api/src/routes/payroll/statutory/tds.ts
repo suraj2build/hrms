@@ -77,6 +77,50 @@ async function writeAuditLog(
     })
 }
 
+// ── ESS-03: Declaration window check ─────────────────────────────────────────
+// Returns null (window open / no window configured) or an error object to send.
+async function checkDeclarationWindow(
+  fastify: FastifyInstance,
+  tenantId: string,
+): Promise<{ code: number; body: object } | null> {
+  const { data: settings } = await fastify.supabase
+    .from('payroll_statutory_settings')
+    .select('declaration_window_open, declaration_window_close')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (!settings) return null  // no settings row → window unrestricted
+
+  const { declaration_window_open: open, declaration_window_close: close } = settings as any
+
+  if (!open && !close) return null  // no window configured → unrestricted
+
+  const today = new Date().toISOString().substring(0, 10)
+  if (open && today < open) {
+    return {
+      code: 423,
+      body: {
+        error:   'WINDOW_NOT_OPEN',
+        message: `The declaration window opens on ${open}. Declarations cannot be added before that date.`,
+        window_open:  open,
+        window_close: close ?? null,
+      },
+    }
+  }
+  if (close && today > close) {
+    return {
+      code: 423,
+      body: {
+        error:   'WINDOW_CLOSED',
+        message: `The declaration window closed on ${close}. No further declarations can be added.`,
+        window_open:  open ?? null,
+        window_close: close,
+      },
+    }
+  }
+  return null  // within window
+}
+
 // =============================================================================
 export default async function tdsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -182,6 +226,9 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const windowErr = await checkDeclarationWindow(fastify, req.tenantId)
+    if (windowErr) return reply.code(windowErr.code).send(windowErr.body)
+
     const { data, error } = await fastify.supabase
       .from('tax_declarations')
       .insert({
@@ -228,6 +275,9 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     if (!EMPLOYEE_MUTABLE_STATUSES.includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Declarations with status '${(existing as any).status}' cannot be modified. Only draft, declared, or revision_requested declarations can be updated.` })
     }
+
+    const windowErr2 = await checkDeclarationWindow(fastify, req.tenantId)
+    if (windowErr2) return reply.code(windowErr2.code).send(windowErr2.body)
 
     const schema = z.object({
       declared_amount: z.number().positive().optional(),
@@ -289,6 +339,147 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'submitted', 'Submitted for review by employee')
 
     return reply.send({ data })
+  })
+
+  // ===========================================================================
+  // ESS-03: Form 12BB — printable HTML (browser prints to PDF)
+  // GET /payroll/statutory/tds/declarations/form12bb?financial_year=YYYY-YY
+  // ===========================================================================
+
+  fastify.get('/declarations/form12bb', auth, async (req: any, reply) => {
+    const employeeId = await resolveCallerEmployeeId(fastify, req)
+    if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
+
+    const qs   = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
+    const fy   = qs.data?.financial_year ?? currentFinancialYear()
+    const fyStart = parseInt(fy.split('-')[0])
+    const fyLabel = `${fyStart}-${fyStart + 1}`
+
+    const [{ data: emp }, { data: tenant }, { data: decls }, { data: identity }] = await Promise.all([
+      fastify.supabase.from('employees').select('first_name, last_name, employee_code, email').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle(),
+      fastify.supabase.from('tenants').select('name').eq('id', req.tenantId).maybeSingle(),
+      fastify.supabase.from('tax_declarations').select('*').eq('employee_id', employeeId).eq('tenant_id', req.tenantId).eq('financial_year', fy).not('status', 'in', '(rejected,archived)').order('declaration_category', { ascending: true }),
+      fastify.supabase.from('employee_identity').select('identity_type, identity_number').eq('employee_id', employeeId).eq('tenant_id', req.tenantId).maybeSingle(),
+    ])
+
+    const employeeName   = emp ? `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim() : 'Employee'
+    const employeeCode   = (emp as any)?.employee_code ?? ''
+    const pan            = (identity as any)?.identity_type === 'pan' ? (identity as any).identity_number ?? '' : ''
+    const companyName    = (tenant as any)?.name ?? 'Employer'
+    const declarations   = (decls ?? []) as any[]
+    const today          = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
+
+    const fmtINR = (n: number) =>
+      new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+
+    // Group by category for display
+    const grouped: Record<string, any[]> = {}
+    for (const d of declarations) {
+      if (!grouped[d.declaration_category]) grouped[d.declaration_category] = []
+      grouped[d.declaration_category].push(d)
+    }
+
+    const hraDecls  = grouped['HRA'] ?? []
+    const ltaDecls  = grouped['LTA'] ?? []
+    const hlDecls   = [...(grouped['home_loan_principal'] ?? []), ...(grouped['home_loan_interest'] ?? [])]
+    const chap6Cats = ['80C','80D','80E','80G','80TTA','NPS','standard_deduction','professional_tax','other']
+    const chap6Decls = chap6Cats.flatMap(c => grouped[c] ?? [])
+    const totalDeclared = declarations.reduce((s: number, d: any) => s + (d.declared_amount ?? 0), 0)
+
+    const rows = (items: any[]) => items.map((d: any) => `
+      <tr>
+        <td>${d.section ?? d.declaration_category}</td>
+        <td>${d.description ?? ''}</td>
+        <td style="text-align:right">${fmtINR(d.declared_amount ?? 0)}</td>
+        <td style="text-align:center">${d.status}</td>
+      </tr>`).join('')
+
+    const section = (title: string, items: any[], note?: string) => `
+      <h3>${title}</h3>
+      ${note ? `<p style="font-size:12px;color:#666;margin:0 0 6px">${note}</p>` : ''}
+      <table>
+        <thead><tr><th>Section</th><th>Description</th><th>Amount (₹)</th><th>Status</th></tr></thead>
+        <tbody>${items.length > 0 ? rows(items) : '<tr><td colspan="4" style="color:#999;text-align:center">No declarations</td></tr>'}</tbody>
+      </table>`
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Form 12BB — ${employeeName} — FY ${fyLabel}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #000; margin: 0; padding: 20px; }
+  .header { text-align: center; border: 2px solid #000; padding: 12px; margin-bottom: 16px; }
+  .header h1 { margin: 0 0 4px; font-size: 18px; }
+  .header h2 { margin: 0; font-size: 14px; font-weight: normal; }
+  .details { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; border: 1px solid #ccc; padding: 10px; }
+  .details .item { font-size: 12px; } .details .item span { font-weight: bold; }
+  h3 { background: #f0f0f0; padding: 6px 10px; margin: 16px 0 6px; font-size: 13px; border-left: 3px solid #2E6FE6; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 12px; }
+  th { background: #e8e8e8; border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  td { border: 1px solid #ccc; padding: 5px 8px; }
+  .total-row td { font-weight: bold; background: #f8f8f8; }
+  .declaration { border: 1px solid #ccc; padding: 12px; margin-top: 20px; font-size: 12px; }
+  .sig { display: flex; justify-content: space-between; margin-top: 40px; }
+  .sig div { text-align: center; font-size: 12px; }
+  @media print { body { margin: 0; padding: 10px; } button { display: none; } }
+  .print-btn { float: right; margin-bottom: 12px; padding: 8px 18px; background: #2E6FE6; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+</style>
+</head>
+<body>
+<button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+<div class="header">
+  <h1>FORM 12BB</h1>
+  <h2>Statement showing particulars of claims by an employee for deduction of tax under section 192</h2>
+  <p style="margin:6px 0 0;font-size:12px">[See rule 26C of Income-tax Rules, 1962]</p>
+</div>
+
+<div class="details">
+  <div class="item">Name: <span>${employeeName}</span></div>
+  <div class="item">Employee ID: <span>${employeeCode}</span></div>
+  <div class="item">PAN: <span>${pan || '—'}</span></div>
+  <div class="item">Financial Year: <span>${fyLabel}</span></div>
+  <div class="item">Employer: <span>${companyName}</span></div>
+  <div class="item">Date: <span>${today}</span></div>
+</div>
+
+${section('Part A — House Rent Allowance (HRA)', hraDecls,
+  'Rent paid for residential accommodation and details of landlord.')}
+
+${section('Part B — Leave Travel Concession / Assistance (LTA)', ltaDecls,
+  'Nature of expenditure and amount of LTA claimed.')}
+
+${section('Part C — Deductions under Chapter VI-A', chap6Decls,
+  'Investments and payments qualifying for deduction under sections 80C, 80D, 80E, 80G, NPS, etc.')}
+
+${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
+  'Details of interest paid on loan taken for self-occupied or let-out property.')}
+
+<table style="margin-top:16px">
+  <tr class="total-row">
+    <td colspan="2" style="text-align:right;font-weight:bold">Total Declared Amount:</td>
+    <td style="text-align:right;font-weight:bold">${fmtINR(totalDeclared)}</td>
+    <td></td>
+  </tr>
+</table>
+
+<div class="declaration">
+  <strong>Declaration:</strong>
+  <p>I, <strong>${employeeName}</strong>, do hereby declare that the investments/expenditures mentioned above
+  have been made / are proposed to be made by me during the financial year ${fyLabel} and that the particulars
+  furnished are correct and complete. I also declare that the above are not being claimed as deduction under
+  any other provision of the Income-tax Act, 1961.</p>
+</div>
+
+<div class="sig">
+  <div><div style="border-top:1px solid #000;width:200px;padding-top:4px">Date: ${today}</div></div>
+  <div><div style="border-top:1px solid #000;width:200px;padding-top:4px">Signature of Employee</div></div>
+</div>
+
+</body>
+</html>`
+
+    return reply.header('Content-Type', 'text/html; charset=utf-8').send(html)
   })
 
   // ===========================================================================

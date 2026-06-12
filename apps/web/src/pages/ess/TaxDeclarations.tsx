@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, Loader2, ChevronRight, CheckCircle2, AlertCircle, Lock, Calendar, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -203,6 +203,30 @@ export function TaxDeclarations() {
       api.get(`/payroll/statutory/tds/projections/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? []),
   })
 
+  const { data: govSettings } = useQuery({
+    queryKey: ['statutory', 'governance', 'settings'],
+    queryFn:  () => api.get('/payroll/statutory/governance/settings').then((r: any) => r.data ?? null),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // ── Window status ─────────────────────────────────────────────────────────────
+  const windowOpen  = (govSettings as any)?.declaration_window_open  ?? null
+  const windowClose = (govSettings as any)?.declaration_window_close ?? null
+  const today       = new Date().toISOString().substring(0, 10)
+  const windowConfigured  = windowOpen || windowClose
+  const windowNotYetOpen  = windowConfigured && windowOpen  && today < windowOpen
+  const windowClosed      = windowConfigured && windowClose && today > windowClose
+  const windowActive      = windowConfigured && !windowNotYetOpen && !windowClosed
+  const canAddDeclaration = !windowNotYetOpen && !windowClosed  // open if no window configured
+
+  const fmtDate = (d: string) =>
+    new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+
+  const daysUntil = (d: string) => {
+    const diff = Math.ceil((new Date(d + 'T00:00:00').getTime() - new Date().getTime()) / 86400000)
+    return diff
+  }
+
   // ── Mutations ────────────────────────────────────────────────────────────────
 
   const electRegime = useMutation({
@@ -363,6 +387,45 @@ export function TaxDeclarations() {
         </div>
       )}
 
+      {/* ── Declaration window banner ────────────────────────────────────────── */}
+      {windowNotYetOpen && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 mb-4 flex items-start gap-2">
+          <Calendar className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-blue-800">
+              Declaration window opens on {fmtDate(windowOpen!)} ({daysUntil(windowOpen!)} days)
+            </p>
+            <p className="text-xs text-blue-600 mt-0.5">
+              You can review your previous declarations but cannot add new ones until the window opens.
+            </p>
+          </div>
+        </div>
+      )}
+      {windowActive && windowClose && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 mb-4 flex items-start gap-2">
+          <Calendar className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-emerald-800">
+              Declaration window is open — closes {fmtDate(windowClose)} ({daysUntil(windowClose)} days remaining)
+            </p>
+            <p className="text-xs text-emerald-600 mt-0.5">Submit your declarations before the window closes.</p>
+          </div>
+        </div>
+      )}
+      {windowClosed && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 mb-4 flex items-start gap-2">
+          <Lock className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-800">
+              Declaration window closed on {fmtDate(windowClose!)}
+            </p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              No new declarations can be added. Contact HR if you need to make changes.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── Summary chips ───────────────────────────────────────────────────── */}
       {declarations.length > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-6">
@@ -434,10 +497,35 @@ export function TaxDeclarations() {
         title="My Declarations"
         className="mb-6"
         action={
-          <Button size="sm" onClick={() => setDeclDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add Declaration
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const html = await api.getRaw(`/payroll/statutory/tds/declarations/form12bb?financial_year=${selectedFY}`).then(r => r.text())
+                  const blob = new Blob([html], { type: 'text/html' })
+                  const url  = URL.createObjectURL(blob)
+                  window.open(url, '_blank')
+                  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+                } catch {
+                  toast.error('Could not load Form 12BB')
+                }
+              }}
+            >
+              <FileText className="h-4 w-4 mr-1" />
+              Form 12BB
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setDeclDialogOpen(true)}
+              disabled={!canAddDeclaration}
+              title={windowClosed ? 'Declaration window is closed' : windowNotYetOpen ? 'Declaration window not yet open' : undefined}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add Declaration
+            </Button>
+          </div>
         }
       >
         {declarations.length === 0 ? (

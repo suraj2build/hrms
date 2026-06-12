@@ -70,12 +70,14 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
   // PUT /payroll/statutory/governance/settings
   fastify.put('/settings', adminAuth, async (req: any, reply) => {
     const schema = z.object({
-      pf_enabled:         z.boolean().optional(),
-      esi_enabled:        z.boolean().optional(),
-      pt_enabled:         z.boolean().optional(),
-      tds_enabled:        z.boolean().optional(),
-      tds_default_rate:   z.number().min(0).max(100).optional(),
-      tds_default_regime: z.enum(['old', 'new']).optional(),
+      pf_enabled:               z.boolean().optional(),
+      esi_enabled:              z.boolean().optional(),
+      pt_enabled:               z.boolean().optional(),
+      tds_enabled:              z.boolean().optional(),
+      tds_default_rate:         z.number().min(0).max(100).optional(),
+      tds_default_regime:       z.enum(['old', 'new']).optional(),
+      declaration_window_open:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      declaration_window_close: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     })
 
     const parsed = schema.safeParse(req.body)
