@@ -21,6 +21,7 @@ import {
   PlayCircle,
   Check,
   X,
+  SkipForward,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -169,6 +170,7 @@ function StepPanel({
   onComplete,
   onSkip,
   canSkip = true,
+  canBypass = false,
 }: {
   step: PayrollStep
   children: React.ReactNode
@@ -176,8 +178,19 @@ function StepPanel({
   onComplete?: () => void
   onSkip?: () => void
   canSkip?: boolean
+  canBypass?: boolean
 }): JSX.Element {
   const StepIcon = step.icon
+  const [showBypass, setShowBypass] = useState(false)
+  const [bypassReason, setBypassReason] = useState('')
+
+  const handleBypassConfirm = () => {
+    if (!bypassReason.trim()) return
+    setShowBypass(false)
+    setBypassReason('')
+    onSkip?.()
+  }
+
   return (
     <div className="p-6 flex flex-col gap-4">
       <div className="flex items-start gap-3">
@@ -227,6 +240,33 @@ function StepPanel({
 
       <div>{children}</div>
 
+      {/* Bypass reason input — shown inline when user clicks Proceed Anyway */}
+      {showBypass && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+          <p className="text-xs font-medium text-amber-700">
+            Bypassing with open issues — enter a reason to confirm
+          </p>
+          <textarea
+            className="w-full rounded border border-border bg-background text-sm px-2.5 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+            rows={2}
+            placeholder="e.g. Mis-punches are for resigned employees, safe to proceed"
+            value={bypassReason}
+            onChange={e => setBypassReason(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs"
+              onClick={() => { setShowBypass(false); setBypassReason('') }}>
+              Cancel
+            </Button>
+            <Button size="sm" className="h-7 text-xs gap-1 bg-amber-600 hover:bg-amber-700 text-white border-0"
+              disabled={!bypassReason.trim()}
+              onClick={handleBypassConfirm}>
+              <SkipForward className="h-3 w-3" /> Confirm bypass
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 pt-2 border-t border-border">
         {status === 'ok' && onComplete && (
           <Button onClick={onComplete} className="gap-1.5">
@@ -238,8 +278,17 @@ function StepPanel({
             Skip →
           </Button>
         )}
-        {status !== 'ok' && (
+        {status !== 'ok' && canBypass && !showBypass && onSkip && (
+          <Button variant="outline" size="sm" className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
+            onClick={() => setShowBypass(true)}>
+            <SkipForward className="h-3.5 w-3.5" /> Proceed anyway
+          </Button>
+        )}
+        {status !== 'ok' && !canBypass && !canSkip && (
           <p className="text-xs text-muted-foreground">Resolve issues above before proceeding</p>
+        )}
+        {status !== 'ok' && !canBypass && canSkip && (
+          <p className="text-xs text-muted-foreground">Issues found — resolve or skip to proceed</p>
         )}
       </div>
     </div>
@@ -547,6 +596,7 @@ export function PayrollControlCenter(): JSX.Element {
             onComplete={() => completeStep('readiness')}
             onSkip={() => skipStep('readiness')}
             canSkip={false}
+            canBypass
           >
             <div className="flex flex-col gap-2">
               <IssueRow
@@ -580,6 +630,7 @@ export function PayrollControlCenter(): JSX.Element {
             onComplete={() => completeStep('exceptions')}
             onSkip={() => skipStep('exceptions')}
             canSkip={false}
+            canBypass
           >
             <div className="flex flex-col gap-2">
               <IssueRow
@@ -604,7 +655,9 @@ export function PayrollControlCenter(): JSX.Element {
             step={currentStep}
             status={isFrozen ? 'ok' : 'warning'}
             onComplete={isFrozen ? () => completeStep('freeze') : undefined}
+            onSkip={() => skipStep('freeze')}
             canSkip={false}
+            canBypass
           >
             <div className="flex flex-col gap-3">
               {isFrozen ? (
