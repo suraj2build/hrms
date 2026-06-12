@@ -86,19 +86,54 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
   /**
    * GET /trust/scores
-   * Get trust scores for the tenant.
+   * Get trust scores for the tenant, enriched with employee name/code for
+   * score_type='employee' rows so UI can show a real name rather than a UUID.
    */
   fastify.get('/trust/scores', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const tenantId = (req as any).tenantId
-    const { limit = '50' } = req.query as any
-    const { data, error } = await fastify.supabase
+    const { limit = '50', score_type } = req.query as any
+
+    let q = fastify.supabase
       .from('workforce_trust_scores')
-      .select('*')
+      .select('id, entity_id, score_type, score, severity, factors, computed_at')
       .eq('org_id', tenantId)
       .order('score', { ascending: true })  // lowest trust first
       .limit(Number(limit))
+
+    if (score_type) q = q.eq('score_type', score_type)
+
+    const { data, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
-    return { scores: data ?? [], total: (data ?? []).length }
+
+    const scores = data ?? []
+
+    // Enrich employee-type rows with name + code from the employees table
+    const employeeIds = scores
+      .filter((s: any) => s.score_type === 'employee')
+      .map((s: any) => s.entity_id)
+
+    let nameMap: Record<string, { name: string; employee_code: string }> = {}
+    if (employeeIds.length > 0) {
+      const { data: emps } = await fastify.supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', tenantId)
+        .in('id', employeeIds)
+      for (const e of (emps ?? []) as any[]) {
+        nameMap[e.id] = {
+          name:          [e.first_name, e.last_name].filter(Boolean).join(' ') || `Employee ${e.employee_code ?? ''}`,
+          employee_code: e.employee_code ?? '',
+        }
+      }
+    }
+
+    const enriched = scores.map((s: any) => ({
+      ...s,
+      employee_name: nameMap[s.entity_id]?.name          ?? null,
+      employee_code: nameMap[s.entity_id]?.employee_code ?? null,
+    }))
+
+    return { scores: enriched, total: enriched.length }
   })
 
   /**

@@ -185,6 +185,9 @@ export class TrustIntelligenceService {
     const hasFailure  = verifications.some(v => v.status === 'failed' || v.status === 'inconclusive')
     const hasDuplicate = duplicates.length > 0
 
+    // Only write to the timeline when there is something meaningful to report.
+    // Clean evaluations (score ≥ 80, no failures) are silent — "Trust Score Computed"
+    // repeated on every run is noise, not signal.
     if (hasDuplicate) {
       dispatchTrustLifecycleEvent({
         supabase,
@@ -207,18 +210,8 @@ export class TrustIntelligenceService {
         severity:    'warning',
         payload:     { score: score.score },
       }).catch(() => { /* best-effort */ })
-    } else if (score.score >= 80) {
-      dispatchTrustLifecycleEvent({
-        supabase,
-        tenantId:    input.tenant_id,
-        employeeId:  input.employee_id,
-        eventType:   'trust.score.computed',
-        title:       'Trust evaluation completed',
-        description: `Trust score: ${score.score}/100 (${score.severity})`,
-        severity:    'info',
-        payload:     { score: score.score, severity: score.severity },
-      }).catch(() => { /* best-effort */ })
     }
+    // No timeline entry for clean evaluations — silence is the signal.
   }
 
   private async fetchDocumentVerifications(

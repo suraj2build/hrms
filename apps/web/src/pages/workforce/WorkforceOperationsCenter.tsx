@@ -86,13 +86,13 @@ interface OnboardingStats {
 }
 
 interface TrustObservation {
-  entity_id:  string
-  score:      number
-  severity:   'low' | 'medium' | 'high' | 'critical'
-  factors:    string[]
-  strengths:  string[]
-  risks:      string[]
-  computed_at: string
+  entity_id:     string
+  score:         number
+  severity:      'low' | 'medium' | 'high' | 'critical'
+  factors:       string[]
+  employee_name: string | null
+  employee_code: string | null
+  computed_at:   string
 }
 
 // ── Org state derivation ───────────────────────────────────────────────────────
@@ -321,10 +321,10 @@ export function WorkforceOperationsCenter() {
     retry:     false,
   })
 
-  // O5.8 — Trust observations: high/critical-risk employees
+  // O5.8 — Trust observations: high/critical-risk employees (score_type=employee only)
   const { data: trustResp, isLoading: trustLoading } = useQuery<{ scores: TrustObservation[]; total: number }>({
     queryKey:  ['wf-trust-observations'],
-    queryFn:   () => api.get('/trust/scores?limit=10'),
+    queryFn:   () => api.get('/trust/scores?limit=20&score_type=employee'),
     enabled:   isAdmin,
     staleTime: 5 * 60_000,
     retry:     false,
@@ -761,18 +761,29 @@ export function WorkforceOperationsCenter() {
               ) : (
                 <div className="space-y-1.5">
                   {trustScores.slice(0, 4).map(t => (
-                    <div key={t.entity_id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/40 last:border-0">
-                      <div className="min-w-0">
-                        <p className="font-mono text-[10px] text-muted-foreground truncate">{t.entity_id.slice(0, 8)}…</p>
-                        <p className="text-muted-foreground text-[10px] truncate">{t.risks?.[0] ?? 'Trust risk flagged'}</p>
+                    <Link
+                      key={t.entity_id}
+                      to="/admin/trust"
+                      className="flex items-start gap-2 py-2 border-b border-border/40 last:border-0 hover:bg-muted/20 rounded transition-colors px-1 -mx-1 group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-foreground truncate">
+                          {t.employee_name ?? `Employee ${t.employee_code ?? t.entity_id.slice(0, 8)}`}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {t.factors?.[0] ?? 'Trust risk flagged'}
+                        </p>
                       </div>
-                      <span className={cn(
-                        'text-[10px] font-semibold capitalize shrink-0',
-                        t.severity === 'critical' ? 'text-destructive' : 'text-warning',
-                      )}>
-                        {t.score}/100 · {t.severity}
-                      </span>
-                    </div>
+                      <div className="shrink-0 text-right">
+                        <p className={cn(
+                          'text-[10px] font-semibold capitalize',
+                          t.severity === 'critical' ? 'text-destructive' : 'text-warning',
+                        )}>
+                          {t.severity}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground group-hover:text-primary">Review →</p>
+                      </div>
+                    </Link>
                   ))}
                 </div>
               )}

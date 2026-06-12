@@ -284,6 +284,34 @@ interface TrustAdminInboxOpts {
   actionRoute: string
 }
 
+/** Returns true if an unread trust inbox item with the same title already exists
+ *  for this entity within the last 7 days. Prevents duplicate flooding when trust
+ *  is re-evaluated on every profile update. */
+async function trustAdminInboxItemExists(
+  supabase:  SupabaseClient,
+  tenantId:  string,
+  entityId:  string,
+  title:     string,
+): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const { data } = await supabase
+      .from('inbox_items')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('entity_id', entityId)
+      .eq('entity_type', 'workforce_trust')
+      .eq('title', title)
+      .eq('status', 'unread')
+      .gte('created_at', since)
+      .limit(1)
+      .maybeSingle()
+    return !!data?.id
+  } catch {
+    return false  // on error, allow the item through
+  }
+}
+
 async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<void> {
   try {
     // Fetch all HR-admin profiles in the tenant
@@ -556,42 +584,74 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     }
   })
 
-  // ── O5.6 — Trust notifications: HR admin inbox for risk/duplicate signals ────
-  // These dispatch to ALL HR admin profiles in the tenant, not to the employee.
+  // ── O5.6 — Trust notifications: HR admin inbox — exception-based only ─────────
+  //
+  // Rules:
+  //   • Duplicates     → always notify (critical signal), but deduplicate: skip if
+  //                      an unread item for the same employee+type exists < 7 days.
+  //   • Verifications  → aggregate ALL failures from one evaluation into ONE inbox
+  //                      item per employee; deduplicate the same way.
+  //   • trust.score.computed / trust.verification.completed → never notify.
+  //   • trust.risk.raised → notify only for severity medium+; deduplicate.
+  //
+  // This prevents HR inboxes from flooding when a single employee has multiple
+  // failed checks or when trust is re-evaluated on every profile update.
 
   eventBus.on('trust.duplicate.detected', async (event) => {
     const { tenantId, entityId, duplicateType, matchingEntityIds, severity } = event.payload
+    const title = 'Duplicate identity detected'
+    if (await trustAdminInboxItemExists(supabase, tenantId, entityId, title)) return
     await dispatchTrustAdminInboxItem({
       supabase, tenantId,
-      entityType: 'workforce_trust', entityId,
-      severity:   severity === 'critical' || severity === 'high' ? 'critical' : 'warning',
-      title:      'Duplicate identity detected',
-      summary:    `A duplicate ${duplicateType} was found across ${matchingEntityIds.length + 1} employee record(s). Please investigate.`,
+      entityType:  'workforce_trust', entityId,
+      severity:    severity === 'critical' || severity === 'high' ? 'critical' : 'warning',
+      title,
+      summary:     `A duplicate ${duplicateType} was found across ${matchingEntityIds.length + 1} employee record(s). Please investigate.`,
       actionRoute: '/admin/trust',
     })
   })
 
+  // Verification failures are aggregated: a debounce window of 5 s collects all
+  // failures for the same employee in one evaluation then sends a single item.
+  const pendingVerifFailures: Map<string, { types: string[]; timer: ReturnType<typeof setTimeout> }> = new Map()
+
   eventBus.on('trust.verification.failed', async (event) => {
-    const { tenantId, entityId, verificationType, status } = event.payload
-    await dispatchTrustAdminInboxItem({
-      supabase, tenantId,
-      entityType: 'workforce_trust', entityId,
-      severity:   'warning',
-      title:      `${verificationType.toUpperCase()} verification ${status}`,
-      summary:    `${verificationType} could not be confirmed for employee ${entityId}. Manual review may be needed.`,
-      actionRoute: '/admin/trust',
-    })
+    const { tenantId, entityId, verificationType } = event.payload
+    const key = `${tenantId}:${entityId}`
+    const existing = pendingVerifFailures.get(key)
+    if (existing) {
+      existing.types.push(verificationType)
+      return  // timer already set — will flush when it fires
+    }
+    const entry = { types: [verificationType], timer: null as any }
+    pendingVerifFailures.set(key, entry)
+    entry.timer = setTimeout(async () => {
+      pendingVerifFailures.delete(key)
+      const types = entry.types
+      const title  = 'Identity verification failed'
+      if (await trustAdminInboxItemExists(supabase, tenantId, entityId, title)) return
+      await dispatchTrustAdminInboxItem({
+        supabase, tenantId,
+        entityType:  'workforce_trust', entityId,
+        severity:    'warning',
+        title,
+        summary:     `${types.map(t => t.toUpperCase()).join(', ')} verification could not be confirmed. Manual review may be needed.`,
+        actionRoute: '/admin/trust',
+      })
+    }, 5_000)
   })
 
   eventBus.on('trust.risk.raised', async (event) => {
     const { tenantId, entityId, riskType, severity, detail } = event.payload
     if (severity === 'low') return  // only escalate medium+ to HR
+    const title = `Trust risk raised: ${riskType}`
+    if (await trustAdminInboxItemExists(supabase, tenantId, entityId, title)) return
     await dispatchTrustAdminInboxItem({
       supabase, tenantId,
-      entityType: 'workforce_trust', entityId,
-      severity:   severity === 'critical' ? 'critical' : 'warning',
-      title:      `Trust risk raised: ${riskType}`,
-      summary:    detail ?? `A ${severity} trust risk (${riskType}) was flagged for employee ${entityId}.`,
+      entityType:  'workforce_trust', entityId,
+      severity:    severity === 'critical' ? 'critical' : 'warning',
+      title,
+      summary:     detail ?? `A ${severity} trust risk (${riskType}) was flagged for this employee.`,
       actionRoute: '/admin/trust',
     })
   })
