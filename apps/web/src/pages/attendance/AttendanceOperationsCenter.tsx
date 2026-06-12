@@ -7,13 +7,13 @@
  * Navigation to sub-pages is via the sidebar (not redundant cards here).
  */
 
-import { useMemo }     from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery }    from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ClipboardEdit, Clock, ShieldAlert,
   RefreshCw, TrendingDown, Users, Zap, Activity,
-  CalendarClock, Lock, Upload, BookOpen,
+  CalendarClock, Lock, Upload, BookOpen, History, X,
 } from 'lucide-react'
 
 import { PageContainer }             from '@/components/layout/PageContainer'
@@ -54,6 +54,8 @@ interface AttendancePeriod {
 
 export function AttendanceOperationsCenter() {
   const navigate = useNavigate()
+  // Recent Events is noisy at scale — load on demand only, not by default.
+  const [showEvents, setShowEvents] = useState(false)
 
   const { data: stats, isLoading } = useQuery<AttendanceStats>({
     queryKey:  ['attendance-ops-stats'],
@@ -79,6 +81,7 @@ export function AttendanceOperationsCenter() {
     queryFn:   () => api.get('/attendance/events?limit=15'),
     staleTime: 20_000,
     retry:     false,
+    enabled:   showEvents,
   })
 
   const currentPeriod = periodData?.data?.[0] ?? null
@@ -190,11 +193,19 @@ export function AttendanceOperationsCenter() {
         title="Attendance Operations"
         subtitle="Real-time operational state — anomalies, corrections, staffing and payroll continuity."
         actions={
-          <Button size="sm" variant="outline"
-            className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
-            onClick={() => navigate('/admin/attendance')}>
-            Process Attendance
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline"
+              className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() => setShowEvents(v => !v)}>
+              <History className="h-3.5 w-3.5" />
+              {showEvents ? 'Hide Events' : 'Recent Events'}
+            </Button>
+            <Button size="sm" variant="outline"
+              className="h-8 gap-1.5 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() => navigate('/admin/attendance')}>
+              Process Attendance
+            </Button>
+          </div>
         }
       />
 
@@ -365,16 +376,26 @@ export function AttendanceOperationsCenter() {
 
         </div>
 
-        {/* Right — recent events timeline */}
-        <div className="w-64 flex-shrink-0">
-          <SectionCard title="Recent Events">
-            <OperationalTimeline
-              events={timeline}
-              loading={eventsLoading}
-              maxItems={12}
-            />
-          </SectionCard>
-        </div>
+        {/* Right — recent events timeline (on-demand only) */}
+        {showEvents && (
+          <div className="w-64 flex-shrink-0">
+            <SectionCard
+              title="Recent Events"
+              action={
+                <button type="button" onClick={() => setShowEvents(false)}
+                  className="text-muted-foreground hover:text-foreground p-0.5">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              }
+            >
+              <OperationalTimeline
+                events={timeline}
+                loading={eventsLoading}
+                maxItems={12}
+              />
+            </SectionCard>
+          </div>
+        )}
 
       </div>
     </PageContainer>
