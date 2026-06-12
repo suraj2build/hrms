@@ -689,6 +689,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       trustHighRes, trustMedRes, trustTotalRes,
       trustVerifiedRes,
       dupRes, govRes,
+      wfTrustRes,
     ] = await Promise.all([
       // Open incidents
       fastify.supabase
@@ -775,6 +776,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .gte('created_at', `${from30}T00:00:00`)
         .limit(200),
+
+      // O5.9 — workforce_trust_scores avg + distribution
+      fastify.supabase
+        .from('workforce_trust_scores')
+        .select('score, severity, computed_at')
+        .eq('org_id', req.tenantId)
+        .eq('score_type', 'employee')
+        .order('computed_at', { ascending: false })
+        .limit(500),
     ])
 
     const open_incidents         = incOpenRes.count     ?? 0
@@ -796,6 +806,29 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       acc[s] = (acc[s] ?? 0) + 1
       return acc
     }, {})
+
+    // O5.9 — trust metrics from workforce_trust_scores
+    const wfScores: Array<{ score: number; severity: string; computed_at: string }> = wfTrustRes?.data ?? []
+    const avg_trust_score = wfScores.length > 0
+      ? Math.round(wfScores.reduce((sum, r) => sum + (r.score ?? 0), 0) / wfScores.length)
+      : null
+    const trust_distribution = wfScores.reduce((acc: Record<string, number>, r) => {
+      acc[r.severity] = (acc[r.severity] ?? 0) + 1
+      return acc
+    }, {})
+    // Monthly trend: group scores by YYYY-MM and average
+    const trendMap: Record<string, { total: number; count: number }> = {}
+    for (const r of wfScores) {
+      const month = r.computed_at?.slice(0, 7) ?? 'unknown'
+      const entry = trendMap[month] ?? { total: 0, count: 0 }
+      entry.total += r.score ?? 0
+      entry.count++
+      trendMap[month] = entry
+    }
+    const trust_trend = Object.entries(trendMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([month, { total, count }]) => ({ month, avg_score: Math.round(total / count) }))
 
     const sla_breach_rate       = safeRate(sla_breached_30d, total_exceptions_30d)
     const trust_verification_pct = safeRate(trust_verified, trust_total)
@@ -839,6 +872,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Composite
       compliance_risk_score,
       risk_status,
+      // O5.9 — trust intelligence metrics
+      avg_trust_score,
+      trust_distribution,
+      trust_trend,
       generated_at: new Date().toISOString(),
       period: { from: from30, to },
     })

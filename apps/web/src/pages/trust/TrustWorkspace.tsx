@@ -18,7 +18,7 @@ import { useQuery, useMutation, useQueryClient }               from '@tanstack/r
 import { toast }                                               from 'sonner'
 import {
   ShieldCheck, AlertTriangle, Copy, FileText,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, ShieldAlert, ShieldX, BarChart2,
 }                                                              from 'lucide-react'
 import { PageContainer }                                       from '@/components/layout/PageContainer'
 import { PageHeader }                                          from '@/components/layout/PageHeader'
@@ -56,14 +56,17 @@ interface VerificationEvent {
 }
 
 interface TrustScore {
-  id:          string
-  entity_id:   string
-  entity_type: string
-  score_type:  string
-  score:       number
-  severity:    string
-  factors:     string[]
-  computed_at: string
+  id:              string
+  entity_id:       string
+  entity_type:     string
+  score_type:      string
+  score:           number
+  severity:        string
+  factors:         string[]
+  strengths?:      string[]
+  risks?:          string[]
+  recommendations?: string[]
+  computed_at:     string
   explainability?: Explainability
 }
 
@@ -222,20 +225,68 @@ function VerificationTab() {
 
 // ── Trust Signals Tab ─────────────────────────────────────────────────────────
 
+interface TrustDrilldown {
+  entityId:  string
+  score:     TrustScore
+}
+
 function TrustSignalsTab() {
-  const [drawerItem, setDrawerItem] = useState<DrawerItem | null>(null)
+  const [drilldown, setDrilldown] = useState<TrustDrilldown | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['trust', 'scores'],
-    queryFn:  () => api.get<{ scores: TrustScore[] }>('/trust/scores?limit=30'),
+    queryFn:  () => api.get<{ scores: TrustScore[] }>('/trust/scores?limit=50'),
+  })
+
+  // Full trust breakdown for the drilled-down employee (O5.10)
+  const drillQ = useQuery({
+    queryKey: ['employee-trust', drilldown?.entityId],
+    queryFn:  () => api.get<{ data: TrustScore }>(`/employees/${drilldown!.entityId}/trust`).then(r => r.data),
+    enabled:  !!drilldown?.entityId,
+    staleTime: 120_000,
   })
 
   const items    = data?.scores ?? []
   const lowTrust = items.filter(s => s.score < 80)
 
+  // Aggregate metrics for header (O5.10)
+  const totalScored = items.length
+  const bySeveity   = items.reduce((acc: Record<string, number>, s) => {
+    acc[s.severity] = (acc[s.severity] ?? 0) + 1
+    return acc
+  }, {})
+  const avgScore = totalScored > 0
+    ? Math.round(items.reduce((sum, s) => sum + s.score, 0) / totalScored)
+    : null
+
+  const detail = drillQ.data ?? drilldown?.score ?? null
+
   return (
     <>
-      <SectionCard title="Trust Signals" description="Employees with lowest trust scores (below 80)">
+      {/* Aggregate header */}
+      {totalScored > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: 'Scored', value: totalScored, icon: BarChart2, cls: 'text-foreground' },
+            { label: 'Low risk', value: bySeveity.low ?? 0, icon: ShieldCheck, cls: 'text-emerald-600' },
+            { label: 'Medium / High', value: (bySeveity.medium ?? 0) + (bySeveity.high ?? 0), icon: ShieldAlert, cls: 'text-amber-500' },
+            { label: 'Critical', value: bySeveity.critical ?? 0, icon: ShieldX, cls: 'text-destructive' },
+          ].map(({ label, value, icon: Icon, cls }) => (
+            <div key={label} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5">
+              <Icon className={cn('h-4 w-4 shrink-0', cls)} />
+              <div>
+                <p className="text-base font-semibold tabular-nums">{value}</p>
+                <p className="text-[10px] text-muted-foreground">{label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <SectionCard
+        title="Trust Signals"
+        description={avgScore != null ? `Avg score ${avgScore}/100 · employees below 80 shown` : 'Employees with lowest trust scores (below 80)'}
+      >
         {isLoading && <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>}
         {!isLoading && lowTrust.length === 0 && (
           <div className="py-8 text-center space-y-2">
@@ -249,11 +300,7 @@ function TrustSignalsTab() {
             {lowTrust.map(s => (
               <button
                 key={s.id}
-                onClick={() => setDrawerItem({
-                  label:          `Trust score ${s.score}/100 — ${s.entity_id}`,
-                  timestamp:      s.computed_at,
-                  explainability: s.explainability,
-                })}
+                onClick={() => setDrilldown({ entityId: s.entity_id, score: s })}
                 className="w-full text-left px-0 py-3 hover:bg-muted/30 transition-colors rounded-sm"
               >
                 <div className="flex items-start justify-between gap-4">
@@ -264,17 +311,14 @@ function TrustSignalsTab() {
                       <SeverityBadge severity={s.severity} />
                     </div>
                     <ScoreBar score={s.score} severity={s.severity} />
-                    {s.factors.length > 0 && (
+                    {(s.risks ?? s.factors).slice(0, 2).length > 0 && (
                       <ul className="text-xs text-muted-foreground space-y-0.5">
-                        {s.factors.slice(0, 3).map((f, i) => (
+                        {(s.risks ?? s.factors).slice(0, 2).map((f, i) => (
                           <li key={i} className="flex items-start gap-1">
                             <span className="text-muted-foreground mt-0.5">•</span>
                             {f}
                           </li>
                         ))}
-                        {s.factors.length > 3 && (
-                          <li className="text-muted-foreground">+{s.factors.length - 3} more factors</li>
-                        )}
                       </ul>
                     )}
                   </div>
@@ -288,14 +332,59 @@ function TrustSignalsTab() {
         )}
       </SectionCard>
 
+      {/* Employee drilldown drawer (O5.10) */}
       <ExplainabilityDrawer
-        open={!!drawerItem}
-        onClose={() => setDrawerItem(null)}
-        title={drawerItem?.label ?? 'Intelligence Details'}
-        explainability={drawerItem?.explainability}
+        open={!!drilldown}
+        onClose={() => setDrilldown(null)}
+        title={drilldown ? `Trust breakdown — ${truncateId(drilldown.entityId)}` : 'Trust Details'}
+        explainability={detail?.explainability}
       >
-        {drawerItem && (
-          <p className="text-xs text-muted-foreground">{fmtDate(drawerItem.timestamp)}</p>
+        {drilldown && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ScoreBar score={drilldown.score.score} severity={drilldown.score.severity} />
+              <SeverityBadge severity={drilldown.score.severity} />
+            </div>
+
+            {drillQ.isLoading && <p className="text-xs text-muted-foreground">Loading full breakdown…</p>}
+
+            {detail?.strengths && detail.strengths.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Strengths</p>
+                {detail.strengths.map((s, i) => (
+                  <p key={i} className="text-xs text-foreground flex gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />{s}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {detail?.risks && detail.risks.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Risks</p>
+                {detail.risks.map((r, i) => (
+                  <p key={i} className="text-xs text-foreground flex gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />{r}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {detail?.recommendations && detail.recommendations.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-[#2E6FE6] uppercase tracking-wide">Recommendations</p>
+                {detail.recommendations.map((rec, i) => (
+                  <p key={i} className="text-xs text-foreground flex gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-[#2E6FE6] shrink-0 mt-0.5" />{rec}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[10px] text-muted-foreground">
+              Computed {fmtDate(drilldown.score.computed_at)}
+            </p>
+          </div>
         )}
       </ExplainabilityDrawer>
     </>

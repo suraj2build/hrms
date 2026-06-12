@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { ShieldCheck, ShieldAlert, AlertTriangle, FileWarning, Gauge, ClipboardCheck, ScrollText } from 'lucide-react'
-import { RadialBar, RadialBarChart, PolarAngleAxis, ResponsiveContainer } from 'recharts'
+import { ShieldCheck, ShieldAlert, AlertTriangle, FileWarning, Gauge, ClipboardCheck, ScrollText, TrendingUp } from 'lucide-react'
+import { RadialBar, RadialBarChart, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { ExecLayout, Panel, EmptyBody, StatTile, PALETTE } from '@/components/exec/ExecShell'
@@ -12,6 +12,10 @@ interface ComplianceData {
   trust_total: number; trust_verified: number; trust_verification_pct: number
   gov_total_30d: number; gov_by_severity: Record<string, number>
   open_duplicates: number; compliance_risk_score: number; risk_status: 'low' | 'medium' | 'high'
+  // O5.9
+  avg_trust_score: number | null
+  trust_distribution: Record<string, number>
+  trust_trend: Array<{ month: string; avg_score: number }>
 }
 
 const RISK_TONE: Record<string, { ring: string; text: string; fill: string }> = {
@@ -95,6 +99,49 @@ export default function ComplianceView() {
 
         <Panel icon={ScrollText} iconClass="text-info" title="Governance Audit Log" subtitle="Recent governance actions">
           <EmptyBody text="An itemised governance audit log isn't surfaced in the executive view — only roll-up counts are available. The detailed log lives in the governance module." />
+        </Panel>
+      </section>
+
+      {/* O5.9 — Trust Intelligence Panel */}
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Panel icon={ShieldCheck} iconClass="text-primary" title="Trust Distribution" subtitle="Employees by trust risk severity">
+          {c && Object.keys(c.trust_distribution ?? {}).length > 0 ? (
+            <div className="mt-3 space-y-2.5">
+              {(['low', 'medium', 'high', 'critical'] as const)
+                .filter(s => (c.trust_distribution?.[s] ?? 0) > 0)
+                .map((sev, i) => {
+                  const n   = c.trust_distribution[sev] ?? 0
+                  const max = Math.max(...Object.values(c.trust_distribution))
+                  const color = sev === 'low' ? 'var(--success)' : sev === 'medium' ? 'var(--warning)' : 'var(--destructive)'
+                  return (
+                    <div key={sev}>
+                      <div className="mb-1 flex justify-between text-xs capitalize"><span>{sev} risk</span><span className="font-medium tabular-nums">{n}</span></div>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${max ? (n / max) * 100 : 0}%`, background: color }} /></div>
+                    </div>
+                  )
+                })}
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <StatTile label="Avg Trust Score" value={c.avg_trust_score != null ? `${c.avg_trust_score}/100` : '—'} tone="muted" />
+                <StatTile label="Verified" value={`${c.trust_verification_pct.toFixed(0)}%`} tone="success" />
+              </div>
+            </div>
+          ) : <EmptyBody text="Trust scores are computed when identity verification runs. No employee scores yet." />}
+        </Panel>
+
+        <Panel icon={TrendingUp} iconClass="text-info" title="Trust Score Trend" subtitle="Average trust score · last 6 months">
+          {c && (c.trust_trend ?? []).length > 0 ? (
+            <div className="mt-3 h-44">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={c.trust_trend} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" width={28} />
+                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+                  <Line type="monotone" dataKey="avg_score" stroke="var(--primary)" strokeWidth={2} dot={false} name="Avg score" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <EmptyBody text="Trust trend data requires at least one month of scored employees." />}
         </Panel>
       </section>
     </ExecLayout>

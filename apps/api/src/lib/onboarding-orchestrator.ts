@@ -267,6 +267,58 @@ async function dispatchOnboardingInboxItem(opts: OnboardingInboxOpts): Promise<v
   }
 }
 
+// ── O5.6 — Trust admin inbox dispatch ────────────────────────────────────────
+//
+// HR admin trust notifications go to every HR_ADMIN / SUPER_ADMIN profile in the
+// tenant. The category is 'compliance' so frontend filters can separate them from
+// employee onboarding items.
+
+interface TrustAdminInboxOpts {
+  supabase:    SupabaseClient
+  tenantId:    string
+  entityType:  string
+  entityId:    string
+  severity:    'info' | 'warning' | 'success' | 'critical'
+  title:       string
+  summary:     string
+  actionRoute: string
+}
+
+async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<void> {
+  try {
+    // Fetch all HR-admin profiles in the tenant
+    const { data: admins } = await opts.supabase
+      .from('profiles')
+      .select('id')
+      .eq('tenant_id', opts.tenantId)
+      .in('role', ['hr_admin', 'super_admin', 'owner'])
+
+    if (!admins || admins.length === 0) return
+
+    const rows = admins.map((a: any) => ({
+      tenant_id:    opts.tenantId,
+      recipient_id: a.id,
+      item_type:    'action_required',
+      severity:     opts.severity,
+      title:        opts.title,
+      summary:      opts.summary,
+      entity_type:  opts.entityType,
+      entity_id:    opts.entityId,
+      action_route: opts.actionRoute,
+      action_label: 'Review trust',
+      status:       'unread',
+      metadata: {
+        category: 'compliance',
+        source:   'Trust Intelligence',
+      },
+    }))
+
+    await opts.supabase.from('inbox_items').insert(rows)
+  } catch (err) {
+    logWarn('trust_admin_inbox_failed', opts.entityId, err)
+  }
+}
+
 /** For document events: look up linked_employee_id from the session (set only
  *  after approval — silently skips if the session is still pre-approval). */
 async function resolveSessionEmployeeId(
@@ -502,6 +554,46 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     } catch (err) {
       logWarn('checklist_auto_create_failed', event.payload.sessionId, err)
     }
+  })
+
+  // ── O5.6 — Trust notifications: HR admin inbox for risk/duplicate signals ────
+  // These dispatch to ALL HR admin profiles in the tenant, not to the employee.
+
+  eventBus.on('trust.duplicate.detected', async (event) => {
+    const { tenantId, entityId, duplicateType, matchingEntityIds, severity } = event.payload
+    await dispatchTrustAdminInboxItem({
+      supabase, tenantId,
+      entityType: 'workforce_trust', entityId,
+      severity:   severity === 'critical' || severity === 'high' ? 'critical' : 'warning',
+      title:      'Duplicate identity detected',
+      summary:    `A duplicate ${duplicateType} was found across ${matchingEntityIds.length + 1} employee record(s). Please investigate.`,
+      actionRoute: '/admin/trust',
+    })
+  })
+
+  eventBus.on('trust.verification.failed', async (event) => {
+    const { tenantId, entityId, verificationType, status } = event.payload
+    await dispatchTrustAdminInboxItem({
+      supabase, tenantId,
+      entityType: 'workforce_trust', entityId,
+      severity:   'warning',
+      title:      `${verificationType.toUpperCase()} verification ${status}`,
+      summary:    `${verificationType} could not be confirmed for employee ${entityId}. Manual review may be needed.`,
+      actionRoute: '/admin/trust',
+    })
+  })
+
+  eventBus.on('trust.risk.raised', async (event) => {
+    const { tenantId, entityId, riskType, severity, detail } = event.payload
+    if (severity === 'low') return  // only escalate medium+ to HR
+    await dispatchTrustAdminInboxItem({
+      supabase, tenantId,
+      entityType: 'workforce_trust', entityId,
+      severity:   severity === 'critical' ? 'critical' : 'warning',
+      title:      `Trust risk raised: ${riskType}`,
+      summary:    detail ?? `A ${severity} trust risk (${riskType}) was flagged for employee ${entityId}.`,
+      actionRoute: '/admin/trust',
+    })
   })
 
   console.log(JSON.stringify({

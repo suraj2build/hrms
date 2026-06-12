@@ -55,14 +55,28 @@ export interface DuplicateDetectionResult {
 
 export type TrustScoreType = 'employee' | 'onboarding' | 'payroll' | 'document'
 
+/** One piece of evidence supporting a trust assessment.
+ *  audit_signals are immutable evidence; strengths/risks are derived explanations.
+ *  Never contains raw PII — only hashed IDs and event metadata. */
+export interface TrustAuditSignal {
+  signal:      string    // e.g. 'PAN_VERIFIED', 'DUPLICATE_PAN_DETECTED'
+  source:      string    // table / service that produced this evidence
+  occurred_at: string    // ISO timestamp
+  detail?:     string    // optional context
+}
+
 export interface TrustScoreResult {
-  score_type:    TrustScoreType
-  entity_id:     string
-  org_id:        string
-  score:         number          // 0–100, higher = more trustworthy
-  severity:      'low' | 'medium' | 'high' | 'critical'
-  factors:       string[]
-  computed_at:   string
+  score_type:      TrustScoreType
+  entity_id:       string
+  org_id:          string
+  score:           number          // 0–100, higher = more trustworthy
+  severity:        'low' | 'medium' | 'high' | 'critical'
+  factors:         string[]        // legacy negative deductions — kept for backward compat
+  strengths:       string[]        // positive signals: what passed
+  risks:           string[]        // negative signals: what failed or is missing
+  recommendations: string[]        // actionable HR steps
+  audit_signals:   TrustAuditSignal[]  // immutable evidence trail
+  computed_at:     string
   explainability?: ExplainabilityResult
 }
 

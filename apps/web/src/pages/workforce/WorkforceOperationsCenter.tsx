@@ -20,7 +20,7 @@ import { Link, useNavigate }  from 'react-router-dom'
 import { useQuery }           from '@tanstack/react-query'
 import {
   Users, UserPlus, UserMinus, AlertTriangle,
-  Building2, Brain,
+  Building2, Brain, ShieldAlert,
   ChevronRight, ChevronDown,
   CheckCircle2, XCircle, ArrowRight,
   Activity, FolderUp, BarChart2,
@@ -83,6 +83,16 @@ interface OnboardingStats {
   rejected:             number
   draft_ready?:         number
   active?:              number
+}
+
+interface TrustObservation {
+  entity_id:  string
+  score:      number
+  severity:   'low' | 'medium' | 'high' | 'critical'
+  factors:    string[]
+  strengths:  string[]
+  risks:      string[]
+  computed_at: string
 }
 
 // ── Org state derivation ───────────────────────────────────────────────────────
@@ -311,8 +321,18 @@ export function WorkforceOperationsCenter() {
     retry:     false,
   })
 
+  // O5.8 — Trust observations: high/critical-risk employees
+  const { data: trustResp, isLoading: trustLoading } = useQuery<{ scores: TrustObservation[]; total: number }>({
+    queryKey:  ['wf-trust-observations'],
+    queryFn:   () => api.get('/trust/scores?limit=10'),
+    enabled:   isAdmin,
+    staleTime: 5 * 60_000,
+    retry:     false,
+  })
+
   const intel     = intelResp?.data
   const onboarding = onboardResp?.data
+  const trustScores = (trustResp?.scores ?? []).filter(s => s.severity === 'high' || s.severity === 'critical')
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const orgState   = useMemo(() => deriveOrgState(stats, onboarding, intel), [stats, onboarding, intel])
@@ -711,6 +731,47 @@ export function WorkforceOperationsCenter() {
                           />
                         </div>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          )}
+
+          {/* Trust Observations — O5.8 */}
+          {isAdmin && (
+            <SectionCard
+              title="Trust Observations"
+              icon={<ShieldAlert className="h-4 w-4 text-muted-foreground" />}
+              action={
+                <Link to="/admin/trust" className="text-[11px] text-primary hover:underline flex items-center gap-0.5">
+                  Trust workspace <ArrowRight className="h-3 w-3" />
+                </Link>
+              }
+            >
+              {trustLoading ? (
+                <div className="space-y-2">
+                  {[1, 2].map(i => <div key={i} className="h-8 rounded-md bg-muted/30 animate-pulse" />)}
+                </div>
+              ) : trustScores.length === 0 ? (
+                <div className="flex items-center gap-2 text-xs text-success py-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" />
+                  No high-risk trust signals.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {trustScores.slice(0, 4).map(t => (
+                    <div key={t.entity_id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/40 last:border-0">
+                      <div className="min-w-0">
+                        <p className="font-mono text-[10px] text-muted-foreground truncate">{t.entity_id.slice(0, 8)}…</p>
+                        <p className="text-muted-foreground text-[10px] truncate">{t.risks?.[0] ?? 'Trust risk flagged'}</p>
+                      </div>
+                      <span className={cn(
+                        'text-[10px] font-semibold capitalize shrink-0',
+                        t.severity === 'critical' ? 'text-destructive' : 'text-warning',
+                      )}>
+                        {t.score}/100 · {t.severity}
+                      </span>
                     </div>
                   ))}
                 </div>

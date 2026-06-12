@@ -69,6 +69,7 @@ import employeeManagerRoutes   from './routes/employees/manager.js'
 import employeeOrgContextRoutes from './routes/employees/org-context.js'
 import shiftHistoryRoutes       from './routes/employees/shift-history.js'
 import onboardingStatusRoutes   from './routes/employees/onboarding-status.js'
+import employeeTrustRoutes      from './routes/employees/trust.js'
 import userAccountRoutes        from './routes/employees/user-account.js'
 import employeeImportantDatesRoutes from './routes/employees/important-dates.js'
 import employeeContextDataRoutes    from './routes/employees/context-data.js'
@@ -517,6 +518,7 @@ async function start() {
   await fastify.register(employeeOrgContextRoutes) // /employees/:id/org-context
   await fastify.register(shiftHistoryRoutes)       // /employees/:id/shift-history
   await fastify.register(onboardingStatusRoutes)   // /employees/:id/onboarding-status
+  await fastify.register(employeeTrustRoutes)      // O5.3: /employees/:id/trust + /onboarding/sessions/:id/trust
   await fastify.register(userAccountRoutes)        // /employees/:id/user-account
   await fastify.register(employeeImportantDatesRoutes) // /employees/:id/important-dates/*
   await fastify.register(employeeContextDataRoutes)    // /employees/:id/attendance | overtime | payroll-summary | activity-log

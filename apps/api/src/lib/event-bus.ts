@@ -580,6 +580,68 @@ export interface HrmsEventMap {
     employeeId:  string
     checklistId: string
   }
+
+  // ── Trust events ─────────────────────────────────────────────────────────────
+
+  /** Trust score (re)computed for an employee or onboarding session */
+  'trust.score.computed': {
+    tenantId:   string
+    entityId:   string          // employee UUID or session UUID
+    entityType: 'employee' | 'onboarding_session'
+    score:      number          // 0–100
+    severity:   'low' | 'medium' | 'high' | 'critical'
+    factorCount: number
+  }
+
+  /** Identity / document / bank verification succeeded */
+  'trust.verification.completed': {
+    tenantId:         string
+    entityId:         string
+    entityType:       string
+    verificationType: string    // 'pan' | 'aadhaar' | 'bank_account' | etc.
+    score:            number
+    flags:            string[]
+  }
+
+  /** Identity / document / bank verification failed or came back inconclusive */
+  'trust.verification.failed': {
+    tenantId:         string
+    entityId:         string
+    entityType:       string
+    verificationType: string
+    status:           string    // 'failed' | 'inconclusive'
+    flags:            string[]
+  }
+
+  /** A risk signal was raised against an employee */
+  'trust.risk.raised': {
+    tenantId:   string
+    entityId:   string
+    entityType: string
+    riskType:   string          // e.g. 'duplicate_pan', 'name_mismatch'
+    severity:   'low' | 'medium' | 'high' | 'critical'
+    detail?:    string
+  }
+
+  /** A previously raised risk signal has been cleared / resolved */
+  'trust.risk.cleared': {
+    tenantId:   string
+    entityId:   string
+    entityType: string
+    riskType:   string
+    clearedBy:  string          // user ID who cleared it
+    reason?:    string
+  }
+
+  /** Duplicate identity value detected across two or more employees */
+  'trust.duplicate.detected': {
+    tenantId:           string
+    entityId:           string
+    duplicateType:      string   // 'pan' | 'bank_account' | 'phone' | etc.
+    matchingEntityIds:  string[]
+    severity:           'low' | 'medium' | 'high' | 'critical'
+    valueHash:          string   // SHA-256 of the duplicated value (no PII)
+  }
 }
 
 export type HrmsEventType = keyof HrmsEventMap
