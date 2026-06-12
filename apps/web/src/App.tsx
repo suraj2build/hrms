@@ -57,6 +57,7 @@ const Organization      = lazy(() => import('@/pages/organization/Organization')
 const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m => ({ default: m.OrgChart })))
 const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
 const AuditTrail        = lazy(() => import('@/pages/admin/AuditTrail').then(m => ({ default: m.AuditTrail })))
+const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').then(m => ({ default: m.AdminRecruitment })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
@@ -729,7 +730,12 @@ export default function App() {
                 <Route path="/admin/masters/statutory-groups"        element={<StatutoryGroups />} />
                 <Route path="/admin/masters/asset-categories"        element={<AssetCategories />} />
                 <Route path="/admin/assets"                          element={<AssetMaster />} />
-                <Route path="/admin/recruitment"                     element={<AdminComingSoon />} />
+                <Route path="/admin/recruitment"                     element={<Navigate to="/admin/recruitment/requisitions" replace />} />
+                <Route path="/admin/recruitment/requisitions"       element={<AdminRecruitment />} />
+                <Route path="/admin/recruitment/pipeline"           element={<AdminComingSoon />} />
+                <Route path="/admin/recruitment/candidates"         element={<AdminComingSoon />} />
+                <Route path="/admin/recruitment/interviews"         element={<AdminComingSoon />} />
+                <Route path="/admin/recruitment/question-bank"      element={<AdminComingSoon />} />
                 {/* AI Workforce OS — Intelligence Layer */}
                 <Route path="/admin/intelligence/workforce-command"  element={<WorkforceCommand />} />
                 <Route path="/admin/intelligence/org-health"        element={<OrgHealth />} />

@@ -54,6 +54,10 @@ import {
   Briefcase,
   UserPlus,
   Package,
+  Kanban,
+  Users2,
+  CalendarCheck,
+  HelpCircle,
   // Attendance
   Upload,
   BookOpen,
@@ -233,6 +237,7 @@ export const DOMAINS: Domain[] = [
       '/admin/workforce/center',
       '/admin/documents',
     ],
+    // Note: /admin/recruitment/* all live here — do not add to other domains.
     defaultRoute: '/admin/employees',
     groups: [
       {
@@ -246,7 +251,16 @@ export const DOMAINS: Domain[] = [
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
           { id: 'assets',                label: 'Assets',               route: '/admin/assets',                               icon: Package,      keywords: ['asset management', 'equipment', 'laptop', 'device', 'asset assignment', 'asset allocation', 'inventory'] },
           { id: 'letters',               label: 'Letters',              route: '/admin/letters',                              icon: ScrollText,   keywords: ['offer letter', 'appointment letter', 'salary letter', 'experience letter', 'generate letter'] },
-          { id: 'recruitment',           label: 'Recruitment',          route: '/admin/recruitment',                          icon: Briefcase, badge: 'Soon', keywords: ['hiring', 'job opening', 'candidate', 'vacancy', 'interview', 'JD', 'job description'] },
+        ],
+      },
+      {
+        label: 'Recruitment',
+        items: [
+          { id: 'req-requisitions', label: 'Requisitions',  route: '/admin/recruitment/requisitions',  icon: Briefcase,     keywords: ['job opening', 'vacancy', 'position', 'hire', 'JD', 'job description', 'requisition'] },
+          { id: 'req-pipeline',     label: 'Pipeline',      route: '/admin/recruitment/pipeline',      icon: Kanban,        keywords: ['kanban', 'pipeline', 'applicant tracking', 'candidate stages', 'ATS'], badge: 'Soon' },
+          { id: 'req-candidates',   label: 'Candidates',    route: '/admin/recruitment/candidates',    icon: Users2,        keywords: ['applicants', 'candidates', 'talent pool', 'resumes', 'CVs'], badge: 'Soon' },
+          { id: 'req-interviews',   label: 'Interviews',    route: '/admin/recruitment/interviews',    icon: CalendarCheck, keywords: ['schedule interview', 'panel', 'rounds', 'interview calendar'], badge: 'Soon' },
+          { id: 'req-qbank',        label: 'Question Bank', route: '/admin/recruitment/question-bank', icon: HelpCircle,    keywords: ['questions', 'interview questions', 'question bank', 'behavioural', 'technical questions'], badge: 'Soon' },
         ],
       },
     ],
