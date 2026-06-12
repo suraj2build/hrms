@@ -659,19 +659,28 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
+    // Generate employee_code (NOT NULL on employees) — same scheme as the
+    // draft-approval path so both onboarding routes stay consistent.
+    const { count: empCount } = await fastify.supabase
+      .from('employees')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+
+    const employeeCode = `EMP${String((empCount ?? 0) + 1).padStart(4, '0')}`
+
     // ── Insert employee ──────────────────────────────────────────────────────
     const { data: employee, error: empErr } = await fastify.supabase
       .from('employees')
       .insert({
-        tenant_id:    tenantId,
-        first_name:   invitation.first_name,
-        last_name:    invitation.last_name,
-        email:        invitation.email,
-        phone:        invitation.phone ?? null,
-        joining_date: invitation.joining_date,
-        status:       'active',
-        created_at:   new Date().toISOString(),
-        updated_at:   new Date().toISOString(),
+        tenant_id:     tenantId,
+        employee_code: employeeCode,
+        first_name:    invitation.first_name,
+        last_name:     invitation.last_name,
+        email:         invitation.email,
+        phone:         invitation.phone ?? null,
+        joining_date:  invitation.joining_date,
+        status:        'active',
+        created_by:    req.userId,
       })
       .select()
       .single()
