@@ -172,6 +172,60 @@ async function scan(supabase: SupabaseClient): Promise<void> {
 
       notifiedIds.add(dedupeKey)
     }
+
+    // ── 3. Overdue helpdesk tickets (ESS-05) ───────────────────────────────────
+    // sla_due_at is set per-ticket from priority at creation. A ticket breaches
+    // when now > sla_due_at and it is not yet resolved/closed. Stamp
+    // sla_breached_at once so the admin queue can flag it.
+    const nowIso = new Date().toISOString()
+    const { data: overTickets } = await supabase
+      .from('helpdesk_tickets')
+      .select('id, subject, priority, sla_hours, sla_due_at, created_at, employees(first_name, last_name)')
+      .eq('tenant_id', tenantId)
+      .is('sla_breached_at', null)
+      .not('status', 'in', '(resolved,closed)')
+      .lt('sla_due_at', nowIso)
+
+    for (const row of (overTickets ?? [])) {
+      const dedupeKey = `helpdesk:${row.id}`
+      if (notifiedIds.has(dedupeKey)) continue
+
+      const emp     = Array.isArray(row.employees) ? row.employees[0] : row.employees
+      const name    = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
+      const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
+
+      // Stamp the breach so the queue can show a badge (best-effort).
+      try {
+        await supabase
+          .from('helpdesk_tickets')
+          .update({ sla_breached_at: nowIso })
+          .eq('id', row.id)
+          .eq('tenant_id', tenantId)
+      } catch { /* non-fatal */ }
+
+      eventBus.emit({
+        type:          'sla.breached',
+        tenantId,
+        correlationId: `sla-scan-helpdesk-${row.id}`,
+        payload: {
+          tenantId,
+          entityType:   'approval',   // closest existing entityType in the union
+          entityId:     row.id,
+          slaHours:     (row as any).sla_hours ?? 24,
+          elapsedHours: elapsed,
+        },
+      })
+
+      await writeNotifications(
+        supabase, tenantId, hrProfileIds,
+        'SLA Breach — Helpdesk Ticket',
+        `${name}'s ticket "${(row as any).subject}" has breached its ${(row as any).sla_hours ?? 24}h SLA (open ${elapsed}h). Please action it.`,
+        '/admin/helpdesk',
+        row.id,
+      ).catch(() => void 0)
+
+      notifiedIds.add(dedupeKey)
+    }
   }
 }
 

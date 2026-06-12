@@ -46,6 +46,7 @@ import {
   DollarSign,
   ShieldCheck,
   Inbox,
+  LifeBuoy,
   BarChart2,
   Settings,
   Brain,
@@ -179,6 +180,7 @@ export const DOMAINS: Domain[] = [
       '/admin/daily-ops',
       '/admin/approvals/inbox',
       '/admin/notifications/inbox',
+      '/admin/helpdesk',
     ],
     defaultRoute: '/admin/control-center',
     groups: [
@@ -197,6 +199,7 @@ export const DOMAINS: Domain[] = [
           { id: 'daily-ops',   label: 'Daily Operations', route: '/admin/daily-ops',           icon: Activity,    keywords: ['daily tasks', 'ops dashboard', 'today ops', 'daily work', 'daily checklist'] },
           { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare, keywords: ['approve', 'reject', 'pending approvals', 'leave approval', 'attendance approval', 'inbox'] },
           { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen,    keywords: ['notifications', 'alerts', 'messages', 'notification center'] },
+          { id: 'hr-helpdesk', label: 'HR Helpdesk',      route: '/admin/helpdesk',            icon: LifeBuoy,    keywords: ['helpdesk', 'tickets', 'support', 'employee tickets', 'hr support', 'service desk', 'grievance', 'issues'] },
         ],
       },
     ],

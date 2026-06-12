@@ -39,7 +39,7 @@ import ManagerRegularisationQueue from '@/pages/admin/attendance/ManagerRegulari
 import { MyAttendance }    from '@/pages/attendance/MyAttendance'
 import { MyLeaveRequests } from '@/pages/attendance/MyLeaveRequests'
 import { LeaveApply }      from '@/pages/attendance/LeaveApply'
-import { EssIssues }           from '@/pages/ess/EssIssues'
+import { EssHelpdesk }         from '@/pages/ess/EssHelpdesk'
 // EssCorrections retired — replaced by EssRegularization (/ess/attendance/regularization)
 import { EssSchedule }         from '@/pages/ess/EssSchedule'
 // EssCompOff merged into EssLeaveBalance (/ess/leave/balance → Comp-Off tab)
@@ -55,6 +55,7 @@ import type { Profile, Tenant } from '@/types'
 
 const Organization      = lazy(() => import('@/pages/organization/Organization').then(m => ({ default: m.Organization })))
 const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m => ({ default: m.OrgChart })))
+const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
@@ -553,6 +554,7 @@ export default function App() {
                 <Route path="/admin/employees/org-chart" element={<OrgChart />} />
                 <Route path="/admin/employees/:id"    element={<ProfilePlatform />} />
                 <Route path="/admin/organization"     element={<Organization />} />
+                <Route path="/admin/helpdesk"         element={<AdminHelpdesk />} />
                 <Route path="/admin/documents"        element={<Documents />} />
 
                 {/* Data Onboarding */}
@@ -819,7 +821,7 @@ export default function App() {
                 <Route path="/ess/leave/ledger"           element={<Navigate to="/ess/leave/balance" replace />} />
                 {/* /ess/comp-off merged into /ess/leave/balance (Comp-Off tab) */}
                 <Route path="/ess/comp-off"               element={<Navigate to="/ess/leave/balance" replace />} />
-                <Route path="/ess/issues"                 element={<EssIssues />} />
+                <Route path="/ess/issues"                 element={<EssHelpdesk />} />
                 <Route path="/ess/optional-holidays"      element={<EssOptionalHolidays />} />
                 <Route path="/ess/company-holidays"       element={<EssCompanyHolidays />} />
                 {/* /ess/payroll/my-slips merged into /ess/compensation (Pay Slips tab) */}

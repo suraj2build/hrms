@@ -164,6 +164,7 @@ import seedOnboardingTemplatesRoutes       from './routes/onboarding/seed-templa
 import preJoineeRoutes                     from './routes/onboarding/pre-joinee.js'
 import onboardingTimelineRoutes            from './routes/onboarding/timeline.js'
 import onboardingReadinessRoutes           from './routes/onboarding/readiness.js'
+import helpdeskRoutes                      from './routes/helpdesk/index.js'
 
 // Routes — Upload session lifecycle management
 import uploadSessionRoutes                 from './routes/uploads/index.js'
@@ -643,6 +644,7 @@ async function start() {
   await fastify.register(payrollSchedulerMonitorRoute,      { prefix: '/payroll/scheduler' })         // GET /payroll/scheduler/jobs|status, POST /payroll/scheduler/retry/:jobId
   await fastify.register(notificationTemplatesRoute,        { prefix: '/notifications/templates' })  // GET/POST /notifications/templates/*
   await fastify.register(notificationInboxRoute,            { prefix: '/notifications/inbox' })        // GET/POST /notifications/inbox/*
+  await fastify.register(helpdeskRoutes,                     { prefix: '/helpdesk' })                  // ESS-05 HR helpdesk tickets — employee + HR-admin endpoints
 
   // ── Workspace aggregated stats (must precede individual resource routes) ──
   await fastify.register(workspaceStatsRoutes)          // GET /onboarding/stats|events, /employees/overview, /attendance/stats|events, /payroll/runs/stats|events, /payroll/compliance/stats, /payroll/reconciliation, /ops/health|events
