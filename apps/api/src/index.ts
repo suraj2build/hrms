@@ -161,6 +161,7 @@ import onboardingDashboardRoute            from './routes/onboarding/dashboard.j
 import onboardingChecklistRoutes           from './routes/onboarding/checklist.js'
 import seedOnboardingTemplatesRoutes       from './routes/onboarding/seed-templates.js'
 import preJoineeRoutes                     from './routes/onboarding/pre-joinee.js'
+import onboardingTimelineRoutes            from './routes/onboarding/timeline.js'
 
 // Routes — Upload session lifecycle management
 import uploadSessionRoutes                 from './routes/uploads/index.js'
@@ -485,6 +486,7 @@ async function start() {
   await fastify.register(onboardingChecklistRoutes,       { prefix: '/onboarding' })  // onboarding checklist
   await fastify.register(seedOnboardingTemplatesRoutes,   { prefix: '/onboarding' })  // seed default templates
   await fastify.register(preJoineeRoutes)  // pre-joinee — routes already include full /onboarding/... paths (no prefix to avoid double-prefix)
+  await fastify.register(onboardingTimelineRoutes) // O2: /onboarding/sessions/:id/timeline + /employees/:id/onboarding-timeline
 
   // ── Notifications ─────────────────────────────────────────────
   await fastify.register(notificationsRoutes, { prefix: '/notifications' })

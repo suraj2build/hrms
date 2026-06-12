@@ -11,6 +11,7 @@ import {
   Loader2, ChevronDown, ChevronUp, Shield, Clock, Package,
   CalendarDays, Briefcase, LogOut, AlertTriangle,
 } from 'lucide-react'
+import { LifecycleTimeline } from '@/components/onboarding/LifecycleTimeline'
 
 interface LeaveBalance { leave_type: string; balance: number; used: number }
 
@@ -169,6 +170,12 @@ export function Employee360Tab({ employeeId }: { employeeId: string }) {
           </div>
         </div>
       )}
+
+      {/* O2 — Journey Timeline */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Journey Timeline</h3>
+        <LifecycleTimeline employeeId={employeeId} hideProgressBar={false} />
+      </div>
 
       <p className="text-[11px] text-muted-foreground">
         Generated {new Date(data.generated_at).toLocaleString()} · sources: {data.sources?.join(' · ') || 'employees'}

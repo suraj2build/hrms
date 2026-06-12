@@ -26,6 +26,7 @@ import {
   Phone, Fingerprint, Home,
 } from 'lucide-react'
 import { Employee360Tab } from '@/pages/intelligence/Employee360Tab'
+import { LifecycleTimeline } from '@/components/onboarding/LifecycleTimeline'
 import {
   SeverityBadge,
   RiskIndicator,
@@ -1744,6 +1745,7 @@ export function EmployeeProfile() {
     core:          [
       { key: 'profile',    label: 'Overview',       icon: User       },
       { key: 'personal',   label: 'Personal',       icon: UserCircle },
+      { key: 'journey',    label: 'Journey',         icon: History    },
       ...(isAdmin ? [{ key: 'account', label: 'User Account', icon: KeyRound }] : []),
     ],
     employment:    [
@@ -2046,6 +2048,19 @@ export function EmployeeProfile() {
                       </CardContent>
                     </Card>
                   ))}</div>}
+            </div>
+          )}
+
+          {/* ─────────────────────────────────────────────────────────────────
+              CORE › Journey Timeline (O2)
+          ──────────────────────────────────────────────────────────────────── */}
+          {subTab === 'journey' && id && (
+            <div className="space-y-4 max-w-3xl">
+              <div className="rounded-lg bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] px-5 py-3 text-white">
+                <h2 className="text-base font-semibold">Journey Timeline</h2>
+                <p className="text-xs text-white/75 mt-0.5">Chronological onboarding journey — sourced from lifecycle audit trail</p>
+              </div>
+              <LifecycleTimeline employeeId={id} />
             </div>
           )}
 
