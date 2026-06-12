@@ -165,6 +165,256 @@ export function joiningWelcomeEmail(opts: {
   return { subject, html }
 }
 
+// ── RCT-05: Recruitment stage-change emails ────────────────────────────────────
+
+export function applicationReceivedEmail(opts: {
+  candidateName: string
+  jobTitle:      string
+  companyName:   string
+}): { subject: string; html: string } {
+  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const subject = `Application received — ${opts.jobTitle} at ${opts.companyName}`
+  const html = shell(`
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Application Received</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Hi ${firstName}, thank you for applying for <strong>${opts.jobTitle}</strong> at
+      <strong>${opts.companyName}</strong>. We've received your application and our team
+      will review it shortly.
+    </p>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      We'll be in touch with next steps. In the meantime, feel free to explore other
+      opportunities with us.
+    </p>
+    <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+      Please do not reply to this email — this is an automated notification.
+    </p>
+  `)
+  return { subject, html }
+}
+
+export function applicationShortlistedEmail(opts: {
+  candidateName: string
+  jobTitle:      string
+  companyName:   string
+}): { subject: string; html: string } {
+  const { teal } = brandConfig.colors
+  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const subject = `You've been shortlisted — ${opts.jobTitle} at ${opts.companyName}`
+  const html = shell(`
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="display:inline-block;background:${teal};color:#fff;font-weight:700;font-size:13px;padding:5px 14px;border-radius:999px;letter-spacing:0.5px;">SHORTLISTED</span>
+    </div>
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;text-align:center;">Great news, ${firstName}!</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;text-align:center;">
+      You've been shortlisted for <strong>${opts.jobTitle}</strong> at
+      <strong>${opts.companyName}</strong>.
+    </p>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Our team has reviewed your profile and would like to move forward. Someone from our
+      recruitment team will reach out shortly with details about the next steps.
+    </p>
+    <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+      Please do not reply to this email — this is an automated notification.
+    </p>
+  `)
+  return { subject, html }
+}
+
+export function interviewScheduledEmail(opts: {
+  candidateName: string
+  jobTitle:      string
+  companyName:   string
+  roundNumber:   number
+  interviewType: string
+  scheduledAt?:  string | null
+  durationMins:  number
+  meetLink?:     string | null
+  roundTitle?:   string | null
+}): { subject: string; html: string } {
+  const { primary, teal } = brandConfig.colors
+  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const typeLabel: Record<string, string> = {
+    video: 'Video Call', phone: 'Phone Call',
+    in_person: 'In-Person', assignment: 'Assignment',
+  }
+  const displayType = typeLabel[opts.interviewType] ?? opts.interviewType
+  const roundLabel  = opts.roundTitle || `Round ${opts.roundNumber}`
+
+  let dateBlock = ''
+  if (opts.scheduledAt) {
+    const d = new Date(opts.scheduledAt)
+    const formatted = d.toLocaleString('en-IN', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
+    })
+    dateBlock = `<tr>
+      <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Date &amp; Time</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;">${formatted} IST</td>
+    </tr>`
+  }
+
+  const subject = `Interview scheduled — ${opts.jobTitle} at ${opts.companyName}`
+  const html = shell(`
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="display:inline-block;background:${primary};color:#fff;font-weight:700;font-size:13px;padding:5px 14px;border-radius:999px;letter-spacing:0.5px;">INTERVIEW SCHEDULED</span>
+    </div>
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;text-align:center;">Hi ${firstName}, you have an interview!</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;text-align:center;">
+      Your interview for <strong>${opts.jobTitle}</strong> at <strong>${opts.companyName}</strong> has been scheduled.
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:14px;">
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Round</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${roundLabel}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Format</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${displayType}</td>
+      </tr>
+      ${dateBlock}
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Duration</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.durationMins} minutes</td>
+      </tr>
+      ${opts.meetLink ? `<tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Meeting Link</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;"><a href="${opts.meetLink}" style="color:${teal};word-break:break-all;">${opts.meetLink}</a></td>
+      </tr>` : ''}
+    </table>
+    <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 8px;">
+      Please ensure you are available at the scheduled time. If you need to reschedule,
+      contact the recruitment team at your earliest convenience.
+    </p>
+    <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+      Please do not reply to this email — this is an automated notification.
+    </p>
+  `)
+  return { subject, html }
+}
+
+export function panelInterviewNotificationEmail(opts: {
+  panelName:     string
+  candidateName: string
+  jobTitle:      string
+  roundNumber:   number
+  roundTitle?:   string | null
+  interviewType: string
+  scheduledAt?:  string | null
+  durationMins:  number
+  meetLink?:     string | null
+}): { subject: string; html: string } {
+  const { primary, teal } = brandConfig.colors
+  const typeLabel: Record<string, string> = {
+    video: 'Video Call', phone: 'Phone Call',
+    in_person: 'In-Person', assignment: 'Assignment',
+  }
+  const displayType = typeLabel[opts.interviewType] ?? opts.interviewType
+  const roundLabel  = opts.roundTitle || `Round ${opts.roundNumber}`
+
+  let dateBlock = ''
+  if (opts.scheduledAt) {
+    const d = new Date(opts.scheduledAt)
+    const formatted = d.toLocaleString('en-IN', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
+    })
+    dateBlock = `<tr>
+      <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Date &amp; Time</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;">${formatted} IST</td>
+    </tr>`
+  }
+
+  const subject = `Interview panel — ${opts.candidateName} for ${opts.jobTitle}`
+  const html = shell(`
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="display:inline-block;background:${primary};color:#fff;font-weight:700;font-size:13px;padding:5px 14px;border-radius:999px;letter-spacing:0.5px;">PANEL NOTIFICATION</span>
+    </div>
+    <h1 style="font-size:20px;color:#0f172a;margin:0 0 12px;">Hi ${opts.panelName},</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;">
+      You've been assigned to interview <strong>${opts.candidateName}</strong> for the
+      <strong>${opts.jobTitle}</strong> role.
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:14px;">
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Round</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${roundLabel}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Format</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${displayType}</td>
+      </tr>
+      ${dateBlock}
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Duration</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.durationMins} minutes</td>
+      </tr>
+      ${opts.meetLink ? `<tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Meeting Link</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;"><a href="${opts.meetLink}" style="color:${teal};word-break:break-all;">${opts.meetLink}</a></td>
+      </tr>` : ''}
+    </table>
+    <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+      Please do not reply to this email — this is an automated notification.
+    </p>
+  `)
+  return { subject, html }
+}
+
+export function offerExtendedEmail(opts: {
+  candidateName: string
+  jobTitle:      string
+  companyName:   string
+}): { subject: string; html: string } {
+  const { teal } = brandConfig.colors
+  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const subject = `Offer from ${opts.companyName} — ${opts.jobTitle}`
+  const html = shell(`
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="display:inline-block;background:${teal};color:#fff;font-weight:700;font-size:13px;padding:5px 14px;border-radius:999px;letter-spacing:0.5px;">OFFER EXTENDED</span>
+    </div>
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;text-align:center;">Congratulations, ${firstName}! 🎉</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;text-align:center;">
+      We are delighted to extend an offer for the <strong>${opts.jobTitle}</strong> position
+      at <strong>${opts.companyName}</strong>.
+    </p>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Our HR team will reach out to you shortly with the full offer letter and details.
+      We look forward to welcoming you to the team!
+    </p>
+    <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+      Please do not reply to this email — this is an automated notification.
+    </p>
+  `)
+  return { subject, html }
+}
+
+export function applicationRejectedEmail(opts: {
+  candidateName: string
+  jobTitle:      string
+  companyName:   string
+}): { subject: string; html: string } {
+  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const subject = `Update on your application — ${opts.jobTitle} at ${opts.companyName}`
+  const html = shell(`
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Hi ${firstName},</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Thank you for taking the time to apply for <strong>${opts.jobTitle}</strong> at
+      <strong>${opts.companyName}</strong> and for the interest you've shown in joining our team.
+    </p>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      After careful consideration, we've decided to move forward with other candidates whose
+      experience more closely matches the current requirements of the role.
+    </p>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0;">
+      We appreciate your effort and wish you the very best in your career journey.
+    </p>
+    <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
+      Please do not reply to this email — this is an automated notification.
+    </p>
+  `)
+  return { subject, html }
+}
+
 // ── ONB-05: IT provisioning notification to HR/IT team ────────────────────────
 
 export function itProvisioningEmail(opts: {

@@ -14,6 +14,46 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction }    from '../../lib/audit-service.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
+import {
+  sendEmail,
+  applicationReceivedEmail,
+  applicationShortlistedEmail,
+  interviewScheduledEmail,
+  panelInterviewNotificationEmail,
+  offerExtendedEmail,
+  applicationRejectedEmail,
+} from '../../lib/email-service.js'
+
+// Fetch candidate name/email + job title + company name for a given application
+async function getAppEmailCtx(
+  supabase:  any,
+  tenantId:  string,
+  appId:     string,
+): Promise<{ candidateName: string; candidateEmail: string; jobTitle: string; companyName: string } | null> {
+  try {
+    const [{ data: app }, { data: tenant }] = await Promise.all([
+      supabase
+        .from('applications')
+        .select('candidates(first_name,last_name,email), job_requisitions(title)')
+        .eq('id', appId)
+        .eq('tenant_id', tenantId)
+        .single(),
+      supabase
+        .from('tenants')
+        .select('name')
+        .eq('id', tenantId)
+        .single(),
+    ])
+    if (!app) return null
+    const cand = app.candidates
+    return {
+      candidateName:  `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim() || 'Candidate',
+      candidateEmail: cand?.email ?? '',
+      jobTitle:       app.job_requisitions?.title ?? 'Position',
+      companyName:    tenant?.name ?? 'Our Company',
+    }
+  } catch { return null }
+}
 
 const HR_ADMIN_ROLES = ['super_admin', 'hr_admin'] as const
 
@@ -549,6 +589,14 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     }
 
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'applications', recordId: (data as any).id, action: 'INSERT', performedBy: req.userId, newData: parsed.data })
+
+    // Fire application-received email to candidate (non-blocking)
+    const appId = (data as any).id
+    void (async () => {
+      const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, appId)
+      if (ctx?.candidateEmail) await sendEmail({ to: ctx.candidateEmail, ...applicationReceivedEmail(ctx) })
+    })()
+
     return reply.code(201).send({ data })
   })
 
@@ -593,6 +641,25 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         note:           parsed.data.note ?? null,
       })
 
+    // Stage-change emails: shortlisted (screening) or offer extended (offer)
+    void (async () => {
+      try {
+        const { data: stage } = await fastify.supabase
+          .from('recruitment_pipeline_stages')
+          .select('stage_type')
+          .eq('id', parsed.data.stage_id)
+          .single()
+        const stageType = (stage as any)?.stage_type
+        if (stageType !== 'screening' && stageType !== 'offer') return
+        const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, id)
+        if (!ctx?.candidateEmail) return
+        const emailPayload = stageType === 'offer'
+          ? offerExtendedEmail(ctx)
+          : applicationShortlistedEmail(ctx)
+        await sendEmail({ to: ctx.candidateEmail, ...emailPayload })
+      } catch { /* non-throwing */ }
+    })()
+
     return reply.send({ message: 'Application moved' })
   })
 
@@ -609,6 +676,13 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'applications', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'rejected', rejection_reason: parsed.data.rejection_reason } })
+
+    // Rejection email to candidate (non-blocking)
+    void (async () => {
+      const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, id)
+      if (ctx?.candidateEmail) await sendEmail({ to: ctx.candidateEmail, ...applicationRejectedEmail(ctx) })
+    })()
+
     return reply.send({ message: 'Application rejected' })
   })
 
@@ -800,6 +874,47 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       performedBy: req.userId,
       newData:     roundData,
     })
+
+    // Interview scheduled emails — candidate + all panel members (non-blocking)
+    const roundId = (round as any).id
+    void (async () => {
+      try {
+        const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, parsed.data.application_id)
+        if (!ctx) return
+
+        const emailOpts = {
+          candidateName: ctx.candidateName,
+          jobTitle:      ctx.jobTitle,
+          companyName:   ctx.companyName,
+          roundNumber:   parsed.data.round_number,
+          roundTitle:    parsed.data.title ?? null,
+          interviewType: parsed.data.interview_type,
+          scheduledAt:   parsed.data.scheduled_at ?? null,
+          durationMins:  parsed.data.duration_mins,
+          meetLink:      parsed.data.meet_link ?? null,
+        }
+
+        // Email candidate
+        if (ctx.candidateEmail) {
+          await sendEmail({ to: ctx.candidateEmail, ...interviewScheduledEmail(emailOpts) })
+        }
+
+        // Email each panel member
+        if (interviewer_ids.length > 0) {
+          const { data: panelProfiles } = await fastify.supabase
+            .from('profiles')
+            .select('full_name, email')
+            .in('id', interviewer_ids)
+          for (const p of (panelProfiles ?? []) as any[]) {
+            if (!p.email) continue
+            await sendEmail({
+              to: p.email,
+              ...panelInterviewNotificationEmail({ ...emailOpts, panelName: p.full_name ?? 'Interviewer' }),
+            })
+          }
+        }
+      } catch { /* non-throwing */ }
+    })()
 
     return reply.code(201).send({ data: round })
   })
