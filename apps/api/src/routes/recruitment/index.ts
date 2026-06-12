@@ -943,4 +943,215 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     return reply.send({ rounds: rounds ?? [], activity: activity ?? [] })
   })
+
+  // ── Question Bank — Categories ────────────────────────────────────────────
+
+  fastify.get('/question-bank/categories', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('qb_categories')
+      .select('*, departments(id, name)')
+      .eq('tenant_id', req.tenantId)
+      .order('name', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/question-bank/categories', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      name:          z.string().min(1),
+      department_id: z.string().uuid().optional().nullable(),
+      category_type: z.enum(['technical','behavioural','domain','situational','general']).default('technical'),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase
+      .from('qb_categories')
+      .insert({ ...parsed.data, tenant_id: req.tenantId })
+      .select('*, departments(id, name)')
+      .single()
+
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A category with this name already exists' })
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    }
+    return reply.code(201).send({ data })
+  })
+
+  fastify.put('/question-bank/categories/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      name:          z.string().min(1).optional(),
+      department_id: z.string().uuid().optional().nullable(),
+      category_type: z.enum(['technical','behavioural','domain','situational','general']).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase
+      .from('qb_categories')
+      .update(parsed.data)
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'Category updated' })
+  })
+
+  fastify.delete('/question-bank/categories/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { error } = await fastify.supabase
+      .from('qb_categories')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    return reply.send({ message: 'Category deleted' })
+  })
+
+  // ── Question Bank — Items ─────────────────────────────────────────────────
+
+  fastify.get('/question-bank/items', auth, async (req: any, reply) => {
+    const querySchema = z.object({
+      category_id: z.string().uuid().optional(),
+      difficulty:  z.string().optional(),
+      search:      z.string().optional(),
+      is_active:   z.coerce.boolean().optional(),
+      limit:       z.coerce.number().int().min(1).max(200).default(100),
+      offset:      z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    let q = fastify.supabase
+      .from('qb_items')
+      .select('*, qb_categories(id, name, category_type)', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+
+    if (parsed.data.category_id) q = q.eq('category_id', parsed.data.category_id)
+    if (parsed.data.difficulty)  q = q.eq('difficulty',  parsed.data.difficulty)
+    if (parsed.data.is_active !== undefined) q = q.eq('is_active', parsed.data.is_active)
+    if (parsed.data.search) q = q.ilike('question', `%${parsed.data.search}%`)
+
+    q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0 })
+  })
+
+  fastify.post('/question-bank/items', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      category_id:  z.string().uuid(),
+      question:     z.string().min(1),
+      model_answer: z.string().optional().nullable(),
+      difficulty:   z.enum(['easy','medium','hard']).default('medium'),
+      tags:         z.array(z.string()).optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase
+      .from('qb_items')
+      .insert({ ...parsed.data, tenant_id: req.tenantId, created_by: req.userId, is_active: true })
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.put('/question-bank/items/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      question:     z.string().min(1).optional(),
+      model_answer: z.string().optional().nullable(),
+      difficulty:   z.enum(['easy','medium','hard']).optional(),
+      tags:         z.array(z.string()).optional().nullable(),
+      is_active:    z.boolean().optional(),
+      category_id:  z.string().uuid().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase
+      .from('qb_items')
+      .update(parsed.data)
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'Question updated' })
+  })
+
+  fastify.delete('/question-bank/items/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { error } = await fastify.supabase
+      .from('qb_items')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    return reply.send({ message: 'Question deleted' })
+  })
+
+  // ── Scorecards ────────────────────────────────────────────────────────────
+
+  fastify.get('/interviews/:id/scorecard', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: scores, error } = await fastify.supabase
+      .from('interview_scores')
+      .select('*, profiles:interviewer_id(id, full_name)')
+      .eq('round_id', id)
+      .eq('tenant_id', req.tenantId)
+      .order('submitted_at', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    // Compute aggregate
+    const rows = (scores ?? []) as any[]
+    const agg = rows.length === 0 ? null : {
+      technical_score:     +(rows.reduce((s, r) => s + (r.technical_score ?? 0), 0) / rows.filter(r => r.technical_score).length || 0).toFixed(1),
+      communication_score: +(rows.reduce((s, r) => s + (r.communication_score ?? 0), 0) / rows.filter(r => r.communication_score).length || 0).toFixed(1),
+      culture_score:       +(rows.reduce((s, r) => s + (r.culture_score ?? 0), 0) / rows.filter(r => r.culture_score).length || 0).toFixed(1),
+      overall_score:       +(rows.reduce((s, r) => s + (r.overall_score ?? 0), 0) / rows.filter(r => r.overall_score).length || 0).toFixed(1),
+      count: rows.length,
+    }
+
+    return reply.send({ data: scores ?? [], aggregate: agg })
+  })
+
+  fastify.post('/interviews/:id/scorecard', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      technical_score:     z.number().int().min(1).max(5).optional().nullable(),
+      communication_score: z.number().int().min(1).max(5).optional().nullable(),
+      culture_score:       z.number().int().min(1).max(5).optional().nullable(),
+      overall_score:       z.number().int().min(1).max(5).optional().nullable(),
+      recommendation:      z.enum(['strong_yes','yes','maybe','no','strong_no']).optional().nullable(),
+      notes:               z.string().optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase
+      .from('interview_scores')
+      .upsert({
+        ...parsed.data,
+        tenant_id:      req.tenantId,
+        round_id:       id,
+        interviewer_id: req.userId,
+        submitted_at:   new Date().toISOString(),
+      }, { onConflict: 'round_id,interviewer_id' })
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    return reply.code(201).send({ data })
+  })
 }

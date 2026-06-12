@@ -26,6 +26,9 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Label }         from '@/components/ui/label'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter,
 } from '@/components/ui/sheet'
 import {
@@ -134,6 +137,16 @@ export function AdminInterviews() {
 
   const [sheetOpen,    setSheetOpen]    = useState(false)
   const [editTarget,   setEditTarget]   = useState<InterviewRound | null>(null)
+
+  // Scorecard dialog state
+  const [scoreRound,   setScoreRound]   = useState<InterviewRound | null>(null)
+  const [myTech,       setMyTech]       = useState('')
+  const [myComm,       setMyComm]       = useState('')
+  const [myCulture,    setMyCulture]    = useState('')
+  const [myOverall,    setMyOverall]    = useState('')
+  const [myRec,        setMyRec]        = useState('')
+  const [myNotes,      setMyNotes]      = useState('')
+  const [scoreSaving,  setScoreSaving]  = useState(false)
   const [form,         setForm]         = useState<RoundForm>(EMPTY_FORM)
   const [saving,       setSaving]       = useState(false)
 
@@ -175,6 +188,17 @@ export function AdminInterviews() {
   })
   const rows = data?.data ?? []
 
+  const { data: scorecardData, refetch: refetchScorecard } = useQuery<{
+    data: { id: string; interviewer_id: string; technical_score: number|null; communication_score: number|null; culture_score: number|null; overall_score: number|null; recommendation: string|null; notes: string|null; submitted_at: string; profiles: { id: string; full_name: string }|null }[]
+    aggregate: { technical_score: number; communication_score: number; culture_score: number; overall_score: number; count: number } | null
+  }>({
+    queryKey: ['recruitment', 'scorecard', scoreRound?.id],
+    queryFn:  () => api.get(`/recruitment/interviews/${scoreRound?.id}/scorecard`),
+    enabled:  !!scoreRound,
+  })
+  const scorecardRows = scorecardData?.data ?? []
+  const aggregate     = scorecardData?.aggregate ?? null
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   function invalidate() { qc.invalidateQueries({ queryKey: ['recruitment', 'interviews'] }) }
@@ -194,6 +218,38 @@ export function AdminInterviews() {
     onSuccess:  () => { toast.success('Interview deleted'); invalidate() },
     onError:    (e: any) => toast.error(e?.response?.data?.message ?? 'Delete failed'),
   })
+
+  // ── Scorecard helpers ──────────────────────────────────────────────────────
+
+  function openScorecard(r: InterviewRound) {
+    setScoreRound(r)
+    const myScore = scorecardRows.find(s => s.interviewer_id === profile?.id)
+    setMyTech(myScore?.technical_score != null ? String(myScore.technical_score) : '')
+    setMyComm(myScore?.communication_score != null ? String(myScore.communication_score) : '')
+    setMyCulture(myScore?.culture_score != null ? String(myScore.culture_score) : '')
+    setMyOverall(myScore?.overall_score != null ? String(myScore.overall_score) : '')
+    setMyRec(myScore?.recommendation ?? '')
+    setMyNotes(myScore?.notes ?? '')
+  }
+
+  async function submitScore() {
+    if (!scoreRound) return
+    setScoreSaving(true)
+    try {
+      await api.post(`/recruitment/interviews/${scoreRound.id}/scorecard`, {
+        technical_score:     myTech     ? parseInt(myTech)     : null,
+        communication_score: myComm     ? parseInt(myComm)     : null,
+        culture_score:       myCulture  ? parseInt(myCulture)  : null,
+        overall_score:       myOverall  ? parseInt(myOverall)  : null,
+        recommendation:      myRec      || null,
+        notes:               myNotes    || null,
+      })
+      toast.success('Score submitted')
+      refetchScorecard()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? 'Submit failed')
+    } finally { setScoreSaving(false) }
+  }
 
   // ── Sheet helpers ──────────────────────────────────────────────────────────
 
@@ -451,6 +507,9 @@ export function AdminInterviews() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-44">
                                 <DropdownMenuItem onClick={() => openEdit(r)}>Edit details</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openScorecard(r)}>
+                                  <Star className="h-3.5 w-3.5 mr-2" />View Scorecard
+                                </DropdownMenuItem>
                                 {r.status === 'scheduled' && (
                                   <>
                                     <DropdownMenuSeparator />
@@ -659,6 +718,159 @@ export function AdminInterviews() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {/* Scorecard Dialog */}
+      <Dialog open={!!scoreRound} onOpenChange={open => { if (!open) setScoreRound(null) }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Star className="h-5 w-5 text-amber-500" />
+              Scorecard — {scoreRound && (
+                <>R{scoreRound.round_number}{scoreRound.title ? ` · ${scoreRound.title}` : ''}
+                  {scoreRound.applications?.candidates &&
+                    ` · ${scoreRound.applications.candidates.first_name} ${scoreRound.applications.candidates.last_name}`}
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Aggregate summary */}
+          {aggregate && (
+            <div className="rounded-lg border border-border bg-muted/20 p-3 mb-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Panel Aggregate ({aggregate.count} score{aggregate.count !== 1 ? 's' : ''})</p>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                {[
+                  { label: 'Technical',    value: aggregate.technical_score },
+                  { label: 'Communication', value: aggregate.communication_score },
+                  { label: 'Culture',      value: aggregate.culture_score },
+                  { label: 'Overall',      value: aggregate.overall_score },
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-md bg-background border border-border p-2">
+                    <p className="text-lg font-bold">{value > 0 ? value : '—'}</p>
+                    <p className="text-[10px] text-muted-foreground">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Per-panelist rows */}
+          {scorecardRows.length > 0 && (
+            <div className="rounded-md border border-border overflow-hidden mb-3">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted/30 text-muted-foreground border-b border-border">
+                    <th className="text-left py-1.5 px-3 font-medium">Interviewer</th>
+                    <th className="text-center py-1.5 px-2 font-medium">Tech</th>
+                    <th className="text-center py-1.5 px-2 font-medium">Comm</th>
+                    <th className="text-center py-1.5 px-2 font-medium">Culture</th>
+                    <th className="text-center py-1.5 px-2 font-medium">Overall</th>
+                    <th className="text-left py-1.5 px-3 font-medium">Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scorecardRows.map(s => {
+                    const recColors: Record<string, string> = {
+                      strong_yes: 'text-emerald-600', yes: 'text-green-600',
+                      maybe: 'text-amber-600', no: 'text-orange-600', strong_no: 'text-red-600',
+                    }
+                    return (
+                      <tr key={s.id} className="border-b border-border/50 hover:bg-muted/20">
+                        <td className="py-2 px-3 font-medium">{s.profiles?.full_name ?? '—'}</td>
+                        <td className="py-2 px-2 text-center">{s.technical_score ?? '—'}</td>
+                        <td className="py-2 px-2 text-center">{s.communication_score ?? '—'}</td>
+                        <td className="py-2 px-2 text-center">{s.culture_score ?? '—'}</td>
+                        <td className="py-2 px-2 text-center font-semibold">{s.overall_score ?? '—'}</td>
+                        <td className={cn('py-2 px-3 font-medium', recColors[s.recommendation ?? ''] ?? '')}>
+                          {s.recommendation?.replace('_', ' ') ?? '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Submit/update my score */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase mb-3">Submit My Score (1–5 scale)</p>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'Technical',     val: myTech,    set: setMyTech },
+                { label: 'Communication', val: myComm,    set: setMyComm },
+                { label: 'Culture Fit',   val: myCulture, set: setMyCulture },
+                { label: 'Overall',       val: myOverall, set: setMyOverall },
+              ].map(({ label, val, set }) => (
+                <div key={label}>
+                  <Label className="text-xs">{label}</Label>
+                  <div className="flex gap-1 mt-1">
+                    {[1,2,3,4,5].map(n => (
+                      <button
+                        key={n}
+                        onClick={() => set(val === String(n) ? '' : String(n))}
+                        className={cn(
+                          'w-8 h-8 rounded-md border text-sm font-semibold transition-colors',
+                          val === String(n)
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'border-border hover:bg-muted/50',
+                        )}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <Label className="text-xs">Recommendation</Label>
+              <div className="flex gap-1 mt-1 flex-wrap">
+                {(['strong_yes','yes','maybe','no','strong_no'] as const).map(rec => {
+                  const recLabel: Record<string, string> = { strong_yes: 'Strong Yes', yes: 'Yes', maybe: 'Maybe', no: 'No', strong_no: 'Strong No' }
+                  const recColor: Record<string, string> = {
+                    strong_yes: 'border-emerald-500 bg-emerald-50 text-emerald-700',
+                    yes: 'border-green-400 bg-green-50 text-green-700',
+                    maybe: 'border-amber-400 bg-amber-50 text-amber-700',
+                    no: 'border-orange-400 bg-orange-50 text-orange-700',
+                    strong_no: 'border-red-500 bg-red-50 text-red-700',
+                  }
+                  return (
+                    <button
+                      key={rec}
+                      onClick={() => setMyRec(myRec === rec ? '' : rec)}
+                      className={cn(
+                        'px-2.5 py-1 rounded-md border text-xs font-medium transition-colors',
+                        myRec === rec ? recColor[rec] : 'border-border hover:bg-muted/50',
+                      )}
+                    >
+                      {recLabel[rec]}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="mt-3">
+              <Label className="text-xs">Notes</Label>
+              <textarea
+                value={myNotes}
+                onChange={e => setMyNotes(e.target.value)}
+                placeholder="Observations, strengths, areas of concern…"
+                rows={2}
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-3">
+            <Button variant="outline" onClick={() => setScoreRound(null)}>Close</Button>
+            <Button onClick={submitScore} disabled={scoreSaving}>
+              {scoreSaving && <RefreshCw className="h-4 w-4 animate-spin mr-1" />}
+              Submit Score
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   )
 }
