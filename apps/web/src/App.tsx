@@ -61,7 +61,8 @@ const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').th
 const AdminPipeline     = lazy(() => import('@/pages/admin/AdminPipeline').then(m => ({ default: m.AdminPipeline })))
 const AdminCandidates   = lazy(() => import('@/pages/admin/AdminCandidates').then(m => ({ default: m.AdminCandidates })))
 const AdminInterviews   = lazy(() => import('@/pages/admin/AdminInterviews').then(m => ({ default: m.AdminInterviews })))
-const AdminQuestionBank  = lazy(() => import('@/pages/admin/AdminQuestionBank').then(m => ({ default: m.AdminQuestionBank })))
+const AdminQuestionBank           = lazy(() => import('@/pages/admin/AdminQuestionBank').then(m => ({ default: m.AdminQuestionBank })))
+const AdminRecruitmentDashboard   = lazy(() => import('@/pages/admin/AdminRecruitmentDashboard').then(m => ({ default: m.AdminRecruitmentDashboard })))
 const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
@@ -736,7 +737,8 @@ export default function App() {
                 <Route path="/admin/masters/statutory-groups"        element={<StatutoryGroups />} />
                 <Route path="/admin/masters/asset-categories"        element={<AssetCategories />} />
                 <Route path="/admin/assets"                          element={<AssetMaster />} />
-                <Route path="/admin/recruitment"                     element={<Navigate to="/admin/recruitment/requisitions" replace />} />
+                <Route path="/admin/recruitment"                     element={<Navigate to="/admin/recruitment/dashboard" replace />} />
+                <Route path="/admin/recruitment/dashboard"          element={<AdminRecruitmentDashboard />} />
                 <Route path="/admin/recruitment/requisitions"       element={<AdminRecruitment />} />
                 <Route path="/admin/recruitment/pipeline"           element={<AdminPipeline />} />
                 <Route path="/admin/recruitment/candidates"         element={<AdminCandidates />} />

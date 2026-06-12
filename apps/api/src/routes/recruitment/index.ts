@@ -719,6 +719,102 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ requisitions: reqStats, applications: appStats })
   })
 
+  // ── Analytics ─────────────────────────────────────────────────────────────
+
+  fastify.get('/analytics', auth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+
+    const [
+      { data: appRows },
+      { data: reqRows },
+      { data: interviewRows },
+      { data: scoreRows },
+      { data: sourceRows },
+    ] = await Promise.all([
+      fastify.supabase
+        .from('applications')
+        .select('status, created_at, updated_at')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('job_requisitions')
+        .select('status')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('interview_rounds')
+        .select('status')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('interview_scores')
+        .select('recommendation')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('applications')
+        .select('candidates(source)')
+        .eq('tenant_id', tenantId),
+    ])
+
+    // Funnel + TAT
+    const funnel = { applied: 0, screening: 0, interviewing: 0, offer: 0, hired: 0, rejected: 0, withdrawn: 0 }
+    const hireTimes: number[] = []
+    const offerTimes: number[] = []
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString()
+    let recent30d = 0
+
+    for (const a of (appRows ?? []) as any[]) {
+      funnel[a.status as keyof typeof funnel] = (funnel[a.status as keyof typeof funnel] ?? 0) + 1
+      const days = (new Date(a.updated_at).getTime() - new Date(a.created_at).getTime()) / 86400000
+      if (a.status === 'hired') hireTimes.push(days)
+      if (a.status === 'offer' || a.status === 'hired') offerTimes.push(days)
+      if (a.created_at >= thirtyDaysAgo) recent30d++
+    }
+
+    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length) : null
+
+    // Requisition breakdown
+    const reqStats = { draft: 0, open: 0, on_hold: 0, filled: 0, cancelled: 0 }
+    for (const r of (reqRows ?? []) as any[]) {
+      reqStats[r.status as keyof typeof reqStats] = (reqStats[r.status as keyof typeof reqStats] ?? 0) + 1
+    }
+
+    // Interview stats
+    const interviewStats = { scheduled: 0, completed: 0, cancelled: 0, no_show: 0 }
+    for (const i of (interviewRows ?? []) as any[]) {
+      interviewStats[i.status as keyof typeof interviewStats] = (interviewStats[i.status as keyof typeof interviewStats] ?? 0) + 1
+    }
+
+    // Interview pass rate from scorecards
+    let positiveVotes = 0, totalVotes = 0
+    for (const s of (scoreRows ?? []) as any[]) {
+      if (!s.recommendation) continue
+      totalVotes++
+      if (s.recommendation === 'strong_yes' || s.recommendation === 'yes') positiveVotes++
+    }
+    const passRate = totalVotes > 0 ? Math.round((positiveVotes / totalVotes) * 100) : null
+
+    // Source breakdown
+    const sourceMap: Record<string, number> = {}
+    for (const a of (sourceRows ?? []) as any[]) {
+      const src = a.candidates?.source ?? 'direct'
+      sourceMap[src] = (sourceMap[src] ?? 0) + 1
+    }
+    const sourceBreakdown = Object.entries(sourceMap)
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count)
+
+    return reply.send({
+      funnel,
+      avg_time_to_hire:  avg(hireTimes),
+      avg_time_to_offer: avg(offerTimes),
+      requisitions:      reqStats,
+      interviews:        interviewStats,
+      pass_rate:         passRate,
+      source_breakdown:  sourceBreakdown,
+      recent_30d_applications: recent30d,
+      total_applications:      (appRows ?? []).length,
+      total_requisitions:      (reqRows ?? []).length,
+    })
+  })
+
   // ── Interviewers (profiles list for panel assignment) ─────────────────────
 
   fastify.get('/interviewers', auth, async (req: any, reply) => {
