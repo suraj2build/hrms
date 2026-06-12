@@ -1,3 +1,4 @@
+import type React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import {
@@ -121,15 +122,13 @@ function SkeletonCard() {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function AdminRecruitmentDashboard() {
-  const { data: res, isLoading, isError } = useQuery<{ data?: AnalyticsData } & Partial<AnalyticsData>>({
+  const { data: res, isLoading, isError } = useQuery<{ data: AnalyticsData; headers: Headers }>({
     queryKey: ['recruitment', 'analytics'],
-    queryFn:  () => api.get('/recruitment/analytics'),
+    queryFn:  () => api.get<AnalyticsData>('/recruitment/analytics'),
     staleTime: 60_000,
   })
 
-  // API may return either { data: {...} } or the flat object directly
-  const d: AnalyticsData | undefined =
-    (res as any)?.data ?? (res as any)?.funnel ? (res as any) : undefined
+  const d = res?.data
 
   if (isError) {
     return (
