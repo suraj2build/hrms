@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { crossCheckIdentity } from '../../lib/onboarding/identity-check.js'
+import {
+  emitOnboardingSessionApproved,
+  emitOnboardingSessionRejected,
+} from '../../lib/onboarding-orchestrator.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -586,6 +590,17 @@ export default async function draftRoutes(fastify: FastifyInstance) {
         },
       })
 
+    emitOnboardingSessionApproved({
+      tenantId:      req.tenantId,
+      sessionId:     draft.session_id,
+      draftId:       id,
+      employeeId,
+      employeeCode,
+      approvedBy:    req.userId,
+      exceptionPass,
+      correlationId: (req as any).correlationId,
+    })
+
     return reply.code(201).send({
       data: {
         employee_id: employeeId,
@@ -654,6 +669,15 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('id', id)
       .single()
+
+    emitOnboardingSessionRejected({
+      tenantId:      req.tenantId,
+      sessionId:     draft.session_id,
+      draftId:       id,
+      rejectedBy:    req.userId,
+      reason:        parsed.data.reason,
+      correlationId: (req as any).correlationId,
+    })
 
     return reply.send({ data: updatedDraft })
   })

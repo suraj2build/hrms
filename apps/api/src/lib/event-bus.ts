@@ -500,6 +500,51 @@ export interface HrmsEventMap {
     payrollImpacting:  boolean
     appliedPrecedence: string
   }
+
+  // ── Onboarding Lifecycle Events (Phase O1) ────────────────────────────────
+
+  /** New onboarding session created by HR */
+  'onboarding.session.created': {
+    tenantId:       string
+    sessionId:      string
+    candidateName?: string
+    createdBy:      string
+  }
+
+  /** AI extraction complete — draft profile ready for HR review */
+  'onboarding.session.extraction_complete': {
+    tenantId:  string
+    sessionId: string
+    draftId:   string
+    docCount:  number
+  }
+
+  /** HR approved the draft — employee record created */
+  'onboarding.session.approved': {
+    tenantId:      string
+    sessionId:     string
+    draftId:       string
+    employeeId:    string
+    employeeCode:  string
+    approvedBy:    string
+    exceptionPass: boolean
+  }
+
+  /** HR rejected the draft — onboarding will not proceed */
+  'onboarding.session.rejected': {
+    tenantId:   string
+    sessionId:  string
+    draftId:    string
+    rejectedBy: string
+    reason:     string
+  }
+
+  /** All mandatory onboarding checklist tasks completed */
+  'onboarding.checklist.completed': {
+    tenantId:    string
+    employeeId:  string
+    checklistId: string
+  }
 }
 
 export type HrmsEventType = keyof HrmsEventMap

@@ -22,6 +22,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { emitOnboardingChecklistCompleted } from '../../lib/onboarding-orchestrator.js'
 
 const HR_ROLES = ['super_admin', 'hr_admin']
 
@@ -498,6 +499,13 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           })
           .eq('id', checklistId)
           .eq('tenant_id', tenantId)
+
+        emitOnboardingChecklistCompleted({
+          tenantId,
+          employeeId,
+          checklistId,
+          correlationId: (req as any).correlationId,
+        })
       }
     }
 
@@ -718,6 +726,13 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           })
           .eq('id', checklistId)
           .eq('tenant_id', tenantId)
+
+        emitOnboardingChecklistCompleted({
+          tenantId,
+          employeeId:    checklist.employee_id,
+          checklistId,
+          correlationId: (req as any).correlationId,
+        })
       }
     }
 

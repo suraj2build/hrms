@@ -3,6 +3,10 @@ import { z } from 'zod'
 import { parseDocumentToText } from '../../lib/onboarding/document-parser.js'
 import { extractFromDocument } from '../../lib/onboarding/extraction-engine.js'
 import { mergeExtractions } from '../../lib/onboarding/profile-merger.js'
+import {
+  emitOnboardingSessionCreated,
+  emitOnboardingExtractionComplete,
+} from '../../lib/onboarding-orchestrator.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -55,6 +59,14 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    emitOnboardingSessionCreated({
+      tenantId:      req.tenantId,
+      sessionId:     (data as any).id,
+      candidateName: (data as any).candidate_name ?? null,
+      createdBy:     req.userId,
+      correlationId: (req as any).correlationId,
+    })
 
     return reply.code(201).send({ data })
   })
@@ -854,6 +866,16 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           total_documents: documents.length,
         },
       })
+
+    if (draftProfileId) {
+      emitOnboardingExtractionComplete({
+        tenantId:      req.tenantId,
+        sessionId,
+        draftId:       draftProfileId,
+        docCount:      documentsExtracted,
+        correlationId: (req as any).correlationId,
+      })
+    }
 
     return reply.send({
       data: {

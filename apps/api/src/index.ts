@@ -12,6 +12,7 @@ import correlationPlugin from './plugins/correlation.js'
 // Event handlers — register once at startup so notification handlers are wired
 // before the first HTTP request arrives.
 import { registerNotificationHandlers } from './lib/notification-service.js'
+import { registerOnboardingHandlers }    from './lib/onboarding-orchestrator.js'
 import { registerAnomalyHandlers }       from './lib/anomaly-handler.js'
 import { registerLeaveScheduler }            from './lib/leave-scheduler.js'
 import { registerAttendanceApiScheduler }    from './lib/attendance-api-scheduler.js'
@@ -372,6 +373,11 @@ async function start() {
   // Optional module checks degrade gracefully and disable the module.
   await startupHealthChecks(fastify.supabase, fastify.log)
 
+  // Onboarding orchestrator — wires onboarding → events, trust, notifications, checklist
+  await safeRegisterModule('onboarding', async () => {
+    registerOnboardingHandlers(fastify.supabase)
+  }, fastify.log)
+
   // Anomaly handler — optional module, isolated from critical path
   await safeRegisterModule('anomaly-handler', async () => {
     registerAnomalyHandlers(fastify.supabase)
@@ -571,7 +577,7 @@ async function start() {
   await fastify.register(attendanceDebugRawRoute)             // GET  /attendance/debug/raw?month=YYYY-MM
   await fastify.register(attendanceReconcileValidateRoute)    // GET  /attendance/validate/reconcile?month=YYYY-MM
   await fastify.register(anomalyReconcileRoute)               // POST /attendance/anomalies/reconcile
-  await fastify.register(attendanceApiSourcesRoute)           // GET/POST/PUT/DELETE /attendance/api-sources
+  await fastify.register(attendanceApiSourcesRoute)           // CRUD + test + fetch /attendance/api-sources
 
   // ── Phase 16: Attendance Session Intelligence ────────────────────────────────
   await fastify.register(workSessionsRoute)              // GET/POST /attendance/sessions/*, /work-session-anomalies/*

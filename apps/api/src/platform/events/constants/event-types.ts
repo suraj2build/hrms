@@ -60,6 +60,13 @@ export enum EventType {
   SECURITY_SIGNAL_DETECTED   = 'security.signal.detected',
   HEATMAP_UPDATED            = 'heatmap.updated',
 
+  // ── Onboarding lifecycle ──────────────────────────────────────────────────────
+  ONBOARDING_SESSION_CREATED             = 'onboarding.session.created',
+  ONBOARDING_SESSION_EXTRACTION_COMPLETE = 'onboarding.session.extraction_complete',
+  ONBOARDING_SESSION_APPROVED            = 'onboarding.session.approved',
+  ONBOARDING_SESSION_REJECTED            = 'onboarding.session.rejected',
+  ONBOARDING_CHECKLIST_COMPLETED         = 'onboarding.checklist.completed',
+
   // ── Fabric & Orchestration ────────────────────────────────────────────────────
   FABRIC_COMPOSITION_COMPUTED  = 'fabric.composition.computed',
   DECISION_NODE_RECORDED       = 'decision.node.recorded',
