@@ -690,8 +690,7 @@ function SlipDetailDialog({
                     <tr className="border-b border-border">
                       <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Component</th>
                       <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Type</th>
-                      <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Monthly</th>
-                      <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Annual</th>
+                      <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Amount</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -700,7 +699,6 @@ function SlipDetailDialog({
                         <td className="py-1.5 px-2 font-medium">{c.name}</td>
                         <td className="py-1.5 px-2 text-muted-foreground">{c.calc_type}</td>
                         <td className="py-1.5 px-2 text-right font-mono">{fmtCurrency(c.monthly_amount)}</td>
-                        <td className="py-1.5 px-2 text-right font-mono text-muted-foreground">{fmtCurrency(c.annual_amount)}</td>
                       </tr>
                     ))}
                   </tbody>
