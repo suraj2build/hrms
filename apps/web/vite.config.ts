@@ -109,6 +109,7 @@ export default defineConfig({
           }
         },
       }),
+      '/recruitment':     apiProxy(),
       '/payroll':         apiProxy(),
       '/compensation':    apiProxy(),
       '/overtime':        apiProxy(),

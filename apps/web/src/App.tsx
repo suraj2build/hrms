@@ -61,7 +61,8 @@ const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').th
 const AdminPipeline     = lazy(() => import('@/pages/admin/AdminPipeline').then(m => ({ default: m.AdminPipeline })))
 const AdminCandidates   = lazy(() => import('@/pages/admin/AdminCandidates').then(m => ({ default: m.AdminCandidates })))
 const AdminInterviews   = lazy(() => import('@/pages/admin/AdminInterviews').then(m => ({ default: m.AdminInterviews })))
-const AdminQuestionBank = lazy(() => import('@/pages/admin/AdminQuestionBank').then(m => ({ default: m.AdminQuestionBank })))
+const AdminQuestionBank  = lazy(() => import('@/pages/admin/AdminQuestionBank').then(m => ({ default: m.AdminQuestionBank })))
+const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
@@ -519,7 +520,8 @@ export default function App() {
               <Route path="/login"         element={<Login />} />
               <Route path="/signup"        element={<Signup />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
-              <Route path="/pre-join/:token" element={<PreJoinPortal />} />
+              <Route path="/pre-join/:token"          element={<PreJoinPortal />} />
+              <Route path="/portal/candidate/:token" element={<CandidatePortal />} />
 
               {/* ── Admin portal: /admin/* ─────────────────────────────────── */}
               <Route element={<AdminShellV2 />}>

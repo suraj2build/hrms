@@ -594,7 +594,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const appId = (data as any).id
     void (async () => {
       const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, appId)
-      if (ctx?.candidateEmail) await sendEmail({ to: ctx.candidateEmail, ...applicationReceivedEmail(ctx) })
+      if (ctx?.candidateEmail) {
+        const { APP_PUBLIC_URL } = await import('../../lib/email-service.js')
+        const portalUrl = `${APP_PUBLIC_URL}/portal/candidate/${appId}`
+        await sendEmail({ to: ctx.candidateEmail, ...applicationReceivedEmail({ ...ctx, portalUrl }) })
+      }
     })()
 
     return reply.code(201).send({ data })
@@ -1268,5 +1272,69 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
     return reply.code(201).send({ data })
+  })
+
+  // ── Public Candidate Portal ───────────────────────────────────────────────
+  // No authentication — application UUID acts as the access token.
+  // Returns only safe public fields; no scores, notes, or rejection reasons.
+
+  fastify.get('/portal/candidate/:appId', async (req: any, reply) => {
+    const { appId } = req.params as { appId: string }
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_RE.test(appId)) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const { data: app } = await fastify.supabase
+      .from('applications')
+      .select(`
+        id, status, created_at, tenant_id, stage_id,
+        candidates(first_name, last_name),
+        job_requisitions(title, departments(name))
+      `)
+      .eq('id', appId)
+      .maybeSingle()
+
+    if (!app) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const tenantId = (app as any).tenant_id
+
+    const [{ data: tenant }, { data: stages }, { data: interviews }] = await Promise.all([
+      fastify.supabase.from('tenants').select('name').eq('id', tenantId).single(),
+      fastify.supabase
+        .from('recruitment_pipeline_stages')
+        .select('id, name, stage_type, stage_order, color')
+        .eq('tenant_id', tenantId)
+        .order('stage_order'),
+      fastify.supabase
+        .from('interview_rounds')
+        .select('round_number, title, interview_type, scheduled_at, duration_mins, status')
+        .eq('application_id', appId)
+        .order('round_number'),
+    ])
+
+    const cand = (app as any).candidates
+    const reqn = (app as any).job_requisitions
+
+    return reply.send({
+      data: {
+        id:               (app as any).id,
+        status:           (app as any).status,
+        applied_at:       (app as any).created_at,
+        first_name:       cand?.first_name ?? '',
+        candidate_name:   `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim(),
+        job_title:        reqn?.title ?? '',
+        department:       reqn?.departments?.name ?? '',
+        company_name:     (tenant as any)?.name ?? '',
+        current_stage_id: (app as any).stage_id,
+        stages:           stages ?? [],
+        interviews:       (interviews ?? []).map((i: any) => ({
+          round_number: i.round_number,
+          title:        i.title,
+          type:         i.interview_type,
+          scheduled_at: i.scheduled_at,
+          duration_mins: i.duration_mins,
+          status:       i.status,
+        })),
+      },
+    })
   })
 }

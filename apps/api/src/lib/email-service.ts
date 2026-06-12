@@ -171,9 +171,21 @@ export function applicationReceivedEmail(opts: {
   candidateName: string
   jobTitle:      string
   companyName:   string
+  portalUrl?:    string
 }): { subject: string; html: string } {
+  const { teal } = brandConfig.colors
   const firstName = opts.candidateName.split(' ')[0] || 'there'
   const subject = `Application received — ${opts.jobTitle} at ${opts.companyName}`
+  const portalBlock = opts.portalUrl ? `
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${opts.portalUrl}"
+         style="display:inline-block;background:linear-gradient(135deg,#2E6FE6 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 28px;border-radius:999px;">
+        Track Your Application
+      </a>
+    </div>
+    <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0 0 16px;">
+      Or visit: <a href="${opts.portalUrl}" style="color:${teal};word-break:break-all;">${opts.portalUrl}</a>
+    </p>` : ''
   const html = shell(`
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Application Received</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
@@ -181,10 +193,10 @@ export function applicationReceivedEmail(opts: {
       <strong>${opts.companyName}</strong>. We've received your application and our team
       will review it shortly.
     </p>
-    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      We'll be in touch with next steps. In the meantime, feel free to explore other
-      opportunities with us.
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">
+      We'll be in touch with next steps. You can track your application status using the link below.
     </p>
+    ${portalBlock}
     <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
       Please do not reply to this email — this is an automated notification.
     </p>
