@@ -94,6 +94,93 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     return reply.send({ data: enriched })
   })
 
+  // ── GET /employees/org-tree — hierarchical reporting tree (EMP-02) ───────────
+  // Returns the full org hierarchy built from employees.manager_id, enriched with
+  // current designation + department from job_history. Roots = employees with no
+  // manager (or whose manager is outside the active set). Registered before
+  // /employees/:id so "org-tree" is not matched as an id.
+  fastify.get('/employees/org-tree', hrAdminAuth, async (request, reply) => {
+    const { data: emps, error } = await fastify.supabase
+      .from('employees')
+      .select('id, employee_code, first_name, last_name, email, status, manager_id')
+      .eq('tenant_id', request.tenantId)
+      .neq('status', 'separated')
+      .order('first_name', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    const rows = (emps ?? []) as any[]
+    if (rows.length === 0) return reply.send({ data: { roots: [], total: 0 } })
+
+    const empIds = rows.map((e) => e.id)
+
+    // Enrich with current designation/department + profile photo
+    const [jobRes, personalRes] = await Promise.all([
+      fastify.supabase
+        .from('job_history')
+        .select('employee_id, manager_id, designations(name), departments(name)')
+        .in('employee_id', empIds)
+        .eq('tenant_id', request.tenantId)
+        .eq('is_current', true),
+      fastify.supabase
+        .from('employee_personal_info')
+        .select('employee_id, profile_photo')
+        .in('employee_id', empIds)
+        .eq('tenant_id', request.tenantId),
+    ])
+
+    const jobMap = new Map<string, any>()
+    for (const j of (jobRes.data ?? [])) jobMap.set(j.employee_id, j)
+
+    const photoMap = new Map<string, string | null>()
+    for (const p of (personalRes.data ?? [])) photoMap.set(p.employee_id, p.profile_photo ?? null)
+
+    interface OrgNode {
+      id: string; employee_code: string; name: string; email: string; status: string
+      designation: string | null; department: string | null; profile_photo: string | null
+      manager_id: string | null; children: OrgNode[]
+    }
+
+    const nodeMap = new Map<string, OrgNode>()
+    for (const e of rows) {
+      const job = jobMap.get(e.id)
+      // Prefer employees.manager_id; fall back to job_history.manager_id
+      const managerId = e.manager_id ?? job?.manager_id ?? null
+      nodeMap.set(e.id, {
+        id:            e.id,
+        employee_code: e.employee_code,
+        name:          `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
+        email:         e.email,
+        status:        e.status,
+        designation:   job?.designations?.name ?? null,
+        department:    job?.departments?.name ?? null,
+        profile_photo: photoMap.get(e.id) ?? null,
+        manager_id:    managerId,
+        children:      [],
+      })
+    }
+
+    // Wire children to parents; collect roots
+    const roots: OrgNode[] = []
+    for (const node of nodeMap.values()) {
+      if (node.manager_id && nodeMap.has(node.manager_id)) {
+        nodeMap.get(node.manager_id)!.children.push(node)
+      } else {
+        roots.push(node)
+      }
+    }
+
+    // Sort children by name at every level
+    const sortRec = (n: OrgNode) => {
+      n.children.sort((a, b) => a.name.localeCompare(b.name))
+      n.children.forEach(sortRec)
+    }
+    roots.sort((a, b) => a.name.localeCompare(b.name))
+    roots.forEach(sortRec)
+
+    return reply.send({ data: { roots, total: rows.length } })
+  })
+
   // GET /employees — HR admin / super_admin only
   // Employees and managers access their own or team data via scoped ESS/manager endpoints.
   fastify.get('/employees', hrAdminAuth, async (request, reply) => {

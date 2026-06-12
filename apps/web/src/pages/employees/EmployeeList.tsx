@@ -19,7 +19,7 @@ import {
   Search, Download, UserPlus, Building2, MapPin,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Check, Mail, X, Lock, Filter, LayoutGrid, Table2,
-  Bookmark, TrendingUp,
+  Bookmark, TrendingUp, Network,
 } from 'lucide-react'
 import { api }            from '@/lib/api/client'
 import { useBasePath }    from '@/lib/routing'
@@ -418,6 +418,10 @@ export function EmployeeList() {
             </Button>
             {isAdmin && (
               <>
+                <Button variant="outline" size="sm" onClick={() => navigate(`${basePath}/employees/org-chart`)}>
+                  <Network className="h-3.5 w-3.5" />
+                  Org Chart
+                </Button>
                 <Button variant="outline" size="sm">
                   <Download className="h-3.5 w-3.5" />
                   Export
