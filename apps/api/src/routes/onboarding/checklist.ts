@@ -26,6 +26,18 @@ import { emitOnboardingChecklistCompleted } from '../../lib/onboarding-orchestra
 
 const HR_ROLES = ['super_admin', 'hr_admin']
 
+/**
+ * Self-or-HR access check. An employee may access their own checklist/tasks.
+ * `req.userId` is the auth user id; `req.employeeId` is the linked employee record.
+ * The checklist's `employee_id` is an employee-record id, so we match on
+ * `req.employeeId` (with `req.userId` kept as a fallback for legacy linkage).
+ */
+function canAccessEmployee(req: any, employeeId: string): boolean {
+  return HR_ROLES.includes(req.userRole)
+    || req.employeeId === employeeId
+    || req.userId === employeeId
+}
+
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 const createTemplateSchema = z.object({
@@ -232,7 +244,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     const tenantId: string = req.tenantId
 
     // HR admins can view any; employees can view their own
-    if (!HR_ROLES.includes(req.userRole) && req.userId !== employeeId) {
+    if (!canAccessEmployee(req, employeeId)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
     }
 
@@ -409,7 +421,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     const tenantId: string = req.tenantId
 
     // HR admins or the employee themselves can update tasks
-    if (!HR_ROLES.includes(req.userRole) && req.userId !== employeeId) {
+    if (!canAccessEmployee(req, employeeId)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
     }
 
@@ -598,7 +610,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Checklist not found' })
     }
 
-    if (!HR_ROLES.includes(req.userRole) && req.userId !== checklist.employee_id) {
+    if (!canAccessEmployee(req, checklist.employee_id)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
     }
 
@@ -670,7 +682,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     const checklist = (task as any).employee_onboarding_checklists
 
     // HR admins or the owning employee can update
-    if (!HR_ROLES.includes(req.userRole) && req.userId !== checklist.employee_id) {
+    if (!canAccessEmployee(req, checklist.employee_id)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
     }
 

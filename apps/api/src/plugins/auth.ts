@@ -9,6 +9,8 @@ declare module 'fastify' {
     userId: string
     tenantId: string
     userRole: string
+    /** The employee record this user maps to (profiles.employee_id). Null for accounts not linked to an employee (e.g. some admins). */
+    employeeId: string | null
   }
 }
 
@@ -29,10 +31,11 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       request.userId = user.id
       request.userRole = 'authenticated'
       request.tenantId = ''
+      request.employeeId = null
 
       const { data: profile } = await fastify.supabase
         .from('profiles')
-        .select('tenant_id, role')
+        .select('tenant_id, role, employee_id')
         .eq('id', user.id)
         .single()
 
@@ -56,6 +59,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
 
       request.tenantId = profile.tenant_id
       request.userRole = profile.role
+      request.employeeId = (profile as any).employee_id ?? null
     } catch {
       return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
     }

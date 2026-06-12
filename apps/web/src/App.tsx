@@ -126,6 +126,7 @@ const EssMyProfile             = lazy(() => import('@/pages/ess/EssMyProfile').t
 const EssApprovals             = lazy(() => import('@/pages/ess/EssApprovals').then(m => ({ default: m.EssApprovals })))
 const EssLeaveBalance          = lazy(() => import('@/pages/ess/EssLeaveBalance').then(m => ({ default: m.EssLeaveBalance })))
 const EssDocuments             = lazy(() => import('@/pages/ess/EssDocuments').then(m => ({ default: m.EssDocuments })))
+const EssOnboarding            = lazy(() => import('@/pages/ess/EssOnboarding').then(m => ({ default: m.EssOnboarding })))
 const EssTeam                  = lazy(() => import('@/pages/ess/EssTeam').then(m => ({ default: m.EssTeam })))
 const EssPolicies              = lazy(() => import('@/pages/ess/EssPolicies').then(m => ({ default: m.EssPolicies })))
 const EssHRSupport             = lazy(() => import('@/pages/ess/EssHRSupport').then(m => ({ default: m.EssHRSupport })))
@@ -803,6 +804,7 @@ export default function App() {
               <Route element={<EssShell />}>
 
                 <Route path="/ess/dashboard"              element={<EmployeeDashboard />} />
+                <Route path="/ess/onboarding"             element={<EssOnboarding />} />
                 <Route path="/ess/attendance"             element={<MyAttendance />} />
                 {/* Regularization merged into MyAttendance — redirect old deep-link */}
                 <Route path="/ess/attendance/regularization" element={<Navigate to="/ess/attendance" replace />} />

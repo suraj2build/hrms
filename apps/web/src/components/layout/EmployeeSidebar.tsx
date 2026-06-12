@@ -8,6 +8,7 @@ import { Link, useLocation }  from 'react-router-dom'
 import { useQuery }           from '@tanstack/react-query'
 import {
   LayoutDashboard,
+  Rocket,
   CalendarDays,
   CalendarOff,
   Scale,
@@ -60,8 +61,9 @@ const BASE_GROUPS: NavGroup[] = [
   {
     label: 'Main',
     items: [
-      { label: 'Dashboard',   icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
-      { label: 'My Insights', icon: BarChart3,       href: '/ess/operational-center'     },
+      { label: 'Dashboard',     icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
+      { label: 'My Onboarding', icon: Rocket,          href: '/ess/onboarding'             }, // shown only during/after onboarding journey
+      { label: 'My Insights',   icon: BarChart3,       href: '/ess/operational-center'     },
     ],
   },
   {
@@ -128,6 +130,22 @@ function isActive(item: NavItem, pathname: string) {
 
 // ── Pending badge hook ────────────────────────────────────────────────────────
 
+/**
+ * Whether to surface the "My Onboarding" nav item.
+ * True only when this employee actually came through the onboarding flow
+ * (onboarding-status returns a linked record) — keeps the nav clean for
+ * directly-created / tenured staff who have no onboarding journey.
+ */
+function useHasOnboarding(employeeId: string | null): boolean {
+  const { data } = useQuery({
+    queryKey: ['sb-onboarding-status', employeeId],
+    queryFn:  () => api.get<{ data: unknown | null }>(`/employees/${employeeId}/onboarding-status`).then(r => r.data),
+    enabled:  !!employeeId,
+    staleTime: 5 * 60_000,
+  })
+  return data != null
+}
+
 function usePendingCount(employeeId: string | null) {
   const { data: leaveData }   = useQuery<{ data: Array<{ status: string }> }>({
     queryKey: ['sb-leave', employeeId],
@@ -174,6 +192,7 @@ export function EmployeeSidebar() {
   const employeeId   = profile?.employee_id ?? null
   const location     = useLocation()
   const pendingCount = usePendingCount(employeeId)
+  const hasOnboarding = useHasOnboarding(employeeId)
 
   // Close the mobile drawer on navigation
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
@@ -191,6 +210,8 @@ export function EmployeeSidebar() {
         ...g,
         items: g.items
           .filter(item => !MANAGER_ONLY_HREFS.has(item.href) || isManager)
+          // Onboarding nav only for employees with an onboarding journey
+          .filter(item => item.href !== '/ess/onboarding' || hasOnboarding)
           .map(item =>
             item.href === '/ess/approvals'
               ? { ...item, badge: pendingCount > 0 ? pendingCount : undefined }
@@ -199,7 +220,7 @@ export function EmployeeSidebar() {
       }))
       // Drop groups that become empty after filtering
       .filter(g => g.items.length > 0),
-    [pendingCount, isManager]
+    [pendingCount, isManager, hasOnboarding]
   )
 
   return (
