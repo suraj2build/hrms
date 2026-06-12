@@ -70,7 +70,6 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         description,
         is_active,
         created_at,
-        updated_at,
         onboarding_checklist_items (
           id,
           title,
@@ -123,7 +122,6 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .from('onboarding_checklist_templates')
       .insert({
         tenant_id: tenantId,
-        created_by: userId,
         name: parsed.data.name,
         description: parsed.data.description ?? null,
         is_active: parsed.data.is_active,
@@ -239,7 +237,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     }
 
     const { data, error } = await fastify.supabase
-      .from('onboarding_checklists')
+      .from('employee_onboarding_checklists')
       .select(`
         id,
         employee_id,
@@ -249,8 +247,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         target_completion_date,
         completed_at,
         created_at,
-        updated_at,
-        onboarding_checklist_tasks (
+        employee_onboarding_tasks (
           id,
           title,
           description,
@@ -261,8 +258,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           status,
           notes,
           completed_at,
-          created_at,
-          updated_at
+          created_at
         )
       `)
       .eq('employee_id', employeeId)
@@ -351,15 +347,14 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // Create checklist
     const { data: checklist, error: checklistError } = await fastify.supabase
-      .from('onboarding_checklists')
+      .from('employee_onboarding_checklists')
       .insert({
         tenant_id: tenantId,
         employee_id: employeeId,
         template_id: template_id ?? null,
-        status: 'pending',
+        status: 'not_started',
         start_date: start_date ?? null,
         target_completion_date: targetCompletionDate,
-        created_by: userId,
       })
       .select('id, employee_id, template_id, status, start_date, target_completion_date, created_at')
       .single()
@@ -387,7 +382,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       }))
 
       const { data: insertedTasks, error: tasksError } = await fastify.supabase
-        .from('onboarding_checklist_tasks')
+        .from('employee_onboarding_tasks')
         .insert(taskInserts)
         .select('id, title, is_mandatory, sort_order, status, created_at')
 
@@ -431,12 +426,12 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // Fetch the task and verify it belongs to an employee checklist in this tenant
     const { data: task, error: taskFetchError } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .select(`
         id,
         checklist_id,
         is_mandatory,
-        onboarding_checklists!inner (
+        employee_onboarding_checklists!inner (
           id,
           employee_id,
           status,
@@ -451,23 +446,22 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Task not found' })
     }
 
-    const checklist = (task as any).onboarding_checklists
+    const checklist = (task as any).employee_onboarding_checklists
     if (checklist.employee_id !== employeeId || checklist.tenant_id !== tenantId) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Task does not belong to this employee' })
     }
 
     // Update the task
     const { data: updatedTask, error: updateError } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .update({
         status,
         notes: notes ?? null,
         completed_at: completedAt,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', taskId)
       .eq('tenant_id', tenantId)
-      .select('id, title, is_mandatory, status, notes, completed_at, updated_at')
+      .select('id, title, is_mandatory, status, notes, completed_at')
       .single()
 
     if (updateError || !updatedTask) {
@@ -478,7 +472,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     // Auto-complete checklist if all mandatory tasks are completed
     const checklistId: string = task.checklist_id
     const { data: allTasks, error: allTasksError } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .select('id, is_mandatory, status')
       .eq('checklist_id', checklistId)
       .eq('tenant_id', tenantId)
@@ -491,11 +485,10 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
       if (allMandatoryDone && checklist.status !== 'completed') {
         await fastify.supabase
-          .from('onboarding_checklists')
+          .from('employee_onboarding_checklists')
           .update({
             status: 'completed',
             completed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
           })
           .eq('id', checklistId)
           .eq('tenant_id', tenantId)
@@ -523,7 +516,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     const tenantId: string = req.tenantId
 
     const { data, error } = await fastify.supabase
-      .from('onboarding_checklists')
+      .from('employee_onboarding_checklists')
       .select(`
         id,
         employee_id,
@@ -533,10 +526,10 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         target_completion_date,
         completed_at,
         created_at,
-        updated_at,
         employees:employee_id (
           id,
-          full_name,
+          first_name,
+          last_name,
           employee_code,
           joining_date,
           departments ( name )
@@ -545,7 +538,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           id,
           name
         ),
-        onboarding_checklist_tasks ( id, status )
+        employee_onboarding_tasks ( id, status )
       `)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
@@ -556,7 +549,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     }
 
     const rows = (data ?? []).map((cl: any) => {
-      const tasks: Array<{ id: string; status: string }> = cl.onboarding_checklist_tasks ?? []
+      const tasks: Array<{ id: string; status: string }> = cl.employee_onboarding_tasks ?? []
       const totalTasks = tasks.length
       const completedTasks = tasks.filter((t) => t.status === 'completed').length
       return {
@@ -568,11 +561,10 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         target_completion_date: cl.target_completion_date,
         completed_at: cl.completed_at,
         created_at: cl.created_at,
-        updated_at: cl.updated_at,
         employee: cl.employees
           ? {
               id: cl.employees.id,
-              full_name: cl.employees.full_name,
+              full_name: `${cl.employees.first_name} ${cl.employees.last_name}`.trim(),
               employee_code: cl.employees.employee_code,
               joining_date: cl.employees.joining_date ?? null,
               departments: cl.employees.departments ?? null,
@@ -596,7 +588,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // Verify checklist belongs to tenant (and access)
     const { data: checklist, error: clError } = await fastify.supabase
-      .from('onboarding_checklists')
+      .from('employee_onboarding_checklists')
       .select('id, employee_id')
       .eq('id', checklistId)
       .eq('tenant_id', tenantId)
@@ -611,7 +603,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     }
 
     const { data, error } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .select(`
         id,
         title,
@@ -623,8 +615,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         status,
         notes,
         completed_at,
-        created_at,
-        updated_at
+        created_at
       `)
       .eq('checklist_id', checklistId)
       .eq('tenant_id', tenantId)
@@ -656,12 +647,12 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // Fetch the task and its parent checklist (tenant-scoped)
     const { data: task, error: taskFetchError } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .select(`
         id,
         checklist_id,
         is_mandatory,
-        onboarding_checklists!inner (
+        employee_onboarding_checklists!inner (
           id,
           employee_id,
           status,
@@ -676,7 +667,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Task not found' })
     }
 
-    const checklist = (task as any).onboarding_checklists
+    const checklist = (task as any).employee_onboarding_checklists
 
     // HR admins or the owning employee can update
     if (!HR_ROLES.includes(req.userRole) && req.userId !== checklist.employee_id) {
@@ -685,16 +676,15 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // Update the task
     const { data: updatedTask, error: updateError } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .update({
         status,
         notes: notes ?? null,
         completed_at: completedAt,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', taskId)
       .eq('tenant_id', tenantId)
-      .select('id, title, is_mandatory, status, notes, completed_at, updated_at')
+      .select('id, title, is_mandatory, status, notes, completed_at')
       .single()
 
     if (updateError || !updatedTask) {
@@ -705,7 +695,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     // Auto-complete checklist if all mandatory tasks are completed
     const checklistId: string = task.checklist_id
     const { data: allTasks, error: allTasksError } = await fastify.supabase
-      .from('onboarding_checklist_tasks')
+      .from('employee_onboarding_tasks')
       .select('id, is_mandatory, status')
       .eq('checklist_id', checklistId)
       .eq('tenant_id', tenantId)
@@ -718,11 +708,10 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
       if (allMandatoryDone && checklist.status !== 'completed') {
         await fastify.supabase
-          .from('onboarding_checklists')
+          .from('employee_onboarding_checklists')
           .update({
             status: 'completed',
             completed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
           })
           .eq('id', checklistId)
           .eq('tenant_id', tenantId)
@@ -841,15 +830,14 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // Create checklist
     const { data: checklist, error: checklistError } = await fastify.supabase
-      .from('onboarding_checklists')
+      .from('employee_onboarding_checklists')
       .insert({
         tenant_id: tenantId,
         employee_id,
         template_id: template_id ?? null,
-        status: 'pending',
+        status: 'not_started',
         start_date: start_date ?? null,
         target_completion_date: targetCompletionDate,
-        created_by: userId,
       })
       .select('id, employee_id, template_id, status, start_date, target_completion_date, created_at')
       .single()
@@ -877,7 +865,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       }))
 
       const { data: insertedTasks, error: tasksError } = await fastify.supabase
-        .from('onboarding_checklist_tasks')
+        .from('employee_onboarding_tasks')
         .insert(taskInserts)
         .select('id, title, is_mandatory, sort_order, status, created_at')
 

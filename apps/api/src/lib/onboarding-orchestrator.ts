@@ -370,7 +370,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       if (!template) return
 
       const { data: existing } = await supabase
-        .from('onboarding_checklists')
+        .from('employee_onboarding_checklists')
         .select('id')
         .eq('employee_id', employeeId)
         .eq('tenant_id', tenantId)
@@ -391,12 +391,12 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       const targetDate = target.toISOString().substring(0, 10)
 
       const { data: checklist } = await supabase
-        .from('onboarding_checklists')
+        .from('employee_onboarding_checklists')
         .insert({
           tenant_id:              tenantId,
           employee_id:            employeeId,
           template_id:            template.id,
-          status:                 'pending',
+          status:                 'not_started',
           start_date:             today,
           target_completion_date: targetDate,
         })
@@ -419,7 +419,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
         completed_at:     null,
       }))
 
-      await supabase.from('onboarding_checklist_tasks').insert(taskRows)
+      await supabase.from('employee_onboarding_tasks').insert(taskRows)
 
       // Notify the new joiner that a checklist is now assigned.
       renderAndSend('checklist_assigned', tenantId, { employee_id: employeeId })

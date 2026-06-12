@@ -65,6 +65,19 @@ export interface TimelineQueryOpts {
 
 // ── Metadata tables ───────────────────────────────────────────────────────────
 
+// G1 fix: semantic source attribution per event type
+const SOURCE_MAP: Record<string, string> = {
+  'onboarding.session.created':             'Onboarding',
+  'onboarding.document.uploaded':           'Document Management',
+  'onboarding.document.verified':           'Document Management',
+  'onboarding.document.rejected':           'Document Management',
+  'onboarding.session.extraction_complete': 'Document Management',
+  'onboarding.session.approved':            'Workflow Engine',
+  'onboarding.session.rejected':            'Workflow Engine',
+  'onboarding.joining.completed':           'Onboarding',
+  'onboarding.checklist.completed':         'Checklist Engine',
+}
+
 const CATEGORY_MAP: Record<string, TimelineCategory> = {
   'onboarding.session.created':             'action',
   'onboarding.document.uploaded':           'action',
@@ -113,6 +126,23 @@ export async function fetchTimeline(
   }
 
   // ── 1. Query lifecycle events ─────────────────────────────────────────────
+  //
+  // G2 fix: when querying by employeeId, pre-joining events (document.uploaded,
+  // document.verified, etc.) have employee_id=null because the employee record
+  // didn't exist yet. We resolve the session_id(s) from existing events that DO
+  // carry employee_id, then re-query by session_id to get the full timeline.
+
+  let resolvedSessionIds: string[] = []
+  if (employeeId && !sessionId) {
+    const { data: linked } = await supabase
+      .from('onboarding_lifecycle_events')
+      .select('session_id')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .not('session_id', 'is', null)
+    resolvedSessionIds = [...new Set((linked ?? []).map((r: any) => r.session_id as string).filter(Boolean))]
+  }
+
   let query = supabase
     .from('onboarding_lifecycle_events')
     .select('*', { count: 'exact' })
@@ -120,8 +150,13 @@ export async function fetchTimeline(
     .order('occurred_at', { ascending: true })
     .range(offset, offset + limit - 1)
 
-  if (sessionId)  query = query.eq('session_id', sessionId)
-  if (employeeId) query = query.eq('employee_id', employeeId)
+  if (sessionId) {
+    query = query.eq('session_id', sessionId)
+  } else if (resolvedSessionIds.length > 0) {
+    query = query.in('session_id', resolvedSessionIds)
+  } else if (employeeId) {
+    query = query.eq('employee_id', employeeId)
+  }
 
   const { data: rows, count, error } = await query
 
@@ -185,7 +220,7 @@ function mapRow(r: RawRow, actorMap: Map<string, string>): TimelineItem {
     description,
     actor_id:            r.actor_id,
     actor_name:          actorName,
-    source:              'onboarding_lifecycle_events',
+    source:              SOURCE_MAP[r.event_type] ?? 'Onboarding',
     category:            CATEGORY_MAP[r.event_type]  ?? 'system',
     severity:            r.severity,
     readiness_dimension: READINESS_MAP[r.event_type] ?? 'none',
