@@ -68,6 +68,7 @@ interface Roster          { id: string; name: string }
 interface RotationPolicy  { id: string; name: string }
 interface LeavePolicy     { id: string; name: string }
 interface HolidayGroup    { id: string; name: string; state_code: string | null; is_active: boolean }
+interface StateRow        { state_code: string; state_name: string; enabled: boolean }
 
 const EMPTY_FORM = {
   name:                       '',
@@ -305,7 +306,7 @@ export function Sites() {
   const [search,   setSearch]         = useState('')
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
 
-  const { data: sitesData, isLoading } = useQuery<{ data: Site[] }>({
+  const { data: sitesData, isLoading, isError, error } = useQuery<{ data: Site[] }>({
     queryKey: ['sites'],
     queryFn:  () => api.get('/masters/sites'),
     staleTime: 60_000,
@@ -335,24 +336,30 @@ export function Sites() {
     queryFn:  () => api.get('/masters/holiday-groups'),
     staleTime: 120_000,
   })
-  const { data: ptaxStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+  // PT/LWF state endpoints return a RAW ARRAY (not { data: [...] }). Normalize so
+  // this matches the shared ['ptax-states'] / ['lwf-states'] cache shape used by
+  // the PTAX/LWF management pages — otherwise whichever page populates the cache
+  // first dictates the shape and the other silently reads undefined.
+  const { data: ptaxStates } = useQuery<StateRow[]>({
     queryKey: ['ptax-states'],
-    queryFn:  () => api.get('/payroll/statutory/ptax/states'),
+    queryFn:  () => api.get('/payroll/statutory/ptax/states')
+      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
     staleTime: 5 * 60_000,
   })
-  const { data: lwfStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+  const { data: lwfStates } = useQuery<StateRow[]>({
     queryKey: ['lwf-states'],
-    queryFn:  () => api.get('/payroll/statutory/lwf/states'),
+    queryFn:  () => api.get('/payroll/statutory/lwf/states')
+      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
     staleTime: 5 * 60_000,
   })
 
   // Union of enabled PT and LWF states — these are the states the tenant has configured
   const configuredStates = useMemo(() => {
     const map = new Map<string, string>()
-    for (const s of ptaxStatesData?.data ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
-    for (const s of lwfStatesData?.data ?? [])  if (s.enabled) map.set(s.state_code, s.state_name)
+    for (const s of ptaxStates ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
+    for (const s of lwfStates ?? [])  if (s.enabled) map.set(s.state_code, s.state_name)
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]))
-  }, [ptaxStatesData, lwfStatesData])
+  }, [ptaxStates, lwfStates])
 
   const sites            = sitesData?.data         ?? []
   const rosters          = rostersData?.data       ?? []
@@ -506,6 +513,14 @@ export function Sites() {
         <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span className="text-sm">Loading…</span>
+        </div>
+      ) : isError ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+          <Globe className="h-10 w-10 text-destructive/40" />
+          <p className="text-sm font-medium text-destructive">Couldn’t load sites</p>
+          <p className="text-xs text-muted-foreground max-w-sm">
+            {error instanceof Error ? error.message : 'The sites list failed to load. Please retry.'}
+          </p>
         </div>
       ) : filteredSites.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">

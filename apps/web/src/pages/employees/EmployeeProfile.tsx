@@ -636,24 +636,28 @@ export function EmployeeProfile() {
 
   // Configured PT + LWF states — used for state override dropdowns (only show
   // states the tenant has actually set up, not the full list of 28)
-  const { data: ptaxStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+  // PT/LWF state endpoints return a RAW ARRAY (not { data: [...] }). Normalize to
+  // match the shared ['ptax-states'] / ['lwf-states'] cache shape used elsewhere.
+  const { data: ptaxStates } = useQuery<{ state_code: string; state_name: string; enabled: boolean }[]>({
     queryKey: ['ptax-states'],
-    queryFn:  () => api.get('/payroll/statutory/ptax/states'),
+    queryFn:  () => api.get('/payroll/statutory/ptax/states')
+      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
     enabled:  !!id && visited.has('compensation'),
     staleTime: 5 * 60_000,
   })
-  const { data: lwfStatesData } = useQuery<{ data: { state_code: string; state_name: string; enabled: boolean }[] }>({
+  const { data: lwfStates } = useQuery<{ state_code: string; state_name: string; enabled: boolean }[]>({
     queryKey: ['lwf-states'],
-    queryFn:  () => api.get('/payroll/statutory/lwf/states'),
+    queryFn:  () => api.get('/payroll/statutory/lwf/states')
+      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
     enabled:  !!id && visited.has('compensation'),
     staleTime: 5 * 60_000,
   })
   const configuredPtLwfStates = useMemo(() => {
     const map = new Map<string, string>()
-    for (const s of ptaxStatesData?.data ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
-    for (const s of lwfStatesData?.data  ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
+    for (const s of ptaxStates ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
+    for (const s of lwfStates  ?? []) if (s.enabled) map.set(s.state_code, s.state_name)
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]))
-  }, [ptaxStatesData, lwfStatesData])
+  }, [ptaxStates, lwfStates])
 
   // Continuation period — operational data shown read-only on ESI status card
   const profileToday = new Date().toISOString().slice(0, 10)

@@ -70,14 +70,22 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
   }
 
   // ── GET /masters/sites ────────────────────────────────────────────────────
+  //
+  // Resilient SELECT: we use '*' rather than an explicit column list so that a
+  // column added to the schema before its migration has been applied in a given
+  // environment (e.g. state_code from migration 166) can never blank the entire
+  // Sites page. The frontend reads only the fields it needs and tolerates any
+  // that are absent. '*' also surfaces `code` (migration 116), which the list
+  // search filters on.
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('sites')
-      .select(SELECT_COLS)
+      .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
 
     if (error) {
+      req.log.error({ err: error }, 'GET /masters/sites failed')
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     }
     return reply.send({ data: data ?? [] })
