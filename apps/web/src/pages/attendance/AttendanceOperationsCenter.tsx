@@ -1,25 +1,19 @@
 /**
  * AttendanceOperationsCenter — /admin/attendance/center
  *
- * Standalone fullscreen operational overview for the Attendance domain.
- * Replaces the workspace command header without reintroducing workspace navigation.
- *
- * Layout:
- *   PageHeader
- *   WorkspaceCommandHeader (KPI chips strip)
- *   Two-column content:
- *     Left  → grouped insight cards + quick-action navigation grid
- *     Right → recent operational events timeline
+ * Real-time command center for Attendance operations.
+ * Designed for large organisations: shows what needs action TODAY —
+ * anomalies, corrections, payroll continuity, processing status.
+ * Navigation to sub-pages is via the sidebar (not redundant cards here).
  */
 
-import { useMemo }    from 'react'
-import { useQuery }   from '@tanstack/react-query'
+import { useMemo }     from 'react'
+import { useQuery }    from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ClipboardEdit, Clock, ShieldAlert,
   RefreshCw, TrendingDown, Users, Zap, Activity,
-  BarChart2, Target, FileSearch, ShieldCheck, Brain,
-  ClipboardCheck, Layers, Grid3X3,
+  CalendarClock, Lock, Upload, BookOpen,
 } from 'lucide-react'
 
 import { PageContainer }             from '@/components/layout/PageContainer'
@@ -32,6 +26,7 @@ import { OperationalTimeline }       from '@/components/workspace/OperationalTim
 import type { InsightGroup }         from '@/components/workspace/IntelligencePanel'
 import type { TimelineEvent }        from '@/components/workspace/OperationalTimeline'
 import { Button }                    from '@/components/ui/button'
+import { Badge }                     from '@/components/ui/badge'
 import { api }                       from '@/lib/api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -47,38 +42,12 @@ interface AttendanceStats {
   is_processing:           boolean
 }
 
-// ── Quick-action cards ─────────────────────────────────────────────────────────
-
-interface QuickAction {
-  label:       string
-  description: string
-  href:        string
-  icon:        React.ComponentType<{ className?: string }>
-  accent?:     'warning' | 'destructive' | 'success' | 'neutral'
-}
-
-const QUICK_ACTIONS: QuickAction[] = [
-  { label: 'Muster Roll',      description: 'Month-view attendance grid',           href: '/admin/attendance/muster',            icon: Grid3X3,       accent: 'neutral'     },
-  { label: 'Corrections',      description: 'Pending correction requests',          href: '/admin/attendance/corrections',        icon: ClipboardEdit, accent: 'warning'     },
-  { label: 'Regularisation',   description: 'HR approval queue',                   href: '/admin/attendance/regularisation',     icon: ClipboardCheck,accent: 'warning'     },
-  { label: 'Anomalies',        description: 'Flagged attendance anomalies',         href: '/admin/attendance/anomalies',          icon: AlertTriangle, accent: 'destructive' },
-  { label: 'Exceptions',       description: 'Exception governance & rules',         href: '/admin/attendance/exceptions',         icon: ShieldAlert,   accent: 'warning'     },
-  { label: 'Forensics',        description: 'Timeline deep-dive investigator',      href: '/admin/attendance/forensics',          icon: Target,        accent: 'neutral'     },
-  { label: 'Risk Profiles',    description: 'Per-employee risk heatmap',           href: '/admin/attendance/risk',              icon: TrendingDown,  accent: 'warning'     },
-  { label: 'Intelligence',     description: 'AI-powered workforce insights',        href: '/admin/intelligence',                  icon: Brain,         accent: 'neutral'     },
-  { label: 'Confidence',       description: 'AI extraction confidence review',      href: '/admin/attendance/confidence',         icon: Activity,      accent: 'neutral'     },
-  { label: 'Op. Health',       description: 'Operational health dashboard',         href: '/admin/operational-health',            icon: Zap,           accent: 'neutral'     },
-  { label: 'Audit Log',        description: 'Full attendance audit trail',          href: '/admin/attendance/audit',              icon: FileSearch,    accent: 'neutral'     },
-  { label: 'Policy',           description: 'Attendance policy configuration',      href: '/admin/attendance/policy',            icon: ShieldCheck,   accent: 'neutral'     },
-  { label: 'Analytics',        description: 'Workforce composition analytics',      href: '/admin/analytics/workforce',          icon: BarChart2,     accent: 'neutral'     },
-  { label: 'Policy Conflicts', description: 'Inter-policy conflict detection',      href: '/admin/attendance/policy-conflicts',  icon: Layers,        accent: 'warning'     },
-]
-
-const ACCENT_CLASSES = {
-  warning:     'border-warning/20 bg-warning/[0.04] hover:bg-warning/[0.08]',
-  destructive: 'border-destructive/20 bg-destructive/[0.04] hover:bg-destructive/[0.08]',
-  success:     'border-success/20 bg-success/[0.04] hover:bg-success/[0.08]',
-  neutral:     'border-border/60 bg-muted/[0.04] hover:bg-muted/10',
+interface AttendancePeriod {
+  id:           string
+  month:        string
+  state:        'OPEN' | 'LOCKED' | 'CLOSED'
+  locked_at:    string | null
+  locked_by:    string | null
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -93,6 +62,13 @@ export function AttendanceOperationsCenter() {
     retry:     false,
   })
 
+  const { data: periodData } = useQuery<{ data: AttendancePeriod[] }>({
+    queryKey:  ['attendance-periods-current'],
+    queryFn:   () => api.get('/attendance/periods?limit=3'),
+    staleTime: 60_000,
+    retry:     false,
+  })
+
   const { data: events, isLoading: eventsLoading } = useQuery<{
     data: Array<{
       id: string; event_type: string; employee_name: string
@@ -104,6 +80,9 @@ export function AttendanceOperationsCenter() {
     staleTime: 20_000,
     retry:     false,
   })
+
+  const currentPeriod = periodData?.data?.[0] ?? null
+  const periodState   = currentPeriod?.state ?? 'OPEN'
 
   // ── Critical alert ──────────────────────────────────────────────────────────
   const criticalAlert = !isLoading && (stats?.payroll_continuity_gaps ?? 0) > 0
@@ -308,25 +287,79 @@ export function AttendanceOperationsCenter() {
             />
           </SectionCard>
 
-          {/* Quick-action navigation grid */}
-          <SectionCard title="Operational Tools">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              {QUICK_ACTIONS.map(qa => (
-                <button
-                  key={qa.href}
-                  type="button"
-                  onClick={() => navigate(qa.href)}
-                  className={`group flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 ${ACCENT_CLASSES[qa.accent ?? 'neutral']}`}
-                >
-                  <span className="chip-grad flex h-7 w-7 items-center justify-center rounded-lg text-white shadow-sm flex-shrink-0">
-                    <qa.icon className="h-3.5 w-3.5" />
-                  </span>
+          {/* Period Status + Quick Actions */}
+          <SectionCard title="Period & Quick Actions">
+            <div className="space-y-3">
+              {/* Period status row */}
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                <div className="flex items-center gap-2.5">
+                  <CalendarClock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <div>
-                    <p className="text-[12px] font-medium text-foreground leading-tight">{qa.label}</p>
-                    <p className="text-[10px] text-muted-foreground/60 leading-tight mt-0.5">{qa.description}</p>
+                    <p className="text-xs font-medium text-foreground">
+                      {currentPeriod ? currentPeriod.month : 'Current Period'}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {periodState === 'LOCKED' || periodState === 'CLOSED'
+                        ? `Locked · payroll can be finalized`
+                        : 'Open · lock before running payroll'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={periodState === 'OPEN' ? 'warning' : 'success'} className="text-[10px] px-1.5">
+                    {periodState}
+                  </Badge>
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                    onClick={() => navigate('/admin/attendance/periods')}>
+                    <Lock className="h-3 w-3" />
+                    {periodState === 'OPEN' ? 'Lock Period' : 'Manage'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* High-value action shortcuts */}
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => navigate('/admin/attendance/upload-workspace')}
+                  className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/[0.04] hover:bg-muted/10 px-3 py-2.5 text-left transition-colors">
+                  <Upload className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Upload Punches</p>
+                    <p className="text-[10px] text-muted-foreground">Import CSV / biometric data</p>
                   </div>
                 </button>
-              ))}
+                <button type="button" onClick={() => navigate('/admin/attendance/muster')}
+                  className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/[0.04] hover:bg-muted/10 px-3 py-2.5 text-left transition-colors">
+                  <BookOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Muster Roll</p>
+                    <p className="text-[10px] text-muted-foreground">Month-view attendance grid</p>
+                  </div>
+                </button>
+                <button type="button" onClick={() => navigate('/admin/attendance/anomalies')}
+                  className="flex items-center gap-2.5 rounded-lg border border-destructive/20 bg-destructive/[0.04] hover:bg-destructive/[0.08] px-3 py-2.5 text-left transition-colors">
+                  <AlertTriangle className="h-4 w-4 text-destructive/70 flex-shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Anomalies</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {(stats?.unresolved_anomalies ?? 0) > 0
+                        ? `${stats!.unresolved_anomalies} unresolved`
+                        : 'All clear'}
+                    </p>
+                  </div>
+                </button>
+                <button type="button" onClick={() => navigate('/admin/attendance/corrections')}
+                  className="flex items-center gap-2.5 rounded-lg border border-warning/20 bg-warning/[0.04] hover:bg-warning/[0.08] px-3 py-2.5 text-left transition-colors">
+                  <ClipboardEdit className="h-4 w-4 text-warning/70 flex-shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Corrections</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {(stats?.pending_corrections ?? 0) > 0
+                        ? `${stats!.pending_corrections} pending`
+                        : 'None pending'}
+                    </p>
+                  </div>
+                </button>
+              </div>
             </div>
           </SectionCard>
 

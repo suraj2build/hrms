@@ -1242,12 +1242,33 @@ function FinalizeConfirmDialog({
 }
 
 // ── ForceOverrideDialog ───────────────────────────────────────────────────────
-// Shown when the backend returns 422 MISSING_ATTENDANCE_DATA during finalization.
-// Operator must enter an override reason before force-finalizing.
-// All overrides are persisted by the backend to payroll_finalize_overrides (SOX audit trail).
+// Shown when finalization is blocked by a bypass-able gate:
+//   MISSING_ATTENDANCE_DATA — some employees have no attendance records
+//   ATTENDANCE_NOT_LOCKED   — attendance period is still open (not closed)
+//   OPEN_BLOCKERS           — unresolved payroll run blockers exist
+// All overrides are persisted to payroll_finalize_overrides (SOX audit trail).
+
+const BYPASS_COPY: Record<string, { title: string; body: string; placeholder: string }> = {
+  MISSING_ATTENDANCE_DATA: {
+    title:       'Bypass — Missing Attendance Data',
+    body:        'Some employees have no processed attendance records. They will receive full pay (0 LOP assumed). This override is audit-logged.',
+    placeholder: 'e.g. Attendance system was down — verified manually with managers',
+  },
+  ATTENDANCE_NOT_LOCKED: {
+    title:       'Bypass — Attendance Period Not Locked',
+    body:        'The attendance period for this month is still open. Locking it first is recommended to prevent last-minute punch changes from affecting pay. Bypassing will finalize with current data.',
+    placeholder: 'e.g. Period lock is delayed; all anomalies verified and accepted by HR',
+  },
+  OPEN_BLOCKERS: {
+    title:       'Bypass — Open Payroll Blockers',
+    body:        'There are unresolved blockers on this payroll run (validation failures, coverage issues, etc.). Bypassing will finalize despite these — they will be audit-logged.',
+    placeholder: 'e.g. Blockers reviewed and accepted — minor edge cases not affecting payroll accuracy',
+  },
+}
 
 function ForceOverrideDialog({
   run,
+  errorCode,
   missingEmployees,
   overrideReason,
   onReasonChange,
@@ -1256,6 +1277,7 @@ function ForceOverrideDialog({
   pending,
 }: {
   run:              PayrollRun
+  errorCode:        string
   missingEmployees: MissingAttendanceEmployee[]
   overrideReason:   string
   onReasonChange:   (v: string) => void
@@ -1264,6 +1286,7 @@ function ForceOverrideDialog({
   pending:          boolean
 }) {
   const reasonTooShort = overrideReason.trim().length < 10
+  const copy = BYPASS_COPY[errorCode] ?? BYPASS_COPY.OPEN_BLOCKERS
 
   return (
     <Dialog open onOpenChange={onCancel}>
@@ -1271,24 +1294,16 @@ function ForceOverrideDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <AlertTriangle className="h-4 w-4 text-warning" />
-            Force Finalize — Missing Attendance Data
+            {copy.title}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
-          {/* Warning */}
           <div className="p-3 rounded-md bg-warning/10 border border-warning/20 text-warning text-xs">
-            <p className="font-semibold mb-1">
-              {missingEmployees.length} employee{missingEmployees.length !== 1 ? 's' : ''} have no attendance
-              data for {fmtMonth(run.month)}.
-            </p>
-            <p>
-              These employees will receive <strong>full pay (0 LOP assumed)</strong>.
-              Proceeding is irreversible — this override will be logged for audit.
-            </p>
+            <p className="font-semibold mb-1">{fmtMonth(run.month)}</p>
+            <p>{copy.body}</p>
           </div>
 
-          {/* Affected employees */}
           {missingEmployees.length > 0 && (
             <div className="rounded-md border border-border overflow-hidden">
               <div className="px-3 py-1.5 bg-muted/30 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
@@ -1305,7 +1320,6 @@ function ForceOverrideDialog({
             </div>
           )}
 
-          {/* Override reason */}
           <div>
             <label className="text-xs font-medium text-muted-foreground block mb-1.5">
               Override Reason <span className="text-destructive">*</span>
@@ -1320,15 +1334,13 @@ function ForceOverrideDialog({
                   : 'border-input focus:ring-ring',
               )}
               rows={3}
-              placeholder="e.g. Attendance system was down for these employees — verified manually with managers"
+              placeholder={copy.placeholder}
               value={overrideReason}
               onChange={e => onReasonChange(e.target.value)}
               disabled={pending}
             />
             {reasonTooShort && overrideReason.length > 0 && (
-              <p className="text-[10px] text-destructive mt-1">
-                Please provide at least 10 characters.
-              </p>
+              <p className="text-[10px] text-destructive mt-1">Please provide at least 10 characters.</p>
             )}
           </div>
         </div>
@@ -1344,10 +1356,7 @@ function ForceOverrideDialog({
             disabled={pending || reasonTooShort}
             className="gap-1.5"
           >
-            {pending
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <Lock className="h-3.5 w-3.5" />
-            }
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
             Force Finalize
           </Button>
         </div>
@@ -1892,8 +1901,9 @@ export function PayrollRuns() {
   const [activeReopenRun, setActiveReopenRun]         = useState<PayrollRun | null>(null)
   const [reopenReason, setReopenReason]               = useState('')
 
-  // Force-finalize state: populated when backend returns MISSING_ATTENDANCE_DATA
+  // Force-finalize state: populated when backend returns a bypass-able error
   const [forceOverrideRun, setForceOverrideRun]       = useState<PayrollRun | null>(null)
+  const [forceOverrideCode, setForceOverrideCode]     = useState<'MISSING_ATTENDANCE_DATA' | 'ATTENDANCE_NOT_LOCKED' | 'OPEN_BLOCKERS' | ''>('')
   const [missingEmployees, setMissingEmployees]       = useState<MissingAttendanceEmployee[]>([])
   const [overrideReason, setOverrideReason]           = useState('')
 
@@ -1974,17 +1984,18 @@ export function PayrollRuns() {
       toast.success('Payroll run finalized')
     },
     onError: (e: unknown) => {
-      if (e instanceof ApiError && e.error === 'MISSING_ATTENDANCE_DATA') {
-        // Backend blocked finalization: some employees have no attendance data.
-        // Surface the force-override dialog instead of a plain error message.
-        const employees = (e.data.missing_attendance_employees as MissingAttendanceEmployee[] | undefined) ?? []
+      const code = e instanceof ApiError ? (e.error as string) : ''
+      if (code === 'MISSING_ATTENDANCE_DATA' || code === 'ATTENDANCE_NOT_LOCKED' || code === 'OPEN_BLOCKERS') {
+        const employees = code === 'MISSING_ATTENDANCE_DATA'
+          ? ((e as ApiError).data?.missing_attendance_employees as MissingAttendanceEmployee[] | undefined) ?? []
+          : []
         setMissingEmployees(employees)
         setOverrideReason('')
+        setForceOverrideCode(code as any)
         setForceOverrideRun(activeFinalizeRun)
-        setActiveFinalizeRun(null)   // close confirm dialog
+        setActiveFinalizeRun(null)
         setRunError('')
       } else {
-        // Keep dialog open so the error is visible and the user can retry
         setRunError((e as any)?.message ?? 'Failed to finalize run')
       }
     },
@@ -2124,10 +2135,17 @@ export function PayrollRuns() {
                   {fmtMonth(runMonth)}
                 </div>
                 <Button size="icon" variant="ghost" className="h-8 w-8"
+                  disabled={runMonth >= todayYM}
                   onClick={() => setRunMonth(nextMonthStr(runMonth))}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
+              {runMonth > todayYM && (
+                <p className="text-[10px] text-destructive flex items-center gap-1 mt-1">
+                  <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                  Future month — payroll cannot be run for upcoming periods
+                </p>
+              )}
             </div>
 
             <div>
@@ -2156,7 +2174,7 @@ export function PayrollRuns() {
             <div className="flex gap-2">
               <Button
                 className="flex-1 h-9 text-sm gap-2"
-                disabled={triggerMutation.isPending || dryRunMutation.isPending}
+                disabled={triggerMutation.isPending || dryRunMutation.isPending || runMonth > todayYM}
                 onClick={() => triggerMutation.mutate()}
               >
                 {triggerMutation.isPending
@@ -2336,10 +2354,11 @@ export function PayrollRuns() {
         />
       )}
 
-      {/* Force-override dialog — shown when backend blocks finalize due to missing attendance */}
+      {/* Force-override dialog — shown when backend blocks finalize with a bypass-able error */}
       {forceOverrideRun && (
         <ForceOverrideDialog
           run={forceOverrideRun}
+          errorCode={forceOverrideCode}
           missingEmployees={missingEmployees}
           overrideReason={overrideReason}
           onReasonChange={setOverrideReason}
@@ -2349,6 +2368,7 @@ export function PayrollRuns() {
           })}
           onCancel={() => {
             setForceOverrideRun(null)
+            setForceOverrideCode('')
             setMissingEmployees([])
             setOverrideReason('')
           }}

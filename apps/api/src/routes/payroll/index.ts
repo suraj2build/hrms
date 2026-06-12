@@ -460,6 +460,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { month, notes, dry_run } = parsed.data
     const tenantId = req.tenantId as string
 
+    // ── Guard: block payroll runs for future months ───────────────────────────
+    const currentYM = new Date().toISOString().slice(0, 7)
+    if (month > currentYM) {
+      return reply.code(400).send({
+        error:   'FUTURE_MONTH',
+        message: `Cannot run payroll for a future month (${month}). Current month is ${currentYM}.`,
+      })
+    }
+
     // ── Pre-flight: compensation coverage audit ──────────────────────────────
     // For live runs only — dry runs bypass this check so operators can
     // simulate even when some employees are not yet set up.
