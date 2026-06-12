@@ -24,7 +24,10 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Label }         from '@/components/ui/label'
 import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter,
+  Dialog, DialogContent,
+} from '@/components/ui/dialog'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -439,89 +442,126 @@ export function AdminCandidates() {
         )}
       </SectionCard>
 
-      {/* Create / Edit Sheet */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>{editTarget ? 'Edit Candidate' : 'Add Candidate'}</SheetTitle>
-          </SheetHeader>
-          <div className="mt-6 space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="c-first">First Name <span className="text-red-500">*</span></Label>
-                <Input id="c-first" value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} className="mt-1" placeholder="Priya" />
+      {/* Create / Edit Dialog */}
+      <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
+        <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden [&>button]:text-white [&>button]:opacity-80 [&>button:hover]:opacity-100 [&>button]:top-5 [&>button]:right-5">
+          {/* Header */}
+          <div className="bg-gradient-to-br from-[#0d5a4e] to-[#15B8A6] px-6 py-5">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 rounded-xl p-2.5 shrink-0">
+                <Users2 className="h-5 w-5 text-white" />
               </div>
               <div>
-                <Label htmlFor="c-last">Last Name <span className="text-red-500">*</span></Label>
-                <Input id="c-last" value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} className="mt-1" placeholder="Sharma" />
+                <h2 className="text-white font-semibold text-lg leading-tight">
+                  {editTarget ? 'Edit Candidate' : 'Add New Candidate'}
+                </h2>
+                <p className="text-teal-100 text-sm mt-0.5">
+                  {editTarget ? 'Update candidate information' : 'Add a candidate to your talent pool'}
+                </p>
               </div>
             </div>
+          </div>
 
+          {/* Form body */}
+          <div className="overflow-y-auto max-h-[65vh] px-6 py-5 space-y-6">
+
+            {/* Personal Information */}
             <div>
-              <Label htmlFor="c-email">Email <span className="text-red-500">*</span></Label>
-              <Input id="c-email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="mt-1" placeholder="priya@example.com" disabled={!!editTarget} />
-              {editTarget && <p className="text-[11px] text-muted-foreground mt-1">Email cannot be changed after creation.</p>}
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#15B8A6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Personal Information</p>
+              </div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">First Name <span className="text-destructive">*</span></Label>
+                    <Input value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} placeholder="Priya" className="h-10" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Last Name <span className="text-destructive">*</span></Label>
+                    <Input value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} placeholder="Sharma" className="h-10" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Email Address <span className="text-destructive">*</span></Label>
+                  <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="priya@example.com" disabled={!!editTarget} className="h-10" />
+                  {editTarget && <p className="text-[11px] text-muted-foreground mt-1">Email cannot be changed after creation.</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Phone</Label>
+                  <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91 98765 43210" className="h-10" />
+                </div>
+              </div>
             </div>
 
+            {/* Professional Background */}
             <div>
-              <Label htmlFor="c-phone">Phone</Label>
-              <Input id="c-phone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="mt-1" placeholder="+91 98765 43210" />
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#15B8A6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Professional Background</p>
+              </div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Current Company</Label>
+                    <Input value={form.current_company} onChange={e => setForm(f => ({ ...f, current_company: e.target.value }))} placeholder="Acme Corp" className="h-10" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Current Title</Label>
+                    <Input value={form.current_title} onChange={e => setForm(f => ({ ...f, current_title: e.target.value }))} placeholder="Software Engineer" className="h-10" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Total Experience (yrs)</Label>
+                    <Input type="number" min={0} step={0.5} value={form.total_experience} onChange={e => setForm(f => ({ ...f, total_experience: e.target.value }))} placeholder="5" className="h-10" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Source</Label>
+                    <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
+                      <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(SOURCE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">LinkedIn URL</Label>
+                  <Input value={form.linkedin_url} onChange={e => setForm(f => ({ ...f, linkedin_url: e.target.value }))} placeholder="https://linkedin.com/in/…" className="h-10" />
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="c-company">Current Company</Label>
-                <Input id="c-company" value={form.current_company} onChange={e => setForm(f => ({ ...f, current_company: e.target.value }))} className="mt-1" placeholder="Acme Corp" />
-              </div>
-              <div>
-                <Label htmlFor="c-title">Current Title</Label>
-                <Input id="c-title" value={form.current_title} onChange={e => setForm(f => ({ ...f, current_title: e.target.value }))} className="mt-1" placeholder="Software Engineer" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="c-exp">Total Experience (yrs)</Label>
-                <Input id="c-exp" type="number" min={0} step={0.5} value={form.total_experience} onChange={e => setForm(f => ({ ...f, total_experience: e.target.value }))} className="mt-1" placeholder="5" />
-              </div>
-              <div>
-                <Label>Source</Label>
-                <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(SOURCE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
+            {/* Notes */}
             <div>
-              <Label htmlFor="c-linkedin">LinkedIn URL</Label>
-              <Input id="c-linkedin" value={form.linkedin_url} onChange={e => setForm(f => ({ ...f, linkedin_url: e.target.value }))} className="mt-1" placeholder="https://linkedin.com/in/…" />
-            </div>
-
-            <div>
-              <Label htmlFor="c-notes">Notes</Label>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#15B8A6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Internal Notes</p>
+              </div>
               <textarea
-                id="c-notes"
                 value={form.notes}
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                 placeholder="Any internal notes about this candidate…"
                 rows={3}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
               />
             </div>
           </div>
 
-          <SheetFooter className="mt-6 gap-2">
-            <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving && <RefreshCw className="h-4 w-4 animate-spin mr-1" />}
-              {editTarget ? 'Save Changes' : 'Add Candidate'}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          {/* Footer */}
+          <div className="px-6 py-4 border-t bg-muted/20 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground"><span className="text-destructive">*</span> Required fields</p>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving} className="min-w-32 bg-[#15B8A6] hover:bg-[#0d9488]">
+                {saving && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
+                {editTarget ? 'Save Changes' : 'Add Candidate'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Candidate Detail Slide-over */}
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>

@@ -29,9 +29,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter,
-} from '@/components/ui/sheet'
-import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -552,172 +549,179 @@ export function AdminInterviews() {
         </div>
       )}
 
-      {/* Schedule / Edit Sheet */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>{editTarget ? 'Edit Interview' : 'Schedule Interview'}</SheetTitle>
-          </SheetHeader>
-
-          <div className="mt-6 space-y-4">
-            {/* Application selector — only on create */}
-            {!editTarget && (
-              <div>
-                <Label>Application <span className="text-red-500">*</span></Label>
-                <Select value={form.application_id || 'none'} onValueChange={v => setForm(f => ({ ...f, application_id: v === 'none' ? '' : v }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select candidate application…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— Select —</SelectItem>
-                    {applications.map(a => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.candidates.first_name} {a.candidates.last_name}
-                        {a.job_requisitions && ` · ${a.job_requisitions.title}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="iv-round">Round Number</Label>
-                <Input
-                  id="iv-round"
-                  type="number"
-                  min={1}
-                  value={form.round_number}
-                  onChange={e => setForm(f => ({ ...f, round_number: e.target.value }))}
-                  className="mt-1"
-                />
+      {/* Schedule / Edit Dialog */}
+      <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
+        <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden [&>button]:text-white [&>button]:opacity-80 [&>button:hover]:opacity-100 [&>button]:top-5 [&>button]:right-5">
+          {/* Header */}
+          <div className="bg-gradient-to-br from-[#4c1d95] to-[#7c3aed] px-6 py-5">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 rounded-xl p-2.5 shrink-0">
+                <CalendarCheck className="h-5 w-5 text-white" />
               </div>
               <div>
-                <Label>Interview Type</Label>
-                <Select value={form.interview_type} onValueChange={v => setForm(f => ({ ...f, interview_type: v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="video">Video call</SelectItem>
-                    <SelectItem value="phone">Phone</SelectItem>
-                    <SelectItem value="in_person">In-person</SelectItem>
-                    <SelectItem value="assignment">Assignment / Task</SelectItem>
-                  </SelectContent>
-                </Select>
+                <h2 className="text-white font-semibold text-lg leading-tight">
+                  {editTarget ? 'Edit Interview' : 'Schedule Interview'}
+                </h2>
+                <p className="text-purple-100 text-sm mt-0.5">
+                  {editTarget ? 'Update interview round details' : 'Set up round, panel members, and schedule'}
+                </p>
               </div>
             </div>
+          </div>
 
+          {/* Form body */}
+          <div className="overflow-y-auto max-h-[65vh] px-6 py-5 space-y-6">
+
+            {/* Interview Details */}
             <div>
-              <Label htmlFor="iv-title">Round Title <span className="text-xs text-muted-foreground">(optional)</span></Label>
-              <Input
-                id="iv-title"
-                value={form.title}
-                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                placeholder="e.g. Technical Round 1"
-                className="mt-1"
-              />
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#7c3aed]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Interview Details</p>
+              </div>
+              <div className="space-y-3">
+                {!editTarget && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Candidate Application <span className="text-destructive">*</span></Label>
+                    <Select value={form.application_id || 'none'} onValueChange={v => setForm(f => ({ ...f, application_id: v === 'none' ? '' : v }))}>
+                      <SelectTrigger className="h-10"><SelectValue placeholder="Select candidate application…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— Select —</SelectItem>
+                        {applications.map(a => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.candidates.first_name} {a.candidates.last_name}
+                            {a.job_requisitions && ` · ${a.job_requisitions.title}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Round Number</Label>
+                    <Input type="number" min={1} value={form.round_number} onChange={e => setForm(f => ({ ...f, round_number: e.target.value }))} className="h-10" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Interview Type</Label>
+                    <Select value={form.interview_type} onValueChange={v => setForm(f => ({ ...f, interview_type: v }))}>
+                      <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="video">Video call</SelectItem>
+                        <SelectItem value="phone">Phone</SelectItem>
+                        <SelectItem value="in_person">In-person</SelectItem>
+                        <SelectItem value="assignment">Assignment / Task</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">
+                    Round Title
+                    <span className="text-muted-foreground font-normal ml-1">(optional)</span>
+                  </Label>
+                  <Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Technical Round 1" className="h-10" />
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="iv-date">Date</Label>
-                <Input
-                  id="iv-date"
-                  type="date"
-                  value={form.scheduled_at}
-                  onChange={e => setForm(f => ({ ...f, scheduled_at: e.target.value }))}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="iv-time">Time</Label>
-                <Input
-                  id="iv-time"
-                  type="time"
-                  value={form.scheduled_time}
-                  onChange={e => setForm(f => ({ ...f, scheduled_time: e.target.value }))}
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="iv-dur">Duration (minutes)</Label>
-                <Input
-                  id="iv-dur"
-                  type="number"
-                  min={15}
-                  step={15}
-                  value={form.duration_mins}
-                  onChange={e => setForm(f => ({ ...f, duration_mins: e.target.value }))}
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
+            {/* Schedule */}
             <div>
-              <Label htmlFor="iv-meet">Meet Link</Label>
-              <Input
-                id="iv-meet"
-                value={form.meet_link}
-                onChange={e => setForm(f => ({ ...f, meet_link: e.target.value }))}
-                placeholder="https://meet.google.com/…"
-                className="mt-1"
-              />
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#7c3aed]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Schedule</p>
+              </div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Date</Label>
+                    <Input type="date" value={form.scheduled_at} onChange={e => setForm(f => ({ ...f, scheduled_at: e.target.value }))} className="h-10" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Time</Label>
+                    <Input type="time" value={form.scheduled_time} onChange={e => setForm(f => ({ ...f, scheduled_time: e.target.value }))} className="h-10" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Duration (mins)</Label>
+                    <Input type="number" min={15} step={15} value={form.duration_mins} onChange={e => setForm(f => ({ ...f, duration_mins: e.target.value }))} className="h-10" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Meet / Video Link</Label>
+                  <Input value={form.meet_link} onChange={e => setForm(f => ({ ...f, meet_link: e.target.value }))} placeholder="https://meet.google.com/…" className="h-10" />
+                </div>
+              </div>
             </div>
 
-            {/* Panel selection */}
+            {/* Panel Members */}
             <div>
-              <Label className="mb-2 block">
-                Interview Panel
-                <span className="text-xs text-muted-foreground ml-1">({form.interviewer_ids.length} selected)</span>
-              </Label>
-              <div className="max-h-48 overflow-y-auto rounded-md border border-border divide-y divide-border">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#7c3aed]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Interview Panel
+                  {form.interviewer_ids.length > 0 && (
+                    <span className="ml-2 normal-case text-[#7c3aed] bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5">
+                      {form.interviewer_ids.length} selected
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border overflow-hidden divide-y divide-border max-h-44 overflow-y-auto">
                 {interviewers.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-muted-foreground italic">No interviewers available</p>
+                  <p className="px-4 py-3 text-sm text-muted-foreground italic">No interviewers available</p>
                 ) : (
                   interviewers.map(ivr => (
                     <label
                       key={ivr.id}
-                      className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/40 cursor-pointer"
+                      className={cn(
+                        'flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors',
+                        form.interviewer_ids.includes(ivr.id) ? 'bg-purple-50/60' : 'hover:bg-muted/40'
+                      )}
                     >
                       <input
                         type="checkbox"
                         checked={form.interviewer_ids.includes(ivr.id)}
                         onChange={() => toggleInterviewer(ivr.id)}
-                        className="accent-primary"
+                        className="accent-purple-600 w-4 h-4"
                       />
-                      <span className="text-sm">{ivr.full_name}</span>
-                      <span className="text-xs text-muted-foreground ml-auto">{ivr.role.replace('_', ' ')}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{ivr.full_name}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{ivr.role.replace(/_/g, ' ')}</p>
+                      </div>
                     </label>
                   ))
                 )}
               </div>
             </div>
 
+            {/* Notes */}
             <div>
-              <Label htmlFor="iv-notes">Notes</Label>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#7c3aed]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Notes</p>
+              </div>
               <textarea
-                id="iv-notes"
                 value={form.notes}
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                placeholder="Instructions for panel, topics to cover…"
+                placeholder="Instructions for the panel, topics to cover, prep notes…"
                 rows={3}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
               />
             </div>
           </div>
 
-          <SheetFooter className="mt-6 gap-2">
-            <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving && <RefreshCw className="h-4 w-4 animate-spin mr-1" />}
-              {editTarget ? 'Save Changes' : 'Schedule'}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          {/* Footer */}
+          <div className="px-6 py-4 border-t bg-muted/20 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground"><span className="text-destructive">*</span> Required fields</p>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving} className="min-w-28 bg-[#7c3aed] hover:bg-[#6d28d9]">
+                {saving && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
+                {editTarget ? 'Save Changes' : 'Schedule Interview'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Scorecard Dialog */}
       <Dialog open={!!scoreRound} onOpenChange={open => { if (!open) setScoreRound(null) }}>

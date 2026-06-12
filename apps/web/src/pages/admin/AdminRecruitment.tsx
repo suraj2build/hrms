@@ -25,8 +25,8 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Label }         from '@/components/ui/label'
 import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter,
-} from '@/components/ui/sheet'
+  Dialog, DialogContent,
+} from '@/components/ui/dialog'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -470,178 +470,206 @@ export function AdminRecruitment() {
         )}
       </SectionCard>
 
-      {/* Create / Edit Sheet */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>{editTarget ? 'Edit Requisition' : 'New Requisition'}</SheetTitle>
-          </SheetHeader>
+      {/* Create / Edit Dialog */}
+      <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
+        <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden [&>button]:text-white [&>button]:opacity-80 [&>button:hover]:opacity-100 [&>button]:top-5 [&>button]:right-5">
+          {/* Header */}
+          <div className="bg-gradient-to-br from-[#1e3a8a] to-[#2E6FE6] px-6 py-5">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 rounded-xl p-2.5 shrink-0">
+                <Briefcase className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-white font-semibold text-lg leading-tight">
+                  {editTarget ? 'Edit Requisition' : 'New Job Requisition'}
+                </h2>
+                <p className="text-blue-100 text-sm mt-0.5">
+                  {editTarget ? 'Update the role details below' : 'Open a new position for your organisation'}
+                </p>
+              </div>
+            </div>
+          </div>
 
-          <div className="mt-6 space-y-4">
+          {/* Form body */}
+          <div className="overflow-y-auto max-h-[65vh] px-6 py-5 space-y-6">
+
+            {/* Role Details */}
             <div>
-              <Label htmlFor="req-title">Job Title <span className="text-red-500">*</span></Label>
-              <Input
-                id="req-title"
-                value={form.title}
-                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                placeholder="e.g. Senior Backend Engineer"
-                className="mt-1"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Department</Label>
-                <Select value={form.department_id || 'none'} onValueChange={v => setForm(f => ({ ...f, department_id: v === 'none' ? '' : v }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select dept…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— None —</SelectItem>
-                    {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#2E6FE6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Role Details</p>
               </div>
-              <div>
-                <Label htmlFor="req-location">Location</Label>
-                <Input
-                  id="req-location"
-                  value={form.location}
-                  onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                  placeholder="City / Remote"
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Employment Type</Label>
-                <Select value={form.employment_type} onValueChange={v => setForm(f => ({ ...f, employment_type: v }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="full_time">Full-time</SelectItem>
-                    <SelectItem value="part_time">Part-time</SelectItem>
-                    <SelectItem value="contract">Contract</SelectItem>
-                    <SelectItem value="intern">Intern</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="req-openings">No. of Openings</Label>
-                <Input
-                  id="req-openings"
-                  type="number"
-                  min={1}
-                  value={form.openings}
-                  onChange={e => setForm(f => ({ ...f, openings: e.target.value }))}
-                  className="mt-1"
-                />
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Job Title <span className="text-destructive">*</span></Label>
+                  <Input
+                    value={form.title}
+                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                    placeholder="e.g. Senior Backend Engineer"
+                    className="h-10"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Department</Label>
+                    <Select value={form.department_id || 'none'} onValueChange={v => setForm(f => ({ ...f, department_id: v === 'none' ? '' : v }))}>
+                      <SelectTrigger className="h-10"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— None —</SelectItem>
+                        {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Location</Label>
+                    <Input
+                      value={form.location}
+                      onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                      placeholder="City / Remote"
+                      className="h-10"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="req-min-exp">Min Experience (yrs)</Label>
-                <Input
-                  id="req-min-exp"
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={form.min_experience}
-                  onChange={e => setForm(f => ({ ...f, min_experience: e.target.value }))}
-                  placeholder="0"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="req-max-exp">Max Experience (yrs)</Label>
-                <Input
-                  id="req-max-exp"
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={form.max_experience}
-                  onChange={e => setForm(f => ({ ...f, max_experience: e.target.value }))}
-                  placeholder="10"
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="req-sal-min">Salary Min (₹)</Label>
-                <Input
-                  id="req-sal-min"
-                  type="number"
-                  min={0}
-                  value={form.salary_min}
-                  onChange={e => setForm(f => ({ ...f, salary_min: e.target.value }))}
-                  placeholder="600000"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="req-sal-max">Salary Max (₹)</Label>
-                <Input
-                  id="req-sal-max"
-                  type="number"
-                  min={0}
-                  value={form.salary_max}
-                  onChange={e => setForm(f => ({ ...f, salary_max: e.target.value }))}
-                  placeholder="1200000"
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
+            {/* Requirements */}
             <div>
-              <Label htmlFor="req-target">Target Close Date</Label>
-              <Input
-                id="req-target"
-                type="date"
-                value={form.target_date}
-                onChange={e => setForm(f => ({ ...f, target_date: e.target.value }))}
-                className="mt-1"
-              />
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#2E6FE6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Requirements</p>
+              </div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Employment Type</Label>
+                    <Select value={form.employment_type} onValueChange={v => setForm(f => ({ ...f, employment_type: v }))}>
+                      <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="full_time">Full-time</SelectItem>
+                        <SelectItem value="part_time">Part-time</SelectItem>
+                        <SelectItem value="contract">Contract</SelectItem>
+                        <SelectItem value="intern">Intern</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">No. of Openings</Label>
+                    <Input
+                      type="number" min={1}
+                      value={form.openings}
+                      onChange={e => setForm(f => ({ ...f, openings: e.target.value }))}
+                      className="h-10"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Min Experience (yrs)</Label>
+                    <Input
+                      type="number" min={0} step={0.5}
+                      value={form.min_experience}
+                      onChange={e => setForm(f => ({ ...f, min_experience: e.target.value }))}
+                      placeholder="0"
+                      className="h-10"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Max Experience (yrs)</Label>
+                    <Input
+                      type="number" min={0} step={0.5}
+                      value={form.max_experience}
+                      onChange={e => setForm(f => ({ ...f, max_experience: e.target.value }))}
+                      placeholder="10"
+                      className="h-10"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Salary Min (₹)</Label>
+                    <Input
+                      type="number" min={0}
+                      value={form.salary_min}
+                      onChange={e => setForm(f => ({ ...f, salary_min: e.target.value }))}
+                      placeholder="600,000"
+                      className="h-10"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Salary Max (₹)</Label>
+                    <Input
+                      type="number" min={0}
+                      value={form.salary_max}
+                      onChange={e => setForm(f => ({ ...f, salary_max: e.target.value }))}
+                      placeholder="1,200,000"
+                      className="h-10"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
+            {/* Timeline & Skills */}
             <div>
-              <Label htmlFor="req-skills">Required Skills <span className="text-xs text-muted-foreground">(comma-separated)</span></Label>
-              <Input
-                id="req-skills"
-                value={form.skills_raw}
-                onChange={e => setForm(f => ({ ...f, skills_raw: e.target.value }))}
-                placeholder="React, Node.js, PostgreSQL"
-                className="mt-1"
-              />
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#2E6FE6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Timeline & Skills</p>
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Target Close Date</Label>
+                  <Input
+                    type="date"
+                    value={form.target_date}
+                    onChange={e => setForm(f => ({ ...f, target_date: e.target.value }))}
+                    className="h-10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">
+                    Required Skills
+                    <span className="text-muted-foreground font-normal ml-1">(comma-separated)</span>
+                  </Label>
+                  <Input
+                    value={form.skills_raw}
+                    onChange={e => setForm(f => ({ ...f, skills_raw: e.target.value }))}
+                    placeholder="React, Node.js, PostgreSQL"
+                    className="h-10"
+                  />
+                </div>
+              </div>
             </div>
 
+            {/* Job Description */}
             <div>
-              <Label htmlFor="req-jd">Job Description</Label>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-[#2E6FE6]" />
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Job Description</p>
+              </div>
               <textarea
-                id="req-jd"
                 value={form.jd_text}
                 onChange={e => setForm(f => ({ ...f, jd_text: e.target.value }))}
                 placeholder="Describe the role, responsibilities, and requirements…"
                 rows={5}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
               />
             </div>
           </div>
 
-          <SheetFooter className="mt-6 gap-2">
-            <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : null}
-              {editTarget ? 'Save Changes' : 'Create Requisition'}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          {/* Footer */}
+          <div className="px-6 py-4 border-t bg-muted/20 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground"><span className="text-destructive">*</span> Required fields</p>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving} className="min-w-36 bg-[#2E6FE6] hover:bg-[#2563eb]">
+                {saving && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
+                {editTarget ? 'Save Changes' : 'Create Requisition'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   )
 }
