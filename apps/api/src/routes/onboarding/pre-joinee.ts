@@ -5,6 +5,7 @@ import {
   sendEmail, preJoineeInviteEmail, APP_PUBLIC_URL,
   type SendEmailResult,
 } from '../../lib/email-service.js'
+import { emitPreJoineeJoiningCompleted } from '../../lib/onboarding-orchestrator.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -780,6 +781,15 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     if (updateErr) {
       fastify.log.warn({ event: 'pre_joinee.approve.status_update', tenant_id: tenantId, id, err: updateErr })
     }
+
+    // Trigger welcome email (ONB-04) + IT provisioning notification (ONB-05)
+    emitPreJoineeJoiningCompleted({
+      tenantId,
+      invitationId: id,
+      employeeId,
+      employeeCode,
+      joiningDate:  invitation.joining_date ?? null,
+    })
 
     return reply.send({
       message:     'Invitation approved and employee created',

@@ -17,6 +17,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventBus }           from './event-bus.js'
 import type { HrmsEventType, HrmsEvent } from './event-bus.js'
 import { trustScoreService }  from '../platform/trust/scoring/trust-score.service.js'
+import {
+  sendEmail,
+  joiningWelcomeEmail,
+  itProvisioningEmail,
+  APP_PUBLIC_URL,
+} from './email-service.js'
+import { brandConfig } from './brand-config.js'
 
 // ── Event emitters (called by onboarding routes) ──────────────────────────────
 
@@ -201,6 +208,32 @@ export function emitOnboardingChecklistCompleted(opts: {
       tenantId:    opts.tenantId,
       employeeId:  opts.employeeId,
       checklistId: opts.checklistId,
+    },
+  })
+}
+
+// ── Pre-joinee path helper — emits joining.completed without a session ─────────
+// The pre-joinee approval creates an employee directly from an invitation (no
+// onboarding session / draft).  Emit just the joining.completed event so the
+// welcome email (ONB-04) and IT provisioning (ONB-05) handlers still fire.
+
+export function emitPreJoineeJoiningCompleted(opts: {
+  tenantId:     string
+  invitationId: string   // used as sessionId so the inbox entity points to the invitation
+  employeeId:   string
+  employeeCode: string
+  joiningDate?: string | null
+}): void {
+  eventBus.emit({
+    type:          'onboarding.joining.completed',
+    tenantId:      opts.tenantId,
+    correlationId: 'system',
+    payload: {
+      tenantId:     opts.tenantId,
+      sessionId:    opts.invitationId,
+      employeeId:   opts.employeeId,
+      employeeCode: opts.employeeCode,
+      joiningDate:  opts.joiningDate ?? null,
     },
   })
 }
@@ -448,6 +481,99 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       source: 'Onboarding Engine',
       actionRoute: '/ess/onboarding', actionLabel: 'View your workspace',
     })
+  })
+
+  // ── ONB-04 + ONB-05: Welcome email to joiner + IT provisioning notification ──
+  eventBus.on('onboarding.joining.completed', async (event) => {
+    const { tenantId, employeeId, employeeCode, joiningDate } = event.payload
+
+    // Fetch employee and tenant in parallel
+    const [{ data: emp }, { data: tenant }] = await Promise.all([
+      supabase
+        .from('employees')
+        .select('first_name, last_name, email, reporting_manager_id')
+        .eq('id', employeeId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle(),
+      supabase
+        .from('tenants')
+        .select('name')
+        .eq('id', tenantId)
+        .maybeSingle(),
+    ])
+
+    const companyName = (tenant as any)?.name ?? brandConfig.productName
+
+    // ONB-04: Welcome email to the new employee
+    if ((emp as any)?.email) {
+      try {
+        let managerName: string | undefined
+        let managerEmail: string | undefined
+        if ((emp as any).reporting_manager_id) {
+          const { data: mgr } = await supabase
+            .from('employees')
+            .select('first_name, last_name, email')
+            .eq('id', (emp as any).reporting_manager_id)
+            .eq('tenant_id', tenantId)
+            .maybeSingle()
+          if (mgr) {
+            managerName  = `${(mgr as any).first_name ?? ''} ${(mgr as any).last_name ?? ''}`.trim() || undefined
+            managerEmail = (mgr as any).email ?? undefined
+          }
+        }
+
+        const { subject, html } = joiningWelcomeEmail({
+          firstName:    (emp as any).first_name ?? '',
+          employeeCode,
+          companyName,
+          joiningDate:  joiningDate ?? undefined,
+          managerName,
+          managerEmail,
+          loginUrl:     APP_PUBLIC_URL,
+        })
+        await sendEmail({ to: (emp as any).email, subject, html })
+      } catch (err) {
+        logWarn('welcome_email_failed', employeeId, err)
+      }
+    }
+
+    // ONB-05: IT provisioning notification to HR admins
+    // (Profiles has no email col — fetch emails via Supabase Auth Admin API)
+    try {
+      const { data: admins } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('role', ['hr_admin', 'super_admin'])
+
+      if (admins && admins.length > 0) {
+        const emailMap: Record<string, string> = {}
+        try {
+          const { data: authList } = await (supabase.auth as any).admin.listUsers({ perPage: 1000, page: 1 })
+          for (const u of (authList?.users ?? [])) {
+            emailMap[u.id] = u.email ?? ''
+          }
+        } catch (_) { /* email enrichment best-effort */ }
+
+        const recipientEmails = admins
+          .map((a: any) => emailMap[a.id])
+          .filter((e): e is string => Boolean(e))
+
+        if (recipientEmails.length > 0 && emp) {
+          const employeeName = `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim()
+          const { subject, html } = itProvisioningEmail({
+            employeeName,
+            employeeCode,
+            companyName,
+            joiningDate: joiningDate ?? undefined,
+            hrSystemUrl: APP_PUBLIC_URL,
+          })
+          await sendEmail({ to: recipientEmails, subject, html })
+        }
+      }
+    } catch (err) {
+      logWarn('it_provisioning_email_failed', employeeId, err)
+    }
   })
 
   // ── approved → compute + persist onboarding trust score ────────────────────

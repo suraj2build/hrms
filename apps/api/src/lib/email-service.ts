@@ -124,3 +124,95 @@ export function preJoineeInviteEmail(opts: {
   `)
   return { subject, html }
 }
+
+// ── ONB-04: Post-joining welcome email to new employee ─────────────────────────
+
+export function joiningWelcomeEmail(opts: {
+  firstName:     string
+  employeeCode:  string
+  companyName:   string
+  joiningDate?:  string
+  managerName?:  string
+  managerEmail?: string
+  loginUrl:      string
+}): { subject: string; html: string } {
+  const { primary, teal } = brandConfig.colors
+  const firstName = opts.firstName || 'there'
+  const subject = `Welcome to ${opts.companyName} — your account is ready`
+  const html = shell(`
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Welcome aboard, ${firstName}! 🎉</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Your joining at <strong>${opts.companyName}</strong> has been confirmed${opts.joiningDate ? ` — joining date <strong>${opts.joiningDate}</strong>` : ''}.
+      Your employee ID is <strong>${opts.employeeCode}</strong>.
+    </p>
+    ${opts.managerName ? `
+    <div style="background:#f8fafc;border-radius:8px;padding:14px 16px;margin:0 0 20px;border-left:3px solid ${teal};">
+      <p style="margin:0;color:#475569;font-size:13px;"><strong>Reporting Manager:</strong>&nbsp;${opts.managerName}${opts.managerEmail ? ` &mdash; <a href="mailto:${opts.managerEmail}" style="color:${primary};">${opts.managerEmail}</a>` : ''}</p>
+    </div>` : ''}
+    <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 20px;">
+      Access your employee workspace to view payslips, apply for leave, and complete your onboarding checklist.
+    </p>
+    <div style="text-align:center;margin:28px 0;">
+      <a href="${opts.loginUrl}"
+         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;">
+        Go to My Workspace
+      </a>
+    </div>
+    <p style="color:#94a3b8;font-size:12px;margin-top:16px;">
+      If you have any questions reach out to your HR team. We're excited to have you on board.
+    </p>
+  `)
+  return { subject, html }
+}
+
+// ── ONB-05: IT provisioning notification to HR/IT team ────────────────────────
+
+export function itProvisioningEmail(opts: {
+  employeeName: string
+  employeeCode: string
+  companyName:  string
+  joiningDate?: string
+  hrSystemUrl:  string
+}): { subject: string; html: string } {
+  const { primary } = brandConfig.colors
+  const subject = `IT Setup Required — ${opts.employeeName} joining${opts.joiningDate ? ` on ${opts.joiningDate}` : ''}`
+  const html = shell(`
+    <h1 style="font-size:20px;color:#0f172a;margin:0 0 12px;">New Joiner IT Provisioning</h1>
+    <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px;">
+      A new employee has been confirmed in ${opts.companyName}. Please complete IT provisioning before their joining date.
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:13px;">
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Employee</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.employeeName}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Employee Code</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.employeeCode}</td>
+      </tr>
+      ${opts.joiningDate ? `
+      <tr>
+        <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Joining Date</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.joiningDate}</td>
+      </tr>` : ''}
+    </table>
+    <p style="color:#475569;font-size:13px;font-weight:600;margin:0 0 8px;">Standard Provisioning Checklist:</p>
+    <ul style="color:#475569;font-size:13px;line-height:1.8;margin:0 0 20px;padding-left:20px;">
+      <li>Create company email account</li>
+      <li>Set up laptop / workstation</li>
+      <li>Provision system access (HRMS, intranet, relevant tools)</li>
+      <li>Add to relevant communication channels (Slack / Teams)</li>
+      <li>Configure VPN and security credentials</li>
+    </ul>
+    <div style="text-align:center;margin:20px 0;">
+      <a href="${opts.hrSystemUrl}"
+         style="display:inline-block;background:${primary};color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 28px;border-radius:999px;">
+        View in HR System
+      </a>
+    </div>
+    <p style="color:#94a3b8;font-size:12px;margin-top:16px;">
+      Full onboarding checklist and asset requirements are available in the HR system.
+    </p>
+  `)
+  return { subject, html }
+}
