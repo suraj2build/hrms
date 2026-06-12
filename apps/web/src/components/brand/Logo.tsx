@@ -10,8 +10,12 @@
  * Brand: "Smarter Workforce. Stronger Future." — a Saar HRMS application.
  * The mark / wordmark / lockup all render the canonical brand raster
  * (apps/web/public/brand/*), so they match the official artwork pixel-for-pixel.
+ *
+ * All asset paths and brand colours are sourced from brandConfig so a
+ * white-label deployment can override them via VITE_BRAND_* env vars.
  */
 import { cn } from '@/lib/utils'
+import { brandConfig } from '@/lib/brand-config'
 
 interface LogoProps {
   variant?: 'full' | 'mark' | 'lockup'
@@ -21,15 +25,19 @@ interface LogoProps {
   dark?: boolean
 }
 
-/** Brand colours, exported for use in non-image brand contexts. */
-export const BRAND_BLUE = '#2E6FE6'
-export const BRAND_TEAL = '#15B8A6'
+/**
+ * Brand colours — re-exported from brandConfig for consumers that need a hex
+ * value (e.g. inline SVG fills). A white-label build overrides via
+ * VITE_BRAND_COLOR_PRIMARY / VITE_BRAND_COLOR_TEAL env vars.
+ */
+export const BRAND_BLUE = brandConfig.colors.primary
+export const BRAND_TEAL = brandConfig.colors.teal
 
-/** Public paths to the canonical brand assets. */
-export const BRAND_ICON_SRC           = '/brand/cognixhr-icon.png'
-export const BRAND_LOCKUP_SRC          = '/brand/cognixhr-lockup.png'
-export const BRAND_WORDMARK_SRC        = '/brand/cognixhr-wordmark.png'
-export const BRAND_WORDMARK_LIGHT_SRC  = '/brand/cognixhr-wordmark-light.png'
+/** Public paths to the canonical brand assets, sourced from brandConfig. */
+export const BRAND_ICON_SRC           = brandConfig.assets.icon
+export const BRAND_LOCKUP_SRC         = brandConfig.assets.lockup
+export const BRAND_WORDMARK_SRC       = brandConfig.assets.wordmark
+export const BRAND_WORDMARK_LIGHT_SRC = brandConfig.assets.wordmarkLight
 
 /**
  * The brand mark (icon). Pass `tile` to back it with a white rounded tile so the
@@ -40,7 +48,7 @@ export function LogoMark({
 }: { size?: number; className?: string; tile?: boolean }) {
   const img = (
     <img
-      src={BRAND_ICON_SRC}
+      src={brandConfig.assets.icon}
       width={size}
       height={size}
       className={tile ? undefined : className}
@@ -70,7 +78,7 @@ export function Wordmark({
 }: { height?: number; tone?: 'color' | 'light'; className?: string }) {
   return (
     <img
-      src={tone === 'light' ? BRAND_WORDMARK_LIGHT_SRC : BRAND_WORDMARK_SRC}
+      src={tone === 'light' ? brandConfig.assets.wordmarkLight : brandConfig.assets.wordmark}
       className={className}
       alt="CognixHR"
       draggable={false}
@@ -83,7 +91,7 @@ export function Logo({ variant = 'full', size = 32, className, dark = false }: L
   if (variant === 'lockup') {
     return (
       <img
-        src={BRAND_LOCKUP_SRC}
+        src={brandConfig.assets.lockup}
         className={className}
         alt="CognixHR — Smarter Workforce. Stronger Future."
         draggable={false}

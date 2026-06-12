@@ -521,7 +521,7 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
 
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-indigo-100 text-indigo-600" />
+        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-blue-100 text-blue-600" />
         <StatCard label="Pending"           value={stats.pending}   icon={Clock}          accent="bg-amber-100 text-amber-600" />
         <StatCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  accent="bg-blue-100 text-blue-600" />
         <StatCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   accent="bg-emerald-100 text-emerald-600" />

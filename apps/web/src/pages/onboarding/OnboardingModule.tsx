@@ -133,7 +133,7 @@ function categoryLabel(cat: string): string {
 function categoryColor(cat: string): string {
   const map: Record<string, string> = {
     documentation: 'bg-blue-100 text-blue-700',
-    it_setup: 'bg-purple-100 text-purple-700',
+    it_setup: 'bg-sky-100 text-sky-700',
     training: 'bg-amber-100 text-amber-700',
     hr_formalities: 'bg-rose-100 text-rose-700',
     compliance: 'bg-red-100 text-red-700',

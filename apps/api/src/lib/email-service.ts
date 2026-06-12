@@ -12,12 +12,14 @@
  * rest of the flow (e.g. invite creation) never fails because of email.
  */
 
+import { brandConfig } from './brand-config.js'
+
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 
 export const APP_PUBLIC_URL =
   process.env.APP_PUBLIC_URL ?? 'https://hrms-web-alpha.vercel.app'
 
-const DEFAULT_FROM = process.env.EMAIL_FROM ?? 'CognixHR <onboarding@resend.dev>'
+const DEFAULT_FROM = process.env.EMAIL_FROM ?? `${brandConfig.productName} <onboarding@resend.dev>`
 
 export interface SendEmailInput {
   to:      string | string[]
@@ -73,18 +75,22 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 // ── Branded templates ──────────────────────────────────────────────────────────
 
 function shell(bodyHtml: string): string {
+  const { primary, teal } = brandConfig.colors
+  const logoImg = brandConfig.assets.logoUrl
+    ? `<img src="${brandConfig.assets.logoUrl}" alt="${brandConfig.productName}" style="height:36px;width:auto;display:block;margin:0 auto;" />`
+    : `<div style="display:inline-block;width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,${primary} 0%,#2392C8 50%,${teal} 100%);"></div>
+       <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:8px;letter-spacing:-0.5px;">${brandConfig.productName}</div>`
   return `
   <div style="margin:0;padding:0;background:#f4f6fb;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
     <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
       <div style="text-align:center;margin-bottom:24px;">
-        <div style="display:inline-block;width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#2E6FE6 0%,#2392C8 50%,#15B8A6 100%);"></div>
-        <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:8px;letter-spacing:-0.5px;">Cognix<span style="color:#15B8A6;">HR</span></div>
+        ${logoImg}
       </div>
       <div style="background:#ffffff;border-radius:16px;padding:32px;border:1px solid #e2e8f0;">
         ${bodyHtml}
       </div>
       <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:20px;">
-        CognixHR — Smarter Workforce. Stronger Future.
+        ${brandConfig.productName} — ${brandConfig.tagline}
       </p>
     </div>
   </div>`

@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { uploadToSignedUrl } from "@/lib/supabase-storage";
+import { LogoMark, Wordmark } from "@/components/brand/Logo";
+import { brandConfig }        from "@/lib/brand-config";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,10 +93,10 @@ function FieldRow({
 }
 
 const inputClass =
-  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 transition";
+  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
 
 const selectClass =
-  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 bg-white focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 transition";
+  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 bg-white focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
 
 // ---------------------------------------------------------------------------
 // Step components
@@ -388,7 +390,7 @@ function ReviewRow({ label, value }: { label: string; value?: string }) {
 function ReviewSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-gray-50 rounded-xl p-4 space-y-0">
-      <h4 className="text-xs font-semibold text-violet-600 uppercase tracking-wider mb-3">
+      <h4 className="text-xs font-semibold text-[#2E6FE6] uppercase tracking-wider mb-3">
         {title}
       </h4>
       {children}
@@ -458,7 +460,7 @@ function Step4({
         <div className="mt-0.5 shrink-0">
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500 cursor-pointer"
+            className="h-4 w-4 rounded border-gray-300 text-[#2E6FE6] focus:ring-[#2E6FE6]/30 cursor-pointer"
             checked={form.declaration}
             onChange={(e) => onDeclarationChange(e.target.checked)}
           />
@@ -479,18 +481,10 @@ function Step4({
 
 function CenterScreen({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-indigo-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 max-w-md w-full text-center">
         {children}
       </div>
-    </div>
-  );
-}
-
-function LogoMark() {
-  return (
-    <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-violet-600 text-white text-xl font-bold shadow-md">
-      E
     </div>
   );
 }
@@ -557,7 +551,7 @@ function LoadingScreen() {
   return (
     <CenterScreen>
       <div className="flex justify-center mb-4">
-        <svg className="animate-spin h-8 w-8 text-violet-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <svg className="animate-spin h-8 w-8 text-[#2E6FE6]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
@@ -596,9 +590,9 @@ function ProgressBar({ current }: { current: number }) {
                 className={[
                   "h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold mb-1 transition-all",
                   done
-                    ? "bg-violet-600 text-white"
+                    ? "bg-[#2E6FE6] text-white"
                     : active
-                    ? "bg-violet-100 text-violet-700 ring-2 ring-violet-500"
+                    ? "bg-[#EEF3FB] text-[#2E6FE6] ring-2 ring-[#2E6FE6]"
                     : "bg-gray-100 text-gray-400",
                 ].join(" ")}
               >
@@ -613,7 +607,7 @@ function ProgressBar({ current }: { current: number }) {
               <span
                 className={[
                   "text-xs hidden sm:block",
-                  active ? "text-violet-700 font-medium" : "text-gray-400",
+                  active ? "text-[#2E6FE6] font-medium" : "text-gray-400",
                 ].join(" ")}
               >
                 {s.label}
@@ -624,7 +618,7 @@ function ProgressBar({ current }: { current: number }) {
       </div>
       <div className="relative h-1.5 bg-gray-200 rounded-full overflow-hidden">
         <div
-          className="absolute left-0 top-0 h-full bg-violet-600 rounded-full transition-all duration-500"
+          className="absolute left-0 top-0 h-full bg-[#2E6FE6] rounded-full transition-all duration-500"
           style={{ width: `${((current) / (STEPS.length - 1)) * 100}%` }}
         />
       </div>
@@ -696,7 +690,7 @@ function DocSlot({
 
       <div className="shrink-0">
         {status === "uploading" ? (
-          <div className="flex items-center gap-2 text-xs text-violet-600">
+          <div className="flex items-center gap-2 text-xs text-[#2E6FE6]">
             <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -711,7 +705,7 @@ function DocSlot({
                 ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 : status === "error"
                 ? "bg-red-50 text-red-600 hover:bg-red-100"
-                : "bg-violet-600 text-white hover:bg-violet-700",
+                : "bg-[#2E6FE6] text-white hover:bg-[#1A4D8F]",
             ].join(" ")}
           >
             {status === "done" ? "Replace" : status === "error" ? "Retry" : "Upload"}
@@ -963,16 +957,17 @@ export function PreJoinPortal() {
     : "";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Top bar */}
       <header className="bg-white border-b border-gray-100 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-violet-600 flex items-center justify-center text-white text-sm font-bold shadow">
-            E
+          <LogoMark size={36} tile />
+          <div className="flex flex-col leading-tight">
+            <Wordmark height={14} />
+            <span className="text-[10px] text-gray-400 mt-0.5">
+              {meta?.company_name ?? brandConfig.productName}
+            </span>
           </div>
-          <span className="text-gray-900 font-semibold text-sm">
-            {meta?.company_name ?? "Company"}
-          </span>
           <span className="ml-auto text-xs text-gray-400 hidden sm:block">
             Pre-Join Portal
           </span>
@@ -982,7 +977,7 @@ export function PreJoinPortal() {
       <main className="max-w-2xl mx-auto px-4 py-8">
         {/* Welcome banner — only step 0 */}
         {currentStep === 0 && (
-          <div className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-2xl p-6 mb-6 text-white shadow-lg">
+          <div className="rounded-2xl p-6 mb-6 text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${brandConfig.colors.primary} 0%, ${brandConfig.colors.navy} 100%)` }}>
             <div className="flex items-start gap-4">
               <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                 <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -995,12 +990,12 @@ export function PreJoinPortal() {
                   {meta?.candidate_name ? `, ${meta.candidate_name.split(" ")[0]}` : ""}!
                 </h1>
                 {joiningDateFormatted && (
-                  <p className="text-violet-200 text-sm mt-1">
+                  <p className="text-white/75 text-sm mt-1">
                     We are excited to have you joining us on{" "}
                     <span className="text-white font-semibold">{joiningDateFormatted}</span>.
                   </p>
                 )}
-                <p className="text-violet-200 text-sm mt-2">
+                <p className="text-white/75 text-sm mt-2">
                   Please take a few minutes to fill in your details below. This helps us get
                   everything ready for your first day.
                 </p>
@@ -1095,8 +1090,8 @@ export function PreJoinPortal() {
                 className={[
                   "ml-auto flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition",
                   currentStep === STEP_DOCUMENTS && !allMandatoryUploaded
-                    ? "bg-violet-300 cursor-not-allowed"
-                    : "bg-violet-600 hover:bg-violet-700 active:bg-violet-800",
+                    ? "bg-[#2E6FE6]/40 cursor-not-allowed"
+                    : "bg-[#2E6FE6] hover:bg-[#1A4D8F] active:bg-[#163E72]",
                 ].join(" ")}
               >
                 Continue
@@ -1112,8 +1107,8 @@ export function PreJoinPortal() {
                 className={[
                   "ml-auto flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition",
                   submitting || !form.declaration || !allMandatoryUploaded
-                    ? "bg-violet-300 cursor-not-allowed"
-                    : "bg-violet-600 hover:bg-violet-700 active:bg-violet-800",
+                    ? "bg-[#2E6FE6]/40 cursor-not-allowed"
+                    : "bg-[#2E6FE6] hover:bg-[#1A4D8F] active:bg-[#163E72]",
                 ].join(" ")}
               >
                 {submitting ? (
@@ -1138,7 +1133,7 @@ export function PreJoinPortal() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6 pb-8">
-          Having trouble? Contact your HR team for assistance.
+          {brandConfig.portalHelpText}
         </p>
       </main>
     </div>
