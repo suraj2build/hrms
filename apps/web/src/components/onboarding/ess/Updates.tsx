@@ -1,17 +1,17 @@
 /**
- * Updates — onboarding activity & notifications feed.
+ * Updates — onboarding activity feed.
  *
- * Consumes the existing Notifications service (shared ['notifications'] query) and
- * presents the new hire's recent updates, surfacing onboarding-related ones first.
- * Tapping an item marks it read and follows its link. No new notification logic.
+ * Consumes structured onboarding inbox items filtered server-side by entity_type
+ * ('onboarding_session' | 'onboarding_document' | 'onboarding_checklist').
+ * No keyword matching. No URL parsing. No heuristics.
  */
 
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, Loader2, ChevronRight } from 'lucide-react'
+import { Bell, BellOff, Loader2, ChevronRight, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  useOnboardingNotifications, useMarkNotificationRead, isOnboardingRelated,
+  useOnboardingNotifications, useMarkNotificationRead, isUnread,
   type OnboardingNotification,
 } from './onboarding-data'
 
@@ -27,6 +27,14 @@ function fmtRelative(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
+function ItemIcon({ severity, itemType }: { severity: string; itemType: string }) {
+  const cls = 'mt-0.5 h-4 w-4 shrink-0'
+  if (itemType === 'action_required') return <AlertTriangle className={cn(cls, 'text-amber-500')} />
+  if (severity === 'success')         return <CheckCircle2 className={cn(cls, 'text-emerald-500')} />
+  if (severity === 'warning')         return <AlertTriangle className={cn(cls, 'text-amber-500')} />
+  return <Info className={cn(cls, 'text-[#2E6FE6]')} />
+}
+
 export function Updates({ limit = 12 }: { limit?: number }) {
   const { data, isLoading, isError } = useOnboardingNotifications()
   const markRead = useMarkNotificationRead()
@@ -34,12 +42,12 @@ export function Updates({ limit = 12 }: { limit?: number }) {
 
   const items = useMemo(() => {
     const all = data?.data ?? []
-    // Onboarding-related first, then newest — without dropping general updates.
+    // Action-required first, then newest.
     return all
       .slice()
       .sort((a, b) => {
-        const r = Number(isOnboardingRelated(b)) - Number(isOnboardingRelated(a))
-        if (r !== 0) return r
+        const r = Number(a.item_type === 'action_required') - Number(b.item_type === 'action_required')
+        if (r !== 0) return -r
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       })
       .slice(0, limit)
@@ -65,14 +73,14 @@ export function Updates({ limit = 12 }: { limit?: number }) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 p-6 text-center">
         <BellOff className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">No updates yet. We’ll let you know when there’s news.</p>
+        <p className="text-sm text-muted-foreground">No updates yet. We'll let you know when there's news.</p>
       </div>
     )
   }
 
   const handleClick = (n: OnboardingNotification) => {
-    if (!n.is_read) markRead.mutate(n.id)
-    if (n.link) navigate(n.link)
+    if (isUnread(n)) markRead.mutate(n.id)
+    if (n.action_route) navigate(n.action_route)
   }
 
   return (
@@ -83,16 +91,22 @@ export function Updates({ limit = 12 }: { limit?: number }) {
           onClick={() => handleClick(n)}
           className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50"
         >
-          <span className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', n.is_read ? 'bg-transparent' : 'bg-[#2E6FE6]')} />
-          <Bell className={cn('mt-0.5 h-4 w-4 shrink-0', n.is_read ? 'text-muted-foreground/50' : 'text-[#2E6FE6]')} />
+          <span className={cn(
+            'mt-2 h-2 w-2 shrink-0 rounded-full',
+            isUnread(n) ? 'bg-[#2E6FE6]' : 'bg-transparent',
+          )} />
+          <ItemIcon severity={n.severity} itemType={n.item_type} />
           <div className="min-w-0 flex-1">
-            <p className={cn('text-sm leading-tight', n.is_read ? 'font-medium text-foreground' : 'font-semibold text-foreground')}>
+            <p className={cn(
+              'text-sm leading-tight',
+              isUnread(n) ? 'font-semibold text-foreground' : 'font-medium text-foreground',
+            )}>
               {n.title}
             </p>
-            {n.body && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.body}</p>}
+            {n.summary && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.summary}</p>}
             <p className="mt-1 text-[10px] text-muted-foreground">{fmtRelative(n.created_at)}</p>
           </div>
-          {n.link && <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground/50" />}
+          {n.action_route && <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground/50" />}
         </button>
       ))}
     </div>

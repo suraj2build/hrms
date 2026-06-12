@@ -65,14 +65,19 @@ export interface ReadinessSummary {
   last_updated:   string
 }
 
+/** Inbox item shape (from /notifications/inbox, entity_type='onboarding_*'). */
 export interface OnboardingNotification {
-  id:         string
-  title:      string
-  body:       string
-  link?:      string | null
-  is_read:    boolean
-  created_at: string
-  event_id:   string
+  id:           string
+  title:        string
+  summary:      string
+  item_type:    string
+  severity:     string
+  status:       string         // 'unread' | 'read' | 'actioned' | 'dismissed' | 'snoozed'
+  entity_type:  string         // 'onboarding_session' | 'onboarding_document' | 'onboarding_checklist'
+  entity_id:    string | null
+  action_route: string | null
+  action_label: string | null
+  created_at:   string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -115,11 +120,8 @@ export function daysUntil(iso: string | null | undefined): number | null {
   return Math.round((end.getTime() - start.getTime()) / 86_400_000)
 }
 
-/** Heuristic: is a notification relevant to onboarding? Used to surface the
- *  most pertinent updates first without inventing a new notification category. */
-export function isOnboardingRelated(n: OnboardingNotification): boolean {
-  const hay = `${n.link ?? ''} ${n.title} ${n.body}`.toLowerCase()
-  return /onboard|document|checklist|task|verif|joining|pre-?join|welcome/.test(hay)
+export function isUnread(n: OnboardingNotification): boolean {
+  return n.status === 'unread'
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
@@ -168,11 +170,28 @@ export function useReadinessSummary(employeeId: string | null) {
   })
 }
 
+/** Fetches structured onboarding inbox items — no keyword matching, no URL parsing.
+ *  Filtered server-side to entity_type='onboarding_*' via the inbox endpoint. */
 export function useOnboardingNotifications() {
   return useQuery({
-    // Same key as the NotificationBell → one fetch feeds both.
-    queryKey: ['notifications'],
-    queryFn:  () => api.get<{ data: OnboardingNotification[]; unread_count: number }>('/notifications'),
+    queryKey: ['onboarding-inbox'],
+    queryFn:  () =>
+      // entity_type filter supported from O4.1: returns only structured onboarding items.
+      api.get<{ data: OnboardingNotification[]; total: number }>(
+        '/notifications/inbox?entity_type=onboarding_session&limit=50',
+      ).then(async r => {
+        // Also fetch document and checklist items and merge.
+        const [docs, checklists] = await Promise.all([
+          api.get<{ data: OnboardingNotification[] }>('/notifications/inbox?entity_type=onboarding_document&limit=50'),
+          api.get<{ data: OnboardingNotification[] }>('/notifications/inbox?entity_type=onboarding_checklist&limit=50'),
+        ])
+        const all = [
+          ...(r.data ?? []),
+          ...(docs.data ?? []),
+          ...(checklists.data ?? []),
+        ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        return { data: all, total: all.length }
+      }),
     staleTime: 30_000,
     refetchInterval: 60_000,
   })
@@ -196,7 +215,7 @@ export function useToggleTask(employeeId: string) {
 export function useMarkNotificationRead() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => api.post(`/notifications/${id}/read`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+    mutationFn: (id: string) => api.post(`/notifications/inbox/${id}/read`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['onboarding-inbox'] }),
   })
 }

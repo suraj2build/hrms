@@ -205,66 +205,82 @@ export function emitOnboardingChecklistCompleted(opts: {
   })
 }
 
-// ── O1.2 — Reusable notification template catalog ──────────────────────────────
+// ── O1.2 / O4.1 — Structured onboarding inbox dispatch ────────────────────────
 //
-// One template per onboarding touchpoint. Subject/body are rendered from the
-// event payload. The dispatch path is still a structured-log stub — when a real
-// provider (Resend / OneSignal / Supabase Realtime) is wired, only renderAndSend()
-// changes; these templates and the event→template mapping stay the same.
-// Future phases extend this catalog: probation_started, probation_review_due,
-// confirmation_approved. (Defined but not wired until those phases exist.)
+// Every onboarding event that reaches an employee's ESS workspace is dispatched
+// as a structured inbox_items row with entity_type, entity_id, and
+// metadata.category='onboarding'. This replaces the original log stub so
+// consumers can filter by entity_type without any keyword or URL heuristics.
+//
+// Only post-approval events dispatch to the employee inbox — pre-approval events
+// (session.created, document.uploaded) happen before the employee profile exists
+// and are handled via the email invite flow (email-service.ts / PreJoinPortal).
 
-interface NotificationTemplate {
-  code:    string
-  subject: string
-  body:    (ctx: Record<string, unknown>) => string
+interface OnboardingInboxOpts {
+  supabase:      SupabaseClient
+  tenantId:      string
+  employeeId:    string             // used to look up recipient profile UUID
+  entityType:    string             // 'onboarding_session' | 'onboarding_document' | 'onboarding_checklist'
+  entityId:      string
+  itemType:      'action_required' | 'info' | 'reminder'
+  severity:      'info' | 'warning' | 'success'
+  title:         string
+  summary:       string
+  source:        string             // 'Onboarding Engine' | 'Document Management' | 'Checklist Engine'
+  actionRoute?:  string
+  actionLabel?:  string
 }
 
-const NOTIFICATION_TEMPLATES: Record<string, NotificationTemplate> = {
-  welcome: {
-    code:    'onboarding_welcome',
-    subject: 'Welcome aboard',
-    body:    (c) => `A new onboarding has started${c.candidate_name ? ` for ${c.candidate_name}` : ''}.`,
-  },
-  documents_required: {
-    code:    'onboarding_documents_required',
-    subject: 'Documents required',
-    body:    () => 'Please upload the requested onboarding documents to proceed.',
-  },
-  verification_approved: {
-    code:    'onboarding_verification_approved',
-    subject: 'Document verified',
-    body:    (c) => `Your ${c.document_type ?? 'document'} has been verified.`,
-  },
-  verification_rejected: {
-    code:    'onboarding_verification_rejected',
-    subject: 'Document rejected',
-    body:    (c) => `Your ${c.document_type ?? 'document'} was rejected${c.reason ? `: ${c.reason}` : ''}.`,
-  },
-  checklist_assigned: {
-    code:    'onboarding_checklist_assigned',
-    subject: 'Onboarding checklist assigned',
-    body:    () => 'An onboarding checklist has been assigned to you.',
-  },
-  checklist_completed: {
-    code:    'onboarding_checklist_completed',
-    subject: 'Onboarding checklist completed',
-    body:    () => 'All mandatory onboarding tasks are complete.',
-  },
-  ready_for_joining: {
-    code:    'onboarding_ready_for_joining',
-    subject: 'Ready for joining',
-    body:    (c) => `Joining is finalised${c.employee_code ? ` (${c.employee_code})` : ''}.`,
-  },
+/** Insert a structured onboarding inbox item for the employee.
+ *  Silently skips if no profile is found — never throws. */
+async function dispatchOnboardingInboxItem(opts: OnboardingInboxOpts): Promise<void> {
+  try {
+    // Resolve the profile UUID from the employee record.
+    const { data: profile } = await opts.supabase
+      .from('profiles')
+      .select('id')
+      .eq('employee_id', opts.employeeId)
+      .eq('tenant_id', opts.tenantId)
+      .maybeSingle()
+
+    if (!profile?.id) return  // employee not yet linked to a profile — skip silently
+
+    await opts.supabase.from('inbox_items').insert({
+      tenant_id:    opts.tenantId,
+      recipient_id: profile.id,
+      item_type:    opts.itemType,
+      severity:     opts.severity,
+      title:        opts.title,
+      summary:      opts.summary,
+      entity_type:  opts.entityType,
+      entity_id:    opts.entityId,
+      action_route: opts.actionRoute ?? '/ess/onboarding',
+      action_label: opts.actionLabel ?? 'View onboarding',
+      status:       'unread',
+      metadata: {
+        category: 'onboarding',
+        source:   opts.source,
+      },
+    })
+  } catch (err) {
+    logWarn('inbox_dispatch_failed', opts.entityId, err)
+  }
 }
 
-/** Event type → notification template key. Only mapped events dispatch. */
-const EVENT_TEMPLATE_MAP: Partial<Record<HrmsEventType, keyof typeof NOTIFICATION_TEMPLATES>> = {
-  'onboarding.session.created':       'welcome',
-  'onboarding.document.verified':     'verification_approved',
-  'onboarding.document.rejected':     'verification_rejected',
-  'onboarding.checklist.completed':   'checklist_completed',
-  'onboarding.joining.completed':     'ready_for_joining',
+/** For document events: look up linked_employee_id from the session (set only
+ *  after approval — silently skips if the session is still pre-approval). */
+async function resolveSessionEmployeeId(
+  supabase: SupabaseClient,
+  sessionId: string,
+  tenantId:  string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('onboarding_sessions')
+    .select('linked_employee_id')
+    .eq('id', sessionId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  return (data as any)?.linked_employee_id ?? null
 }
 
 // ── Handler registration (call once at startup) ────────────────────────────────
@@ -295,11 +311,63 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     }
   })
 
-  // ── O1.2 — Dispatch templated notifications for mapped events ──────────────
-  eventBus.onMany(ALL_ONBOARDING_EVENTS, async (event) => {
-    const templateKey = EVENT_TEMPLATE_MAP[event.type]
-    if (!templateKey) return
-    renderAndSend(templateKey, event.tenantId, event.payload as Record<string, unknown>)
+  // ── O4.1 — Structured inbox dispatch for employee-facing onboarding events ──
+  // Post-approval events only (pre-approval events have no employee profile yet).
+
+  eventBus.on('onboarding.document.verified', async (event) => {
+    const { tenantId, sessionId, documentId, documentType } = event.payload
+    const employeeId = await resolveSessionEmployeeId(supabase, sessionId, tenantId)
+    if (!employeeId) return
+    await dispatchOnboardingInboxItem({
+      supabase, tenantId, employeeId,
+      entityType: 'onboarding_document', entityId: documentId,
+      itemType: 'info', severity: 'success',
+      title: 'Document verified',
+      summary: `Your ${documentType ?? 'document'} has been reviewed and verified.`,
+      source: 'Document Management',
+      actionRoute: '/ess/onboarding', actionLabel: 'View your onboarding',
+    })
+  })
+
+  eventBus.on('onboarding.document.rejected', async (event) => {
+    const { tenantId, sessionId, documentId, documentType, reason } = event.payload
+    const employeeId = await resolveSessionEmployeeId(supabase, sessionId, tenantId)
+    if (!employeeId) return
+    await dispatchOnboardingInboxItem({
+      supabase, tenantId, employeeId,
+      entityType: 'onboarding_document', entityId: documentId,
+      itemType: 'action_required', severity: 'warning',
+      title: 'Document needs attention',
+      summary: `Your ${documentType ?? 'document'} was rejected${reason ? `: ${reason}` : ''}. Your HR team will advise next steps.`,
+      source: 'Document Management',
+      actionRoute: '/ess/onboarding', actionLabel: 'View your documents',
+    })
+  })
+
+  eventBus.on('onboarding.checklist.completed', async (event) => {
+    const { tenantId, employeeId, checklistId } = event.payload
+    await dispatchOnboardingInboxItem({
+      supabase, tenantId, employeeId,
+      entityType: 'onboarding_checklist', entityId: checklistId,
+      itemType: 'info', severity: 'success',
+      title: 'Onboarding checklist complete',
+      summary: 'All mandatory onboarding tasks are done. Great work!',
+      source: 'Checklist Engine',
+      actionRoute: '/ess/onboarding', actionLabel: 'View your journey',
+    })
+  })
+
+  eventBus.on('onboarding.joining.completed', async (event) => {
+    const { tenantId, sessionId, employeeId, employeeCode } = event.payload
+    await dispatchOnboardingInboxItem({
+      supabase, tenantId, employeeId,
+      entityType: 'onboarding_session', entityId: sessionId,
+      itemType: 'info', severity: 'success',
+      title: 'Joining finalised',
+      summary: `Welcome to the team${employeeCode ? ` (${employeeCode})` : ''}. Your onboarding is complete.`,
+      source: 'Onboarding Engine',
+      actionRoute: '/ess/onboarding', actionLabel: 'View your workspace',
+    })
   })
 
   // ── approved → compute + persist onboarding trust score ────────────────────
@@ -422,7 +490,15 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       await supabase.from('employee_onboarding_tasks').insert(taskRows)
 
       // Notify the new joiner that a checklist is now assigned.
-      renderAndSend('checklist_assigned', tenantId, { employee_id: employeeId })
+      await dispatchOnboardingInboxItem({
+        supabase, tenantId, employeeId,
+        entityType: 'onboarding_checklist', entityId: checklist.id,
+        itemType: 'action_required', severity: 'info',
+        title: 'Your onboarding checklist is ready',
+        summary: 'Your personalised onboarding checklist has been set up. Complete your tasks to get fully set up.',
+        source: 'Checklist Engine',
+        actionRoute: '/ess/onboarding', actionLabel: 'View my checklist',
+      })
     } catch (err) {
       logWarn('checklist_auto_create_failed', event.payload.sessionId, err)
     }
@@ -499,28 +575,6 @@ function normalizeLifecycleEvent(event: HrmsEvent<HrmsEventType>): LifecycleEven
   }
 }
 
-/** Render a template and dispatch it. Structured-log stub — swap for a provider. */
-function renderAndSend(
-  templateKey: keyof typeof NOTIFICATION_TEMPLATES,
-  tenantId:    string,
-  ctx:         Record<string, unknown>,
-): void {
-  const template = NOTIFICATION_TEMPLATES[templateKey]
-  if (!template) return
-  try {
-    console.log(JSON.stringify({
-      level:         'info',
-      service:       'onboarding-notification',
-      template_code: template.code,
-      tenant_id:     tenantId,
-      subject:       template.subject,
-      body:          template.body(ctx),
-      ...ctx,
-    }))
-  } catch {
-    // Notification rendering/dispatch must never affect the lifecycle flow.
-  }
-}
 
 function logWarn(event: string, entityId: string, err: unknown): void {
   console.log(JSON.stringify({

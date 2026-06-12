@@ -38,7 +38,7 @@ import { TasksPanel }        from '@/components/onboarding/ess/TasksPanel'
 import { DocumentsPanel }    from '@/components/onboarding/ess/DocumentsPanel'
 import {
   useOnboardingStatus, useOnboardingChecklist, useReadinessSummary,
-  useOnboardingNotifications, isDocVerified, daysUntil,
+  useOnboardingNotifications, isDocVerified, isUnread, daysUntil,
 } from '@/components/onboarding/ess/onboarding-data'
 
 // ── Section heading inside a tab ──────────────────────────────────────────────
@@ -115,7 +115,7 @@ export function EssOnboarding() {
 
   const { tasks, stats } = checklistQ
   const readiness   = readinessQ.data ?? null
-  const unread      = (notifQ.data?.data ?? []).filter(n => !n.is_read).length
+  const unread      = (notifQ.data?.data ?? []).filter(isUnread).length
   const joiningDays = daysUntil(checklistQ.checklist?.start_date ?? checklistQ.checklist?.target_completion_date)
 
   return (

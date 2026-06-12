@@ -68,14 +68,14 @@ export function NextSteps({
         title: t.title, hint: t.description ?? undefined, task: t,
       }))
 
-    // 3. Action notifications addressed to this employee that carry a link.
+    // 3. Action-required inbox items with a navigation target.
     notifications
-      .filter(n => !n.is_read && n.link)
+      .filter(n => n.status === 'unread' && n.item_type === 'action_required' && n.action_route)
       .slice(0, 3)
       .forEach(n => out.push({
         key: `notif-${n.id}`, kind: 'notification', priority: 2,
-        title: n.title, hint: n.body,
-        ctaLabel: 'Open', onClick: () => onNavigate(n.link as string),
+        title: n.title, hint: n.summary,
+        ctaLabel: n.action_label ?? 'Open', onClick: () => onNavigate(n.action_route as string),
       }))
 
     // 4. Optional tasks the employee owns.

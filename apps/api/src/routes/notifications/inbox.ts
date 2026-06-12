@@ -39,9 +39,10 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
   // ── GET /notifications/inbox ──────────────────────────────────────────────────
   fastify.get('/', auth, async (req: any, reply) => {
     const querySchema = z.object({
-      status: z.string().optional(),
-      item_type: z.string().optional(),
-      limit: z.coerce.number().int().min(1).max(200).default(50),
+      status:      z.string().optional(),
+      item_type:   z.string().optional(),
+      entity_type: z.string().optional(),
+      limit:  z.coerce.number().int().min(1).max(200).default(50),
       offset: z.coerce.number().int().min(0).default(0),
     })
 
@@ -50,7 +51,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { status, item_type, limit, offset } = parsed.data
+    const { status, item_type, entity_type, limit, offset } = parsed.data
     const now = new Date().toISOString()
 
     let q = fastify.supabase
@@ -62,8 +63,9 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (status) q = q.eq('status', status)
-    if (item_type) q = q.eq('item_type', item_type)
+    if (status)      q = q.eq('status', status)
+    if (item_type)   q = q.eq('item_type', item_type)
+    if (entity_type) q = q.eq('entity_type', entity_type)
 
     const { data, error, count } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
