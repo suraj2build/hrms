@@ -41,6 +41,7 @@ const OPTIONAL_MODULES = [
   'letters',
   'notifications',
   'leave-scheduler',
+  'attendance-api-scheduler',
   'anomaly-handler',
   'intelligence',
   'event-bus-automation',

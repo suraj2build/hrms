@@ -161,6 +161,7 @@ const EssOperationalCenter        = lazy(() => import('@/pages/ess/EssOperationa
 
 // Operational center pages — standalone fullscreen domain overviews
 const AttendanceOperationsCenter  = lazy(() => import('@/pages/attendance/AttendanceOperationsCenter').then(m => ({ default: m.AttendanceOperationsCenter })))
+const AttendanceApiConnector      = lazy(() => import('@/pages/attendance/AttendanceApiConnector').then(m => ({ default: m.AttendanceApiConnector })))
 const WorkforceOperationsCenter   = lazy(() => import('@/pages/workforce/WorkforceOperationsCenter').then(m => ({ default: m.WorkforceOperationsCenter })))
 
 // Phase 14 — Enterprise Payroll Operationalization
@@ -536,7 +537,8 @@ export default function App() {
 
                 {/* ── Operational center pages ─────────────────────────────────── */}
                 <Route path="/admin/workforce/center"  element={<WorkforceOperationsCenter />} />
-                <Route path="/admin/attendance/center" element={<AttendanceOperationsCenter />} />
+                <Route path="/admin/attendance/center"       element={<AttendanceOperationsCenter />} />
+                <Route path="/admin/attendance/api-connector" element={<AttendanceApiConnector />} />
                 <Route path="/admin/payroll/center"    element={<PayrollControlCenter />} />
                 <Route path="/admin/payroll/hub"       element={<PayrollHub />} />
 

@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ClipboardEdit, Clock, ShieldAlert,
   RefreshCw, TrendingDown, Users, Zap, Activity,
-  CalendarClock, Lock, Upload, BookOpen, History, X,
+  CalendarClock, Lock, Upload, BookOpen, History, X, Link2,
 } from 'lucide-react'
 
 import { PageContainer }             from '@/components/layout/PageContainer'
@@ -371,6 +371,16 @@ export function AttendanceOperationsCenter() {
                   </div>
                 </button>
               </div>
+
+              {/* API Connector shortcut */}
+              <button type="button" onClick={() => navigate('/admin/attendance/api-connector')}
+                className="w-full flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/[0.04] hover:bg-muted/10 px-3 py-2.5 text-left transition-colors">
+                <Link2 className="h-4 w-4 text-teal-500 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium">API Connector</p>
+                  <p className="text-[10px] text-muted-foreground">Connect external punch-data APIs &amp; configure auto-fetch</p>
+                </div>
+              </button>
             </div>
           </SectionCard>
 

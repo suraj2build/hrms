@@ -13,7 +13,8 @@ import correlationPlugin from './plugins/correlation.js'
 // before the first HTTP request arrives.
 import { registerNotificationHandlers } from './lib/notification-service.js'
 import { registerAnomalyHandlers }       from './lib/anomaly-handler.js'
-import { registerLeaveScheduler }        from './lib/leave-scheduler.js'
+import { registerLeaveScheduler }            from './lib/leave-scheduler.js'
+import { registerAttendanceApiScheduler }    from './lib/attendance-api-scheduler.js'
 import { registerEventBusAutomation }    from './lib/event-bus-automation.js'
 import { registerSlaScanner }            from './lib/sla-scanner.js'
 import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
@@ -134,6 +135,7 @@ import attendanceTimelineIntelligenceRoute from './routes/attendance/timeline-in
 import attendanceDebugRawRoute             from './routes/attendance/debug-raw.js'
 import attendanceReconcileValidateRoute   from './routes/attendance/reconciliation-validate.js'
 import anomalyReconcileRoute              from './routes/attendance/anomaly-reconcile.js'
+import attendanceApiSourcesRoute          from './routes/attendance/api-sources.js'
 
 // Routes — Payroll
 import payrollRoutes                       from './routes/payroll/index.js'
@@ -386,6 +388,11 @@ async function start() {
     registerLeaveScheduler(fastify.supabase)
   }, fastify.log)
 
+  // Attendance API scheduler — polls external punch-data sources on their configured intervals
+  await safeRegisterModule('attendance-api-scheduler', async () => {
+    registerAttendanceApiScheduler(fastify.supabase)
+  }, fastify.log)
+
   // SLA scanner — proactively checks for overdue leave/correction requests every 4 hours
   await safeRegisterModule('sla-scanner', async () => {
     registerSlaScanner(fastify.supabase)
@@ -564,6 +571,7 @@ async function start() {
   await fastify.register(attendanceDebugRawRoute)             // GET  /attendance/debug/raw?month=YYYY-MM
   await fastify.register(attendanceReconcileValidateRoute)    // GET  /attendance/validate/reconcile?month=YYYY-MM
   await fastify.register(anomalyReconcileRoute)               // POST /attendance/anomalies/reconcile
+  await fastify.register(attendanceApiSourcesRoute)           // GET/POST/PUT/DELETE /attendance/api-sources
 
   // ── Phase 16: Attendance Session Intelligence ────────────────────────────────
   await fastify.register(workSessionsRoute)              // GET/POST /attendance/sessions/*, /work-session-anomalies/*
