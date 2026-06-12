@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { logAction } from '../../lib/audit-service.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -85,6 +86,17 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'advance_salary_requests',
+      recordId:    (data as any).id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  parsed.data.employee_id,
+      newData:     { ...parsed.data, status: 'pending' },
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -161,6 +173,16 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'advance_salary_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  adv.employee_id ?? null,
+      newData:     { status: 'approved', approved_amount: parsed.data.approved_amount },
+    })
+
     return reply.send({ message: 'Advance approved', advance_id: id, schedules_created: schedules.length })
   })
 
@@ -188,6 +210,16 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'advance_salary_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'rejected', rejection_reason: parsed.data.rejection_reason },
+    })
+
     return reply.send({ message: 'Advance rejected' })
   })
 
@@ -218,6 +250,16 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'advance_salary_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'disbursed', disbursed_amount: parsed.data.disbursed_amount, disbursed_date: parsed.data.disbursed_date },
+    })
+
     return reply.send({ message: 'Advance disbursed' })
   })
 

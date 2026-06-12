@@ -28,6 +28,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { resolveEmployeeStatutoryParams } from '../../../lib/statutory/statutory-governance.js'
+import { logAction } from '../../../lib/audit-service.js'
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,16 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'payroll_statutory_settings',
+      recordId:    (data as any)?.id ?? req.tenantId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.send({ data })
   })
 

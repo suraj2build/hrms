@@ -1,6 +1,72 @@
 import type { FastifyInstance } from 'fastify'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function auditRoutes(fastify: FastifyInstance) {
+
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RPT-04 — Generic audit_logs viewer (DB-change trail from logAction)
+  // GET /enterprise/audit/logs?table_name=&action=&performed_by=&record_id=&from=&to=&limit=&offset=
+  // ═══════════════════════════════════════════════════════════════════════════
+  fastify.get('/audit/logs', hrAdminAuth, async (req: any, reply) => {
+    const q = req.query as Record<string, string | undefined>
+    const tenantId = req.tenantId
+
+    const limit  = Math.min(Math.max(Number(q.limit ?? 100), 1), 200)
+    const offset = Math.max(Number(q.offset ?? 0), 0)
+
+    let qb = fastify.supabase
+      .from('audit_logs')
+      .select('id, table_name, record_id, action, performed_by, on_behalf_of, old_data, new_data, created_at', { count: 'exact' })
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (q.table_name && q.table_name !== 'all')   qb = qb.eq('table_name', q.table_name)
+    if (q.action && q.action !== 'all')           qb = qb.eq('action', q.action)
+    if (q.performed_by)                           qb = qb.eq('performed_by', q.performed_by)
+    if (q.record_id)                              qb = qb.eq('record_id', q.record_id)
+    if (q.from)                                   qb = qb.gte('created_at', q.from)
+    if (q.to)                                     qb = qb.lte('created_at', q.to)
+
+    const { data, error, count } = await qb
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    const rows = (data ?? []) as any[]
+
+    // Enrich performed_by → actor name (best-effort).
+    const actorIds = Array.from(new Set(rows.map(r => r.performed_by).filter(Boolean)))
+    const nameMap = new Map<string, string>()
+    if (actorIds.length > 0) {
+      const { data: profs } = await fastify.supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', actorIds)
+        .eq('tenant_id', tenantId)
+      for (const p of (profs ?? [])) nameMap.set((p as any).id, (p as any).full_name ?? '')
+    }
+
+    const enriched = rows.map(r => ({
+      ...r,
+      performed_by_name: r.performed_by ? (nameMap.get(r.performed_by) ?? null) : null,
+    }))
+
+    return reply.send({ data: enriched, total: count ?? enriched.length, limit, offset })
+  })
+
+  // GET /enterprise/audit/logs/tables — distinct table_names present (for the filter dropdown)
+  fastify.get('/audit/logs/tables', hrAdminAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('audit_logs')
+      .select('table_name')
+      .eq('tenant_id', req.tenantId)
+      .limit(5000)
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    const tables = Array.from(new Set((data ?? []).map((r: any) => r.table_name))).sort()
+    return reply.send({ data: tables })
+  })
 
   // GET /enterprise/audit/export
   fastify.get('/audit/export', { preHandler: [fastify.authenticate] }, async (req, reply) => {

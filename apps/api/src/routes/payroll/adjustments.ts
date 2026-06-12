@@ -23,6 +23,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { notifyHrAdmins } from '../../lib/notify.js'
+import { logAction } from '../../lib/audit-service.js'
 
 export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -168,6 +169,16 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'payroll_adjustments',
+      recordId:    (data as any).id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  parsed.data.employee_id,
+      newData:     { ...parsed.data, status: 'pending' },
+    })
+
     return reply.code(201).send({
       data,
       period_frozen: !!freeze,
@@ -213,6 +224,17 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'payroll_adjustments',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (data as any).employee_id ?? null,
+      newData:     { status: 'approved', apply_to_month: parsed.data.apply_to_month ?? null, notes: parsed.data.notes ?? null },
+    })
+
     return reply.send({ data })
   })
 
@@ -236,6 +258,17 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .single()
 
     if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND_OR_INVALID_STATUS' })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'payroll_adjustments',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (data as any).employee_id ?? null,
+      newData:     { status: 'rejected', reason: parsed.data.reason },
+    })
+
     return reply.send({ data })
   })
 
@@ -295,6 +328,17 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'payroll_adjustments',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (existing as any).employee_id ?? null,
+      newData:     { status: 'applied', applied_run_id: parsed.data.run_id, apply_to_month: parsed.data.apply_to_month ?? (run as any).month },
+    })
+
     return reply.send({ data, run_month: (run as any).month })
   })
 }

@@ -495,6 +495,7 @@ export const DOMAINS: Domain[] = [
     matchPrefixes: [
       '/admin/reports',
       '/admin/explorer',   // Data Explorer lives outside /admin/reports — keep Reports tab active
+      '/admin/audit-trail',
     ],
     defaultRoute: '/admin/reports',
     groups: [
@@ -515,6 +516,7 @@ export const DOMAINS: Domain[] = [
         label: 'Operational',
         items: [
           { id: 'reports-operational', label: 'Operational Reports', route: '/admin/reports/operational',              icon: FileText,  keywords: ['headcount report', 'attendance report', 'salary register', 'statutory register', 'muster roll', 'leave register', 'payroll register'] },
+          { id: 'audit-trail',         label: 'Audit Trail',         route: '/admin/audit-trail',                      icon: ScrollText, keywords: ['audit log', 'audit trail', 'change history', 'who changed', 'activity log', 'system log', 'data changes', 'compliance log'] },
         ],
       },
     ],
