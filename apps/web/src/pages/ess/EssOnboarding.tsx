@@ -1,298 +1,69 @@
 /**
  * EssOnboarding — /ess/onboarding
  *
- * O4: Employee-facing self-service onboarding workspace.
+ * O4: Employee-first, mobile-first onboarding workspace.
  *
- * This is purely an experience layer. It consumes existing services and adds
- * NO new business logic, workflow engine, or onboarding status model:
- *   - Readiness + Trust  → ReadinessCard            (GET /employees/:id/readiness)
- *   - Tasks / Checklist  → existing checklist API   (GET/PATCH /onboarding/employees/:id/...)
- *   - Documents          → onboarding-status API    (GET /employees/:id/onboarding-status)
- *   - Timeline           → LifecycleTimeline         (GET /employees/:id/onboarding-timeline)
+ * A pure experience layer that composes existing CognixHR services — it adds NO
+ * new business logic, workflow engine, or onboarding status model:
  *
- * The employee actions only their own items; everything else is read-only.
+ *   - Readiness + Trust  → ReadinessCard / useReadinessSummary  (GET /employees/:id/readiness)
+ *   - Tasks / Checklist  → TasksPanel + useToggleTask           (GET/PATCH /onboarding/employees/:id/...)
+ *   - Documents          → DocumentsPanel                       (GET /employees/:id/onboarding-status)
+ *   - Notifications      → Updates                              (GET /notifications, shared with the bell)
+ *   - Timeline           → LifecycleTimeline                    (GET /employees/:id/onboarding-timeline)
+ *
+ * Layout mirrors best-in-class onboarding journeys (Darwinbox / Deel / Rippling /
+ * HiBob): a progress hero, a prioritised "Next steps" queue, and mobile-first
+ * tabbed sections — each badged with its live count.
  */
 
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
-  Loader2, CheckCircle2, Circle, FileText, Milestone,
-  PartyPopper, ClipboardList, Lock, FileCheck2, FileClock, FileX2,
+  Loader2, ListChecks, FileText, Bell, Milestone, Sparkles,
 } from 'lucide-react'
-import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
-import { Badge }         from '@/components/ui/badge'
-import { api }           from '@/lib/api/client'
-import { useAuthStore }  from '@/stores/authStore'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn }            from '@/lib/utils'
-import { ReadinessCard }      from '@/components/onboarding/ReadinessCard'
-import { LifecycleTimeline }  from '@/components/onboarding/LifecycleTimeline'
+import { useAuthStore }  from '@/stores/authStore'
 
-// ── Types (mirror existing API shapes) ────────────────────────────────────────
+import { ReadinessCard }     from '@/components/onboarding/ReadinessCard'
+import { LifecycleTimeline } from '@/components/onboarding/LifecycleTimeline'
+import { OnboardingHero }    from '@/components/onboarding/ess/OnboardingHero'
+import { NextSteps }         from '@/components/onboarding/ess/NextSteps'
+import { Updates }           from '@/components/onboarding/ess/Updates'
+import { TasksPanel }        from '@/components/onboarding/ess/TasksPanel'
+import { DocumentsPanel }    from '@/components/onboarding/ess/DocumentsPanel'
+import {
+  useOnboardingStatus, useOnboardingChecklist, useReadinessSummary,
+  useOnboardingNotifications, isDocVerified, daysUntil,
+} from '@/components/onboarding/ess/onboarding-data'
 
-interface ChecklistTask {
-  id:               string
-  title:            string
-  description:      string | null
-  is_mandatory:     boolean
-  sort_order:       number
-  category:         string | null
-  assigned_to_role: string | null
-  status:           string
-  notes:            string | null
-  completed_at:     string | null
-}
+// ── Section heading inside a tab ──────────────────────────────────────────────
 
-interface Checklist {
-  id:                      string
-  employee_id:             string
-  status:                  string
-  start_date:              string | null
-  target_completion_date:  string | null
-  completed_at:            string | null
-  employee_onboarding_tasks: ChecklistTask[]
-}
-
-interface OnboardingStatusDoc {
-  id:                string
-  document_type:     string
-  extraction_status: string
-  uploaded_at:       string | null
-}
-
-interface OnboardingStatus {
-  session:   { id: string; status: string } | null
-  draft:     { id: string; status: string } | null
-  documents: { total: number; extracted: number; failed: number; items: OnboardingStatusDoc[] }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const DOC_TYPE_LABEL: Record<string, string> = {
-  cv: 'CV / Resume', resume: 'Resume',
-  pan: 'PAN card', aadhaar: 'Aadhaar', passport: 'Passport',
-  cheque: 'Cancelled cheque', bank_proof: 'Bank proof',
-  photo: 'Passport photo', offer_letter: 'Offer letter',
-  experience_letter: 'Experience letter', relieving_letter: 'Relieving letter',
-  salary_slip: 'Salary slip', driving_license: 'Driving licence',
-}
-
-function docLabel(t: string): string {
-  return DOC_TYPE_LABEL[t] ?? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-/** Tasks the employee themselves can action vs. tasks owned by another team. */
-function isEmployeeActionable(role: string | null): boolean {
-  if (!role) return true
-  const r = role.toLowerCase()
-  return r === 'employee' || r === 'self' || r === 'candidate' || r === 'new_hire'
-}
-
-// ── Tasks section ─────────────────────────────────────────────────────────────
-
-function TaskRow({
-  task, employeeId,
-}: { task: ChecklistTask; employeeId: string }) {
-  const qc = useQueryClient()
-  const actionable = isEmployeeActionable(task.assigned_to_role)
-  const done       = task.status === 'completed' || task.status === 'skipped'
-
-  const mutation = useMutation({
-    mutationFn: (next: 'completed' | 'pending') =>
-      api.patch(`/onboarding/employees/${employeeId}/tasks/${task.id}`, { status: next }),
-    onSuccess: () => {
-      // Completing a task moves readiness + timeline — refresh those too.
-      qc.invalidateQueries({ queryKey: ['ess-onboarding-checklist', employeeId] })
-      qc.invalidateQueries({ queryKey: ['readiness', employeeId] })
-      qc.invalidateQueries({ queryKey: ['lifecycle-timeline', employeeId] })
-    },
-    onError: (e: any) => toast.error(e?.message ?? 'Could not update task'),
-  })
-
-  const toggle = () => {
-    if (!actionable) return
-    mutation.mutate(done ? 'pending' : 'completed')
-  }
-
+function SectionTitle({
+  icon: Icon, title, hint,
+}: { icon: React.ComponentType<{ className?: string }>; title: string; hint?: string }) {
   return (
-    <div className={cn(
-      'flex items-start gap-3 rounded-lg border border-border bg-card px-3 py-2.5',
-      done && 'bg-muted/40',
+    <div className="mb-3 flex items-center gap-2">
+      <Icon className="h-4 w-4 text-[#2E6FE6]" />
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      {hint && <span className="text-xs text-muted-foreground">· {hint}</span>}
+    </div>
+  )
+}
+
+function TabCount({ n, active }: { n: number; active?: boolean }) {
+  if (!n) return null
+  return (
+    <span className={cn(
+      'ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums',
+      active ? 'bg-[#2E6FE6] text-white' : 'bg-muted-foreground/15 text-muted-foreground',
     )}>
-      <button
-        onClick={toggle}
-        disabled={!actionable || mutation.isPending}
-        aria-label={done ? 'Mark incomplete' : 'Mark complete'}
-        className={cn(
-          'mt-0.5 shrink-0 transition-colors',
-          actionable ? 'cursor-pointer' : 'cursor-default',
-        )}
-      >
-        {mutation.isPending
-          ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          : done
-          ? <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-          : actionable
-          ? <Circle className="h-5 w-5 text-muted-foreground hover:text-[#2E6FE6]" />
-          : <Lock className="h-4 w-4 text-muted-foreground/60 mt-0.5" />
-        }
-      </button>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={cn(
-            'text-sm font-medium',
-            done ? 'text-muted-foreground line-through' : 'text-foreground',
-          )}>
-            {task.title}
-          </span>
-          {task.is_mandatory && !done && (
-            <Badge variant="warning" className="text-[10px] py-0">Required</Badge>
-          )}
-          {task.category && (
-            <Badge variant="secondary" className="text-[10px] py-0">{task.category}</Badge>
-          )}
-        </div>
-        {task.description && (
-          <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
-        )}
-        {!actionable && (
-          <p className="text-[11px] text-muted-foreground/70 mt-1 flex items-center gap-1">
-            <Lock className="h-3 w-3" />
-            Handled by your {task.assigned_to_role} team
-            {done && ' — done'}
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function TasksSection({ employeeId }: { employeeId: string }) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['ess-onboarding-checklist', employeeId],
-    queryFn:  () => api.get<{ data: Checklist[] }>(`/onboarding/employees/${employeeId}/checklist`).then(r => r.data),
-    enabled:  !!employeeId,
-    staleTime: 30_000,
-  })
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading your tasks…
-      </div>
-    )
-  }
-  if (isError) {
-    return (
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        Could not load your onboarding tasks.
-      </div>
-    )
-  }
-
-  const checklist = (data ?? [])[0]
-  const tasks = (checklist?.employee_onboarding_tasks ?? []).slice().sort((a, b) => a.sort_order - b.sort_order)
-
-  if (!checklist || tasks.length === 0) {
-    return (
-      <div className="rounded-lg border border-border bg-muted/30 p-6 text-center">
-        <ClipboardList className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">No onboarding tasks assigned yet. Your HR team will set these up.</p>
-      </div>
-    )
-  }
-
-  const mandatory      = tasks.filter(t => t.is_mandatory)
-  const mandatoryDone  = mandatory.filter(t => t.status === 'completed' || t.status === 'skipped').length
-  const pct            = mandatory.length > 0 ? Math.round((mandatoryDone / mandatory.length) * 100) : 100
-  const myOpen         = tasks.filter(t => isEmployeeActionable(t.assigned_to_role) && t.status !== 'completed' && t.status !== 'skipped').length
-
-  return (
-    <div className="space-y-3">
-      {/* Progress header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{mandatoryDone}/{mandatory.length} required complete</span>
-          {myOpen > 0 && (
-            <Badge variant="info" className="text-[10px] py-0">{myOpen} action{myOpen !== 1 ? 's' : ''} for you</Badge>
-          )}
-        </div>
-        <span className="text-xs font-semibold tabular-nums text-foreground">{pct}%</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-border overflow-hidden">
-        <div
-          className={cn('h-full rounded-full transition-all duration-500', pct === 100 ? 'bg-emerald-500' : 'bg-[#2E6FE6]')}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-
-      {/* Task list */}
-      <div className="space-y-2 pt-1">
-        {tasks.map(t => (
-          <TaskRow key={t.id} task={t} employeeId={employeeId} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ── Documents section ─────────────────────────────────────────────────────────
-
-function DocStatusBadge({ status }: { status: string }) {
-  if (status === 'completed' || status === 'extracted') {
-    return <Badge variant="success" className="text-[10px] py-0 gap-1"><FileCheck2 className="h-3 w-3" />Verified</Badge>
-  }
-  if (status === 'failed') {
-    return <Badge variant="destructive" className="text-[10px] py-0 gap-1"><FileX2 className="h-3 w-3" />Action needed</Badge>
-  }
-  return <Badge variant="secondary" className="text-[10px] py-0 gap-1"><FileClock className="h-3 w-3" />Processing</Badge>
-}
-
-function DocumentsSection({ docs }: { docs: OnboardingStatusDoc[] }) {
-  if (docs.length === 0) {
-    return (
-      <div className="rounded-lg border border-border bg-muted/30 p-6 text-center">
-        <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-        <p className="text-sm text-muted-foreground">No documents on file yet.</p>
-      </div>
-    )
-  }
-  const sorted = docs.slice().sort((a, b) => docLabel(a.document_type).localeCompare(docLabel(b.document_type)))
-  return (
-    <div className="space-y-2">
-      {sorted.map(d => (
-        <div key={d.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
-          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="text-sm text-foreground flex-1 min-w-0 truncate">{docLabel(d.document_type)}</span>
-          <DocStatusBadge status={d.extraction_status} />
-        </div>
-      ))}
-      <p className="text-[11px] text-muted-foreground pt-1">
-        Documents are reviewed by HR. If something needs attention, your HR team will reach out.
-      </p>
-    </div>
-  )
-}
-
-// ── Section wrapper ───────────────────────────────────────────────────────────
-
-function Section({
-  title, icon: Icon, count, children,
-}: { title: string; icon: React.ComponentType<{ className?: string }>; count?: number; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4 sm:p-5 space-y-3">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 text-[#2E6FE6]" />
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        {typeof count === 'number' && count > 0 && (
-          <span className="text-xs text-muted-foreground">({count})</span>
-        )}
-      </div>
-      {children}
-    </div>
+      {n}
+    </span>
   )
 }
 
@@ -300,77 +71,146 @@ function Section({
 
 export function EssOnboarding() {
   const { profile } = useAuthStore()
+  const navigate    = useNavigate()
   const employeeId  = profile?.employee_id ?? null
   const firstName   = profile?.full_name?.split(' ')[0] ?? null
 
-  const { data: status, isLoading } = useQuery({
-    queryKey: ['ess-onboarding-status', employeeId],
-    queryFn:  () => api.get<{ data: OnboardingStatus | null }>(`/employees/${employeeId}/onboarding-status`).then(r => r.data),
-    enabled:  !!employeeId,
-    staleTime: 60_000,
-  })
+  const [tab, setTab] = useState('overview')
 
+  const statusQ    = useOnboardingStatus(employeeId)
+  const checklistQ = useOnboardingChecklist(employeeId)
+  const readinessQ = useReadinessSummary(employeeId)
+  const notifQ     = useOnboardingNotifications()
+
+  // ── Not linked to an employee record yet ──
   if (!employeeId) {
     return (
       <PageContainer size="medium">
         <PageHeader title="My Onboarding" subtitle="Your onboarding journey" />
-        <div className="rounded-lg border border-border bg-muted/30 p-6 text-sm text-muted-foreground text-center">
+        <div className="rounded-lg border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
           Your account isn’t linked to an employee record yet. Please contact HR.
         </div>
       </PageContainer>
     )
   }
 
-  if (isLoading) {
+  // ── First load ──
+  if (statusQ.isLoading && checklistQ.isLoading) {
     return (
       <PageContainer size="medium">
         <PageHeader title="My Onboarding" subtitle="Your onboarding journey" />
-        <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground text-sm">
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading your onboarding workspace…
         </div>
       </PageContainer>
     )
   }
 
-  const sessionComplete = status?.session?.status === 'employee_created' || status?.draft?.status === 'completed'
-  const docs = status?.documents?.items ?? []
+  // ── Derived values for the hero + tab counts ──
+  const status         = statusQ.data
+  const docs           = status?.documents?.items ?? []
+  const docsVerified   = docs.filter(d => isDocVerified(d.extraction_status)).length
+  const sessionComplete =
+    status?.session?.status === 'employee_created' || status?.draft?.status === 'completed'
+
+  const { tasks, stats } = checklistQ
+  const readiness   = readinessQ.data ?? null
+  const unread      = (notifQ.data?.data ?? []).filter(n => !n.is_read).length
+  const joiningDays = daysUntil(checklistQ.checklist?.start_date ?? checklistQ.checklist?.target_completion_date)
 
   return (
-    <PageContainer size="medium" spacing="loose">
+    <PageContainer size="medium" spacing="normal">
       <PageHeader
         breadcrumb={[{ label: 'Employee Portal' }, { label: 'Onboarding' }]}
         title={firstName ? `Welcome aboard, ${firstName}` : 'My Onboarding'}
         subtitle="Everything you need to get set up for your first days — in one place."
       />
 
-      {/* Completed celebration banner */}
-      {sessionComplete && (
-        <div className="rounded-xl bg-gradient-to-r from-[#2E6FE6] to-[#15B8A6] px-5 py-4 text-white flex items-center gap-3">
-          <PartyPopper className="h-6 w-6 shrink-0" />
-          <div>
-            <p className="font-semibold text-sm">You’re all set!</p>
-            <p className="text-xs text-white/80 mt-0.5">Your onboarding is complete. Anything below is just for your reference.</p>
-          </div>
-        </div>
-      )}
+      <OnboardingHero
+        firstName={firstName}
+        readinessScore={readiness?.overall_score ?? null}
+        readinessLabel={readiness?.status ?? null}
+        tasksPct={stats.pct}
+        tasksDone={stats.mandatoryDone}
+        tasksTotal={stats.mandatory.length}
+        docsVerified={docsVerified}
+        docsTotal={docs.length}
+        joiningInDays={joiningDays}
+        complete={sessionComplete}
+      />
 
-      {/* Readiness + Trust (engine-computed, explainable) */}
-      <ReadinessCard employeeId={employeeId} />
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
+        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl p-1">
+          <TabsTrigger value="overview" className="shrink-0">
+            <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Overview
+          </TabsTrigger>
+          <TabsTrigger value="tasks" className="shrink-0">
+            <ListChecks className="mr-1.5 h-3.5 w-3.5" /> Tasks
+            <TabCount n={stats.myOpen.length} active={tab === 'tasks'} />
+          </TabsTrigger>
+          <TabsTrigger value="documents" className="shrink-0">
+            <FileText className="mr-1.5 h-3.5 w-3.5" /> Documents
+            <TabCount n={docs.length} active={tab === 'documents'} />
+          </TabsTrigger>
+          <TabsTrigger value="updates" className="shrink-0">
+            <Bell className="mr-1.5 h-3.5 w-3.5" /> Updates
+            <TabCount n={unread} active={tab === 'updates'} />
+          </TabsTrigger>
+          <TabsTrigger value="journey" className="shrink-0">
+            <Milestone className="mr-1.5 h-3.5 w-3.5" /> Journey
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Self-service tasks */}
-      <Section title="Your Onboarding Checklist" icon={ClipboardList}>
-        <TasksSection employeeId={employeeId} />
-      </Section>
+        {/* Overview — next steps + readiness detail */}
+        <TabsContent value="overview" className="space-y-5">
+          <section>
+            <SectionTitle icon={Sparkles} title="Next steps" hint="What needs you right now" />
+            <NextSteps
+              employeeId={employeeId}
+              tasks={tasks}
+              docs={docs}
+              blockingItems={readiness?.blocking_items ?? []}
+              notifications={notifQ.data?.data ?? []}
+              onOpenTab={setTab}
+              onNavigate={navigate}
+            />
+          </section>
+          <section>
+            <SectionTitle icon={Sparkles} title="Your readiness" hint="How ready you are to start" />
+            <ReadinessCard employeeId={employeeId} />
+          </section>
+        </TabsContent>
 
-      {/* Documents */}
-      <Section title="Your Documents" icon={FileText} count={docs.length}>
-        <DocumentsSection docs={docs} />
-      </Section>
+        {/* Tasks */}
+        <TabsContent value="tasks">
+          <SectionTitle icon={ListChecks} title="Your onboarding checklist" />
+          <TasksPanel
+            employeeId={employeeId}
+            tasks={tasks}
+            isLoading={checklistQ.isLoading}
+            isError={checklistQ.isError}
+            stats={stats}
+          />
+        </TabsContent>
 
-      {/* Journey timeline */}
-      <Section title="Your Journey" icon={Milestone}>
-        <LifecycleTimeline employeeId={employeeId} />
-      </Section>
+        {/* Documents */}
+        <TabsContent value="documents">
+          <SectionTitle icon={FileText} title="Your documents" hint={`${docsVerified}/${docs.length} verified`} />
+          <DocumentsPanel docs={docs} />
+        </TabsContent>
+
+        {/* Updates / notifications */}
+        <TabsContent value="updates">
+          <SectionTitle icon={Bell} title="Updates" hint="News and reminders for you" />
+          <Updates />
+        </TabsContent>
+
+        {/* Journey timeline */}
+        <TabsContent value="journey">
+          <SectionTitle icon={Milestone} title="Your journey" hint="Every milestone so far" />
+          <LifecycleTimeline employeeId={employeeId} />
+        </TabsContent>
+      </Tabs>
     </PageContainer>
   )
 }
