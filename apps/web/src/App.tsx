@@ -58,6 +58,8 @@ const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m
 const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
 const AuditTrail        = lazy(() => import('@/pages/admin/AuditTrail').then(m => ({ default: m.AuditTrail })))
 const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').then(m => ({ default: m.AdminRecruitment })))
+const AdminPipeline     = lazy(() => import('@/pages/admin/AdminPipeline').then(m => ({ default: m.AdminPipeline })))
+const AdminCandidates   = lazy(() => import('@/pages/admin/AdminCandidates').then(m => ({ default: m.AdminCandidates })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
@@ -732,8 +734,8 @@ export default function App() {
                 <Route path="/admin/assets"                          element={<AssetMaster />} />
                 <Route path="/admin/recruitment"                     element={<Navigate to="/admin/recruitment/requisitions" replace />} />
                 <Route path="/admin/recruitment/requisitions"       element={<AdminRecruitment />} />
-                <Route path="/admin/recruitment/pipeline"           element={<AdminComingSoon />} />
-                <Route path="/admin/recruitment/candidates"         element={<AdminComingSoon />} />
+                <Route path="/admin/recruitment/pipeline"           element={<AdminPipeline />} />
+                <Route path="/admin/recruitment/candidates"         element={<AdminCandidates />} />
                 <Route path="/admin/recruitment/interviews"         element={<AdminComingSoon />} />
                 <Route path="/admin/recruitment/question-bank"      element={<AdminComingSoon />} />
                 {/* AI Workforce OS — Intelligence Layer */}
