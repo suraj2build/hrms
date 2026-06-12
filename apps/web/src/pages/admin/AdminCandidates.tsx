@@ -12,7 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Users2, Plus, RefreshCw, Search, Star, ExternalLink,
   Mail, Phone, Building2, Briefcase, ChevronRight, X,
-  Globe, Linkedin, FileText,
+  Globe, Linkedin, FileText, CalendarCheck, Video, MapPin,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -58,6 +58,18 @@ interface CandidateApplication {
   created_at:     string
   job_requisitions: { id: string; title: string } | null
   recruitment_pipeline_stages: { id: string; name: string; color: string } | null
+}
+
+interface CandidateInterview {
+  id:             string
+  round_number:   number
+  title:          string | null
+  interview_type: string
+  scheduled_at:   string | null
+  status:         string
+  duration_mins:  number
+  applications: { job_requisitions: { title: string } | null } | null
+  interview_panel: { profiles: { full_name: string } | null }[]
 }
 
 interface CandForm {
@@ -150,6 +162,13 @@ export function AdminCandidates() {
     enabled:  !!detailCand,
   })
   const candidateApps = appsData?.data ?? []
+
+  const { data: ivsData } = useQuery<{ data: CandidateInterview[] }>({
+    queryKey: ['recruitment', 'interviews', 'candidate', detailCand?.id],
+    queryFn:  () => api.get(`/recruitment/interviews?candidate_id=${detailCand?.id}&limit=50`),
+    enabled:  !!detailCand,
+  })
+  const candidateInterviews = ivsData?.data ?? []
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -558,6 +577,55 @@ export function AdminCandidates() {
                   <div className="rounded-lg bg-muted/40 px-3 py-2">
                     <p className="text-xs text-muted-foreground font-medium mb-1">Notes</p>
                     <p className="text-sm">{detailCand.notes}</p>
+                  </div>
+                )}
+
+                {/* Interview Timeline */}
+                {candidateInterviews.length > 0 && (
+                  <div>
+                    <p className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                      <CalendarCheck className="h-4 w-4 text-muted-foreground" />
+                      Interview Timeline ({candidateInterviews.length})
+                    </p>
+                    <div className="space-y-2">
+                      {candidateInterviews.map(iv => {
+                        const ivStatusMeta: Record<string, string> = {
+                          scheduled: 'text-blue-600 bg-blue-50 border-blue-200',
+                          completed: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+                          cancelled: 'text-gray-500 bg-gray-50 border-gray-200',
+                          no_show:   'text-red-600 bg-red-50 border-red-200',
+                        }
+                        return (
+                          <div key={iv.id} className="rounded-lg border border-border p-2.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-medium">
+                                  R{iv.round_number}{iv.title ? ` · ${iv.title}` : ''}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {iv.applications?.job_requisitions?.title ?? '—'}
+                                </p>
+                              </div>
+                              <Badge variant="outline" className={cn('text-[10px] shrink-0', ivStatusMeta[iv.status] ?? '')}>
+                                {iv.status.replace('_', '-')}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
+                              {iv.scheduled_at && (
+                                <span>{new Date(iv.scheduled_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} · {new Date(iv.scheduled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                              )}
+                              <span className="flex items-center gap-0.5">
+                                {iv.interview_type === 'video' ? <Video className="h-2.5 w-2.5" /> : iv.interview_type === 'in_person' ? <MapPin className="h-2.5 w-2.5" /> : null}
+                                {iv.interview_type}
+                              </span>
+                              {iv.interview_panel.length > 0 && (
+                                <span>{iv.interview_panel.map(p => p.profiles?.full_name?.split(' ')[0]).filter(Boolean).join(', ')}</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
 

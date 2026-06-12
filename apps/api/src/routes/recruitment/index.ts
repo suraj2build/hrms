@@ -640,4 +640,307 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     return reply.send({ requisitions: reqStats, applications: appStats })
   })
+
+  // ── Interviewers (profiles list for panel assignment) ─────────────────────
+
+  fastify.get('/interviewers', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('profiles')
+      .select('id, full_name, role, employees(id, employee_code, designations(title))')
+      .eq('tenant_id', req.tenantId)
+      .order('full_name', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── Interview Rounds ──────────────────────────────────────────────────────
+
+  fastify.get('/interviews', auth, async (req: any, reply) => {
+    const querySchema = z.object({
+      application_id:  z.string().uuid().optional(),
+      candidate_id:    z.string().uuid().optional(),
+      requisition_id:  z.string().uuid().optional(),
+      status:          z.string().optional(),
+      from:            z.string().optional(),
+      to:              z.string().optional(),
+      limit:           z.coerce.number().int().min(1).max(200).default(50),
+      offset:          z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    let q = fastify.supabase
+      .from('interview_rounds')
+      .select(`
+        *,
+        applications(
+          id, status,
+          candidates(id, first_name, last_name, email, current_company, current_title),
+          job_requisitions(id, title)
+        ),
+        interview_panel(interviewer_id, profiles:profiles(id, full_name))
+      `, { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('scheduled_at', { ascending: true })
+
+    if (parsed.data.status)         q = q.eq('status',         parsed.data.status)
+    if (parsed.data.application_id) q = q.eq('application_id', parsed.data.application_id)
+    if (parsed.data.from)           q = q.gte('scheduled_at',  parsed.data.from)
+    if (parsed.data.to)             q = q.lte('scheduled_at',  parsed.data.to)
+
+    // Candidate-level filter — need app IDs first
+    if (parsed.data.candidate_id) {
+      const { data: apps } = await fastify.supabase
+        .from('applications')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .eq('candidate_id', parsed.data.candidate_id)
+      const appIds = (apps ?? []).map((a: any) => a.id)
+      if (appIds.length === 0) return reply.send({ data: [], total: 0 })
+      q = q.in('application_id', appIds)
+    }
+
+    if (parsed.data.requisition_id) {
+      const { data: apps } = await fastify.supabase
+        .from('applications')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .eq('requisition_id', parsed.data.requisition_id)
+      const appIds = (apps ?? []).map((a: any) => a.id)
+      if (appIds.length === 0) return reply.send({ data: [], total: 0 })
+      q = q.in('application_id', appIds)
+    }
+
+    q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
+  })
+
+  fastify.get('/interviews/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data, error } = await fastify.supabase
+      .from('interview_rounds')
+      .select(`
+        *,
+        applications(
+          id, status, candidate_id,
+          candidates(id, first_name, last_name, email, phone, current_company, current_title),
+          job_requisitions(id, title)
+        ),
+        interview_panel(interviewer_id, profiles:profiles(id, full_name)),
+        interview_scores(*)
+      `)
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interview not found' })
+    return reply.send({ data })
+  })
+
+  fastify.post('/interviews', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      application_id:  z.string().uuid(),
+      stage_id:        z.string().uuid().optional().nullable(),
+      round_number:    z.number().int().min(1).default(1),
+      title:           z.string().optional().nullable(),
+      interview_type:  z.enum(['video','phone','in_person','assignment']).default('video'),
+      scheduled_at:    z.string().optional().nullable(),
+      duration_mins:   z.number().int().min(15).max(480).default(60),
+      meet_link:       z.string().optional().nullable(),
+      notes:           z.string().optional().nullable(),
+      interviewer_ids: z.array(z.string().uuid()).optional().default([]),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { interviewer_ids, ...roundData } = parsed.data
+
+    const { data: round, error: roundErr } = await fastify.supabase
+      .from('interview_rounds')
+      .insert({
+        ...roundData,
+        tenant_id:  req.tenantId,
+        status:     'scheduled',
+        created_by: req.userId,
+      })
+      .select()
+      .single()
+
+    if (roundErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: roundErr.message })
+
+    // Assign panel members
+    if (interviewer_ids.length > 0) {
+      await fastify.supabase
+        .from('interview_panel')
+        .insert(interviewer_ids.map(iid => ({
+          tenant_id:      req.tenantId,
+          round_id:       (round as any).id,
+          interviewer_id: iid,
+        })))
+    }
+
+    // Move application to interviewing status if still at applied/screening
+    await fastify.supabase
+      .from('applications')
+      .update({ status: 'interviewing' })
+      .eq('id', parsed.data.application_id)
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['applied', 'screening'])
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'interview_rounds',
+      recordId:    (round as any).id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     roundData,
+    })
+
+    return reply.code(201).send({ data: round })
+  })
+
+  fastify.put('/interviews/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      title:           z.string().optional().nullable(),
+      interview_type:  z.enum(['video','phone','in_person','assignment']).optional(),
+      scheduled_at:    z.string().optional().nullable(),
+      duration_mins:   z.number().int().min(15).max(480).optional(),
+      meet_link:       z.string().optional().nullable(),
+      notes:           z.string().optional().nullable(),
+      interviewer_ids: z.array(z.string().uuid()).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { interviewer_ids, ...roundData } = parsed.data
+
+    if (Object.keys(roundData).length > 0) {
+      const { error } = await fastify.supabase
+        .from('interview_rounds')
+        .update(roundData)
+        .eq('id', id)
+        .eq('tenant_id', req.tenantId)
+
+      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    }
+
+    // Replace panel if provided
+    if (interviewer_ids !== undefined) {
+      await fastify.supabase
+        .from('interview_panel')
+        .delete()
+        .eq('round_id', id)
+        .eq('tenant_id', req.tenantId)
+
+      if (interviewer_ids.length > 0) {
+        await fastify.supabase
+          .from('interview_panel')
+          .insert(interviewer_ids.map(iid => ({
+            tenant_id:      req.tenantId,
+            round_id:       id,
+            interviewer_id: iid,
+          })))
+      }
+    }
+
+    return reply.send({ message: 'Interview updated' })
+  })
+
+  fastify.delete('/interviews/:id', hrAdminAuth, async (req: any, reply) => {
+    const { data: existing } = await fastify.supabase
+      .from('interview_rounds')
+      .select('status')
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interview not found' })
+    if ((existing as any).status !== 'scheduled') {
+      return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only scheduled interviews can be deleted' })
+    }
+
+    const { error } = await fastify.supabase
+      .from('interview_rounds')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    return reply.send({ message: 'Interview deleted' })
+  })
+
+  // Status transitions
+
+  async function transitionInterview(req: any, reply: any, status: string, requireScheduled = false) {
+    const { id } = req.params as { id: string }
+
+    const { data: existing } = await fastify.supabase
+      .from('interview_rounds')
+      .select('status')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interview not found' })
+    if (requireScheduled && (existing as any).status !== 'scheduled') {
+      return reply.code(422).send({ error: 'INVALID_STATE', message: 'Interview is not in scheduled status' })
+    }
+
+    const { error } = await fastify.supabase
+      .from('interview_rounds')
+      .update({ status })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'interview_rounds', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status } })
+    return reply.send({ message: `Interview marked as ${status}` })
+  }
+
+  fastify.post('/interviews/:id/complete', hrAdminAuth, async (req: any, reply) =>
+    transitionInterview(req, reply, 'completed', true))
+
+  fastify.post('/interviews/:id/cancel', hrAdminAuth, async (req: any, reply) =>
+    transitionInterview(req, reply, 'cancelled', true))
+
+  fastify.post('/interviews/:id/no-show', hrAdminAuth, async (req: any, reply) =>
+    transitionInterview(req, reply, 'no_show', true))
+
+  // ── Application Timeline ──────────────────────────────────────────────────
+
+  fastify.get('/applications/:id/timeline', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const [{ data: rounds }, { data: activity }] = await Promise.all([
+      fastify.supabase
+        .from('interview_rounds')
+        .select(`
+          *,
+          interview_panel(interviewer_id, profiles:profiles(id, full_name)),
+          interview_scores(interviewer_id, overall_score, recommendation, submitted_at)
+        `)
+        .eq('application_id', id)
+        .eq('tenant_id', req.tenantId)
+        .order('round_number', { ascending: true }),
+      fastify.supabase
+        .from('application_activity_log')
+        .select(`
+          *,
+          from_stage:recruitment_pipeline_stages!application_activity_log_from_stage_id_fkey(id, name, color),
+          to_stage:recruitment_pipeline_stages!application_activity_log_to_stage_id_fkey(id, name, color),
+          actor:profiles(id, full_name)
+        `)
+        .eq('application_id', id)
+        .eq('tenant_id', req.tenantId)
+        .order('created_at', { ascending: true }),
+    ])
+
+    return reply.send({ rounds: rounds ?? [], activity: activity ?? [] })
+  })
 }

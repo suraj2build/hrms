@@ -259,7 +259,7 @@ export const DOMAINS: Domain[] = [
           { id: 'req-requisitions', label: 'Requisitions',  route: '/admin/recruitment/requisitions',  icon: Briefcase,     keywords: ['job opening', 'vacancy', 'position', 'hire', 'JD', 'job description', 'requisition'] },
           { id: 'req-pipeline',     label: 'Pipeline',      route: '/admin/recruitment/pipeline',      icon: Kanban,        keywords: ['kanban', 'pipeline', 'applicant tracking', 'candidate stages', 'ATS'] },
           { id: 'req-candidates',   label: 'Candidates',    route: '/admin/recruitment/candidates',    icon: Users2,        keywords: ['applicants', 'candidates', 'talent pool', 'resumes', 'CVs'] },
-          { id: 'req-interviews',   label: 'Interviews',    route: '/admin/recruitment/interviews',    icon: CalendarCheck, keywords: ['schedule interview', 'panel', 'rounds', 'interview calendar'], badge: 'Soon' },
+          { id: 'req-interviews',   label: 'Interviews',    route: '/admin/recruitment/interviews',    icon: CalendarCheck, keywords: ['schedule interview', 'panel', 'rounds', 'interview calendar'] },
           { id: 'req-qbank',        label: 'Question Bank', route: '/admin/recruitment/question-bank', icon: HelpCircle,    keywords: ['questions', 'interview questions', 'question bank', 'behavioural', 'technical questions'], badge: 'Soon' },
         ],
       },

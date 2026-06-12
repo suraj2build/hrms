@@ -172,7 +172,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('sites')
       .insert({ ...parsed.data, tenant_id: req.tenantId })
-      .select(SELECT_COLS)
+      .select('*')
       .single()
 
     if (error) {
@@ -271,7 +271,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .update(parsed.data)
       .eq('id', (req.params as any).id)
       .eq('tenant_id', req.tenantId)
-      .select(SELECT_COLS)
+      .select('*')
       .single()
 
     if (error) {
