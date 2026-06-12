@@ -169,9 +169,17 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Strip migration-dependent optional columns when null/undefined so the
+    // insert never references a column that may not exist in older deployments
+    // (migration 166 → state_code, migration 217 → holiday_group_id).
+    const { state_code, holiday_group_id, ...coreInsert } = parsed.data
+    const insertPayload: Record<string, unknown> = { ...coreInsert, tenant_id: req.tenantId }
+    if (state_code    != null) insertPayload.state_code      = state_code
+    if (holiday_group_id != null) insertPayload.holiday_group_id = holiday_group_id
+
     const { data, error } = await fastify.supabase
       .from('sites')
-      .insert({ ...parsed.data, tenant_id: req.tenantId })
+      .insert(insertPayload)
       .select('*')
       .single()
 
@@ -266,9 +274,16 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Strip migration-dependent optional columns when null/undefined (same
+    // resilience pattern as INSERT above — migration 166/217 may be absent).
+    const { state_code, holiday_group_id, ...coreUpdate } = parsed.data
+    const updatePayload: Record<string, unknown> = { ...coreUpdate }
+    if (state_code       != null) updatePayload.state_code       = state_code
+    if (holiday_group_id != null) updatePayload.holiday_group_id = holiday_group_id
+
     const { data, error } = await fastify.supabase
       .from('sites')
-      .update(parsed.data)
+      .update(updatePayload)
       .eq('id', (req.params as any).id)
       .eq('tenant_id', req.tenantId)
       .select('*')
