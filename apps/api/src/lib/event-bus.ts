@@ -511,6 +511,32 @@ export interface HrmsEventMap {
     createdBy:      string
   }
 
+  /** A document was uploaded to an onboarding session */
+  'onboarding.document.uploaded': {
+    tenantId:     string
+    sessionId:    string
+    documentId:   string
+    documentType: string
+    uploadedBy:   string
+  }
+
+  /** A document passed identity/extraction and is verified */
+  'onboarding.document.verified': {
+    tenantId:     string
+    sessionId:    string
+    documentId:   string
+    documentType: string
+  }
+
+  /** A document was rejected (identity mismatch / extraction failure) */
+  'onboarding.document.rejected': {
+    tenantId:     string
+    sessionId:    string
+    documentId:   string
+    documentType: string
+    reason:       string
+  }
+
   /** AI extraction complete — draft profile ready for HR review */
   'onboarding.session.extraction_complete': {
     tenantId:  string
@@ -537,6 +563,15 @@ export interface HrmsEventMap {
     draftId:    string
     rejectedBy: string
     reason:     string
+  }
+
+  /** Joining finalised — the employee record (joining) is created and ready */
+  'onboarding.joining.completed': {
+    tenantId:     string
+    sessionId:    string
+    employeeId:   string
+    employeeCode: string
+    joiningDate:  string | null
   }
 
   /** All mandatory onboarding checklist tasks completed */

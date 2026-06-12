@@ -598,6 +598,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       employeeCode,
       approvedBy:    req.userId,
       exceptionPass,
+      joiningDate:   draft.joining_date ?? null,
       correlationId: (req as any).correlationId,
     })
 

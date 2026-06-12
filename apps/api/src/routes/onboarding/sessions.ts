@@ -6,6 +6,9 @@ import { mergeExtractions } from '../../lib/onboarding/profile-merger.js'
 import {
   emitOnboardingSessionCreated,
   emitOnboardingExtractionComplete,
+  emitOnboardingDocumentUploaded,
+  emitOnboardingDocumentVerified,
+  emitOnboardingDocumentRejected,
 } from '../../lib/onboarding-orchestrator.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
@@ -234,6 +237,15 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    emitOnboardingDocumentUploaded({
+      tenantId:      req.tenantId,
+      sessionId:     id,
+      documentId:    (data as any).id,
+      documentType:  document_type,
+      uploadedBy:    req.userId,
+      correlationId: (req as any).correlationId,
+    })
 
     return reply.code(201).send({ data })
   })
@@ -532,6 +544,11 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
                 .from('onboarding_documents')
                 .update({ extraction_status: 'rejected', extraction_error: reason })
                 .eq('id', doc.id)
+              emitOnboardingDocumentRejected({
+                tenantId: req.tenantId, sessionId, documentId: doc.id,
+                documentType: doc.document_type, reason,
+                correlationId: (req as any).correlationId,
+              })
               continue  // ← skip adding to extractionResults — no data from this doc
             }
 
@@ -553,6 +570,11 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
                   .from('onboarding_documents')
                   .update({ extraction_status: 'rejected', extraction_error: reason })
                   .eq('id', doc.id)
+                emitOnboardingDocumentRejected({
+                  tenantId: req.tenantId, sessionId, documentId: doc.id,
+                  documentType: doc.document_type, reason,
+                  correlationId: (req as any).correlationId,
+                })
                 continue
               }
             }
@@ -563,6 +585,11 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
             documentId: doc.id,
             documentType: doc.document_type,
             fields: extractionResult.fields as any,
+          })
+          emitOnboardingDocumentVerified({
+            tenantId: req.tenantId, sessionId, documentId: doc.id,
+            documentType: doc.document_type,
+            correlationId: (req as any).correlationId,
           })
           documentsExtracted++
         }

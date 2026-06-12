@@ -62,9 +62,13 @@ export enum EventType {
 
   // ── Onboarding lifecycle ──────────────────────────────────────────────────────
   ONBOARDING_SESSION_CREATED             = 'onboarding.session.created',
+  ONBOARDING_DOCUMENT_UPLOADED           = 'onboarding.document.uploaded',
+  ONBOARDING_DOCUMENT_VERIFIED           = 'onboarding.document.verified',
+  ONBOARDING_DOCUMENT_REJECTED           = 'onboarding.document.rejected',
   ONBOARDING_SESSION_EXTRACTION_COMPLETE = 'onboarding.session.extraction_complete',
   ONBOARDING_SESSION_APPROVED            = 'onboarding.session.approved',
   ONBOARDING_SESSION_REJECTED            = 'onboarding.session.rejected',
+  ONBOARDING_JOINING_COMPLETED           = 'onboarding.joining.completed',
   ONBOARDING_CHECKLIST_COMPLETED         = 'onboarding.checklist.completed',
 
   // ── Fabric & Orchestration ────────────────────────────────────────────────────
