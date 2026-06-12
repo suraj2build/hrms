@@ -601,7 +601,7 @@ export const DOMAINS: Domain[] = [
           { id: 'workforce-search',      label: 'People Search',          route: '/admin/intelligence/search',            icon: Search,     keywords: ['find employee', 'search employee', 'directory search', 'people finder', 'advanced search'] },
           { id: 'uat-certification',     label: 'UAT Testing',            route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'], keywords: ['UAT', 'user acceptance testing', 'certification', 'QA testing'] },
           { id: 'narratives',            label: 'Narratives',             route: '/admin/intelligence/narratives',        icon: FileText,   keywords: ['AI narratives', 'story', 'written insights', 'AI summary', 'narrative report'] },
-          { id: 'workforce-intel',       label: 'Analytics',              route: '/admin/intelligence',                   icon: Brain,      keywords: ['workforce intelligence', 'advanced analytics', 'AI analytics', 'intelligence'] },
+          { id: 'workforce-intel',       label: 'Analytics',              route: '/admin/intelligence',  exact: true,    icon: Brain,      keywords: ['workforce intelligence', 'advanced analytics', 'AI analytics', 'intelligence'] },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity,   keywords: ['ops health', 'operations status', 'platform health', 'system status'] },
         ],
       },
