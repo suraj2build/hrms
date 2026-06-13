@@ -59,6 +59,7 @@ import separationWorkflowRoutes from './routes/employees/separation-workflow.js'
 import assetsRoutes              from './routes/assets/index.js'
 import intelligenceRoutes        from './routes/intelligence/index.js'
 import complianceRoutes          from './routes/compliance/index.js'
+import workforceRoutes           from './routes/workforce/index.js'
 import accessCardsRoutes       from './routes/employees/access-cards.js'
 import jobHistoryRoutes        from './routes/employees/job-history.js'
 import compensationRoutes      from './routes/employees/compensation.js'
@@ -514,6 +515,7 @@ async function start() {
   await fastify.register(assetsRoutes)             // /assets/* + /employees/:id/assets[/outstanding-count]
   await fastify.register(intelligenceRoutes, { prefix: '/intelligence' }) // AI Workforce OS — read-only intelligence
   await fastify.register(complianceRoutes, { prefix: '/compliance' })     // P2.1 statutory deadline calendar
+  await fastify.register(workforceRoutes, { prefix: '/workforce' })       // P3.4 lifecycle expiry register
   await fastify.register(accessCardsRoutes)
   await fastify.register(jobHistoryRoutes)
   await fastify.register(compensationRoutes)
