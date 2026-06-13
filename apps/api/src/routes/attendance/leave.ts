@@ -691,10 +691,14 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   // ── GET /attendance/leave/team-balances ──────────────────────────────────────
   // Manager-facing: returns leave balances for all direct reports of the caller.
   // Also accessible to hr_admin / super_admin (unrestricted).
+  // P6.10: hierarchy fixed to use employees.manager_id (canonical P6.0a model).
+  // P6.10: ?include_liability=true computes liability_value = balance × daily_rate
+  //        (daily_rate = ctc_monthly / 26) using existing employee_compensations.
   fastify.get('/attendance/leave/team-balances', auth, async (req: any, reply) => {
-    const year       = new Date().getFullYear()
-    const tenantId   = req.tenantId as string
-    const isHrAdmin  = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const year             = new Date().getFullYear()
+    const tenantId         = req.tenantId as string
+    const isHrAdmin        = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const includeLiability = (req.query as any).include_liability === 'true'
 
     let teamEmployeeIds: string[] = []
 
@@ -707,7 +711,8 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .eq('status', 'active')
       teamEmployeeIds = ((allEmps ?? []) as any[]).map(e => e.id)
     } else {
-      // Manager: resolve their own employee_id, then find direct reports
+      // Manager: use the canonical hierarchy (employees.manager_id / status)
+      // that is the single source of truth established in P6.0a.
       const { data: callerProfile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
@@ -721,11 +726,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
       const { data: directReports } = await fastify.supabase
         .from('employees')
-        .select('id, job_history!job_history_employee_id_fkey(manager_id, is_current)')
+        .select('id')
         .eq('tenant_id', tenantId)
+        .eq('manager_id', callerProfile.employee_id)
         .eq('status', 'active')
-        .eq('job_history.manager_id', callerProfile.employee_id)
-        .eq('job_history.is_current', true)
 
       teamEmployeeIds = ((directReports ?? []) as any[]).map(e => e.id)
     }
@@ -758,6 +762,24 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .gt('days', 0),
     ])
 
+    // Optional: fetch compensation to compute leave liability value
+    const compData = includeLiability
+      ? (await fastify.supabase
+          .from('employee_compensations')
+          .select('employee_id, ctc_monthly')
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+          .in('employee_id', teamEmployeeIds)).data
+      : null
+
+    // ctc_monthly lookup: employee_id → daily_rate (ctc_monthly / 26)
+    const dailyRateByEmp: Record<string, number> = {}
+    if (includeLiability && compData) {
+      for (const c of (compData as any[])) {
+        if (c.ctc_monthly) dailyRateByEmp[c.employee_id] = Number(c.ctc_monthly) / 26
+      }
+    }
+
     // Build accrual lookup: employeeId → leaveTypeId → total days
     const accrualMap: Record<string, Record<string, number>> = {}
     for (const row of (accrualRows ?? []) as any[]) {
@@ -770,26 +792,42 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const balanceByEmp: Record<string, any[]> = {}
     for (const b of (balances ?? []) as any[]) {
       if (!balanceByEmp[b.employee_id]) balanceByEmp[b.employee_id] = []
-      balanceByEmp[b.employee_id].push({
+      const bal   = Number(b.balance)
+      const daily = dailyRateByEmp[b.employee_id] ?? null
+      const row: Record<string, any> = {
         leave_type_id:     b.leave_type_id,
         leave_type_name:   (b.leave_types as any)?.name ?? 'Unknown',
         is_paid:           (b.leave_types as any)?.is_paid ?? false,
-        balance:           Number(b.balance),
+        balance:           bal,
         annual_entitlement: accrualMap[b.employee_id]?.[b.leave_type_id] ?? null,
-        used:              (accrualMap[b.employee_id]?.[b.leave_type_id] ?? 0) - Number(b.balance),
-      })
+        used:              (accrualMap[b.employee_id]?.[b.leave_type_id] ?? 0) - bal,
+      }
+      if (includeLiability) {
+        row.daily_rate     = daily !== null ? Math.round(daily * 100) / 100 : null
+        row.liability_value = daily !== null ? Math.round(bal * daily * 100) / 100 : null
+      }
+      balanceByEmp[b.employee_id].push(row)
     }
 
     // Assemble final response
     const result = ((employees ?? []) as any[]).map(emp => {
       const dept = Array.isArray(emp.departments) ? emp.departments[0] : emp.departments
-      return {
+      const empBalances = balanceByEmp[emp.id] ?? []
+      const entry: Record<string, any> = {
         employee_id:   emp.id,
         employee_code: emp.employee_code,
         name:          `${emp.first_name} ${emp.last_name}`,
         department:    dept?.name ?? null,
-        balances:      balanceByEmp[emp.id] ?? [],
+        balances:      empBalances,
       }
+      if (includeLiability) {
+        const daily = dailyRateByEmp[emp.id] ?? null
+        entry.daily_rate       = daily !== null ? Math.round(daily * 100) / 100 : null
+        entry.total_liability  = daily !== null
+          ? Math.round(empBalances.reduce((s: number, b: any) => s + (b.is_paid ? b.balance : 0), 0) * daily * 100) / 100
+          : null
+      }
+      return entry
     })
 
     return reply.send({ data: result, year })

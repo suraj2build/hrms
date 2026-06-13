@@ -105,8 +105,14 @@ const OvertimeManagement  = lazy(() => import('@/pages/attendance/OvertimeManage
 const PayrollReadiness    = lazy(() => import('@/pages/attendance/PayrollReadiness').then(m => ({ default: m.PayrollReadiness })))
 const LeaveAccrualAdmin   = lazy(() => import('@/pages/attendance/LeaveAccrualAdmin').then(m => ({ default: m.LeaveAccrualAdmin })))
 const TeamLeaveBalances   = lazy(() => import('@/pages/manager/TeamLeaveBalances').then(m => ({ default: m.TeamLeaveBalances })))
-const ManagerCompensation = lazy(() => import('@/pages/manager/ManagerCompensation').then(m => ({ default: m.ManagerCompensation })))
-const ManagerTeamLifecycle = lazy(() => import('@/pages/manager/ManagerTeamLifecycle').then(m => ({ default: m.ManagerTeamLifecycle })))
+const ManagerCompensation         = lazy(() => import('@/pages/manager/ManagerCompensation').then(m => ({ default: m.ManagerCompensation })))
+const ManagerTeamLifecycle        = lazy(() => import('@/pages/manager/ManagerTeamLifecycle').then(m => ({ default: m.ManagerTeamLifecycle })))
+const ManagerTeamOvertimeRequests = lazy(() => import('@/pages/manager/ManagerTeamOvertimeRequests').then(m => ({ default: m.ManagerTeamOvertimeRequests })))
+const ManagerTeamCompOff          = lazy(() => import('@/pages/manager/ManagerTeamCompOff').then(m => ({ default: m.ManagerTeamCompOff })))
+const ManagerTeamRegularisation   = lazy(() => import('@/pages/manager/ManagerTeamRegularisation').then(m => ({ default: m.ManagerTeamRegularisation })))
+const ManagerTeamAssets           = lazy(() => import('@/pages/manager/ManagerTeamAssets').then(m => ({ default: m.ManagerTeamAssets })))
+const ManagerTeamHelpdesk         = lazy(() => import('@/pages/manager/ManagerTeamHelpdesk').then(m => ({ default: m.ManagerTeamHelpdesk })))
+const ManagerTeamPayrollCost      = lazy(() => import('@/pages/manager/ManagerTeamPayrollCost').then(m => ({ default: m.ManagerTeamPayrollCost })))
 const CollisionLog        = lazy(() => import('@/pages/attendance/CollisionLog').then(m => ({ default: m.CollisionLog })))
 const OptionalHolidayPool = lazy(() => import('@/pages/attendance/OptionalHolidayPool').then(m => ({ default: m.OptionalHolidayPool })))
 const LeavePolicyEngine   = lazy(() => import('@/pages/attendance/LeavePolicyEngine').then(m => ({ default: m.LeavePolicyEngine })))
@@ -798,6 +804,12 @@ export default function App() {
                 <Route path="/manager/team/leave-balances"   element={<TeamLeaveBalances />} />
                 <Route path="/manager/team/compensation"     element={<ManagerCompensation />} />
                 <Route path="/manager/team/lifecycle"        element={<ManagerTeamLifecycle />} />
+                <Route path="/manager/team/overtime"         element={<ManagerTeamOvertimeRequests />} />
+                <Route path="/manager/team/comp-off"         element={<ManagerTeamCompOff />} />
+                <Route path="/manager/team/regularisation"   element={<ManagerTeamRegularisation />} />
+                <Route path="/manager/team/assets"           element={<ManagerTeamAssets />} />
+                <Route path="/manager/team/helpdesk"         element={<ManagerTeamHelpdesk />} />
+                <Route path="/manager/team/payroll-cost"     element={<ManagerTeamPayrollCost />} />
                 <Route path="/manager/team/who-is-in"        element={<WhoIsIn />} />
                 <Route path="/manager/team/performance"      element={<ManagerTeamPerformance />} />
                 <Route path="/manager/loans-approvals"       element={<ManagerLoanApprovals />} />

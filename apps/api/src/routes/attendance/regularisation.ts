@@ -18,6 +18,9 @@ import { recomputeRange } from '../../lib/attendance-engine.js'
 import { emitEvent } from '../../lib/event-emitter.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
 import { orchestrateWorkforceEvent } from '../../lib/workforce-orchestrator.js'
+import {
+  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
+} from '../../lib/manager-scope.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -335,10 +338,34 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
   // ── POST /attendance/regularisation/bulk-approve ──────────────────────────────
   // Manager bulk approves team requests.
+  // P6.5 security fix: every request in the batch must belong to a direct report.
   fastify.post('/attendance/regularisation/bulk-approve', auth, async (req: any, reply) => {
     const schema = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Direct-report ownership guard — HR admins bypass; managers are scoped.
+    if (!isHrAdmin(req.userRole)) {
+      const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!myEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
+      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportSet = new Set(reportIds)
+
+      const { data: regs } = await fastify.supabase
+        .from('attendance_regularisation')
+        .select('id, employee_id')
+        .in('id', parsed.data.ids)
+        .eq('tenant_id', req.tenantId)
+
+      const unauthorized = (regs ?? []).filter((r: any) => !reportSet.has(r.employee_id))
+      if (unauthorized.length > 0) {
+        return reply.code(403).send({
+          error:   'FORBIDDEN',
+          message: 'One or more requests do not belong to your direct reports',
+          unauthorized_ids: (unauthorized as any[]).map((r: any) => r.id),
+        })
+      }
+    }
 
     const results: Array<{ id: string; ok: boolean; error?: string }> = []
 
@@ -377,6 +404,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
   // ── POST /attendance/regularisation/bulk-reject ───────────────────────────────
   // Manager bulk rejects team requests.
+  // P6.5 security fix: every request in the batch must belong to a direct report.
   fastify.post('/attendance/regularisation/bulk-reject', auth, async (req: any, reply) => {
     const schema = z.object({
       ids: z.array(z.string().uuid()).min(1).max(50),
@@ -384,6 +412,29 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Direct-report ownership guard — HR admins bypass; managers are scoped.
+    if (!isHrAdmin(req.userRole)) {
+      const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!myEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
+      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportSet = new Set(reportIds)
+
+      const { data: regs } = await fastify.supabase
+        .from('attendance_regularisation')
+        .select('id, employee_id')
+        .in('id', parsed.data.ids)
+        .eq('tenant_id', req.tenantId)
+
+      const unauthorized = (regs ?? []).filter((r: any) => !reportSet.has(r.employee_id))
+      if (unauthorized.length > 0) {
+        return reply.code(403).send({
+          error:   'FORBIDDEN',
+          message: 'One or more requests do not belong to your direct reports',
+          unauthorized_ids: (unauthorized as any[]).map((r: any) => r.id),
+        })
+      }
+    }
 
     const results: Array<{ id: string; ok: boolean; error?: string }> = []
 

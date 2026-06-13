@@ -8,7 +8,7 @@
 
 import { useState, useMemo }  from 'react'
 import { useQuery }           from '@tanstack/react-query'
-import { Search, RefreshCw, Users, CalendarDays } from 'lucide-react'
+import { Search, RefreshCw, Users, CalendarDays, IndianRupee } from 'lucide-react'
 import { api }                from '@/lib/api/client'
 import { PageContainer }      from '@/components/layout/PageContainer'
 import { PageHeader }         from '@/components/layout/PageHeader'
@@ -26,14 +26,17 @@ interface LeaveTypeBalance {
   balance:            number
   annual_entitlement: number | null
   used:               number
+  liability_value:    number | null
 }
 
 interface EmployeeBalance {
-  employee_id:   string
-  employee_code: string
-  name:          string
-  department:    string | null
-  balances:      LeaveTypeBalance[]
+  employee_id:    string
+  employee_code:  string
+  name:           string
+  department:     string | null
+  balances:       LeaveTypeBalance[]
+  daily_rate:     number | null
+  total_liability: number | null
 }
 
 interface TeamBalancesResponse {
@@ -71,9 +74,15 @@ export function TeamLeaveBalances() {
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<TeamBalancesResponse>({
     queryKey:  ['manager-team-leave-balances'],
-    queryFn:   () => api.get('/attendance/leave/team-balances'),
+    queryFn:   () => api.get('/attendance/leave/team-balances?include_liability=true'),
     staleTime: 60_000,
   })
+
+  const hasLiability = (data?.data ?? []).some(e => e.total_liability != null)
+
+  function fmtINR(n: number) {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  }
 
   const rows       = data?.data ?? []
   const year       = data?.year ?? new Date().getFullYear()
@@ -230,6 +239,14 @@ export function TeamLeaveBalances() {
                   </Badge>
                 </th>
               ))}
+              {hasLiability && (
+                <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2.5 whitespace-nowrap min-w-[100px]">
+                  <div className="flex items-center justify-end gap-1">
+                    <IndianRupee className="h-3 w-3" />
+                    Liability
+                  </div>
+                </th>
+              )}
             </tr>
           </thead>
 
@@ -266,6 +283,13 @@ export function TeamLeaveBalances() {
                         </td>
                       )
                     })}
+                    {hasLiability && (
+                      <td className="px-3 py-3 text-right tabular-nums text-xs">
+                        {emp.total_liability != null
+                          ? <span className={cn('font-semibold', emp.total_liability > 0 ? 'text-amber-700' : 'text-muted-foreground')}>{fmtINR(emp.total_liability)}</span>
+                          : <span className="text-muted-foreground/40">—</span>}
+                      </td>
+                    )}
                   </tr>
                 )
               })
@@ -290,6 +314,13 @@ export function TeamLeaveBalances() {
                     </td>
                   )
                 })}
+                {hasLiability && (
+                  <td className="px-3 py-2.5 text-right">
+                    <span className="text-xs font-semibold tabular-nums text-amber-700">
+                      {fmtINR(filtered.reduce((s, e) => s + (e.total_liability ?? 0), 0))}
+                    </span>
+                  </td>
+                )}
               </tr>
             </tfoot>
           )}
@@ -298,6 +329,7 @@ export function TeamLeaveBalances() {
 
       <p className="text-[10px] text-muted-foreground">
         Balance = remaining days · / N = annual entitlement · Red = 0 days · Amber = ≤ 25% remaining
+        {hasLiability && ' · Liability = unpaid leave balance × daily rate (CTC ÷ 26)'}
       </p>
     </PageContainer>
   )
