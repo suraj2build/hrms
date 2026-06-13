@@ -122,13 +122,11 @@ function SkeletonCard() {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function AdminRecruitmentDashboard() {
-  const { data: res, isLoading, isError } = useQuery<{ data: AnalyticsData; headers: Headers }>({
+  const { data: d, isLoading, isError } = useQuery<AnalyticsData>({
     queryKey: ['recruitment', 'analytics'],
     queryFn:  () => api.get<AnalyticsData>('/recruitment/analytics'),
     staleTime: 60_000,
   })
-
-  const d = res?.data
 
   if (isError) {
     return (

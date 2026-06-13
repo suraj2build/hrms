@@ -857,8 +857,8 @@ export default function App() {
                 <Route path="/ess/attendance"             element={<MyAttendance />} />
                 {/* Regularization merged into MyAttendance — redirect old deep-link */}
                 <Route path="/ess/attendance/regularization" element={<Navigate to="/ess/attendance" replace />} />
-                {/* Redirect legacy /corrections URL → new /regularization */}
-                <Route path="/ess/attendance/corrections"    element={<Navigate to="/ess/attendance/regularization" replace />} />
+                {/* Legacy /corrections deep-link → MyAttendance (flattened; no double-hop) */}
+                <Route path="/ess/attendance/corrections"    element={<Navigate to="/ess/attendance" replace />} />
                 <Route path="/ess/schedule"               element={<EssSchedule />} />
                 <Route path="/ess/leave"                  element={<MyLeaveRequests />} />
                 <Route path="/ess/leave/apply"            element={<LeaveApply />} />
