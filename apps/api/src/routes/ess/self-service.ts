@@ -21,6 +21,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr, optDate, optEnum, optUuid } from '../../lib/zod-form.js'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
+import { notifyHrAdmins } from '../../lib/notify.js'
 
 const STORAGE_BUCKET = 'employee-files'
 const SIGNED_URL_TTL = 3600
@@ -400,6 +401,104 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.docId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.code(204).send()
+  })
+
+  // ── Separation — resignation request + tracking (P4.3) ───────────────────────
+  // The employee can submit ONE resignation request and then track its progress
+  // (clearances, full & final). The request lands as a pending, employee-initiated
+  // row in employee_separation (initiated_by='employee', lifecycle_stage='initiated',
+  // approval_status='pending') WITHOUT changing employment status — HR drives it
+  // forward through the existing separation workspace. Reuses existing tables and
+  // the existing HR workflow; no new state machine.
+
+  const resignationSchema = z.object({
+    last_working_date: z.string().min(1, 'Proposed last working date is required'),
+    notice_date:       optDate,
+    exit_reason:       z.string().min(1, 'Please tell us your reason for leaving'),
+    remarks:           optStr,
+  })
+
+  fastify.get('/ess/me/separation', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    const { data: sep } = await fastify.supabase
+      .from('employee_separation').select('*')
+      .eq('employee_id', empId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!sep) return reply.send({ data: null, clearances: [], ff: null })
+    const [{ data: clearances }, { data: ff }] = await Promise.all([
+      fastify.supabase.from('separation_clearances')
+        .select('id, department, status, remarks, cleared_at')
+        .eq('separation_id', (sep as any).id).eq('tenant_id', req.tenantId).order('department'),
+      fastify.supabase.from('separation_ff_summary')
+        .select('id, status, net_payable, approved_at, paid_at, leave_encashment_amount, gratuity_amount, notice_period_deduction')
+        .eq('separation_id', (sep as any).id).eq('tenant_id', req.tenantId).maybeSingle(),
+    ])
+    return reply.send({ data: sep, clearances: clearances ?? [], ff: ff ?? null })
+  })
+
+  fastify.post('/ess/me/separation', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    const parsed = resignationSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    // One separation per employee (UNIQUE tenant_id, employee_id). If a record
+    // already exists, the resignation/separation is already under way.
+    const { data: existing } = await fastify.supabase
+      .from('employee_separation').select('id')
+      .eq('employee_id', empId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (existing)
+      return reply.code(409).send({ error: 'ALREADY_EXISTS', message: 'A separation is already in progress. Please track it below or contact HR.' })
+
+    const { data, error } = await fastify.supabase
+      .from('employee_separation')
+      .insert({
+        employee_id:       empId,
+        tenant_id:         req.tenantId,
+        separation_type:   'resignation',
+        initiated_by:      'employee',
+        lifecycle_stage:   'initiated',
+        approval_status:   'pending',
+        notice_date:       parsed.data.notice_date ?? new Date().toISOString().slice(0, 10),
+        last_working_date: parsed.data.last_working_date,
+        exit_reason:       parsed.data.exit_reason,
+        remarks:           parsed.data.remarks ?? null,
+        created_by:        req.userId,
+      })
+      .select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    // Surface to HR through the existing inbox — no new notification framework.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('first_name, last_name, employee_code')
+      .eq('id', empId).eq('tenant_id', req.tenantId).maybeSingle()
+    const who = emp ? `${emp.first_name} ${emp.last_name} (${emp.employee_code ?? '—'})` : 'An employee'
+    await notifyHrAdmins(fastify.supabase, {
+      tenantId:     req.tenantId,
+      senderId:     req.userId,
+      item_type:    'approval_request',
+      title:        'Resignation submitted',
+      summary:      `${who} submitted a resignation. Proposed last working day ${parsed.data.last_working_date}.`,
+      severity:     'warning',
+      entity_type:  'employee_separation',
+      entity_id:    (data as any).id,
+      action_route: `/admin/workforce/separations`,
+      action_label: 'Review separation',
+    }).catch(() => {})
+
+    return reply.code(201).send({ data })
+  })
+
+  // ── Asset obligations — own assigned assets (P4.3) ───────────────────────────
+  fastify.get('/ess/me/assets', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    const { data, error } = await fastify.supabase
+      .from('assets')
+      .select('id, asset_code, name, category_id, serial_number, status, assigned_to, notes')
+      .eq('assigned_to', empId).eq('tenant_id', req.tenantId)
+      .order('name')
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    const assets = data ?? []
+    const outstanding = assets.filter((a: any) => a.status === 'assigned').length
+    return reply.send({ data: assets, outstanding_count: outstanding })
   })
 
   // ── Expiry Awareness — own lifecycle risks (P4.2) ────────────────────────────

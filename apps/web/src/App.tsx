@@ -138,6 +138,7 @@ const EssMyProfile             = lazy(() => import('@/pages/ess/EssMyProfile').t
 const EssApprovals             = lazy(() => import('@/pages/ess/EssApprovals').then(m => ({ default: m.EssApprovals })))
 const EssLeaveBalance          = lazy(() => import('@/pages/ess/EssLeaveBalance').then(m => ({ default: m.EssLeaveBalance })))
 const EssDocuments             = lazy(() => import('@/pages/ess/EssDocuments').then(m => ({ default: m.EssDocuments })))
+const EssSeparation            = lazy(() => import('@/pages/ess/EssSeparation').then(m => ({ default: m.EssSeparation })))
 const EssOnboarding            = lazy(() => import('@/pages/ess/EssOnboarding').then(m => ({ default: m.EssOnboarding })))
 const EssTeam                  = lazy(() => import('@/pages/ess/EssTeam').then(m => ({ default: m.EssTeam })))
 const EssTeamOff               = lazy(() => import('@/pages/ess/EssTeamOff').then(m => ({ default: m.EssTeamOff })))
@@ -870,6 +871,7 @@ export default function App() {
                 <Route path="/ess/approvals"              element={<EssApprovals />} />
                 <Route path="/ess/leave/balance"          element={<EssLeaveBalance />} />
                 <Route path="/ess/documents"              element={<EssDocuments />} />
+                <Route path="/ess/separation"             element={<EssSeparation />} />
                 <Route path="/ess/team"                   element={<EssTeam />} />
                 <Route path="/ess/whos-off"               element={<EssTeamOff />} />
                 <Route path="/ess/policies"               element={<EssPolicies />} />

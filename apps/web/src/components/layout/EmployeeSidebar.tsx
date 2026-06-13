@@ -32,6 +32,7 @@ import {
   ScrollText,
   TrendingUp,
   Wallet,
+  LogOut,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -103,6 +104,7 @@ const BASE_GROUPS: NavGroup[] = [
     items: [
       { label: 'My Documents', icon: FileText,       href: '/ess/documents'   },
       { label: 'Letters',      icon: Mail,           href: '/ess/letters'     },
+      { label: 'Resignation & Exit', icon: LogOut,   href: '/ess/separation'  },
       { label: 'My Team',      icon: Users,          href: '/ess/team'        }, // manager-only
       { label: 'Policies',     icon: BookMarked,     href: '/ess/policies'    },
       { label: 'HR Support',   icon: HeadphonesIcon, href: '/ess/hr-support'  },
