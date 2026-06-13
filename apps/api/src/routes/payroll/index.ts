@@ -3923,7 +3923,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { ledgerId } = req.params as { ledgerId: string }
     const tenantId     = req.tenantId as string
     const qSchema = z.object({
-      format: z.enum(['csv','tally','sap','zoho','quickbooks']).default('csv'),
+      format: z.enum(['csv','tally','sap','zoho','quickbooks','xlsx']).default('csv'),
     })
     const parsed = qSchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })

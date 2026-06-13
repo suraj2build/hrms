@@ -180,8 +180,15 @@ function LedgerRow({
               <Download className="h-3 w-3 mr-1" />Export {showExport ? '▲' : '▼'}
             </Button>
             {showExport && (
-              <div className="absolute right-0 top-8 z-10 bg-card border border-border rounded-lg shadow-md p-1 min-w-[130px]">
-                {['csv','tally','sap','zoho','quickbooks'].map(fmt => (
+              <div className="absolute right-0 top-8 z-10 bg-card border border-border rounded-lg shadow-md p-1 min-w-[160px]">
+                <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Voucher</p>
+                <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#2E6FE6]/10 text-[#2E6FE6] font-medium rounded"
+                  onClick={() => { onExport(ledger.id, 'xlsx'); setShowExport(false) }}>
+                  📊 Voucher Excel (Cost Centre)
+                </button>
+                <div className="border-t border-border my-1" />
+                <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">ERP Formats</p>
+                {(['csv','tally','sap','zoho','quickbooks'] as const).map(fmt => (
                   <button key={fmt} className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/40 rounded"
                     onClick={() => { onExport(ledger.id, fmt); setShowExport(false) }}>
                     {fmt.toUpperCase()}

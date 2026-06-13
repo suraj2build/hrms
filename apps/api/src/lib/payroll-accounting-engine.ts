@@ -24,6 +24,7 @@
 import { createHash }       from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { round2 }           from './payroll-engine.js'
+import * as XLSX            from 'xlsx'
 
 // ── GL Account constants (system defaults, overridable per tenant) ────────────
 
@@ -855,15 +856,16 @@ export async function exportGeneralLedger(
   supabase:  SupabaseClient,
   ledgerId:  string,
   tenantId:  string,
-  format:    'csv' | 'sap' | 'tally' | 'zoho' | 'quickbooks',
-): Promise<{ content: string; filename: string; mime: string } | { error: string }> {
+  format:    'csv' | 'sap' | 'tally' | 'zoho' | 'quickbooks' | 'xlsx',
+): Promise<{ content: string | Buffer; filename: string; mime: string } | { error: string }> {
   const { data: entries, error } = await supabase
     .from('payroll_ledger_entries')
     .select(`
       accounting_date, journal_reference, description,
       gl_account_code, gl_account_name,
       debit_amount, credit_amount, currency,
-      entry_type, source_component_code,
+      entry_type, source_component_code, source_component_name,
+      cost_center_id, department_id,
       employees ( employee_code, profiles ( full_name ) ),
       payroll_financial_ledgers ( ledger_month )
     `)
@@ -875,22 +877,43 @@ export async function exportGeneralLedger(
   if (error) return { error: error.message }
   if (!entries || (entries as any[]).length === 0) return { error: 'No entries found' }
 
+  // Resolve department + cost-center names (best-effort, one query each)
+  const deptIds = [...new Set((entries as any[]).map(e => e.department_id).filter(Boolean))]
+  const ccIds   = [...new Set((entries as any[]).map(e => e.cost_center_id).filter(Boolean))]
+
+  const deptMap: Record<string, string> = {}
+  const ccMap:   Record<string, string> = {}
+
+  if (deptIds.length > 0) {
+    const { data: depts } = await supabase.from('departments').select('id, name').in('id', deptIds)
+    for (const d of (depts ?? [])) deptMap[(d as any).id] = (d as any).name
+  }
+  if (ccIds.length > 0) {
+    const { data: ccs } = await supabase.from('cost_centers').select('id, name').in('id', ccIds)
+    for (const c of (ccs ?? [])) ccMap[(c as any).id] = (c as any).name
+  }
+
   const month = (entries as any[])[0]?.payroll_financial_ledgers?.ledger_month ?? 'unknown'
   const rows  = (entries as any[]).map(e => ({
-    date:          e.accounting_date,
-    reference:     e.journal_reference ?? '',
-    description:   e.description ?? '',
-    gl_code:       e.gl_account_code,
-    gl_name:       e.gl_account_name,
-    debit:         e.debit_amount,
-    credit:        e.credit_amount,
-    currency:      e.currency,
-    employee_code: e.employees?.employee_code ?? '',
-    employee_name: e.employees?.profiles?.full_name ?? '',
-    component:     e.source_component_code ?? '',
+    date:            e.accounting_date,
+    reference:       e.journal_reference ?? '',
+    description:     e.description ?? '',
+    gl_code:         e.gl_account_code,
+    gl_name:         e.gl_account_name,
+    debit:           Number(e.debit_amount)  || 0,
+    credit:          Number(e.credit_amount) || 0,
+    currency:        e.currency,
+    employee_code:   e.employees?.employee_code ?? '',
+    employee_name:   e.employees?.profiles?.full_name ?? '',
+    component:       e.source_component_code ?? '',
+    component_name:  e.source_component_name ?? '',
+    department_name: e.department_id ? (deptMap[e.department_id] ?? e.department_id.slice(0, 8)) : '',
+    cost_center:     e.cost_center_id ? (ccMap[e.cost_center_id]  ?? e.cost_center_id.slice(0, 8)) : '',
   }))
 
   switch (format) {
+    case 'xlsx':
+      return buildXLSXVoucherExport(rows, month)
     case 'csv':
       return buildCSVExport(rows, month)
     case 'tally':
@@ -902,6 +925,89 @@ export async function exportGeneralLedger(
       return buildGenericJournalExport(rows, month, format)
     default:
       return buildCSVExport(rows, month)
+  }
+}
+
+function fmtINR(n: number): string {
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+}
+
+function buildXLSXVoucherExport(rows: any[], month: string): { content: Buffer; filename: string; mime: string } {
+  const wb = XLSX.utils.book_new()
+
+  // ── Sheet 1: Journal Vouchers ──────────────────────────────────────────────
+  const journalData = [
+    ['Date', 'Voucher Ref', 'Description', 'GL Code', 'GL Account', 'Cost Centre', 'Department', 'Component', 'Employee Code', 'Employee Name', 'Debit (₹)', 'Credit (₹)'],
+    ...rows.map(r => [
+      r.date, r.reference, r.description,
+      r.gl_code, r.gl_name, r.cost_center, r.department_name,
+      r.component_name || r.component, r.employee_code, r.employee_name,
+      r.debit > 0 ? r.debit : '', r.credit > 0 ? r.credit : '',
+    ]),
+    [],
+    ['', '', '', '', '', '', '', '', '', 'TOTAL',
+      rows.reduce((s, r) => s + r.debit, 0),
+      rows.reduce((s, r) => s + r.credit, 0),
+    ],
+  ]
+  const ws1 = XLSX.utils.aoa_to_sheet(journalData)
+  ws1['!cols'] = [10,18,30,10,28,18,18,20,12,20,14,14].map(w => ({ wch: w }))
+  XLSX.utils.book_append_sheet(wb, ws1, 'Journal Vouchers')
+
+  // ── Sheet 2: Cost Centre Ledger ────────────────────────────────────────────
+  const ccMap = new Map<string, Map<string, { debit: number; credit: number }>>()
+  for (const r of rows) {
+    const cc = r.cost_center || 'Unassigned'
+    if (!ccMap.has(cc)) ccMap.set(cc, new Map())
+    const glMap = ccMap.get(cc)!
+    const key = `${r.gl_code} — ${r.gl_name}`
+    const prev = glMap.get(key) ?? { debit: 0, credit: 0 }
+    glMap.set(key, { debit: prev.debit + r.debit, credit: prev.credit + r.credit })
+  }
+  const ccData: any[][] = [['Cost Centre', 'GL Code — Account', 'Total Debit (₹)', 'Total Credit (₹)', 'Net (₹)']]
+  let ccGrandDebit = 0, ccGrandCredit = 0
+  for (const [cc, glMap] of Array.from(ccMap.entries()).sort()) {
+    let ccDebit = 0, ccCredit = 0
+    for (const [glKey, totals] of Array.from(glMap.entries()).sort()) {
+      ccData.push([cc, glKey, totals.debit || '', totals.credit || '', totals.debit - totals.credit])
+      ccDebit  += totals.debit
+      ccCredit += totals.credit
+    }
+    ccData.push(['', `${cc} Subtotal`, ccDebit, ccCredit, ccDebit - ccCredit])
+    ccData.push([])
+    ccGrandDebit  += ccDebit
+    ccGrandCredit += ccCredit
+  }
+  ccData.push(['', 'GRAND TOTAL', ccGrandDebit, ccGrandCredit, ccGrandDebit - ccGrandCredit])
+  const ws2 = XLSX.utils.aoa_to_sheet(ccData)
+  ws2['!cols'] = [22, 36, 16, 16, 16].map(w => ({ wch: w }))
+  XLSX.utils.book_append_sheet(wb, ws2, 'Cost Centre Ledger')
+
+  // ── Sheet 3: GL Account Summary ────────────────────────────────────────────
+  const glSummary = new Map<string, { name: string; debit: number; credit: number }>()
+  for (const r of rows) {
+    const prev = glSummary.get(r.gl_code) ?? { name: r.gl_name, debit: 0, credit: 0 }
+    glSummary.set(r.gl_code, { name: r.gl_name, debit: prev.debit + r.debit, credit: prev.credit + r.credit })
+  }
+  const glData: any[][] = [['GL Code', 'GL Account Name', 'Total Debit (₹)', 'Total Credit (₹)', 'Net Balance (₹)', 'Category']]
+  let glGrandDebit = 0, glGrandCredit = 0
+  for (const [code, g] of Array.from(glSummary.entries()).sort()) {
+    const net = g.debit - g.credit
+    glData.push([code, g.name, g.debit || '', g.credit || '', net, net >= 0 ? 'Debit balance' : 'Credit balance'])
+    glGrandDebit  += g.debit
+    glGrandCredit += g.credit
+  }
+  glData.push([])
+  glData.push(['', 'GRAND TOTAL', glGrandDebit, glGrandCredit, glGrandDebit - glGrandCredit, ''])
+  const ws3 = XLSX.utils.aoa_to_sheet(glData)
+  ws3['!cols'] = [12, 36, 16, 16, 16, 16].map(w => ({ wch: w }))
+  XLSX.utils.book_append_sheet(wb, ws3, 'GL Account Summary')
+
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+  return {
+    content:  buffer,
+    filename: `payroll-voucher-${month}.xlsx`,
+    mime:     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   }
 }
 
