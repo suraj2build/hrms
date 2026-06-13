@@ -9,7 +9,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Loader2, TrendingUp, TrendingDown, Minus, MapPin, Store } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
 
 interface Department {
@@ -19,6 +19,12 @@ interface Department {
 interface TrendMonth { period: string; headcount: number; joiners: number; exits: number }
 interface AttritionDept { dept_name: string; count: number }
 interface AttritionData { signal: 'elevated' | 'normal' | 'low'; by_department: AttritionDept[]; total: number }
+
+interface SiteBucket { key: string; label: string; headcount: number; joiners_30d: number; city?: string | null; region?: string | null; zone?: string | null; site_type?: string | null }
+interface SiteData {
+  by_site: SiteBucket[]; by_region: SiteBucket[]; by_zone: SiteBucket[]; by_site_type: SiteBucket[]
+  unassigned: number; total: number; dimensions_configured: boolean
+}
 
 function SignalBadge({ signal }: { signal: 'elevated' | 'normal' | 'low' }) {
   if (signal === 'elevated') return <Badge variant="destructive" className="capitalize">Elevated</Badge>
@@ -49,11 +55,17 @@ export function OrgHealth() {
     queryFn:  () => api.get('/intelligence/org/attrition-signal'),
     staleTime: 5 * 60_000,
   })
+  const sites = useQuery<SiteData>({
+    queryKey: ['intelligence-org-headcount-by-site'],
+    queryFn:  () => api.get('/intelligence/org/headcount-by-site'),
+    staleTime: 5 * 60_000,
+  })
 
   const deptRows  = depts.data?.departments ?? []
   const months    = trend.data?.months ?? []
   const attr       = attrition.data
-  const loading   = depts.isLoading || trend.isLoading || attrition.isLoading
+  const siteData   = sites.data
+  const loading   = depts.isLoading || trend.isLoading || attrition.isLoading || sites.isLoading
 
   return (
     <PageContainer>
@@ -134,6 +146,86 @@ export function OrgHealth() {
               </div>
             )}
           </div>
+
+          {/* Headcount by site / region (R5 — retail intelligence) */}
+          {siteData && (siteData.by_site.length > 0 || siteData.unassigned > 0) && (
+            <div className="rounded-lg border border-border bg-card">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                    <Store className="h-4 w-4 text-muted-foreground" /> Headcount by Site
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">Source: employees.site_id JOIN sites · active headcount disaggregated by location</p>
+                </div>
+                {siteData.unassigned > 0 && (
+                  <span className="text-xs text-muted-foreground">{siteData.unassigned} unassigned</span>
+                )}
+              </div>
+
+              {!siteData.dimensions_configured && (
+                <div className="px-4 py-2 bg-muted/30 text-[11px] text-muted-foreground border-b border-border">
+                  Tip: set <span className="font-medium">region</span>, <span className="font-medium">zone</span>, and <span className="font-medium">site type</span> on each site (Masters → Sites) to unlock regional roll-ups.
+                </div>
+              )}
+
+              {/* Region / Zone / Type roll-up chips */}
+              {(siteData.by_region.length > 0 || siteData.by_zone.length > 0 || siteData.by_site_type.length > 0) && (
+                <div className="px-4 py-3 border-b border-border grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { title: 'By Region', rows: siteData.by_region },
+                    { title: 'By Zone',   rows: siteData.by_zone },
+                    { title: 'By Type',   rows: siteData.by_site_type },
+                  ].filter(g => g.rows.length > 0).map(g => (
+                    <div key={g.title}>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">{g.title}</p>
+                      <div className="space-y-1">
+                        {g.rows.slice(0, 6).map(r => (
+                          <div key={r.key} className="flex items-center justify-between text-xs">
+                            <span className="text-foreground capitalize truncate">{r.label}</span>
+                            <span className="font-semibold tabular-nums ml-2">{r.headcount}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Per-site table */}
+              {siteData.by_site.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No site assignments recorded.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                        <th className="px-4 py-2 font-medium">Site</th>
+                        <th className="px-4 py-2 font-medium">City</th>
+                        <th className="px-4 py-2 font-medium">Region</th>
+                        <th className="px-4 py-2 font-medium">Type</th>
+                        <th className="px-4 py-2 font-medium text-right">Headcount</th>
+                        <th className="px-4 py-2 font-medium text-right">Joiners (30d)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {siteData.by_site.map(row => (
+                        <tr key={row.key} className="border-b border-border/50">
+                          <td className="px-4 py-2 font-medium text-foreground">{row.label}</td>
+                          <td className="px-4 py-2 text-muted-foreground">
+                            {row.city ? <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{row.city}</span> : '—'}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground">{row.region ?? '—'}</td>
+                          <td className="px-4 py-2 text-muted-foreground capitalize">{row.site_type ?? '—'}</td>
+                          <td className="px-4 py-2 text-right font-semibold">{row.headcount}</td>
+                          <td className="px-4 py-2 text-right text-emerald-600">+{row.joiners_30d}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Headcount trend */}
           <div className="rounded-lg border border-border bg-card">

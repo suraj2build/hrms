@@ -47,6 +47,10 @@ interface Site {
   location:                     string | null
   timezone:                     string
   state_code:                   string | null
+  site_type:                    string | null
+  city:                         string | null
+  region:                       string | null
+  zone:                         string | null
   default_roster_id:            string | null
   default_rotation_policy_id:   string | null
   default_leave_policy_id:      string | null
@@ -75,6 +79,10 @@ const EMPTY_FORM = {
   location:                   '',
   timezone:                   'Asia/Kolkata',
   state_code:                 '',
+  site_type:                  '',
+  city:                       '',
+  region:                     '',
+  zone:                       '',
   default_roster_id:          '',
   default_rotation_policy_id: '',
   default_leave_policy_id:    '',
@@ -405,6 +413,10 @@ export function Sites() {
       location:                   s.location ?? '',
       timezone:                   s.timezone,
       state_code:                 s.state_code ?? '',
+      site_type:                  s.site_type ?? '',
+      city:                       s.city ?? '',
+      region:                     s.region ?? '',
+      zone:                       s.zone ?? '',
       default_roster_id:          s.default_roster_id ?? '',
       default_rotation_policy_id: s.default_rotation_policy_id ?? '',
       default_leave_policy_id:    s.default_leave_policy_id ?? '',
@@ -421,6 +433,10 @@ export function Sites() {
         location:                   body.location                   || null,
         timezone:                   body.timezone                   || 'Asia/Kolkata',
         state_code:                 body.state_code                 || null,
+        site_type:                  body.site_type                  || null,
+        city:                       body.city                       || null,
+        region:                     body.region                     || null,
+        zone:                       body.zone                       || null,
         default_roster_id:          body.default_roster_id          || null,
         default_rotation_policy_id: body.default_rotation_policy_id || null,
         default_leave_policy_id:    body.default_leave_policy_id    || null,
@@ -608,6 +624,37 @@ export function Sites() {
                   <a href="/admin/payroll/statutory/lwf" className="text-primary underline">LWF</a> compliance pages first.
                 </p>
               )}
+            </div>
+            {/* Retail / geography dimensions (R5) — power site-disaggregated headcount KPIs */}
+            <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Workforce Geography</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Site Type</label>
+                  <select
+                    value={form.site_type}
+                    onChange={e => setForm(p => ({ ...p, site_type: e.target.value }))}
+                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                  >
+                    <option value="">— Not set —</option>
+                    {['store', 'warehouse', 'office', 'plant', 'distribution_center', 'kiosk'].map(t => (
+                      <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">City</label>
+                  <Input value={form.city} onChange={e => setForm(p => ({ ...p, city: e.target.value }))} placeholder="Mumbai" className="h-8 text-sm" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Region</label>
+                  <Input value={form.region} onChange={e => setForm(p => ({ ...p, region: e.target.value }))} placeholder="West" className="h-8 text-sm" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Zone</label>
+                  <Input value={form.zone} onChange={e => setForm(p => ({ ...p, zone: e.target.value }))} placeholder="Mumbai Metro" className="h-8 text-sm" />
+                </div>
+              </div>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Timezone (IANA)</label>

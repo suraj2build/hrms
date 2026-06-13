@@ -938,6 +938,98 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     }
   })
 
+  // ── GET /intelligence/org/headcount-by-site ────────────────────────────────
+  // R5 — Retail Intelligence. SUP.headcount.by_site disaggregated by the site
+  // dimensions added in migration 248 (site/city/region/zone/site_type). Same
+  // canonical KPI (active headcount), grouped on a new axis — not a new metric.
+  fastify.get('/org/headcount-by-site', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN' })
+    }
+    const tenantId: string = req.tenantId
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    try {
+      // Active employees with their site assignment (employees.site_id → sites).
+      let empRows: any[] = []
+      try {
+        const { data } = await fastify.supabase
+          .from('employees')
+          .select('id, site_id, joining_date')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .limit(5000)
+        empRows = data ?? []
+      } catch (_e) { empRows = [] }
+
+      // Site dimension lookup (resilient: site_type/city/region/zone may be
+      // absent in deployments where migration 248 has not yet been applied).
+      const siteMeta = new Map<string, { name: string; city: string | null; region: string | null; zone: string | null; site_type: string | null }>()
+      try {
+        const { data: sites } = await fastify.supabase
+          .from('sites')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .limit(2000)
+        for (const s of sites ?? []) {
+          siteMeta.set(s.id, {
+            name:      s.name ?? 'Unnamed Site',
+            city:      s.city ?? null,
+            region:    s.region ?? null,
+            zone:      s.zone ?? null,
+            site_type: s.site_type ?? null,
+          })
+        }
+      } catch (_e) { /* skip — no site dimensions available */ }
+
+      // Roll-up accumulators
+      type Bucket = { key: string; label: string; headcount: number; joiners_30d: number }
+      const bySite   = new Map<string, Bucket & { city: string | null; region: string | null; zone: string | null; site_type: string | null }>()
+      const byRegion = new Map<string, Bucket>()
+      const byZone   = new Map<string, Bucket>()
+      const byType   = new Map<string, Bucket>()
+      let unassigned = 0
+
+      const bump = (map: Map<string, Bucket>, key: string, label: string, joined: boolean) => {
+        if (!map.has(key)) map.set(key, { key, label, headcount: 0, joiners_30d: 0 })
+        const b = map.get(key)!
+        b.headcount++
+        if (joined) b.joiners_30d++
+      }
+
+      for (const e of empRows) {
+        const joined = !!(e.joining_date && e.joining_date >= thirtyDaysAgo)
+        if (!e.site_id || !siteMeta.has(e.site_id)) { unassigned++; continue }
+        const m = siteMeta.get(e.site_id)!
+        // by site
+        if (!bySite.has(e.site_id)) {
+          bySite.set(e.site_id, { key: e.site_id, label: m.name, headcount: 0, joiners_30d: 0, city: m.city, region: m.region, zone: m.zone, site_type: m.site_type })
+        }
+        const sb = bySite.get(e.site_id)!
+        sb.headcount++
+        if (joined) sb.joiners_30d++
+        // roll-ups (only when the dimension is populated)
+        if (m.region)    bump(byRegion, m.region, m.region, joined)
+        if (m.zone)      bump(byZone,   m.zone,   m.zone,   joined)
+        if (m.site_type) bump(byType,   m.site_type, m.site_type, joined)
+      }
+
+      const sortDesc = <T extends { headcount: number }>(arr: T[]) => arr.sort((a, b) => b.headcount - a.headcount)
+
+      return reply.send({
+        by_site:      sortDesc(Array.from(bySite.values())),
+        by_region:    sortDesc(Array.from(byRegion.values())),
+        by_zone:      sortDesc(Array.from(byZone.values())),
+        by_site_type: sortDesc(Array.from(byType.values())),
+        unassigned,
+        total:        empRows.length,
+        dimensions_configured: siteMeta.size > 0 && Array.from(siteMeta.values()).some(m => m.region || m.zone || m.site_type),
+      })
+    } catch (err: unknown) {
+      fastify.log.error({ err }, 'intelligence/org/headcount-by-site error')
+      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  })
+
   // ── GET /intelligence/digest/daily ──────────────────────────────────────────
   fastify.get('/digest/daily', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {

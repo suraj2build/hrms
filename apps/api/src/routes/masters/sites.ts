@@ -31,7 +31,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 
 const SELECT_COLS =
-  'id, name, location, timezone, state_code, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, holiday_group_id, created_at'
+  'id, name, location, timezone, state_code, site_type, city, region, zone, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, holiday_group_id, created_at'
 
 const schema = z.object({
   name:                        z.string().min(1, 'Name is required').max(120),
@@ -39,6 +39,11 @@ const schema = z.object({
   timezone:                    z.string().max(100).default('Asia/Kolkata'),
   /** migration 166 — state code (ISO 3166-2 sub-region) for PT/LWF jurisdiction */
   state_code:                  z.string().max(3).optional().nullable(),
+  /** migration 248 — retail/geography dimensions for site-disaggregated KPIs (R5) */
+  site_type:                   z.string().max(40).optional().nullable(),
+  city:                        z.string().max(120).optional().nullable(),
+  region:                      z.string().max(80).optional().nullable(),
+  zone:                        z.string().max(80).optional().nullable(),
   /** migration 217 — holiday group this site observes (NULL = all-India only) */
   holiday_group_id:            z.string().uuid().optional().nullable(),
   default_roster_id:           z.string().uuid().optional().nullable(),
@@ -171,11 +176,15 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
 
     // Strip migration-dependent optional columns when null/undefined so the
     // insert never references a column that may not exist in older deployments
-    // (migration 166 → state_code, migration 217 → holiday_group_id).
-    const { state_code, holiday_group_id, ...coreInsert } = parsed.data
+    // (migration 166 → state_code, 217 → holiday_group_id, 248 → site dimensions).
+    const { state_code, holiday_group_id, site_type, city, region, zone, ...coreInsert } = parsed.data
     const insertPayload: Record<string, unknown> = { ...coreInsert, tenant_id: req.tenantId }
-    if (state_code    != null) insertPayload.state_code      = state_code
+    if (state_code       != null) insertPayload.state_code       = state_code
     if (holiday_group_id != null) insertPayload.holiday_group_id = holiday_group_id
+    if (site_type        != null) insertPayload.site_type        = site_type
+    if (city             != null) insertPayload.city             = city
+    if (region           != null) insertPayload.region           = region
+    if (zone             != null) insertPayload.zone             = zone
 
     const { data, error } = await fastify.supabase
       .from('sites')
@@ -275,11 +284,15 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     }
 
     // Strip migration-dependent optional columns when null/undefined (same
-    // resilience pattern as INSERT above — migration 166/217 may be absent).
-    const { state_code, holiday_group_id, ...coreUpdate } = parsed.data
+    // resilience pattern as INSERT above — migration 166/217/248 may be absent).
+    const { state_code, holiday_group_id, site_type, city, region, zone, ...coreUpdate } = parsed.data
     const updatePayload: Record<string, unknown> = { ...coreUpdate }
     if (state_code       != null) updatePayload.state_code       = state_code
     if (holiday_group_id != null) updatePayload.holiday_group_id = holiday_group_id
+    if (site_type        != null) updatePayload.site_type        = site_type
+    if (city             != null) updatePayload.city             = city
+    if (region           != null) updatePayload.region           = region
+    if (zone             != null) updatePayload.zone             = zone
 
     const { data, error } = await fastify.supabase
       .from('sites')
