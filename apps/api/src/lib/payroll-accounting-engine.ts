@@ -24,6 +24,7 @@
 import { createHash }       from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { round2 }           from './payroll-engine.js'
+import { buildPayrollRunSnapshot } from './payroll-snapshot-engine.js'
 import * as XLSX            from 'xlsx'
 
 // ── GL Account constants (system defaults, overridable per tenant) ────────────
@@ -537,19 +538,38 @@ export async function buildPayrollFinancialLedger(
   tenantId:     string,
   createdBy:    string,
   options: { ledger_type?: string; accounting_date?: string } = {},
-): Promise<LedgerBuildResult | { error: string }> {
+): Promise<LedgerBuildResult | { error: string; code?: string }> {
   const { ledger_type = 'payroll', accounting_date } = options
 
-  // 1. Verify snapshot exists (accounting MUST derive from snapshot)
-  const { data: manifest } = await supabase
+  // 1. Verify snapshot exists (accounting MUST derive from snapshot).
+  //    Self-heal: a run can be finalized without a snapshot because finalize
+  //    builds it best-effort (non-fatal). If it's missing, try to (re)build it
+  //    here from the finalized slips before giving up — this is what turns the
+  //    historical "ledger 500" into a working flow.
+  let { data: manifest } = await supabase
     .from('payroll_run_snapshots')
     .select('id, month, replayable')
     .eq('run_id', runId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
-  if (!manifest) return { error: 'No snapshot found — run must be finalized with a snapshot before accounting' }
-  if (!(manifest as any).replayable) return { error: 'Snapshot is archived — accounting cannot be derived' }
+  if (!manifest) {
+    const snap = await buildPayrollRunSnapshot(supabase, runId, tenantId, createdBy)
+    if ('error' in snap) {
+      // Can't build a snapshot (run not finalized / no slips) — actionable, not a 500.
+      return { error: `Cannot generate the payroll snapshot this ledger derives from: ${snap.error}. Finalize the run first.`, code: 'SNAPSHOT_REQUIRED' }
+    }
+    const reloaded = await supabase
+      .from('payroll_run_snapshots')
+      .select('id, month, replayable')
+      .eq('run_id', runId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    manifest = reloaded.data
+    if (!manifest) return { error: 'Snapshot was created but could not be loaded', code: 'SNAPSHOT_REQUIRED' }
+  }
+
+  if (!(manifest as any).replayable) return { error: 'Snapshot is archived — accounting cannot be derived', code: 'SNAPSHOT_ARCHIVED' }
 
   const snapshotId = (manifest as any).id as string
   const month      = (manifest as any).month as string
@@ -565,7 +585,7 @@ export async function buildPayrollFinancialLedger(
     .maybeSingle()
 
   if (existing && !['draft'].includes((existing as any).ledger_status)) {
-    return { error: `Ledger already exists with status '${(existing as any).ledger_status}' — cannot regenerate` }
+    return { error: `Ledger already exists with status '${(existing as any).ledger_status}' — cannot regenerate`, code: 'LEDGER_EXISTS' }
   }
 
   // 3. Load employee snapshots (source of truth)
@@ -576,7 +596,7 @@ export async function buildPayrollFinancialLedger(
     .eq('tenant_id', tenantId)
 
   if (eErr || !empSnaps || empSnaps.length === 0) {
-    return { error: 'No employee snapshots found — cannot build ledger' }
+    return { error: 'No employee snapshots found — cannot build ledger', code: 'SNAPSHOT_REQUIRED' }
   }
 
   // 4. Load employee department/cost-center data (live OK — metadata, not financial)

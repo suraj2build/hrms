@@ -20,7 +20,7 @@ import {
   BookOpen, Scale, CheckCircle2, AlertTriangle,
   RefreshCw, Loader2, TrendingUp,
   Building2, Download, FileText, RotateCcw,
-  DollarSign, Upload,
+  DollarSign, Upload, Camera,
   Hash, BadgeCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -304,7 +304,27 @@ export function PayrollAccountingCenter() {
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
       queryClient.invalidateQueries({ queryKey: ['accounting-summary'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Failed to generate ledger'),
+    onError: (e: any) => {
+      // 409 SNAPSHOT_REQUIRED is actionable: the run has no immutable snapshot to
+      // derive accounting from (usually because it isn't finalized). Show the
+      // precise backend guidance instead of a generic failure.
+      if (e?.statusCode === 409 && e?.error === 'SNAPSHOT_REQUIRED') {
+        toast.error(e.message ?? 'Generate the payroll snapshot first', {
+          description: 'Finalize the run, then use “Generate Snapshot”.',
+        })
+        return
+      }
+      toast.error(e?.message ?? 'Failed to generate ledger')
+    },
+  })
+
+  const generateSnapshotMutation = useMutation({
+    mutationFn: (runId: string) => api.post(`/payroll/runs/${runId}/snapshot`, {}),
+    onSuccess: () => {
+      toast.success('Payroll snapshot generated')
+      queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Could not generate snapshot — finalize the run first'),
   })
 
   const postLedgerMutation = useMutation({
@@ -469,10 +489,16 @@ export function PayrollAccountingCenter() {
                 ))}
               </div>
               {selectedRunId && (
-                <Button size="sm" variant="outline" onClick={() => generateLedgerMutation.mutate(selectedRunId)} disabled={generateLedgerMutation.isPending}>
-                  {generateLedgerMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
-                  Generate Ledger from Snapshot
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => generateSnapshotMutation.mutate(selectedRunId)} disabled={generateSnapshotMutation.isPending}>
+                    {generateSnapshotMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Camera className="h-3.5 w-3.5 mr-1.5" />}
+                    Generate Snapshot
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => generateLedgerMutation.mutate(selectedRunId)} disabled={generateLedgerMutation.isPending}>
+                    {generateLedgerMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
+                    Generate Ledger from Snapshot
+                  </Button>
+                </div>
               )}
             </div>
           </SectionCard>

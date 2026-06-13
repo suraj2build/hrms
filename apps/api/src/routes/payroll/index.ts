@@ -1775,6 +1775,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const snapResult = await buildPayrollRunSnapshot(fastify.supabase, id, tenantId, req.userId)
       if ('error' in snapResult) {
         req.log.warn({ run_id: id, reason: snapResult.error }, 'payroll finalize: snapshot build failed (non-fatal)')
+        // Surface the failure forensically so the run isn't silently snapshot-less
+        // (Accounting/ledger will otherwise fail until a snapshot is generated).
+        await logRunEvent(fastify.supabase, req.log, {
+          tenant_id:  tenantId,
+          run_id:     id,
+          event_type: 'snapshot_integrity_failed',
+          payload:    { reason: snapResult.error, stage: 'finalize_auto_snapshot' },
+        })
       } else {
         snapshotId   = snapResult.snapshot_id
         snapshotHash = snapResult.integrity_hash
@@ -1794,6 +1802,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       }
     } catch (snapErr: any) {
       req.log.warn({ err: snapErr, run_id: id }, 'payroll finalize: snapshot exception (non-fatal)')
+      await logRunEvent(fastify.supabase, req.log, {
+        tenant_id:  tenantId,
+        run_id:     id,
+        event_type: 'snapshot_integrity_failed',
+        payload:    { reason: String(snapErr?.message ?? snapErr), stage: 'finalize_auto_snapshot' },
+      }).catch(() => void 0)
     }
 
     await logAction(fastify.supabase, {
@@ -3768,7 +3782,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       { ledger_type: parsed.data.ledger_type, accounting_date: parsed.data.accounting_date },
     )
 
-    if ('error' in result) return reply.code(500).send({ error: 'LEDGER_BUILD_FAILED', message: result.error })
+    if ('error' in result) {
+      // Actionable preconditions (snapshot needed / archived / ledger already posted)
+      // surface as 409 with a code the UI can act on, not an opaque 500.
+      const actionable = new Set(['SNAPSHOT_REQUIRED', 'SNAPSHOT_ARCHIVED', 'LEDGER_EXISTS'])
+      const code = (result as any).code as string | undefined
+      if (code && actionable.has(code)) {
+        return reply.code(409).send({ error: code, message: result.error })
+      }
+      return reply.code(500).send({ error: 'LEDGER_BUILD_FAILED', message: result.error })
+    }
 
     await logRunEvent(fastify.supabase, req.log, {
       tenant_id:  tenantId,
