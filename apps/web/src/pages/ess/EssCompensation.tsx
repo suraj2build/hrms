@@ -16,6 +16,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { Link }                         from 'react-router-dom'
 import { useQuery }                     from '@tanstack/react-query'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -30,7 +31,6 @@ import {
   Receipt,
   Wallet, Gift, ShieldCheck, History as HistoryIcon,
   Building2, ArrowUpRight, PiggyBank, Clock,
-  Sparkles,
 } from 'lucide-react'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
@@ -603,26 +603,205 @@ function EmploymentCard({ profile, comp }: { profile?: FullProfile; comp?: Activ
   )
 }
 
-// ── ComingSoon — honest placeholder for tabs without a backing endpoint ─────────
+// ── MyBonusesTab — variable pay awards (P5.1) ────────────────────────────────────
+// Read-only projection of the employee's OWN approved variable pay awards. Reuses
+// the existing variable pay engine via the self-scoped /payroll/variable-pay/my.
 
-function ComingSoon({ icon: Icon, title, blurb }: { icon: React.ElementType; title: string; blurb: string }) {
+interface BonusAward {
+  id:                 string
+  amount:             number
+  status:             string
+  performance_period: string | null
+  performance_notes:  string | null
+  award_name:         string
+  award_type:         string
+  is_taxable:         boolean
+  batch_name:         string | null
+  payout_month:       string | null
+  approved_at:        string | null
+}
+
+const BONUS_TYPE_LABEL: Record<string, string> = {
+  performance_bonus: 'Performance Bonus',
+  sales_incentive:   'Sales Incentive',
+  referral_bonus:    'Referral Bonus',
+  spot_award:        'Spot Award',
+  retention_bonus:   'Retention Bonus',
+  project_completion:'Project Completion',
+  other:             'Variable Pay',
+}
+
+function MyBonusesTab({ awards, total, loading }: { awards: BonusAward[]; total: number; loading: boolean }) {
+  if (loading) {
+    return <SectionCard><IntelligenceLoadingSkeleton rows={4} /></SectionCard>
+  }
+  if (awards.length === 0) {
+    return (
+      <SectionCard>
+        <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+          <div className="rounded-2xl bg-muted/60 p-4"><Gift className="h-8 w-8 text-muted-foreground/70" /></div>
+          <p className="text-sm font-semibold text-foreground">No variable pay awards yet</p>
+          <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">
+            Performance bonuses, incentives and referral awards will appear here once
+            HR publishes an approved payout for you.
+          </p>
+        </div>
+      </SectionCard>
+    )
+  }
   return (
-    <SectionCard>
-      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-        <div className="rounded-2xl bg-muted/60 p-4">
-          <Icon className="h-8 w-8 text-muted-foreground/70" />
-        </div>
-        <div className="space-y-1">
-          <div className="flex items-center justify-center gap-2">
-            <p className="text-sm font-semibold text-foreground">{title}</p>
-            <Badge variant="secondary" className="rounded-full text-[10px] gap-1">
-              <Sparkles className="h-3 w-3" /> Coming soon
-            </Badge>
+    <div className="space-y-4">
+      <SectionCard>
+        <div className="flex items-center justify-between gap-4 px-1 py-1">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-primary/10 p-2.5"><Gift className="h-5 w-5 text-primary" /></div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total awarded (approved)</p>
+              <p className="text-xl font-semibold tabular-nums text-foreground">{fmtCurrency(total)}</p>
+            </div>
           </div>
-          <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">{blurb}</p>
+          <Badge variant="secondary" className="rounded-full text-[11px]">{awards.length} award{awards.length === 1 ? '' : 's'}</Badge>
         </div>
-      </div>
-    </SectionCard>
+      </SectionCard>
+
+      <SectionCard title="Incentives & Bonuses" icon={<Gift className="h-4 w-4 text-muted-foreground" />}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-left font-medium">Award</th>
+                <th className="px-4 py-2 text-left font-medium">Period</th>
+                <th className="px-4 py-2 text-left font-medium">Pay month</th>
+                <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <th className="px-4 py-2 text-center font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {awards.map(a => (
+                <tr key={a.id} className="border-b border-border/40 last:border-0">
+                  <td className="px-4 py-3">
+                    <span className="font-medium text-foreground">{a.award_name}</span>
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <Badge variant="outline" className="rounded-full text-[9px]">{BONUS_TYPE_LABEL[a.award_type] ?? 'Variable Pay'}</Badge>
+                      {a.is_taxable && <Badge variant="outline" className="rounded-full text-[9px]">Taxable</Badge>}
+                    </div>
+                    {a.performance_notes && <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">{a.performance_notes}</p>}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.performance_period ?? '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.payout_month ? fmtMonth(a.payout_month) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-foreground">{fmtCurrency(a.amount)}</td>
+                  <td className="px-4 py-3 text-center">
+                    <Badge variant="success" className="rounded-full text-[10px] capitalize">{a.status}</Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 px-1 text-[11px] text-muted-foreground">
+          Only approved awards are shown. Taxable awards are included in your TDS computation under the Tax tab.
+        </p>
+      </SectionCard>
+    </div>
+  )
+}
+
+// ── MyBenefitsTab — benefits enrolment summary (P5.2) ────────────────────────────
+// Reuses the existing /benefits APIs and links to the full enrolment experience at
+// /ess/benefits. No duplicate enrolment screen.
+
+interface BenefitPlanLite {
+  id: string; name: string; plan_type: string; provider: string | null
+  coverage_amount: number; employee_cost: number; employer_cost: number
+  allows_dependents: boolean; is_open: boolean
+}
+interface BenefitEnrollLite {
+  id: string; plan_id: string; status: 'enrolled' | 'waived'; dependent_ids: string[]
+}
+
+function MyBenefitsTab({ plans, enrollments, loading }: {
+  plans: BenefitPlanLite[]; enrollments: BenefitEnrollLite[]; loading: boolean
+}) {
+  if (loading) {
+    return <SectionCard><IntelligenceLoadingSkeleton rows={4} /></SectionCard>
+  }
+  const enrollByPlan = new Map(enrollments.map(e => [e.plan_id, e]))
+  const enrolledCount = enrollments.filter(e => e.status === 'enrolled').length
+  const planById = new Map(plans.map(p => [p.id, p]))
+  const myCostYr = enrollments
+    .filter(e => e.status === 'enrolled')
+    .reduce((s, e) => s + (planById.get(e.plan_id)?.employee_cost ?? 0), 0)
+
+  return (
+    <div className="space-y-4">
+      <SectionCard>
+        <div className="flex flex-wrap items-center justify-between gap-4 px-1 py-1">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-success/10 p-2.5"><ShieldCheck className="h-5 w-5 text-success" /></div>
+            <div>
+              <p className="text-xs text-muted-foreground">Active enrolments</p>
+              <p className="text-xl font-semibold tabular-nums text-foreground">{enrolledCount}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">of {plans.length} plans</span></p>
+            </div>
+          </div>
+          {myCostYr > 0 && (
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">Your contribution / yr</p>
+              <p className="text-lg font-semibold tabular-nums text-foreground">{fmtCurrency(myCostYr)}</p>
+            </div>
+          )}
+          <Button asChild size="sm" variant="outline" className="h-8 text-xs gap-1.5">
+            <Link to="/ess/benefits"><ShieldCheck className="h-3.5 w-3.5" />Manage benefits</Link>
+          </Button>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="My Benefit Plans" icon={<ShieldCheck className="h-4 w-4 text-muted-foreground" />}>
+        {plans.length === 0 ? (
+          <div className="py-12 text-center text-sm text-muted-foreground">
+            No benefit plans have been published for your organisation yet.
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {plans.map(plan => {
+              const mine = enrollByPlan.get(plan.id)
+              return (
+                <div key={plan.id} className="flex flex-col rounded-xl border border-border p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">{plan.name}</p>
+                    {mine
+                      ? <Badge variant={mine.status === 'enrolled' ? 'success' : 'secondary'} className="text-[10px] capitalize">{mine.status}</Badge>
+                      : !plan.is_open ? <Badge variant="outline" className="text-[10px]">Closed</Badge>
+                      : <Badge variant="outline" className="text-[10px]">Not enrolled</Badge>}
+                  </div>
+                  {plan.provider && <p className="text-[11px] text-muted-foreground">{plan.provider}</p>}
+                  <div className="mt-3 space-y-1 text-xs">
+                    {plan.coverage_amount > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Cover</span>
+                        <span className="font-medium">{fmtCurrency(plan.coverage_amount)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Your cost / yr</span>
+                      <span className="font-medium">{plan.employee_cost > 0 ? fmtCurrency(plan.employee_cost) : 'Free'}</span>
+                    </div>
+                    {mine?.status === 'enrolled' && plan.allows_dependents && (
+                      <div className="flex items-center gap-1 text-muted-foreground">
+                        <PiggyBank className="h-3 w-3" /> {mine.dependent_ids.length} dependent{mine.dependent_ids.length === 1 ? '' : 's'} covered
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <p className="mt-3 px-1 text-[11px] text-muted-foreground">
+          Enrol, waive or update dependent coverage from the full benefits page.
+        </p>
+      </SectionCard>
+    </div>
   )
 }
 
@@ -717,6 +896,32 @@ export function EssCompensation() {
     queryKey:  ['ess-comp-revisions', employeeId],
     queryFn:   () => api.get(`/compensation/revisions/employee/${employeeId}`),
     enabled:   !!employeeId && revVisited,
+    staleTime: 120_000,
+  })
+
+  // Variable pay awards (bonuses) — lazy, only when Bonuses tab is first visited (P5.1)
+  const [bonusVisited, setBonusVisited] = useState(false)
+  useEffect(() => { if (tab === 'bonuses') setBonusVisited(true) }, [tab])
+  const { data: bonusData, isLoading: bonusLoading } = useQuery<{ data: BonusAward[]; total_awarded: number }>({
+    queryKey:  ['ess-variable-pay-my', employeeId],
+    queryFn:   () => api.get('/payroll/variable-pay/my'),
+    enabled:   !!employeeId && bonusVisited,
+    staleTime: 120_000,
+  })
+
+  // Benefits — lazy, only when Benefits tab is first visited (P5.2)
+  const [benefitsVisited, setBenefitsVisited] = useState(false)
+  useEffect(() => { if (tab === 'benefits') setBenefitsVisited(true) }, [tab])
+  const { data: benPlansData, isLoading: benPlansLoading } = useQuery<{ data: BenefitPlanLite[] }>({
+    queryKey:  ['ess-benefit-plans'],
+    queryFn:   () => api.get('/benefits/plans'),
+    enabled:   benefitsVisited,
+    staleTime: 120_000,
+  })
+  const { data: benMyData, isLoading: benMyLoading } = useQuery<{ data: BenefitEnrollLite[] }>({
+    queryKey:  ['ess-benefit-my'],
+    queryFn:   () => api.get('/benefits/my'),
+    enabled:   benefitsVisited,
     staleTime: 120_000,
   })
 
@@ -1134,10 +1339,10 @@ export function EssCompensation() {
       {/* TAB: BONUSES & INCENTIVES                                           */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === 'bonuses' && (
-        <ComingSoon
-          icon={Gift}
-          title="Bonuses & Incentives"
-          blurb="Performance bonuses, variable pay and referral incentives will appear here once incentive payouts are published to employee self-service."
+        <MyBonusesTab
+          awards={bonusData?.data ?? []}
+          total={bonusData?.total_awarded ?? 0}
+          loading={bonusLoading}
         />
       )}
 
@@ -1145,10 +1350,10 @@ export function EssCompensation() {
       {/* TAB: BENEFITS                                                       */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {tab === 'benefits' && (
-        <ComingSoon
-          icon={ShieldCheck}
-          title="Benefits & Perks"
-          blurb="Group health insurance, term life cover and other perks will be listed here once the benefits catalogue is enabled for your organization."
+        <MyBenefitsTab
+          plans={benPlansData?.data ?? []}
+          enrollments={benMyData?.data ?? []}
+          loading={benPlansLoading || benMyLoading}
         />
       )}
 

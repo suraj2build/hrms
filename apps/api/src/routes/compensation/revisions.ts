@@ -47,6 +47,17 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     return ['super_admin', 'hr_admin'].includes(role)
   }
 
+  /** Resolve the caller's own employee_id from their profile (server-side, never trusted). */
+  async function callerEmployeeId(req: any): Promise<string | null> {
+    const { data } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    return (data as { employee_id: string | null } | null)?.employee_id ?? null
+  }
+
   // ── GET /compensation/revisions ──────────────────────────────────────────────
   fastify.get('/compensation/revisions', auth, async (req: any, reply) => {
     const { status, employee_id, revision_type, limit = 50, offset = 0 } = req.query as {
@@ -171,11 +182,28 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase
       .from('employees')
-      .select('id, status')
+      .select('id, status, manager_id')
       .eq('id', d.employee_id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    // Non-admin callers (managers / employees) may only raise a revision for
+    // THEMSELVES or for one of their OWN direct reports. HR retains approval
+    // authority — a manager-submitted revision lands as pending, exactly like any
+    // other (Program 5 · P5.3). This also closes the IDOR hole where any
+    // authenticated user could previously submit a revision for an arbitrary id.
+    if (!isAdmin(req.userRole)) {
+      const myEmpId = await callerEmployeeId(req)
+      const isSelf          = myEmpId && myEmpId === d.employee_id
+      const isMyDirectReport = myEmpId && (emp as any).manager_id === myEmpId
+      if (!isSelf && !isMyDirectReport) {
+        return reply.code(403).send({
+          error:   'FORBIDDEN',
+          message: 'You can only raise a compensation revision for yourself or your direct reports',
+        })
+      }
+    }
 
     // Fetch current active compensation for before snapshot
     const { data: currentComp } = await fastify.supabase
@@ -579,5 +607,164 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .eq('id', id)
 
     return reply.send({ data: preview })
+  })
+
+  // ── POST /compensation/revisions/bulk ────────────────────────────────────────
+  // Increment cycle (Program 5 · P5.5). Creates ONE NORMAL compensation revision
+  // per selected employee — it does NOT bypass the existing workflow. Each row
+  // lands as `pending` and is approved through the existing per-row approve
+  // endpoint by HR. No parallel approval engine, no new table.
+  //
+  // The cohort is resolved server-side from filters (department / grade) and/or an
+  // explicit employee_ids list. Each employee's new CTC is derived from their own
+  // CURRENT active compensation (flat amount or percentage). Employees with no
+  // active compensation, or who already have a pending revision, are skipped and
+  // reported back — never silently dropped.
+  const bulkSchema = z.object({
+    employee_ids:   z.array(z.string().uuid()).optional(),
+    department_id:  z.string().uuid().optional(),
+    grade:          z.string().optional(),
+    mode:           z.enum(['percentage', 'flat_amount']),
+    value:          z.number().positive(),
+    effective_date: z.string().regex(dateRe),
+    revision_type:  z.enum(['increment', 'promotion', 'revision', 'correction', 'restructure', 'retro']).default('increment'),
+    reason:         z.string().min(5).max(1000),
+    notes:          z.string().max(2000).optional(),
+    /** When true, compute the impact and return it WITHOUT inserting any rows. */
+    dry_run:        z.boolean().optional().default(false),
+  })
+
+  fastify.post('/compensation/revisions/bulk', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const parsed = bulkSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const d = parsed.data
+    if (!d.employee_ids?.length && !d.department_id && !d.grade) {
+      return reply.code(400).send({ error: 'NO_COHORT', message: 'Provide employee_ids, department_id or grade to select a cohort' })
+    }
+
+    // ── Resolve the cohort (active employees only) ────────────────────────────
+    let empQ = fastify.supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'active')
+    if (d.employee_ids?.length) empQ = empQ.in('id', d.employee_ids)
+    if (d.department_id)        empQ = empQ.eq('department_id', d.department_id)
+    if (d.grade)                empQ = empQ.eq('grade', d.grade)
+
+    const { data: cohort, error: cohortErr } = await empQ
+    if (cohortErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve cohort' })
+    if (!cohort?.length) return reply.send({ created: [], skipped: [], cohort_size: 0 })
+
+    const empIds = cohort.map((e: any) => e.id)
+
+    // Current active compensation + existing pending revisions, in two batched reads.
+    const [{ data: comps }, { data: pendings }] = await Promise.all([
+      fastify.supabase
+        .from('employee_compensations')
+        .select('id, employee_id, ctc_annual, ctc_monthly, salary_structure_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('is_active', true)
+        .in('employee_id', empIds),
+      fastify.supabase
+        .from('compensation_revisions')
+        .select('employee_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'pending')
+        .in('employee_id', empIds),
+    ])
+
+    const compByEmp    = new Map((comps ?? []).map((c: any) => [c.employee_id, c]))
+    const pendingByEmp = new Set((pendings ?? []).map((p: any) => p.employee_id))
+    const empById      = new Map(cohort.map((e: any) => [e.id, e]))
+
+    const rowsToInsert: any[] = []
+    const skipped: Array<{ employee_id: string; name: string; reason: string }> = []
+
+    for (const empId of empIds) {
+      const emp = empById.get(empId)
+      const name = emp ? `${emp.first_name} ${emp.last_name}` : empId
+      const comp = compByEmp.get(empId)
+
+      if (!comp) { skipped.push({ employee_id: empId, name, reason: 'No active compensation' }); continue }
+      if (pendingByEmp.has(empId)) { skipped.push({ employee_id: empId, name, reason: 'Already has a pending revision' }); continue }
+
+      const beforeCtc = Number(comp.ctc_annual ?? 0)
+      if (beforeCtc <= 0) { skipped.push({ employee_id: empId, name, reason: 'Current CTC is zero' }); continue }
+
+      const newCtc = d.mode === 'percentage'
+        ? Math.round(beforeCtc * (1 + d.value / 100))
+        : Math.round(beforeCtc + d.value)
+      const deltaAmount = newCtc - beforeCtc
+      const deltaPct    = Math.round((deltaAmount / beforeCtc) * 10000) / 100
+
+      rowsToInsert.push({
+        tenant_id:               req.tenantId,
+        employee_id:             empId,
+        requested_by:            req.userId,
+        revision_type:           d.revision_type,
+        effective_date:          d.effective_date,
+        reason:                  d.reason,
+        notes:                   d.notes ?? null,
+        before_compensation_id:  comp.id,
+        before_ctc_annual:       beforeCtc,
+        before_ctc_monthly:      Number(comp.ctc_monthly ?? Math.round(beforeCtc / 12)),
+        new_salary_structure_id: comp.salary_structure_id,  // keep current structure → approve scales components
+        new_ctc_annual:          newCtc,
+        delta_amount:            deltaAmount,
+        delta_pct:               deltaPct,
+        retro_months:            0,
+        status:                  'pending',
+      })
+    }
+
+    const nameFor = (empId: string) => {
+      const e = empById.get(empId) as any
+      return e ? `${e.first_name} ${e.last_name}` : null
+    }
+
+    // Preview only — return the would-be revisions without persisting anything.
+    if (d.dry_run) {
+      const preview = rowsToInsert.map(r => ({
+        employee_id:       r.employee_id,
+        name:              nameFor(r.employee_id),
+        before_ctc_annual: r.before_ctc_annual,
+        new_ctc_annual:    r.new_ctc_annual,
+        delta_amount:      r.delta_amount,
+        delta_pct:         r.delta_pct,
+      }))
+      return reply.send({
+        dry_run:       true,
+        created:       preview,
+        skipped,
+        cohort_size:   empIds.length,
+        created_count: preview.length,
+        skipped_count: skipped.length,
+      })
+    }
+
+    let created: any[] = []
+    if (rowsToInsert.length) {
+      const { data: inserted, error: insErr } = await fastify.supabase
+        .from('compensation_revisions')
+        .insert(rowsToInsert)
+        .select('id, employee_id, before_ctc_annual, new_ctc_annual, delta_pct')
+      if (insErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create revision rows' })
+      created = (inserted ?? []).map((r: any) => ({ ...r, name: nameFor(r.employee_id) }))
+    }
+
+    return reply.code(201).send({
+      created,
+      skipped,
+      cohort_size:   empIds.length,
+      created_count: created.length,
+      skipped_count: skipped.length,
+    })
   })
 }

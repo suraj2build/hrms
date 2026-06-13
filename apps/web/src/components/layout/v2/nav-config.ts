@@ -404,6 +404,7 @@ export const DOMAINS: Domain[] = [
           { id: 'run-console',      label: 'Run Console',       route: '/admin/payroll/run-console', icon: Activity,               keywords: ['run payroll', 'process payroll', 'execute payroll', 'start payroll', 'payroll run console'] },
           { id: 'payroll-runs',     label: 'Payroll Runs',      route: '/admin/payroll',             icon: PlayCircle, exact: true, keywords: ['payroll history', 'past runs', 'salary runs', 'run list'] },
           { id: 'comp-revisions',   label: 'Comp Revisions',    route: '/admin/payroll/revisions',   icon: GitMerge,               keywords: ['salary revision', 'increment', 'hike', 'salary hike', 'appraisal', 'compensation change', 'pay revision', 'ctc revision', 'salary increment'] },
+          { id: 'increment-cycle',  label: 'Increment Cycle',   route: '/admin/payroll/increment-cycle', icon: TrendingUp,          keywords: ['increment cycle', 'annual increment', 'appraisal cycle', 'bulk increment', 'salary increment cycle', 'increment batch', 'merit cycle', 'cohort increment'] },
           { id: 'payroll-forecast', label: 'Forecast',          route: '/admin/payroll/forecast',    icon: TrendingUp,             keywords: ['salary forecast', 'cost forecast', 'manpower cost projection', 'payroll projection', 'cost estimate'] },
           { id: 'payroll-variance', label: 'Variance',          route: '/admin/payroll/variance',    icon: BarChart3,              keywords: ['payroll variance', 'month-on-month', 'salary difference', 'payroll change', 'MOM comparison'] },
         ],

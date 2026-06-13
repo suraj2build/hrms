@@ -318,6 +318,62 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Batch cancelled' })
   })
 
+  // ── GET /payroll/variable-pay/my ──────────────────────────────────────────────
+  // ESS (Program 5 · P5.1): the caller's OWN variable pay awards. employee_id is
+  // resolved server-side from the profile — never trusted from the client — so an
+  // employee can only ever read their own incentives. Only payouts belonging to an
+  // APPROVED batch are exposed (draft / in_review / cancelled payouts stay invisible
+  // to the employee). Read-only — reuses the existing variable pay engine.
+  fastify.get('/my', auth, async (req: any, reply) => {
+    const { data: profile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    const employeeId = (profile as { employee_id: string | null } | null)?.employee_id ?? null
+    if (!employeeId) {
+      return reply.send({ data: [], total_awarded: 0 })
+    }
+
+    const { data, error } = await fastify.supabase
+      .from('variable_payouts')
+      .select(`
+        id, amount, status, performance_period, performance_notes, created_at,
+        variable_payout_batches!inner(id, batch_name, payout_month, status, approved_at,
+          incentive_templates(id, name, code, template_type, is_taxable))
+      `)
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', req.tenantId)
+      .eq('variable_payout_batches.status', 'approved')
+
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const rows = (data ?? []).map((p: any) => {
+      const batch = p.variable_payout_batches
+      const tmpl  = batch?.incentive_templates
+      return {
+        id:                p.id,
+        amount:            Number(p.amount ?? 0),
+        status:            p.status,
+        performance_period: p.performance_period ?? null,
+        performance_notes:  p.performance_notes ?? null,
+        award_name:        tmpl?.name ?? batch?.batch_name ?? 'Variable Pay',
+        award_type:        tmpl?.template_type ?? 'other',
+        is_taxable:        tmpl?.is_taxable ?? true,
+        batch_name:        batch?.batch_name ?? null,
+        payout_month:      batch?.payout_month ?? null,
+        approved_at:       batch?.approved_at ?? null,
+      }
+    })
+    // Newest payout month first
+    rows.sort((a, b) => (b.payout_month ?? '').localeCompare(a.payout_month ?? ''))
+
+    const total_awarded = rows.reduce((s, r) => s + r.amount, 0)
+    return reply.send({ data: rows, total_awarded })
+  })
+
   // ── GET /payroll/variable-pay/employee/:employeeId ────────────────────────────
   fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }

@@ -105,6 +105,7 @@ const OvertimeManagement  = lazy(() => import('@/pages/attendance/OvertimeManage
 const PayrollReadiness    = lazy(() => import('@/pages/attendance/PayrollReadiness').then(m => ({ default: m.PayrollReadiness })))
 const LeaveAccrualAdmin   = lazy(() => import('@/pages/attendance/LeaveAccrualAdmin').then(m => ({ default: m.LeaveAccrualAdmin })))
 const TeamLeaveBalances   = lazy(() => import('@/pages/manager/TeamLeaveBalances').then(m => ({ default: m.TeamLeaveBalances })))
+const ManagerCompensation = lazy(() => import('@/pages/manager/ManagerCompensation').then(m => ({ default: m.ManagerCompensation })))
 const CollisionLog        = lazy(() => import('@/pages/attendance/CollisionLog').then(m => ({ default: m.CollisionLog })))
 const OptionalHolidayPool = lazy(() => import('@/pages/attendance/OptionalHolidayPool').then(m => ({ default: m.OptionalHolidayPool })))
 const LeavePolicyEngine   = lazy(() => import('@/pages/attendance/LeavePolicyEngine').then(m => ({ default: m.LeavePolicyEngine })))
@@ -122,6 +123,7 @@ const PayrollRuns              = lazy(() => import('@/pages/payroll/PayrollRuns'
 const PayrollResolutionCenter  = lazy(() => import('@/pages/payroll/PayrollResolutionCenter').then(m => ({ default: m.PayrollResolutionCenter })))
 const PayrollInvestigation     = lazy(() => import('@/pages/payroll/PayrollInvestigation').then(m => ({ default: m.PayrollInvestigation })))
 const CompensationRevisions    = lazy(() => import('@/pages/payroll/CompensationRevisions').then(m => ({ default: m.CompensationRevisions })))
+const IncrementCycle           = lazy(() => import('@/pages/payroll/IncrementCycle').then(m => ({ default: m.IncrementCycle })))
 const PayrollCostIntelligence  = lazy(() => import('@/pages/payroll/PayrollCostIntelligence').then(m => ({ default: m.PayrollCostIntelligence })))
 const PayrollForecast          = lazy(() => import('@/pages/payroll/PayrollForecast').then(m => ({ default: m.PayrollForecast })))
 const PayrollSimulation        = lazy(() => import('@/pages/payroll/PayrollSimulation').then(m => ({ default: m.PayrollSimulation })))
@@ -676,6 +678,7 @@ export default function App() {
                 <Route path="/admin/payroll/investigate"              element={<PayrollInvestigation />} />
                 <Route path="/admin/payroll/compensation-revisions"   element={<CompensationRevisions />} />
                 <Route path="/admin/payroll/revisions"               element={<CompensationRevisions />} />
+                <Route path="/admin/payroll/increment-cycle"          element={<IncrementCycle />} />
                 <Route path="/admin/payroll/cost-intelligence"        element={<PayrollCostIntelligence />} />
                 <Route path="/admin/payroll/forecast"                 element={<PayrollForecast />} />
                 <Route path="/admin/payroll/simulation"               element={<PayrollSimulation />} />
@@ -792,6 +795,7 @@ export default function App() {
                 <Route path="/manager/team/attendance"       element={<Attendance />} />
                 <Route path="/manager/team/calendar"         element={<ShiftRoster />} />
                 <Route path="/manager/team/leave-balances"   element={<TeamLeaveBalances />} />
+                <Route path="/manager/team/compensation"     element={<ManagerCompensation />} />
                 <Route path="/manager/team/who-is-in"        element={<WhoIsIn />} />
                 <Route path="/manager/team/performance"      element={<ManagerTeamPerformance />} />
                 <Route path="/manager/loans-approvals"       element={<ManagerLoanApprovals />} />

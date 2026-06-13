@@ -15,6 +15,11 @@ interface FinancialData {
   dept_cost_breakdown: Array<{ dept: string; headcount: number; total_gross: number; total_net: number; ot_cost: number }>
   total_revision_delta?: number; avg_revision_pct?: number
   revisions_by_type?: Record<string, number>; approved_revisions_count?: number
+  component_mix?: {
+    month: string; fixed_pay: number; variable_pay: number; statutory_cost: number
+    ot_cost: number; employee_deductions: number; gross_total: number; has_data: boolean
+  }
+  ot_trend?: Array<{ month: string; ot_cost: number }>
 }
 
 export default function FinancialView() {
@@ -35,6 +40,21 @@ export default function FinancialView() {
   )
   const otByDept = deptRows.filter(d => (d.ot_cost ?? 0) > 0).map((d, i) => ({ dept: d.dept, ot: +(d.ot_cost / 1e5).toFixed(1), color: PALETTE[i % PALETTE.length] }))
   const revByType = Object.entries(fin?.revisions_by_type ?? {}).map(([type, n], i) => ({ type, n, color: PALETTE[i % PALETTE.length] }))
+
+  // P5.4 — component-level payroll mix (fixed / variable / statutory / OT)
+  const mix = fin?.component_mix
+  const mixSegments = mix && mix.has_data
+    ? [
+        { label: 'Fixed Pay',      value: mix.fixed_pay,      color: PALETTE[0] },
+        { label: 'Variable Pay',   value: mix.variable_pay,   color: PALETTE[1] },
+        { label: 'Statutory Cost', value: mix.statutory_cost, color: PALETTE[2] },
+        { label: 'Overtime',       value: mix.ot_cost,        color: PALETTE[3] },
+      ].filter(s => s.value > 0)
+    : []
+  const mixTotal = mixSegments.reduce((s, m) => s + m.value, 0)
+
+  // P5.6 — overtime cost trend (month-by-month, ₹ Lakh)
+  const otTrend = (fin?.ot_trend ?? []).filter(t => t.ot_cost > 0).map(t => ({ month: fmtMonth(t.month), ot: +(t.ot_cost / 1e5).toFixed(1) }))
 
   return (
     <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and compensation revisions · live data">
@@ -68,9 +88,34 @@ export default function FinancialView() {
           ) : <EmptyBody text="Payroll cost trend will appear once payroll has run for a few months." />}
         </Panel>
 
-        <Panel icon={PieIcon} iconClass="text-success" title="Payroll Cost Mix" subtitle="By component (₹ Cr)"
+        <Panel icon={PieIcon} iconClass="text-success" title="Payroll Cost Mix" subtitle={mix ? `${fmtMonth(mix.month)} · monthly` : 'By component'}
           badge={undefined}>
-          <EmptyBody text="Component-level payroll breakdown (fixed / variable / statutory / OT) isn't exposed yet — only gross & net totals are available." />
+          {mixSegments.length > 0 ? (
+            <div className="mt-4 space-y-4">
+              {/* Stacked composition bar */}
+              <div className="flex h-3 overflow-hidden rounded-full">
+                {mixSegments.map(s => (
+                  <div key={s.label} style={{ width: `${(s.value / mixTotal) * 100}%`, background: s.color }} title={s.label} />
+                ))}
+              </div>
+              <div className="space-y-2.5">
+                {mixSegments.map(s => (
+                  <div key={s.label}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.label}
+                      </span>
+                      <span className="font-medium tabular-nums">{cr(s.value)} · {((s.value / mixTotal) * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full" style={{ width: `${(s.value / mixTotal) * 100}%`, background: s.color }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Employer-side cost. Employee deductions ({cr(mix?.employee_deductions ?? 0)}) excluded.</p>
+            </div>
+          ) : <EmptyBody text="Component-level payroll mix will appear once a payroll run is finalized for the current month." />}
         </Panel>
       </section>
 
@@ -147,9 +192,26 @@ export default function FinancialView() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          ) : <EmptyBody text="No overtime cost recorded for the current period. A month-by-month overtime trend isn't aggregated yet." />}
+          ) : <EmptyBody text="No overtime cost recorded for the current period." />}
         </Panel>
       </section>
+
+      {/* Overtime cost trend (real · month-by-month) — P5.6 */}
+      <Panel icon={Clock} iconClass="text-warning" title="Overtime Cost Trend" subtitle="Monthly overtime cost (₹ Lakh) across the window">
+        {otTrend.length > 0 ? (
+          <div className="mt-3 h-64">
+            <ResponsiveContainer>
+              <BarChart data={otTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
+                <Tooltip contentStyle={TIP} />
+                <Bar dataKey="ot" name="OT ₹L" fill="var(--chart-4)" radius={[4, 4, 0, 0]} barSize={22} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : <EmptyBody text="Overtime trend will appear once payroll has run with overtime for a few months." />}
+      </Panel>
     </ExecLayout>
   )
 }

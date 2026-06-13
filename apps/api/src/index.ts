@@ -152,6 +152,7 @@ import payrollSimulateRoute                from './routes/payroll/simulate.js'
 
 // Routes — Compensation Intelligence
 import compensationRevisionsRoute          from './routes/compensation/revisions.js'
+import managerCompensationRoute            from './routes/compensation/manager-compensation.js'
 
 // Routes — Letter Generation
 import lettersRoutes                       from './routes/letters/index.js'
@@ -608,7 +609,8 @@ async function start() {
   await fastify.register(payrollSimulateRoute)           // POST /analytics/payroll/simulate
 
   // ── Compensation Intelligence Routes ─────────────────────────
-  await fastify.register(compensationRevisionsRoute)     // GET/POST /compensation/revisions/*
+  await fastify.register(compensationRevisionsRoute)     // GET/POST /compensation/revisions/* (+ /bulk increment cycle)
+  await fastify.register(managerCompensationRoute)        // GET /manager/team/compensation (P5.3)
 
   // ── Letter Generation Routes (optional — isolated) ──────────────────────
   await safeRegisterModule('letters', async () => {

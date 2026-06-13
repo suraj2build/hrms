@@ -58,6 +58,10 @@ interface FinancialData {
   payroll_current_gross: number; payroll_current_net: number; payroll_mom_change: number
   payroll_cost_trend: Array<{ month: string; total_gross: number; employee_count: number; avg_cost_per_head: number }>
   dept_cost_breakdown: Array<{ dept: string; headcount: number; total_gross: number; total_net: number; ot_cost: number }>
+  component_mix?: {
+    month: string; fixed_pay: number; variable_pay: number; statutory_cost: number
+    ot_cost: number; employee_deductions: number; gross_total: number; has_data: boolean
+  }
 }
 interface ComplianceData {
   open_incidents: number; critical_incidents: number; open_exceptions: number
@@ -335,9 +339,36 @@ export default function ExecutiveIntelligenceCenter() {
             ) : <EmptyBody text="Combined trend will appear once trend data is available." />}
           </Panel>
 
-          <Panel icon={Wallet} iconClass="text-success" title="Payroll Cost Mix" subtitle="By component (₹ Cr)"
+          <Panel icon={Wallet} iconClass="text-success" title="Payroll Cost Mix" subtitle="By component · monthly"
             badge={<Badge variant="secondary" className="ml-auto">{cr(fin?.payroll_current_gross ?? 0)}</Badge>}>
-            <EmptyBody text="Component-level payroll breakdown (fixed / variable / statutory / OT) isn't exposed yet — only gross & net totals are available." />
+            {(() => {
+              const m = fin?.component_mix
+              const segs = m && m.has_data
+                ? [
+                    { label: 'Fixed Pay',      value: m.fixed_pay,      color: PALETTE[0] },
+                    { label: 'Variable Pay',   value: m.variable_pay,   color: PALETTE[1] },
+                    { label: 'Statutory Cost', value: m.statutory_cost, color: PALETTE[2] },
+                    { label: 'Overtime',       value: m.ot_cost,        color: PALETTE[3] },
+                  ].filter(s => s.value > 0)
+                : []
+              const total = segs.reduce((s, x) => s + x.value, 0)
+              if (segs.length === 0) {
+                return <EmptyBody text="Component-level payroll mix will appear once a payroll run is finalized for the current month." />
+              }
+              return (
+                <div className="mt-4 space-y-3">
+                  <div className="flex h-3 overflow-hidden rounded-full">
+                    {segs.map(s => <div key={s.label} style={{ width: `${(s.value / total) * 100}%`, background: s.color }} title={s.label} />)}
+                  </div>
+                  {segs.map(s => (
+                    <div key={s.label} className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.label}</span>
+                      <span className="font-medium tabular-nums">{cr(s.value)} · {((s.value / total) * 100).toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </Panel>
         </section>
 

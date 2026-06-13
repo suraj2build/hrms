@@ -583,7 +583,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const monthCount = parsed.data.months
     const oldestMonth = monthsAgo(monthCount)
 
-    const [payrollRunsRes, revisionImpactRes, deptSnapshotRes] = await Promise.all([
+    const [payrollRunsRes, revisionImpactRes, deptSnapshotRes, mixSlipsRes, otTrendRes, variableMonthRes] = await Promise.all([
       // Payroll runs for trend
       fastify.supabase
         .from('payroll_runs')
@@ -610,6 +610,31 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .eq('month', currentMonth())
         .order('total_gross', { ascending: false })
         .limit(10),
+
+      // P5.4 — current finalized slips for component-level payroll mix
+      fastify.supabase
+        .from('payroll_slips')
+        .select('component_breakdown, gross_pay')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', currentMonth())
+        .in('status', ['finalized'])
+        .limit(5000),
+
+      // P5.6 — overtime cost trend across months (from dept snapshots)
+      fastify.supabase
+        .from('payroll_dept_snapshots')
+        .select('month, total_ot_cost')
+        .eq('tenant_id', req.tenantId)
+        .gte('month', oldestMonth)
+        .order('month', { ascending: true }),
+
+      // P5.4 — approved variable pay for the current month (the "variable" bucket)
+      fastify.supabase
+        .from('variable_payouts')
+        .select('amount, variable_payout_batches!inner(status, payout_month)')
+        .eq('tenant_id', req.tenantId)
+        .eq('variable_payout_batches.status', 'approved')
+        .eq('variable_payout_batches.payout_month', currentMonth()),
     ])
 
     const runs = payrollRunsRes.data ?? []
@@ -658,6 +683,49 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       ot_cost:        Number(d.total_ot_cost ?? 0),
     }))
 
+    // ── P5.4 — component-level payroll mix (current finalized month) ───────────
+    // Aggregate each slip's component_breakdown into fixed / statutory buckets,
+    // then add the variable pay (from approved variable payouts) and OT (from dept
+    // snapshots). Reuses payroll data only — no new calculation engine.
+    let fixed_pay = 0
+    let employee_deductions = 0
+    let employer_statutory = 0
+    for (const slip of (mixSlipsRes.data ?? [])) {
+      const breakdown = Array.isArray((slip as any).component_breakdown) ? (slip as any).component_breakdown : []
+      for (const c of breakdown) {
+        const amt = Number(c.monthly_amount ?? 0)
+        if (c.component_type === 'earning')                    fixed_pay += amt
+        else if (c.component_type === 'deduction')             employee_deductions += amt
+        else if (c.component_type === 'employer_contribution') employer_statutory += amt
+      }
+    }
+    const ot_cost_current = dept_cost_breakdown.reduce((s, d) => s + d.ot_cost, 0)
+    const variable_pay = (variableMonthRes.data ?? []).reduce((s, p: any) => s + Number(p.amount ?? 0), 0)
+    // Fixed earnings already include OT inside gross; expose OT separately and net it
+    // out of fixed so the four buckets don't double-count.
+    const fixed_excl_ot = Math.max(0, Math.round(fixed_pay - ot_cost_current))
+
+    const component_mix = {
+      month:               currentMonth(),
+      fixed_pay:           fixed_excl_ot,
+      variable_pay:        Math.round(variable_pay),
+      statutory_cost:      Math.round(employer_statutory),
+      ot_cost:             Math.round(ot_cost_current),
+      employee_deductions: Math.round(employee_deductions),
+      gross_total:         Math.round(fixed_pay),
+      has_data:            (mixSlipsRes.data ?? []).length > 0,
+    }
+
+    // ── P5.6 — overtime cost trend (monthly, across the window) ────────────────
+    const otByMonth = new Map<string, number>()
+    for (const r of (otTrendRes.data ?? [])) {
+      const m = (r as any).month as string
+      otByMonth.set(m, (otByMonth.get(m) ?? 0) + Number((r as any).total_ot_cost ?? 0))
+    }
+    const ot_trend = [...otByMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, ot_cost]) => ({ month, ot_cost: Math.round(ot_cost) }))
+
     return reply.send({
       payroll_current_gross,
       payroll_current_net,
@@ -670,6 +738,8 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       revisions_by_type,
       approved_revisions_count: revisions.length,
       dept_cost_breakdown,
+      component_mix,
+      ot_trend,
       generated_at: new Date().toISOString(),
     })
   })
