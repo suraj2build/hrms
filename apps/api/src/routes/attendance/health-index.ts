@@ -324,6 +324,8 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
 
       const totalDaysMap:    Map<string, number> = new Map()
       const absentMap:       Map<string, number> = new Map()
+      const lateMap:         Map<string, number> = new Map()
+      const leaveMap:        Map<string, number> = new Map()
       const lowConfMap:      Map<string, number> = new Map()
       const correctionMap:   Map<string, number> = new Map()
       const inferenceMap:    Map<string, number> = new Map()
@@ -332,6 +334,12 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         totalDaysMap.set(row.employee_id, (totalDaysMap.get(row.employee_id) ?? 0) + 1)
         if (row.status === 'absent') {
           absentMap.set(row.employee_id, (absentMap.get(row.employee_id) ?? 0) + 1)
+        }
+        if (row.status === 'late') {
+          lateMap.set(row.employee_id, (lateMap.get(row.employee_id) ?? 0) + 1)
+        }
+        if (row.status === 'leave') {
+          leaveMap.set(row.employee_id, (leaveMap.get(row.employee_id) ?? 0) + 1)
         }
         if (row.confidence_level === 'low' || row.confidence_level === 'critical') {
           lowConfMap.set(row.employee_id, (lowConfMap.get(row.employee_id) ?? 0) + 1)
@@ -348,6 +356,8 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
       const upsertRows = targetIds.map((empId) => {
         const totalDays       = totalDaysMap.get(empId) ?? 0
         const absent          = absentMap.get(empId) ?? 0
+        const late            = lateMap.get(empId) ?? 0
+        const leave           = leaveMap.get(empId) ?? 0
         const lowConf         = lowConfMap.get(empId) ?? 0
         const corrections     = correctionMap.get(empId) ?? 0
         const inferences      = inferenceMap.get(empId) ?? 0
@@ -366,6 +376,14 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         const healthScore = Math.max(0, Math.min(100, Math.round(rawScore * 100) / 100))
         const healthGrade = computeHealthGrade(healthScore)
 
+        // Canonical reliability (R0 C5) — same formula as /analytics/workforce/reliability:
+        // clamp(0,100, round(100 - (absent+leave)/total*60 - late/total*20))
+        const relAbsentFrac    = totalDays > 0 ? (absent + leave) / totalDays : 0
+        const relLateFrac      = totalDays > 0 ? late / totalDays : 0
+        const reliabilityScore = Math.max(0, Math.min(100, Math.round(100 - relAbsentFrac * 60 - relLateFrac * 20)))
+        const reliabilityGrade: 'A' | 'B' | 'C' | 'D' =
+          reliabilityScore >= 90 ? 'A' : reliabilityScore >= 75 ? 'B' : reliabilityScore >= 60 ? 'C' : 'D'
+
         return {
           tenant_id:          req.tenantId,
           scope:              'employee' as const,
@@ -381,9 +399,15 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           score_breakdown: {
             total_days:        totalDays,
             absent_days:       absent,
+            late_days:         late,
+            leave_days:        leave,
             low_conf_days:     lowConf,
             correction_count:  corrections,
             inference_count:   inferences,
+            reliability_score: reliabilityScore,
+            reliability_grade: reliabilityGrade,
+            absent_rate_pct:   parseFloat((relAbsentFrac * 100).toFixed(1)),
+            late_rate_pct:     parseFloat((relLateFrac   * 100).toFixed(1)),
           },
           computed_at: now,
         }

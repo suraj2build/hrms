@@ -26,6 +26,20 @@ import { cn }             from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+interface ScoreBreakdown {
+  total_days?: number
+  absent_days?: number
+  late_days?: number
+  leave_days?: number
+  low_conf_days?: number
+  correction_count?: number
+  inference_count?: number
+  reliability_score?: number
+  reliability_grade?: string
+  absent_rate_pct?: number
+  late_rate_pct?: number
+}
+
 interface HealthScore {
   id: string
   scope: 'employee' | 'department' | 'site' | 'org'
@@ -33,11 +47,12 @@ interface HealthScore {
   scope_name: string | null
   period_month: string
   health_score: number
-  present_rate: number
-  late_rate: number
-  absent_rate: number
+  health_grade?: string
   anomaly_rate: number
   missing_punch_rate: number
+  correction_rate?: number
+  inference_rate?: number
+  score_breakdown?: ScoreBreakdown
   computed_at: string
 }
 
@@ -72,8 +87,16 @@ function healthScoreBg(score: number): string {
   return 'bg-destructive/10'
 }
 
-function fmtPct(n: number): string {
-  return `${(n * 100).toFixed(1)}%`
+function fmtRate(n: number | undefined | null): string {
+  if (n == null) return '—'
+  return `${n.toFixed(1)}%`
+}
+
+function reliabilityGradeColor(grade: string | undefined): string {
+  if (grade === 'A') return 'text-success'
+  if (grade === 'B') return 'text-emerald-600'
+  if (grade === 'C') return 'text-warning'
+  return 'text-destructive'
 }
 
 function fmtDatetime(iso: string): string {
@@ -91,6 +114,7 @@ type ScopeFilter = 'all' | 'employee' | 'department' | 'site' | 'org'
 
 function HealthCard({ entry }: { entry: HealthScore }) {
   const score = entry.health_score
+  const sb    = entry.score_breakdown
   return (
     <div className={cn(
       'rounded-xl border border-border p-4 space-y-3',
@@ -117,37 +141,52 @@ function HealthCard({ entry }: { entry: HealthScore }) {
         />
       </div>
 
-      {/* Rate grid */}
+      {/* Rate grid — anomaly_rate/missing_punch_rate stored as 0-100 in DB */}
       <div className="grid grid-cols-3 gap-1 text-[10px]">
         <div className="text-center">
-          <p className="text-muted-foreground">Present</p>
-          <p className="font-semibold text-success">{fmtPct(entry.present_rate)}</p>
-        </div>
-        <div className="text-center">
-          <p className="text-muted-foreground">Late</p>
-          <p className={cn('font-semibold', entry.late_rate > 0.1 ? 'text-warning' : 'text-foreground')}>
-            {fmtPct(entry.late_rate)}
+          <p className="text-muted-foreground">Absent</p>
+          <p className={cn('font-semibold', (sb?.absent_rate_pct ?? 0) > 10 ? 'text-destructive' : 'text-foreground')}>
+            {fmtRate(sb?.absent_rate_pct)}
           </p>
         </div>
         <div className="text-center">
-          <p className="text-muted-foreground">Absent</p>
-          <p className={cn('font-semibold', entry.absent_rate > 0.1 ? 'text-destructive' : 'text-foreground')}>
-            {fmtPct(entry.absent_rate)}
+          <p className="text-muted-foreground">Late</p>
+          <p className={cn('font-semibold', (sb?.late_rate_pct ?? 0) > 10 ? 'text-warning' : 'text-foreground')}>
+            {fmtRate(sb?.late_rate_pct)}
           </p>
         </div>
         <div className="text-center">
           <p className="text-muted-foreground">Anomaly</p>
-          <p className={cn('font-semibold', entry.anomaly_rate > 0.05 ? 'text-warning' : 'text-muted-foreground')}>
-            {fmtPct(entry.anomaly_rate)}
+          <p className={cn('font-semibold', (entry.anomaly_rate ?? 0) > 5 ? 'text-warning' : 'text-muted-foreground')}>
+            {fmtRate(entry.anomaly_rate)}
           </p>
         </div>
         <div className="text-center col-span-2">
           <p className="text-muted-foreground">Missing Punch</p>
-          <p className={cn('font-semibold', entry.missing_punch_rate > 0.05 ? 'text-warning' : 'text-muted-foreground')}>
-            {fmtPct(entry.missing_punch_rate)}
+          <p className={cn('font-semibold', (entry.missing_punch_rate ?? 0) > 5 ? 'text-warning' : 'text-muted-foreground')}>
+            {fmtRate(entry.missing_punch_rate)}
+          </p>
+        </div>
+        <div className="text-center">
+          <p className="text-muted-foreground">Corrections</p>
+          <p className={cn('font-semibold', (entry.correction_rate ?? 0) > 5 ? 'text-warning' : 'text-muted-foreground')}>
+            {fmtRate(entry.correction_rate)}
           </p>
         </div>
       </div>
+
+      {/* Canonical reliability score (R0 C5 — must match /analytics/workforce/reliability) */}
+      {sb?.reliability_score != null && (
+        <div className="flex items-center justify-between text-[10px] pt-1.5 border-t border-border/40">
+          <span className="text-muted-foreground font-medium">Reliability (PRD)</span>
+          <span className={cn('font-bold tabular-nums', reliabilityGradeColor(sb.reliability_grade))}>
+            {sb.reliability_score}
+            {sb.reliability_grade && (
+              <span className="ml-1 text-[9px] font-semibold">Grade {sb.reliability_grade}</span>
+            )}
+          </span>
+        </div>
+      )}
 
       <p className="text-[9px] text-muted-foreground/60">
         Computed {fmtDatetime(entry.computed_at)}
