@@ -28,6 +28,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventBus }           from './event-bus.js'
 import { computeUpcoming }    from './compliance-calendar.js'
+import { computeLifecycleActionable, categoryLabel } from './lifecycle-expiry.js'
 import { notifyHrAdmins }     from './notify.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -454,6 +455,56 @@ async function scanComplianceDeadlines(supabase: SupabaseClient, tenantId: strin
   }
 }
 
+// ── Scanner 7 — Lifecycle expiry (Program 3A) ────────────────────────────────
+// Reuses the single lifecycle-expiry source + notifyHrAdmins (existing inbox).
+// Notifies HR for overdue + due-within-7-days only, once per (item, bucket) so an
+// item alerts when it tips into due-soon and again when it becomes overdue — no
+// spam. Also self-heals contract status (active → expired) once a contract's
+// end_date has passed, using the same scan pass (no new workflow engine).
+
+async function scanLifecycleExpiry(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const items = await computeLifecycleActionable(supabase, tenantId).catch(() => [])
+
+  for (const it of items) {
+    const key = `lifecycle:${tenantId}:${it.id}:${it.bucket}`
+    if (!shouldEmit(key)) continue
+
+    const overdue = it.bucket === 'overdue'
+    await notifyHrAdmins(supabase, {
+      tenantId,
+      item_type:    'compliance_alert',
+      severity:     overdue ? 'error' : 'warning',
+      title:        overdue
+        ? `Expired: ${it.label} — ${it.employee_name} (${Math.abs(it.days_to_due)}d ago)`
+        : `Expiring in ${it.days_to_due}d: ${it.label} — ${it.employee_name}`,
+      summary:      `${categoryLabel(it.category)} · ${it.employee_name}${it.employee_code ? ` (${it.employee_code})` : ''}${it.department_name ? ` · ${it.department_name}` : ''} — ${overdue ? 'has expired' : 'expires'} on ${it.due_date}. ${it.category === 'probation' ? 'Confirm or extend probation.' : 'Renew the document before expiry to stay compliant.'}`,
+      entity_type:  it.source_table,
+      entity_id:    it.source_id,
+      action_route: '/admin/workforce/expiry-management',
+      action_label: 'Open Expiry Management',
+      metadata:     { category: it.category, lifecycle: true, employee_id: it.employee_id, due_date: it.due_date, days_to_due: it.days_to_due, bucket: it.bucket },
+    })
+
+    eventBus.emit({
+      type: 'lifecycle.expiry.alert',
+      tenantId,
+      payload: { tenantId, category: it.category, sourceTable: it.source_table, sourceId: it.source_id, employeeId: it.employee_id, dueDate: it.due_date, daysToDue: it.days_to_due, bucket: it.bucket },
+    } as any)
+  }
+
+  // Self-heal: mark active contracts expired once their end_date is in the past.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const { data: lapsed } = await supabase
+    .from('employee_contracts')
+    .select('id')
+    .eq('tenant_id', tenantId).eq('status', 'active')
+    .not('end_date', 'is', null).lt('end_date', todayIso)
+  for (const c of (lapsed ?? []) as any[]) {
+    await supabase.from('employee_contracts').update({ status: 'expired' }).eq('id', c.id).eq('tenant_id', tenantId)
+    eventBus.emit({ type: 'contract.expired', tenantId, payload: { tenantId, contractId: c.id } } as any)
+  }
+}
+
 // ── Main scan orchestrator ─────────────────────────────────────────────────────
 
 async function runAllScans(supabase: SupabaseClient): Promise<void> {
@@ -468,6 +519,7 @@ async function runAllScans(supabase: SupabaseClient): Promise<void> {
       scanPayrollBlockers(supabase, tenantId),
       scanAttendanceRisk(supabase, tenantId),
       scanComplianceDeadlines(supabase, tenantId),
+      scanLifecycleExpiry(supabase, tenantId),
     ])
   }
 }
