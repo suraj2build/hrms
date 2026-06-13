@@ -2138,123 +2138,66 @@ export function EmployeeProfile() {
           )}
 
           {/* ─────────────────────────────────────────────────────────────────
-              CORE › Onboarding Status
+              CORE › Document Extraction Summary (Onboarding)
+              Session overview removed — ReadinessCard + LifecycleTimeline
+              in the 360 panel cover session status and readiness.
           ──────────────────────────────────────────────────────────────────── */}
-          {/* Merged into the Overview (profile) tab */}
-          {subTab === 'profile' && (
-            <div className="space-y-4">
-              {!onboardingStatus
-                ? (
-                  <Card>
-                    <CardContent className="pt-6">
-                      <EmptySection icon={GraduationCap} title="No onboarding session linked" subtitle="This employee was not onboarded via the AI onboarding workflow." />
-                    </CardContent>
-                  </Card>
-                )
-                : (
-                  <>
-                    {/* Session overview */}
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                          <GraduationCap className="h-4 w-4 text-muted-foreground" />
-                          Onboarding Session
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Session Status</p>
-                            <Badge
-                              variant={
-                                onboardingStatus.session?.status === 'employee_created' ? 'success' :
-                                onboardingStatus.session?.status === 'rejected'         ? 'destructive' :
-                                onboardingStatus.session?.status === 'hr_review'        ? 'warning' :
-                                'secondary'
-                              }
-                              className="rounded-full text-[10px] capitalize"
-                            >
-                              {(onboardingStatus.session?.status ?? '—').replace(/_/g, ' ')}
-                            </Badge>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Draft Status</p>
-                            <Badge variant="outline" className="rounded-full text-[10px] capitalize">
-                              {(onboardingStatus.draft.status ?? '—').replace(/_/g, ' ')}
-                            </Badge>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">AI Confidence Score</p>
-                            <p className="text-sm font-medium">
-                              {onboardingStatus.draft.confidence_score != null
-                                ? `${Math.round(onboardingStatus.draft.confidence_score * 100)}%`
-                                : '—'}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Session Initiated</p>
-                            <p className="text-sm font-medium">{fmtDate(onboardingStatus.session?.created_at)}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    {/* Document completeness */}
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm font-semibold">Document Extraction Summary</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-3 gap-3 text-center mb-4">
-                          {[
-                            { label: 'Uploaded',  value: onboardingStatus.documents.total,     cls: 'text-foreground'    },
-                            { label: 'Extracted', value: onboardingStatus.documents.extracted, cls: 'text-success'       },
-                            { label: 'Failed',    value: onboardingStatus.documents.failed,    cls: 'text-destructive'   },
-                          ].map(({ label, value, cls }) => (
-                            <div key={label} className="p-2 rounded-md bg-muted/40">
-                              <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
-                              <p className={`text-lg font-bold ${cls}`}>{value}</p>
-                            </div>
+          {subTab === 'profile' && onboardingStatus && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <GraduationCap className="h-4 w-4 text-muted-foreground" />
+                  Document Extraction Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-3 text-center mb-4">
+                  {[
+                    { label: 'Uploaded',  value: onboardingStatus.documents.total,     cls: 'text-foreground'  },
+                    { label: 'Extracted', value: onboardingStatus.documents.extracted, cls: 'text-success'     },
+                    { label: 'Failed',    value: onboardingStatus.documents.failed,    cls: 'text-destructive' },
+                  ].map(({ label, value, cls }) => (
+                    <div key={label} className="p-2 rounded-md bg-muted/40">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
+                      <p className={`text-lg font-bold ${cls}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {onboardingStatus.documents.items.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border">
+                          {['Document Type', 'Extraction', 'Uploaded'].map(h => (
+                            <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
                           ))}
-                        </div>
-                        {onboardingStatus.documents.items.length > 0 && (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="border-b border-border">
-                                  {['Document Type', 'Extraction', 'Uploaded'].map(h => (
-                                    <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {onboardingStatus.documents.items.map((doc: any) => (
-                                  <tr key={doc.id} className="border-b border-border/50">
-                                    <td className="px-3 py-2 capitalize font-medium">{(doc.document_type ?? '—').replace(/_/g, ' ')}</td>
-                                    <td className="px-3 py-2">
-                                      <Badge
-                                        variant={
-                                          doc.extraction_status === 'completed' ? 'success'     :
-                                          doc.extraction_status === 'failed'    ? 'destructive' :
-                                          doc.extraction_status === 'pending'   ? 'secondary'   : 'outline'
-                                        }
-                                        className="rounded-full text-[9px] capitalize"
-                                      >
-                                        {doc.extraction_status ?? 'pending'}
-                                      </Badge>
-                                    </td>
-                                    <td className="px-3 py-2 text-muted-foreground">{fmtDate(doc.uploaded_at)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {onboardingStatus.documents.items.map((doc: any) => (
+                          <tr key={doc.id} className="border-b border-border/50">
+                            <td className="px-3 py-2 capitalize font-medium">{(doc.document_type ?? '—').replace(/_/g, ' ')}</td>
+                            <td className="px-3 py-2">
+                              <Badge
+                                variant={
+                                  doc.extraction_status === 'completed' ? 'success'     :
+                                  doc.extraction_status === 'failed'    ? 'destructive' :
+                                  doc.extraction_status === 'pending'   ? 'secondary'   : 'outline'
+                                }
+                                className="rounded-full text-[9px] capitalize"
+                              >
+                                {doc.extraction_status ?? 'pending'}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground">{fmtDate(doc.uploaded_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-            </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* ─────────────────────────────────────────────────────────────────
