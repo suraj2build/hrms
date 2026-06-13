@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.js'
+import { logAction } from '../../../lib/audit-service.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -304,6 +305,15 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declaration_plans',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.code(201).send({ data })
   })
 
@@ -351,6 +361,15 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declaration_plans',
+      recordId:    planId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -387,6 +406,15 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declaration_plans',
+      recordId:    planId,
+      action:      'DELETE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     { status: 'archived' } as Record<string, unknown>,
+    })
     return reply.send({ success: true, message: 'Plan archived' })
   })
 
@@ -748,6 +776,16 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       'Plan submitted as active declaration by employee',
       { item_count: planItems.length, projected_tax: taxResult.annualTaxLiability },
     )
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declaration_plans',
+      recordId:    planId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     { status: 'submitted', is_primary: true, projected_tax: taxResult.annualTaxLiability } as Record<string, unknown>,
+    })
 
     return reply.send({
       data: updatedPlan,

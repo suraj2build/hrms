@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeEPF } from '../../../lib/statutory/epf-engine.js'
 import type { EPFConfig, EPFInput } from '../../../lib/statutory/epf-engine.js'
+import { logAction } from '../../../lib/audit-service.js'
 
 export default async function epfRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -103,10 +104,26 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select()
           .single()
         if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+        await logAction(fastify.supabase, {
+          tenantId:    req.tenantId,
+          tableName:   'epf_config',
+          recordId:    (upd as any)?.id,
+          action:      'UPDATE',
+          performedBy: req.userId,
+          newData:     { effective_from, ...rest } as Record<string, unknown>,
+        })
         return reply.send({ data: upd })
       }
       return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
     }
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'epf_config',
+      recordId:    (data as any)?.id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { effective_from, ...rest } as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -153,6 +170,15 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'epf_eligibility_overrides',
+      recordId:    (data as any)?.id ?? employeeId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -568,6 +594,14 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_registrations',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.code(201).send({ data })
   })
 
@@ -609,6 +643,14 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_registrations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -624,6 +666,14 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .eq('statutory_type', 'epf')
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_registrations',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+      newData:     { is_active: false, is_default: false } as Record<string, unknown>,
+    })
     return reply.code(204).send()
   })
 

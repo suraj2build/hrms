@@ -173,6 +173,15 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
     }
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_registrations',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -203,6 +212,14 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND' })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_registrations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -218,6 +235,14 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_registrations',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+      newData:     { is_active: false } as Record<string, unknown>,
+    })
     return reply.code(204).send()
   })
 
@@ -298,6 +323,16 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         notes:       `${parsed.data.statutory_type} exemption set: ${parsed.data.exemption_reason}`,
       })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'employee_statutory_overrides',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  parsed.data.employee_id,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -352,6 +387,16 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         notes:        'Override updated',
       })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'employee_statutory_overrides',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (before as any).employee_id,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.send({ data })
   })
 
@@ -367,6 +412,13 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'employee_statutory_overrides',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+    })
     return reply.code(204).send()
   })
 

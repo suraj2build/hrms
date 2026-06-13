@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { logAction } from '../../../lib/audit-service.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -90,6 +91,14 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tds_governance_settings',
+      recordId:    (data as any)?.id ?? req.tenantId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 

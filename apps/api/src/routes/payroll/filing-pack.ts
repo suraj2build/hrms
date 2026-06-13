@@ -15,6 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { logAction } from '../../lib/audit-service.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -771,6 +772,15 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_filing_artifacts',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     { ...parsed.data, status: 'generated' } as Record<string, unknown>,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -800,6 +810,15 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Artifact not found' })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_filing_artifacts',
+      recordId:    req.params.id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: parsed.data.status, notes: parsed.data.notes } as Record<string, unknown>,
+    })
 
     return reply.send({ data })
   })

@@ -13,6 +13,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { logAction } from '../../../lib/audit-service.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -157,6 +158,15 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
     if (error) {
       return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declaration_components',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
 
     return reply.code(201).send({ data })
   })

@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computePTax } from '../../../lib/statutory/ptax-engine.js'
 import type { PTaxSlab } from '../../../lib/statutory/ptax-engine.js'
+import { logAction } from '../../../lib/audit-service.js'
 
 export default async function ptaxRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -147,6 +148,15 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'ptax_state_settings',
+      recordId:    stateCode,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.send({
       state_code:          stateCode,
       state_name:          PTAX_STATES[stateCode] ?? parsed.data.state_name ?? stateCode,
@@ -214,6 +224,15 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
     }
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'ptax_slabs',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -228,6 +247,13 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'ptax_slabs',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+    })
     return reply.code(204).send()
   })
 
@@ -294,6 +320,15 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'ptax_state_config',
+      recordId:    (data as any)?.id ?? employeeId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 

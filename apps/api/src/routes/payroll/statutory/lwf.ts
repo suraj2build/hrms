@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeLWF, parseDeductionMonths } from '../../../lib/statutory/lwf-engine.js'
 import type { LWFConfig } from '../../../lib/statutory/lwf-engine.js'
+import { logAction } from '../../../lib/audit-service.js'
 
 // States that levy LWF in India
 const LWF_STATES: Record<string, string> = {
@@ -125,6 +126,14 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       .upsert(upsertPayload, { onConflict: 'tenant_id,state_code' })
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'lwf_state_settings',
+      recordId:    stateCode,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ ...upsertPayload })
   })
 
@@ -175,6 +184,15 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       .select().single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'lwf_state_config',
+      recordId:    (data as any)?.id ?? employeeId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 

@@ -9,6 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
+import { logAction }           from '../../lib/audit-service.js'
 
 const statutoryGroupSchema = z.object({
   code:              z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -66,6 +67,14 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
         return reply.code(409).send({ error: 'DUPLICATE', message: `Statutory group code "${parsed.data.code}" already exists` })
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     }
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_groups',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.code(201).send({ data })
   })
 
@@ -86,6 +95,14 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Statutory group not found' })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_groups',
+      recordId:    req.params.id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -109,6 +126,14 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
       if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+      await logAction(fastify.supabase, {
+        tenantId:    req.tenantId,
+        tableName:   'statutory_groups',
+        recordId:    id,
+        action:      'DELETE',
+        performedBy: req.userId,
+        newData:     { is_active: false } as Record<string, unknown>,
+      })
       return reply.send({ deactivated: true, message: `Statutory group deactivated — ${count} employee record(s) assigned` })
     }
 
@@ -118,6 +143,13 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
     if (delErr) return reply.code(500).send({ error: 'DELETE_FAILED', message: delErr.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'statutory_groups',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+    })
     return reply.code(204).send()
   })
 }

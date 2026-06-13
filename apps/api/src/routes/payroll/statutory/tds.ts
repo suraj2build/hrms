@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeTDS } from '../../../lib/statutory/tds-engine.js'
 import { fetchFbpTaxableForEmployee } from '../../../lib/fbp-service.js'
+import { logAction } from '../../../lib/audit-service.js'
 
 // DB enum values — must match migration 098_tds_foundation.sql CHECK constraint
 const DECLARATION_CATEGORIES = [
@@ -184,6 +185,15 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_regime_elections',
+      recordId:    (data as any)?.id ?? employeeId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -244,6 +254,16 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog(fastify, req.tenantId, (data as any).id, req.userId, null, 'declared', 'Declaration created by employee')
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     { ...parsed.data, status: 'declared' } as Record<string, unknown>,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -295,6 +315,15 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -337,6 +366,16 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'submitted', 'Submitted for review by employee')
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     { status: 'submitted' } as Record<string, unknown>,
+    })
 
     return reply.send({ data })
   })
@@ -645,6 +684,16 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
 
     await writeAuditLog(fastify, req.tenantId, (data as any).id, req.userId, null, 'declared', 'Declaration created by HR admin')
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  parsed.data.employee_id,
+      newData:     { ...parsed.data, status: 'declared' } as Record<string, unknown>,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -680,6 +729,14 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -733,6 +790,15 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       approved_amount: parsed.data.approved_amount,
     })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'approved', approved_amount: parsed.data.approved_amount, notes: parsed.data.notes } as Record<string, unknown>,
+    })
+
     return reply.send({ data })
   })
 
@@ -783,6 +849,15 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'rejected', parsed.data.rejection_reason)
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'rejected', rejection_reason: parsed.data.rejection_reason } as Record<string, unknown>,
+    })
+
     return reply.send({ data })
   })
 
@@ -826,6 +901,15 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'revision_requested', parsed.data.notes)
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tax_declarations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'revision_requested', notes: parsed.data.notes } as Record<string, unknown>,
+    })
 
     return reply.send({ data })
   })
@@ -926,6 +1010,14 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .single()
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'declaration_proofs',
+      recordId:    (data as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      newData:     { declaration_id: id, file_name: parsed.data.file_name } as Record<string, unknown>,
+    })
     return reply.code(201).send({ data })
   })
 
@@ -1004,6 +1096,14 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'declaration_proofs',
+      recordId:    proofId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { document_state: 'verified', verification_notes: parsed.data.verification_notes ?? null } as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -1041,6 +1141,14 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'declaration_proofs',
+      recordId:    proofId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { document_state: 'rejected', rejection_reason: parsed.data.rejection_reason } as Record<string, unknown>,
+    })
     return reply.send({ data })
   })
 
@@ -1252,6 +1360,16 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .single()
 
     if (snapErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: snapErr.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'tds_declaration_snapshots',
+      recordId:    (snapshot as any)?.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  parsed.data.employee_id,
+      newData:     { financial_year: parsed.data.financial_year, total_declared: totalDeclared, total_approved: totalApproved } as Record<string, unknown>,
+    })
 
     // Mark approved declarations as payroll_applied
     if (items.length > 0) {
