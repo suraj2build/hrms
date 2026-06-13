@@ -590,7 +590,7 @@ export function EmployeeProfile() {
   // ── Lazy queries ───────────────────────────────────────────────────────────
   const { data: jobHistoryData } = useQuery<{ data: any[] }>({
     queryKey: ['job-history-all', id], queryFn: () => api.get(`/employees/${id}/job-history`),
-    enabled: !!id && visited.has('employment'), staleTime: 30_000,
+    enabled: !!id, staleTime: 30_000,
   })
   const { data: prevEmpData } = useQuery<{ data: any[] }>({
     queryKey: ['prev-employment', id], queryFn: () => api.get(`/employees/${id}/previous-employment`),
@@ -1746,6 +1746,14 @@ export function EmployeeProfile() {
 
   const initials = `${emp.first_name?.[0] ?? ''}${emp.last_name?.[0] ?? ''}`.toUpperCase()
 
+  const tenureMonths = emp.joining_date
+    ? Math.floor((Date.now() - new Date(emp.joining_date + 'T00:00:00Z').getTime()) / (1000 * 60 * 60 * 24 * 30.44))
+    : null
+  const tenureStr = tenureMonths == null ? '—'
+    : tenureMonths < 1 ? '< 1 month'
+    : tenureMonths < 12 ? `${tenureMonths}m`
+    : `${Math.floor(tenureMonths / 12)}y ${tenureMonths % 12}m`
+
   const SUB_TABS: Record<Section, Array<{ key: string; label: string; icon: React.ElementType }>> = {
     core:          [
       { key: 'profile',    label: 'Overview',       icon: User       },
@@ -1772,144 +1780,111 @@ export function EmployeeProfile() {
     .flatMap(sec => SUB_TABS[sec].map(t => ({ ...t, section: sec })))
 
   return (
-    <div className="flex gap-6 items-start">
+    <div className="space-y-6">
 
-      {/* ── Left Card ── */}
-      <div className="w-72 flex-shrink-0 sticky top-4">
-        {/* ── Profile Card ── */}
-        <div className="overflow-hidden rounded-3xl bg-card border border-border shadow-md">
-
-          {/* ── Banner ── */}
-          <div className="h-32 bg-gradient-to-tr from-primary/40 via-primary/25 to-accent/30 relative overflow-hidden">
-            <div className="absolute -top-6 -right-6 h-28 w-28 rounded-full bg-white/10" />
-            <div className="absolute -bottom-10 -left-4 h-24 w-24 rounded-full bg-white/10" />
-            <div className="absolute top-4 right-14 h-8 w-8 rounded-full bg-white/10" />
-          </div>
-
-          {/* ── Avatar (outside banner so overflow-hidden doesn't clip it) ── */}
-          <div className="flex justify-center -mt-14 relative z-10 px-5">
-            <div className="relative">
-              <div className="h-28 w-28 rounded-2xl ring-[3px] ring-card bg-muted border border-border/50 flex items-center justify-center overflow-hidden shadow-lg">
-                <SignedImage
-                  path={pi?.profile_photo}
-                  alt={`${emp.first_name} ${emp.last_name}`}
-                  className="h-full w-full object-cover"
-                  fallback={<span className="text-3xl font-black text-primary tracking-tight select-none">{initials}</span>}
-                />
-              </div>
-              {photoMutation.isPending && (
-                <div className="absolute inset-0 rounded-2xl bg-background/80 backdrop-blur-sm flex items-center justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                </div>
-              )}
+      {/* ── Profile Hero ── */}
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-br from-primary/12 via-primary/6 to-transparent" />
+        <div className="relative flex flex-col md:flex-row md:items-end gap-5 px-6 pt-6 pb-0 md:px-8">
+          {/* Avatar */}
+          <div className="relative h-20 w-20 shrink-0">
+            <div className="h-20 w-20 rounded-2xl ring-4 ring-card bg-muted border border-border flex items-center justify-center overflow-hidden shadow-md">
+              <SignedImage
+                path={pi?.profile_photo}
+                alt={`${emp.first_name} ${emp.last_name}`}
+                className="h-full w-full object-cover"
+                fallback={<span className="text-2xl font-black text-primary tracking-tight select-none">{initials}</span>}
+              />
             </div>
-          </div>
-
-          {/* ── Content ── */}
-          <div className="pt-4 pb-6 px-5 flex flex-col items-center gap-4">
-
-            {/* Name + designation */}
-            <div className="text-center w-full space-y-1">
-              <h2 className="font-display text-[15px] font-extrabold text-foreground leading-tight tracking-tight">
-                {emp.first_name} {emp.last_name}
-              </h2>
-              <p className="text-[10.5px] text-primary font-bold truncate uppercase tracking-widest">
-                {job?.designations?.name ?? job?.departments?.name ?? 'Unassigned'}
-              </p>
-            </div>
-
-            <Badge
-              variant={STATUS_VARIANT[emp.status] ?? 'secondary'}
-              className="rounded-full text-[9px] font-bold uppercase tracking-widest select-none px-4 py-1"
-            >
-              {emp.status.replace(/_/g, ' ')}
-            </Badge>
-
-            {/* Meta fields */}
-            <div className="w-full rounded-xl bg-muted/40 border border-border/60 overflow-hidden">
-              {[
-                { label: 'Employee ID',     value: emp.employee_code },
-                { label: 'Engagement',      value: job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : '—' },
-                { label: 'Date Joined',     value: fmtDate(emp.joining_date) },
-              ].map(({ label, value }, i, arr) => (
-                <div key={label} className={cn(
-                  'flex justify-between items-center px-3.5 py-2.5 text-xs',
-                  i < arr.length - 1 && 'border-b border-border/60',
-                )}>
-                  <span className="text-muted-foreground font-medium">{label}</span>
-                  <span className="font-bold text-foreground text-right max-w-[130px] truncate">{value}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Organisation Line ── */}
-            {(emp.sites || job?.work_locations || job?.departments || job?.cost_center) && (
-              <div className="w-full rounded-xl bg-muted/40 border border-border/60 px-3.5 py-3 space-y-2">
-                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1">
-                  Organisation Line
-                </p>
-                {[
-                  emp.sites           ? { label: emp.sites.name,                                                                                                  Icon: Globe,      isLast: !job?.work_locations && !job?.departments && !job?.cost_center } : null,
-                  job?.work_locations ? { label: job.work_locations.name,                                                                                         Icon: MapPin,     isLast: !job?.departments && !job?.cost_center } : null,
-                  job?.departments    ? { label: job.departments.name,                                                                                            Icon: Building2,  isLast: !job?.cost_center } : null,
-                  job?.cost_center    ? { label: job.cost_center.name ? `${job.cost_center.name} (${job.cost_center.code})` : (job.cost_center.code ?? '—'),      Icon: DollarSign, isLast: true } : null,
-                ].filter(Boolean).map((item, idx) => item && (
-                  <div key={idx} className="flex items-center gap-2 text-[11px]">
-                    <span className="text-muted-foreground/40 w-3 text-center shrink-0 font-mono text-[10px]">
-                      {item.isLast ? '└' : '├'}
-                    </span>
-                    <item.Icon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-                    <span className="truncate text-foreground/80 font-medium">{item.label}</span>
-                  </div>
-                ))}
+            {photoMutation.isPending && (
+              <div className="absolute inset-0 rounded-2xl bg-background/70 flex items-center justify-center">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
               </div>
             )}
-
-            <input
-              ref={photoInputRef} type="file" accept="image/*" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) photoMutation.mutate(f); e.target.value = '' }}
-            />
-            <Button
-              variant="outline" size="sm"
-              className="w-full gap-2 text-[10px] font-bold uppercase tracking-wider border-border/70 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-all"
-              onClick={() => photoInputRef.current?.click()}
-              disabled={photoMutation.isPending}
-            >
-              <Camera className="h-3.5 w-3.5" />
-              Upload Photo
-            </Button>
           </div>
+
+          {/* Identity */}
+          <div className="flex-1 min-w-0 pb-5">
+            <div className="flex items-center flex-wrap gap-2 mb-1">
+              <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ring-primary/20">
+                {emp.employee_code}
+              </span>
+              <Badge
+                variant={STATUS_VARIANT[emp.status] ?? 'secondary'}
+                className="rounded-full text-[10px] font-bold uppercase tracking-widest px-2.5"
+              >
+                {emp.status.replace(/_/g, ' ')}
+              </Badge>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight leading-tight text-foreground">
+              {emp.first_name} {emp.last_name}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {job?.designations?.name ?? '—'}
+              {job?.departments?.name && <> <span className="mx-1.5 text-border">·</span> {job.departments.name}</>}
+              {job?.manager && <> <span className="mx-1.5 text-border">·</span> Reports to {job.manager.first_name} {job.manager.last_name}</>}
+            </p>
+          </div>
+
+          {/* Actions */}
+          {isAdmin && (
+            <div className="flex items-center gap-2 pb-5 shrink-0">
+              <Button
+                variant="outline" size="sm" className="gap-1.5 h-8"
+                onClick={() => {
+                  setProfileForm({ first_name: emp.first_name, last_name: emp.last_name, email: emp.email, phone: emp.phone ?? '', joining_date: emp.joining_date?.slice(0,10) ?? '', status: emp.status })
+                  setEditProfile(true)
+                  setSubTab('profile')
+                  setSection('core')
+                  setVisited(v => new Set(v).add('core'))
+                }}
+              >
+                <Edit2 className="h-3.5 w-3.5" /> Edit Profile
+              </Button>
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* ── Right Panel ── */}
-      <div className="flex-1 min-w-0 space-y-4">
+        {/* Meta strip */}
+        <div className="relative grid grid-cols-2 md:grid-cols-5 border-t border-border mt-0">
+          {[
+            { label: 'Tenure',        value: tenureStr },
+            { label: 'Grade',         value: job?.grades?.name ?? '—' },
+            { label: 'Type',          value: job?.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : '—' },
+            { label: 'Date Joined',   value: fmtDate(emp.joining_date) },
+            { label: 'Site',          value: emp.sites?.name ?? '—' },
+          ].map((m, i) => (
+            <div key={m.label} className={cn(
+              'px-4 py-3 flex flex-col gap-0.5',
+              i > 0 && 'md:border-l border-border',
+              i === 1 && 'border-l border-border',
+              i === 3 && 'md:border-l border-l border-t md:border-t-0 border-border',
+              i === 4 && 'border-l border-border',
+            )}>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{m.label}</p>
+              <p className="text-sm font-semibold text-foreground truncate">{m.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
 
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Link to={`${basePath}/employees`} className="hover:text-foreground transition-colors">People</Link>
-          <span>/</span>
-          <span className="text-foreground font-medium">{emp.first_name} {emp.last_name}</span>
-        </nav>
+      {/* ── Tab bar ── */}
+      <SubTabs
+        tabs={ALL_TABS.map(t => ({ id: t.key, label: t.label, icon: t.icon }))}
+        value={subTab}
+        onChange={(key) => {
+          const t = ALL_TABS.find(x => x.key === key)
+          if (!t) return
+          setSection(t.section)
+          setVisited(v => new Set(v).add(t.section))
+          setSubTab(t.key)
+        }}
+        className="flex-wrap"
+      />
 
-        {/* Single flat tab bar (replaces the former 2-level section + sub-tab nav) */}
-        <SubTabs
-          tabs={ALL_TABS.map(t => ({ id: t.key, label: t.label, icon: t.icon }))}
-          value={subTab}
-          onChange={(key) => {
-            const t = ALL_TABS.find(x => x.key === key)
-            if (!t) return
-            // Set the owning section too so the section-keyed `visited` set
-            // still gates that section's lazy queries.
-            setSection(t.section)
-            setVisited(v => new Set(v).add(t.section))
-            setSubTab(t.key)
-          }}
-          className="flex-wrap"
-        />
-
-        {/* ── Tab content ── */}
-        <div className="space-y-4">
+      {/* ── Two-column workspace ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 items-start">
+        <div className="space-y-4 min-w-0">
 
           {/* CORE › Profile */}
           {subTab === 'profile' && (
@@ -4278,6 +4253,94 @@ export function EmployeeProfile() {
           )}
 
         </div>
+
+        {/* ── Right aside ── */}
+        <aside className="space-y-4 xl:sticky xl:top-4">
+          {/* Contact */}
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="px-4 pt-4 pb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-3">Contact</p>
+              <div className="space-y-2.5">
+                <a href={`mailto:${emp.email}`} className="flex items-center gap-2.5 text-[13px] text-foreground hover:text-primary transition-colors group">
+                  <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                    <Mail className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary" />
+                  </div>
+                  <span className="truncate">{emp.email}</span>
+                </a>
+                {emp.phone && (
+                  <div className="flex items-center gap-2.5 text-[13px] text-foreground">
+                    <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                      <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                    </div>
+                    <span className="font-mono tabular-nums text-sm">{emp.phone}</span>
+                  </div>
+                )}
+              </div>
+              <input
+                ref={photoInputRef} type="file" accept="image/*" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) photoMutation.mutate(f); e.target.value = '' }}
+              />
+              <Button
+                variant="outline" size="sm"
+                className="w-full mt-3 gap-2 text-xs"
+                onClick={() => photoInputRef.current?.click()}
+                disabled={photoMutation.isPending}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                {photoMutation.isPending ? 'Uploading…' : 'Upload Photo'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Organisation */}
+          {(emp.sites || job?.work_locations || job?.departments || job?.cost_center) && (
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+              <div className="px-4 pt-4 pb-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-3">Organisation</p>
+                <ul className="space-y-2.5">
+                  {[
+                    { Icon: Globe,      label: emp.sites?.name },
+                    { Icon: MapPin,     label: job?.work_locations?.name },
+                    { Icon: Building2,  label: job?.departments?.name },
+                    { Icon: DollarSign, label: job?.cost_center ? `${job.cost_center.name ?? ''} (${job.cost_center.code ?? ''})`.trim() : null },
+                  ].filter(item => item.label).map(({ Icon, label }, idx) => (
+                    <li key={idx} className="flex items-center gap-2.5 text-[13px]">
+                      <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-foreground truncate">{label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Position History */}
+          {(jobHistoryData?.data?.length ?? 0) > 0 && (
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+              <div className="px-4 pt-4 pb-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-3">Position History</p>
+                <ul className="space-y-3">
+                  {(jobHistoryData!.data ?? []).slice(0, 3).map((row: any, i: number) => (
+                    <li key={i} className="flex gap-3">
+                      <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                        <Briefcase className="h-3.5 w-3.5 text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[12.5px] font-medium text-foreground leading-tight truncate">
+                          {row.designations?.name ?? row.departments?.name ?? '—'}
+                        </p>
+                        <p className="text-[11px] font-mono tabular-nums text-muted-foreground mt-0.5">
+                          {fmtDate(row.effective_from)}
+                          {row.is_current && <span className="ml-1.5 text-primary font-sans font-medium">· current</span>}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
 
       {/* ── Dialogs ── */}
