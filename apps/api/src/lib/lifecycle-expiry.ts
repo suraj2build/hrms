@@ -28,6 +28,7 @@ export type LifecycleCategory =
   | 'visa'
   | 'contract'
   | 'probation'
+  | 'certification'
 
 export type ExpiryBucket = 'overdue' | 'due_7' | 'due_30' | 'due_90'
 export type ExpirySeverity = 'critical' | 'high' | 'medium' | 'info'
@@ -76,7 +77,7 @@ export function severityForBucket(b: ExpiryBucket): ExpirySeverity {
   return b === 'overdue' ? 'critical' : b === 'due_7' ? 'high' : b === 'due_30' ? 'medium' : 'info'
 }
 
-const ALL_CATEGORIES: LifecycleCategory[] = ['document', 'identity', 'passport', 'visa', 'contract', 'probation']
+const ALL_CATEGORIES: LifecycleCategory[] = ['document', 'identity', 'passport', 'visa', 'contract', 'probation', 'certification']
 
 export interface LifecycleOptions {
   withinDays?: number              // forward window (default 90); all overdue always included
@@ -100,7 +101,7 @@ export async function computeLifecycleRisks(
   const cats     = new Set(options.categories ?? ALL_CATEGORIES)
 
   // ── 1. Pull each category's raw rows in parallel ───────────────────────────
-  const [docs, idents, pvs, contracts, probationRows] = await Promise.all([
+  const [docs, idents, pvs, contracts, probationRows, certs] = await Promise.all([
     cats.has('document')
       ? supabase.from('documents')
           .select('id, employee_id, doc_type, name, expires_at')
@@ -133,15 +134,23 @@ export async function computeLifecycleRisks(
           .eq('employment_type', 'probation').is('confirmation_date', null)
           .then(r => r.data ?? [])
       : Promise.resolve([] as any[]),
+    cats.has('certification')
+      ? supabase.from('employee_certifications')
+          .select('id, employee_id, cert_name, cert_type, expiry_date')
+          .eq('tenant_id', tenantId).eq('status', 'active')
+          .not('expiry_date', 'is', null).lte('expiry_date', horizon)
+          .then(r => r.data ?? [])
+      : Promise.resolve([] as any[]),
   ])
 
   // ── 2. Resolve employees + departments for every referenced employee ───────
   const empIds = new Set<string>()
-  for (const r of docs)      empIds.add(r.employee_id)
-  for (const r of idents)    empIds.add(r.employee_id)
-  for (const r of pvs)       empIds.add(r.employee_id)
-  for (const r of contracts) empIds.add(r.employee_id)
+  for (const r of docs)         empIds.add(r.employee_id)
+  for (const r of idents)       empIds.add(r.employee_id)
+  for (const r of pvs)          empIds.add(r.employee_id)
+  for (const r of contracts)    empIds.add(r.employee_id)
   for (const r of probationRows) empIds.add(r.employee_id)
+  for (const r of certs)        empIds.add(r.employee_id)
   const empIdList = [...empIds]
 
   const empMap = new Map<string, { name: string; code: string | null; joining_date: string | null; status: string; category_id: string | null }>()
@@ -232,6 +241,13 @@ export async function computeLifecycleRisks(
     push('probation', 'job_history', r.employee_id, r.employee_id, 'Probation confirmation', `${probationDays}-day probation`, probationEnd)
   }
 
+  // ── 8. Certifications ──────────────────────────────────────────────────────
+  for (const r of certs) {
+    const typ = String(r.cert_type ?? 'certification').replace(/_/g, ' ')
+    push('certification', 'employee_certifications', r.id, r.employee_id,
+      `${typ.charAt(0).toUpperCase() + typ.slice(1)} — ${r.cert_name}`, typ, r.expiry_date)
+  }
+
   // Sort by urgency (soonest / most overdue first).
   out.sort((a, b) => a.days_to_due - b.days_to_due)
   return out
@@ -250,6 +266,7 @@ export async function computeLifecycleActionable(
 const CATEGORY_LABEL: Record<LifecycleCategory, string> = {
   document: 'Documents', identity: 'Identity documents', passport: 'Passports',
   visa: 'Visas', contract: 'Contracts', probation: 'Probation confirmations',
+  certification: 'Certifications & Licenses',
 }
 export function categoryLabel(c: LifecycleCategory): string {
   return CATEGORY_LABEL[c]
@@ -270,6 +287,7 @@ export function summariseLifecycle(items: LifecycleRiskItem[]): LifecycleSummary
     by_category: {
       document: emptyBuckets(), identity: emptyBuckets(), passport: emptyBuckets(),
       visa: emptyBuckets(), contract: emptyBuckets(), probation: emptyBuckets(),
+      certification: emptyBuckets(),
     },
   }
   for (const it of items) {

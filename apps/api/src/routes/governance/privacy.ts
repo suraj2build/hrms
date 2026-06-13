@@ -205,6 +205,64 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Erasure request updated' })
   })
 
+  // ── GET /governance/privacy/evaluations ──────────────────────────────────
+  // Compliance evaluation results (entity-level rule pass/fail)
+
+  fastify.get('/privacy/evaluations', auth, async (req: any, reply) => {
+    const q = z.object({
+      entity_type: z.string().optional(),
+      compliant:   z.coerce.boolean().optional(),
+      severity:    z.enum(['info','warning','high','critical']).optional(),
+      limit:       z.coerce.number().int().min(1).max(200).default(50),
+      offset:      z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = q.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { entity_type, compliant, severity, limit, offset } = parsed.data
+
+    let query = fastify.supabase
+      .from('compliance_evaluations')
+      .select('id, entity_type, entity_id, rule_id, compliant, severity, violations, evaluated_at', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('evaluated_at', { ascending: false })
+
+    if (entity_type)           query = query.eq('entity_type', entity_type)
+    if (compliant !== undefined) query = query.eq('compliant', compliant)
+    if (severity)              query = query.eq('severity', severity)
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+  })
+
+  // ── GET /governance/privacy/retention-runs ────────────────────────────────
+  // Data retention enforcement audit trail (read-only)
+
+  fastify.get('/privacy/retention-runs', auth, async (req: any, reply) => {
+    const q = z.object({
+      triggered_by: z.enum(['scheduler','manual','test']).optional(),
+      limit:        z.coerce.number().int().min(1).max(100).default(20),
+      offset:       z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = q.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { triggered_by, limit, offset } = parsed.data
+
+    let query = fastify.supabase
+      .from('retention_enforcement_runs')
+      .select('id, run_at, tables_scanned, records_evaluated, records_deleted, records_anonymized, records_retained, duration_ms, errors, triggered_by', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('run_at', { ascending: false })
+
+    if (triggered_by) query = query.eq('triggered_by', triggered_by)
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+  })
+
   // ── GET /governance/privacy/health ───────────────────────────────────────
   // KPI summary: open requests, SLA breaches, flagged access, control health
 

@@ -13,8 +13,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShieldCheck, Search, RefreshCw, AlertTriangle,
-  CheckCircle2, Clock, FileX2, Eye, Users, XCircle,
-  Plus, ChevronDown, Filter,
+  CheckCircle2, Clock, FileX2, Eye, XCircle,
+  Plus, Database, Activity,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -88,6 +88,30 @@ interface PiiAccessLog {
   source_ip:      string | null
 }
 
+interface ComplianceEvaluation {
+  id:           string
+  entity_type:  string
+  entity_id:    string
+  rule_id:      string | null
+  compliant:    boolean
+  severity:     string
+  violations:   string[]
+  evaluated_at: string
+}
+
+interface RetentionRun {
+  id:                  string
+  run_at:              string
+  tables_scanned:      string[]
+  records_evaluated:   number
+  records_deleted:     number
+  records_anonymized:  number
+  records_retained:    number
+  duration_ms:         number | null
+  errors:              unknown[]
+  triggered_by:        string
+}
+
 interface ErasureRequest {
   id:               string
   subject_email:    string | null
@@ -136,6 +160,9 @@ export function GovernancePrivacyWorkspace() {
   const [erasureForm, setErasureForm] = useState({ subject_email: '', subject_name: '', request_source: 'hr_admin', notes: '' })
   const [updateModal, setUpdateModal] = useState<ErasureRequest | null>(null)
   const [updateForm, setUpdateForm] = useState({ status: '', notes: '' })
+  const [evalCompliant, setEvalCompliant] = useState('all')
+  const [evalSeverity,  setEvalSeverity]  = useState('all')
+  const [retentionBy,   setRetentionBy]   = useState('all')
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -171,6 +198,25 @@ export function GovernancePrivacyWorkspace() {
     queryKey: ['erasure-requests', erasureStatus],
     queryFn:  () => api.get(`/governance/privacy/erasure-requests?${erasureParams}`),
     enabled:  tab === 'erasure',
+  })
+
+  const evalParams = new URLSearchParams({ limit: '100' })
+  if (evalCompliant !== 'all') evalParams.set('compliant', evalCompliant)
+  if (evalSeverity  !== 'all') evalParams.set('severity',  evalSeverity)
+
+  const evaluationsQ = useQuery<{ data: ComplianceEvaluation[]; total: number }>({
+    queryKey: ['compliance-evaluations', evalCompliant, evalSeverity],
+    queryFn:  () => api.get(`/governance/privacy/evaluations?${evalParams}`),
+    enabled:  tab === 'evaluations',
+  })
+
+  const retentionParams = new URLSearchParams({ limit: '20' })
+  if (retentionBy !== 'all') retentionParams.set('triggered_by', retentionBy)
+
+  const retentionQ = useQuery<{ data: RetentionRun[]; total: number }>({
+    queryKey: ['retention-runs', retentionBy],
+    queryFn:  () => api.get(`/governance/privacy/retention-runs?${retentionParams}`),
+    enabled:  tab === 'retention',
   })
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -220,6 +266,8 @@ export function GovernancePrivacyWorkspace() {
             qc.invalidateQueries({ queryKey: ['compliance-controls'] })
             qc.invalidateQueries({ queryKey: ['pii-access'] })
             qc.invalidateQueries({ queryKey: ['erasure-requests'] })
+            qc.invalidateQueries({ queryKey: ['compliance-evaluations'] })
+            qc.invalidateQueries({ queryKey: ['retention-runs'] })
           }}>
             <RefreshCw className="h-4 w-4 mr-1.5" /> Refresh
           </Button>
@@ -239,6 +287,8 @@ export function GovernancePrivacyWorkspace() {
               </span>
             ) : null}
           </TabsTrigger>
+          <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
+          <TabsTrigger value="retention">Retention Runs</TabsTrigger>
         </TabsList>
 
         {/* ── Health Tab ─────────────────────────────────────────────────── */}
@@ -533,6 +583,159 @@ export function GovernancePrivacyWorkspace() {
                         >
                           Update
                         </Button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+
+        {/* ── Compliance Evaluations Tab ────────────────────────────────── */}
+        <TabsContent value="evaluations">
+          <SectionCard>
+            <div className="flex gap-3 mb-4">
+              <Select value={evalCompliant} onValueChange={setEvalCompliant}>
+                <SelectTrigger className="h-8 text-sm w-36">
+                  <SelectValue placeholder="All results" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Results</SelectItem>
+                  <SelectItem value="false">Non-Compliant</SelectItem>
+                  <SelectItem value="true">Compliant</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={evalSeverity} onValueChange={setEvalSeverity}>
+                <SelectTrigger className="h-8 text-sm w-32">
+                  <SelectValue placeholder="All severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severity</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="warning">Warning</SelectItem>
+                  <SelectItem value="info">Info</SelectItem>
+                </SelectContent>
+              </Select>
+              {evaluationsQ.data && (
+                <span className="ml-auto self-center text-xs text-muted-foreground">
+                  {evaluationsQ.data.total} result{evaluationsQ.data.total !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {evaluationsQ.isLoading ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (evaluationsQ.data?.data ?? []).length === 0 ? (
+              <div className="py-12 text-center">
+                <Activity className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No evaluations found</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {(evaluationsQ.data?.data ?? []).map(e => {
+                  const sevColor = e.severity === 'critical' ? 'bg-red-50 text-red-700 border-red-200'
+                    : e.severity === 'high'    ? 'bg-orange-50 text-orange-700 border-orange-200'
+                    : e.severity === 'warning' ? 'bg-amber-50  text-amber-700  border-amber-200'
+                    :                            'bg-gray-100  text-gray-600   border-gray-200'
+                  return (
+                    <div key={e.id} className={cn('py-3 flex items-start gap-3', !e.compliant && 'bg-red-50/20')}>
+                      <div className={cn('mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
+                        e.compliant ? 'bg-emerald-100' : 'bg-red-100')}>
+                        {e.compliant
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          : <AlertTriangle className="h-3.5 w-3.5 text-red-600" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium capitalize">{e.entity_type}</span>
+                          <span className="text-xs font-mono text-muted-foreground">{e.entity_id.slice(0, 8)}</span>
+                          {e.rule_id && <Badge variant="outline" className="text-[10px]">{e.rule_id}</Badge>}
+                          <Badge variant="outline" className={cn('text-[10px] capitalize', sevColor)}>{e.severity}</Badge>
+                          <Badge variant="outline" className={cn('text-[10px]',
+                            e.compliant ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200')}>
+                            {e.compliant ? 'Compliant' : 'Non-Compliant'}
+                          </Badge>
+                        </div>
+                        {e.violations.length > 0 && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {e.violations.slice(0, 3).join(' · ')}{e.violations.length > 3 ? ` +${e.violations.length - 3} more` : ''}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {format(new Date(e.evaluated_at), 'dd MMM yyyy HH:mm')}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+
+        {/* ── Retention Runs Tab ────────────────────────────────────────────── */}
+        <TabsContent value="retention">
+          <SectionCard>
+            <div className="flex gap-3 mb-4">
+              <Select value={retentionBy} onValueChange={setRetentionBy}>
+                <SelectTrigger className="h-8 text-sm w-40">
+                  <SelectValue placeholder="All triggers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Triggers</SelectItem>
+                  <SelectItem value="scheduler">Scheduler</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="test">Test</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {retentionQ.isLoading ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (retentionQ.data?.data ?? []).length === 0 ? (
+              <div className="py-12 text-center">
+                <Database className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No retention runs recorded</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {(retentionQ.data?.data ?? []).map(r => {
+                  const hasErrors = Array.isArray(r.errors) && r.errors.length > 0
+                  return (
+                    <div key={r.id} className={cn('py-3.5', hasErrors && 'bg-amber-50/30')}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium">
+                            {format(new Date(r.run_at), 'dd MMM yyyy HH:mm')}
+                          </span>
+                          <Badge variant="outline" className="text-[10px] capitalize">{r.triggered_by}</Badge>
+                          {hasErrors && (
+                            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                              {r.errors.length} error{r.errors.length > 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                          {r.duration_ms != null && (
+                            <span className="text-xs text-muted-foreground">{(r.duration_ms / 1000).toFixed(1)}s</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {[
+                          { label: 'Evaluated', value: r.records_evaluated, color: 'text-foreground' },
+                          { label: 'Deleted',   value: r.records_deleted,   color: r.records_deleted   > 0 ? 'text-red-600'     : 'text-foreground' },
+                          { label: 'Anonymized',value: r.records_anonymized,color: r.records_anonymized > 0 ? 'text-amber-600'   : 'text-foreground' },
+                          { label: 'Retained',  value: r.records_retained,  color: 'text-emerald-600' },
+                        ].map(k => (
+                          <div key={k.label} className="rounded border p-2">
+                            <p className={cn('text-sm font-semibold', k.color)}>{k.value.toLocaleString()}</p>
+                            <p className="text-[10px] text-muted-foreground">{k.label}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {r.tables_scanned.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1.5">
+                          Tables: {r.tables_scanned.join(', ')}
+                        </p>
                       )}
                     </div>
                   )

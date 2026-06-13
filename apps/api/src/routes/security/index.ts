@@ -184,6 +184,68 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Rule updated' })
   })
 
+  // ── GET /security/intelligence ────────────────────────────────────────────
+  // Threat intelligence signal stream (security_intelligence_events uses org_id)
+
+  fastify.get('/intelligence', auth, async (req: any, reply) => {
+    const q = z.object({
+      signal_type: z.string().optional(),
+      entity_type: z.string().optional(),
+      severity:    z.enum(['info','warning','high','critical']).optional(),
+      limit:       z.coerce.number().int().min(1).max(200).default(100),
+      offset:      z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = q.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { signal_type, entity_type, severity, limit, offset } = parsed.data
+
+    let query = fastify.supabase
+      .from('security_intelligence_events')
+      .select('id, signal_type, entity_id, entity_type, severity, description, metadata, detected_at', { count: 'exact' })
+      .eq('org_id', req.tenantId)
+      .order('detected_at', { ascending: false })
+
+    if (signal_type) query = query.eq('signal_type', signal_type)
+    if (entity_type) query = query.eq('entity_type', entity_type)
+    if (severity)    query = query.eq('severity', severity)
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+  })
+
+  // ── GET /security/verification ────────────────────────────────────────────
+  // Identity verification event log (verification_events uses org_id)
+
+  fastify.get('/verification', auth, async (req: any, reply) => {
+    const q = z.object({
+      verification_type: z.enum(['pan','aadhaar','bank_account','ifsc','document','phone','email']).optional(),
+      status:            z.enum(['verified','failed','pending','skipped','inconclusive']).optional(),
+      entity_type:       z.string().optional(),
+      limit:             z.coerce.number().int().min(1).max(200).default(100),
+      offset:            z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = q.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { verification_type, status, entity_type, limit, offset } = parsed.data
+
+    let query = fastify.supabase
+      .from('verification_events')
+      .select('id, entity_id, entity_type, verification_type, status, score, flags, verified_at', { count: 'exact' })
+      .eq('org_id', req.tenantId)
+      .order('verified_at', { ascending: false })
+
+    if (verification_type) query = query.eq('verification_type', verification_type)
+    if (status)            query = query.eq('status', status)
+    if (entity_type)       query = query.eq('entity_type', entity_type)
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+  })
+
   // ── GET /security/health ──────────────────────────────────────────────────
 
   fastify.get('/health', auth, async (req: any, reply) => {

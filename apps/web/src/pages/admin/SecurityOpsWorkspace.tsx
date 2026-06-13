@@ -13,8 +13,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShieldAlert, RefreshCw, AlertTriangle, CheckCircle2,
-  Eye, Clock, Zap, Activity, ToggleLeft, ToggleRight,
-  ChevronDown,
+  Eye, Activity, ToggleLeft, ToggleRight, Brain, BadgeCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -88,6 +87,28 @@ interface SecurityAlert {
   mttr_seconds:     number | null
 }
 
+interface IntelligenceEvent {
+  id:          string
+  signal_type: string
+  entity_id:   string
+  entity_type: string
+  severity:    string
+  description: string
+  metadata:    Record<string, unknown> | null
+  detected_at: string
+}
+
+interface VerificationEvent {
+  id:                string
+  entity_id:         string
+  entity_type:       string
+  verification_type: string
+  status:            string
+  score:             number
+  flags:             string[]
+  verified_at:       string
+}
+
 interface DetectionRule {
   id:               string
   rule_name:        string
@@ -137,6 +158,9 @@ export function SecurityOpsWorkspace() {
   const [eventSeverity, setEventSeverity] = useState('all')
   const [updateModal,   setUpdateModal]   = useState<SecurityAlert | null>(null)
   const [updateForm,    setUpdateForm]    = useState({ status: '', resolution_note: '' })
+  const [intelSeverity, setIntelSeverity] = useState('all')
+  const [verifType,     setVerifType]     = useState('all')
+  const [verifStatus,   setVerifStatus]   = useState('all')
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -168,6 +192,25 @@ export function SecurityOpsWorkspace() {
     queryKey: ['security-rules'],
     queryFn:  () => api.get('/security/detection-rules'),
     enabled:  tab === 'rules',
+  })
+
+  const intelParams = new URLSearchParams({ limit: '100' })
+  if (intelSeverity !== 'all') intelParams.set('severity', intelSeverity)
+
+  const intelligenceQ = useQuery<{ data: IntelligenceEvent[]; total: number }>({
+    queryKey: ['security-intelligence', intelSeverity],
+    queryFn:  () => api.get(`/security/intelligence?${intelParams}`),
+    enabled:  tab === 'intelligence',
+  })
+
+  const verifParams = new URLSearchParams({ limit: '100' })
+  if (verifType   !== 'all') verifParams.set('verification_type', verifType)
+  if (verifStatus !== 'all') verifParams.set('status',            verifStatus)
+
+  const verificationQ = useQuery<{ data: VerificationEvent[]; total: number }>({
+    queryKey: ['security-verification', verifType, verifStatus],
+    queryFn:  () => api.get(`/security/verification?${verifParams}`),
+    enabled:  tab === 'verification',
   })
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -203,6 +246,8 @@ export function SecurityOpsWorkspace() {
     qc.invalidateQueries({ queryKey: ['security-events'] })
     qc.invalidateQueries({ queryKey: ['security-alerts'] })
     qc.invalidateQueries({ queryKey: ['security-rules'] })
+    qc.invalidateQueries({ queryKey: ['security-intelligence'] })
+    qc.invalidateQueries({ queryKey: ['security-verification'] })
   }
 
   const health = healthQ.data
@@ -232,6 +277,8 @@ export function SecurityOpsWorkspace() {
           </TabsTrigger>
           <TabsTrigger value="events">Event Stream</TabsTrigger>
           <TabsTrigger value="rules">Detection Rules</TabsTrigger>
+          <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
+          <TabsTrigger value="verification">Verification</TabsTrigger>
         </TabsList>
 
         {/* ── Health Tab ─────────────────────────────────────────────────── */}
@@ -497,6 +544,162 @@ export function SecurityOpsWorkspace() {
                         {r.enabled ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
                         {r.enabled ? 'Enabled' : 'Disabled'}
                       </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+
+        {/* ── Intelligence Tab ──────────────────────────────────────────── */}
+        <TabsContent value="intelligence">
+          <SectionCard>
+            <div className="flex gap-3 mb-4">
+              <Select value={intelSeverity} onValueChange={setIntelSeverity}>
+                <SelectTrigger className="h-8 text-sm w-32">
+                  <SelectValue placeholder="All severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severity</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="warning">Warning</SelectItem>
+                  <SelectItem value="info">Info</SelectItem>
+                </SelectContent>
+              </Select>
+              {intelligenceQ.data && (
+                <span className="ml-auto self-center text-xs text-muted-foreground">
+                  {intelligenceQ.data.total} signal{intelligenceQ.data.total !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {intelligenceQ.isLoading ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (intelligenceQ.data?.data ?? []).length === 0 ? (
+              <div className="py-12 text-center">
+                <Brain className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No intelligence signals</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {(intelligenceQ.data?.data ?? []).map(e => {
+                  const sm = SEV[e.severity]
+                  return (
+                    <div key={e.id} className="py-3 flex items-start gap-3">
+                      <div className={cn(
+                        'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
+                        e.severity === 'critical' ? 'bg-red-100'    :
+                        e.severity === 'high'     ? 'bg-orange-100' :
+                        e.severity === 'warning'  ? 'bg-amber-100'  : 'bg-gray-100',
+                      )}>
+                        <Brain className={cn('h-3.5 w-3.5',
+                          e.severity === 'critical' ? 'text-red-600'    :
+                          e.severity === 'high'     ? 'text-orange-600' :
+                          e.severity === 'warning'  ? 'text-amber-600'  : 'text-gray-500')} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium">{e.signal_type}</span>
+                          {sm && <Badge variant="outline" className={cn('text-[10px]', sm.color)}>{sm.label}</Badge>}
+                          <Badge variant="outline" className="text-[10px] capitalize">{e.entity_type}</Badge>
+                          <span className="text-xs font-mono text-muted-foreground">{e.entity_id.slice(0, 8)}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{e.description}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {format(new Date(e.detected_at), 'dd MMM yyyy HH:mm')}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+
+        {/* ── Verification Tab ──────────────────────────────────────────────── */}
+        <TabsContent value="verification">
+          <SectionCard>
+            <div className="flex gap-3 mb-4">
+              <Select value={verifType} onValueChange={setVerifType}>
+                <SelectTrigger className="h-8 text-sm w-44">
+                  <SelectValue placeholder="All types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="pan">PAN</SelectItem>
+                  <SelectItem value="aadhaar">Aadhaar</SelectItem>
+                  <SelectItem value="bank_account">Bank Account</SelectItem>
+                  <SelectItem value="ifsc">IFSC</SelectItem>
+                  <SelectItem value="document">Document</SelectItem>
+                  <SelectItem value="phone">Phone</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={verifStatus} onValueChange={setVerifStatus}>
+                <SelectTrigger className="h-8 text-sm w-40">
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="verified">Verified</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="skipped">Skipped</SelectItem>
+                  <SelectItem value="inconclusive">Inconclusive</SelectItem>
+                </SelectContent>
+              </Select>
+              {verificationQ.data && (
+                <span className="ml-auto self-center text-xs text-muted-foreground">
+                  {verificationQ.data.total} event{verificationQ.data.total !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {verificationQ.isLoading ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>
+            ) : (verificationQ.data?.data ?? []).length === 0 ? (
+              <div className="py-12 text-center">
+                <BadgeCheck className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No verification events</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {(verificationQ.data?.data ?? []).map(e => {
+                  const isVerified = e.status === 'verified'
+                  const isFailed   = e.status === 'failed'
+                  return (
+                    <div key={e.id} className="py-3 flex items-start gap-3">
+                      <div className={cn(
+                        'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
+                        isVerified ? 'bg-emerald-100' : isFailed ? 'bg-red-100' : 'bg-gray-100',
+                      )}>
+                        {isVerified
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          : isFailed
+                            ? <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+                            : <Eye className="h-3.5 w-3.5 text-gray-500" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium uppercase">{e.verification_type.replace('_', ' ')}</span>
+                          <Badge variant="outline" className={cn('text-[10px]',
+                            isVerified ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                            isFailed   ? 'bg-red-50 text-red-700 border-red-200' :
+                                         'bg-gray-100 text-gray-600 border-gray-200')}>
+                            {e.status}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px] capitalize">{e.entity_type}</Badge>
+                          <span className="text-xs font-mono text-muted-foreground">{e.entity_id.slice(0, 8)}</span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                          <span>Score: {e.score}</span>
+                          {e.flags.length > 0 && (
+                            <span className="text-amber-600">{e.flags.slice(0, 3).join(', ')}</span>
+                          )}
+                          <span>{format(new Date(e.verified_at), 'dd MMM yyyy HH:mm')}</span>
+                        </div>
+                      </div>
                     </div>
                   )
                 })}
