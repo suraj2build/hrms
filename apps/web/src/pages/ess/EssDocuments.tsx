@@ -8,10 +8,12 @@
  */
 
 import { useState, useCallback } from 'react'
-import { useQuery }                      from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FileText, Download, Eye, AlertTriangle, Loader2,
   FileImage, File, FileBadge, FolderOpen, Info,
+  Upload, Trash2, CalendarClock, ShieldAlert,
+  Fingerprint, Plane, BadgeCheck,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -19,11 +21,13 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
+import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import { SubTabs }       from '@/components/ui/SubTabs'
 import { toast }         from 'sonner'
+import { uploadEmployeeFile } from '@/lib/supabase-storage'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -37,7 +41,28 @@ interface EmpDocument {
   signed_url_expires_in: number | null
   file_size:             number | null
   mime_type:             string | null
+  expires_at:            string | null
+  /** true when the employee uploaded this document themselves (deletable) */
+  is_own:                boolean
   created_at:            string
+}
+
+type ExpiryBucket = 'overdue' | 'due_7' | 'due_30' | 'due_90'
+type ExpiryCategory = 'document' | 'identity' | 'passport' | 'visa' | 'contract'
+
+interface ExpiryItem {
+  id:            string
+  category:      ExpiryCategory
+  label:         string
+  detail:        string | null
+  due_date:      string
+  days_to_due:   number
+  bucket:        ExpiryBucket
+}
+
+interface ExpirySummary {
+  total: number
+  by_bucket: Record<ExpiryBucket, number>
 }
 
 interface EmpContract {
@@ -91,58 +116,105 @@ const CONTRACT_TYPE_LABEL: Record<string, string> = {
   other:        'Other',
 }
 
+// ── Expiry presentation ─────────────────────────────────────────────────────────
+
+const BUCKET_META: Record<ExpiryBucket, { label: string; variant: 'destructive' | 'warning' | 'secondary'; tone: string }> = {
+  overdue: { label: 'Expired',      variant: 'destructive', tone: 'text-destructive' },
+  due_7:   { label: 'Due ≤ 7 days', variant: 'destructive', tone: 'text-destructive' },
+  due_30:  { label: 'Due ≤ 30 days',variant: 'warning',     tone: 'text-warning' },
+  due_90:  { label: 'Due ≤ 90 days',variant: 'secondary',   tone: 'text-muted-foreground' },
+}
+
+const EXPIRY_CATEGORY_META: Record<ExpiryCategory, { label: string; icon: React.ComponentType<{ className?: string }> }> = {
+  document: { label: 'Document', icon: FileText },
+  identity: { label: 'Identity', icon: Fingerprint },
+  passport: { label: 'Passport', icon: Plane },
+  visa:     { label: 'Visa',     icon: BadgeCheck },
+  contract: { label: 'Contract', icon: FileBadge },
+}
+
+/** Document types an employee may upload themselves (constraint-valid). */
+const UPLOAD_DOC_TYPES: { value: string; label: string }[] = [
+  { value: 'certificate', label: 'Certificate' },
+  { value: 'aadhaar',     label: 'Aadhaar' },
+  { value: 'pan',         label: 'PAN' },
+  { value: 'other',       label: 'Other' },
+]
+
+/** Relative expiry hint, e.g. "in 12 days" / "23 days ago". */
+function expiryHint(days: number): string {
+  if (days < 0)  return `${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`
+  if (days === 0) return 'today'
+  return `in ${days} day${days === 1 ? '' : 's'}`
+}
+
 // ── Document row ──────────────────────────────────────────────────────────────
 
 interface DocRowProps {
   doc:         EmpDocument
   refreshing:  boolean
+  deleting:    boolean
   onView:      (doc: EmpDocument) => void
   onDownload:  (doc: EmpDocument) => void
+  onDelete:    (doc: EmpDocument) => void
 }
 
-function DocRow({ doc, refreshing, onView, onDownload }: DocRowProps) {
+/** Days until a YYYY-MM-DD date (negative = past). null when no date. */
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null
+  const due = Date.parse(dateStr.slice(0, 10) + 'T00:00:00Z')
+  const now = Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00Z')
+  return Math.round((due - now) / 86_400_000)
+}
+
+function DocRow({ doc, refreshing, deleting, onView, onDownload, onDelete }: DocRowProps) {
   // Presence check only — never open storage_path directly (relative path, not URL)
   const hasFile = !!(doc.signed_url || doc.storage_path)
+  const expDays = daysUntil(doc.expires_at)
+  const expBucket: ExpiryBucket | null =
+    expDays === null ? null : expDays < 0 ? 'overdue' : expDays <= 7 ? 'due_7' : expDays <= 30 ? 'due_30' : expDays <= 90 ? 'due_90' : null
 
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-border/40 last:border-0 gap-3">
       <div className="flex items-center gap-2.5 min-w-0">
         <FileIcon mime={doc.mime_type} />
         <div className="min-w-0">
-          <p className="text-xs font-medium text-foreground truncate">{doc.name}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-medium text-foreground truncate">{doc.name}</p>
+            {doc.is_own && <Badge variant="outline" className="rounded-full text-[9px] px-1.5">Uploaded by you</Badge>}
+            {expBucket && (
+              <Badge variant={BUCKET_META[expBucket].variant} className="rounded-full text-[9px] px-1.5">
+                {expBucket === 'overdue' ? 'Expired' : `Expires ${expiryHint(expDays!)}`}
+              </Badge>
+            )}
+          </div>
           <p className="text-[10px] text-muted-foreground">
             {doc.doc_type.replace(/_/g, ' ')}
             {doc.file_size ? ` · ${fmtSize(doc.file_size)}` : ''}
             {' · '}{fmtDate(doc.created_at)}
+            {doc.expires_at ? ` · expires ${fmtDate(doc.expires_at)}` : ''}
           </p>
         </div>
       </div>
-      {hasFile ? (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 w-7 p-0"
-            title="View"
-            disabled={!hasFile || refreshing}
-            onClick={() => onView(doc)}
-          >
-            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {hasFile ? (
+          <>
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="View" disabled={refreshing} onClick={() => onView(doc)}>
+              {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Download" disabled={refreshing} onClick={() => onDownload(doc)}>
+              {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            </Button>
+          </>
+        ) : (
+          <span className="text-[10px] text-muted-foreground italic">No file</span>
+        )}
+        {doc.is_own && (
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" title="Delete" disabled={deleting} onClick={() => onDelete(doc)}>
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 w-7 p-0"
-            title="Download"
-            disabled={!hasFile || refreshing}
-            onClick={() => onDownload(doc)}
-          >
-            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
-      ) : (
-        <span className="text-[10px] text-muted-foreground italic flex-shrink-0">No file</span>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -158,14 +230,25 @@ const URL_REFRESH_THRESHOLD_MS = 55 * 60 * 1000   // 55 min of 60 min TTL
 
 export function EssDocuments() {
   const { profile } = useAuthStore()
+  const qc          = useQueryClient()
   const employeeId  = profile?.employee_id ?? null
-  const [activeTab, setActiveTab] = useState<'documents' | 'contracts'>('documents')
+  const tenantId    = profile?.tenant_id ?? null
+  const [activeTab, setActiveTab] = useState<'documents' | 'contracts' | 'expiry'>('documents')
 
   // Track which document (by id) is currently being URL-refreshed so we can
   // show a spinner on the correct row's buttons.
   const [refreshingDocId, setRefreshingDocId] = useState<string | null>(null)
   // Track which contract is being refreshed
   const [refreshingContractId, setRefreshingContractId] = useState<string | null>(null)
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null)
+
+  // ── Upload form state ────────────────────────────────────────────────────────
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [upFile, setUpFile]   = useState<File | null>(null)
+  const [upName, setUpName]   = useState('')
+  const [upType, setUpType]   = useState('certificate')
+  const [upExpiry, setUpExpiry] = useState('')
+  const [uploading, setUploading] = useState(false)
 
   const {
     data: docData,
@@ -174,12 +257,21 @@ export function EssDocuments() {
     dataUpdatedAt: docUpdatedAt,
   } = useQuery<EmpDocument[]>({
     queryKey: ['ess-documents', employeeId],
-    queryFn:  () => api.get(`/employees/${employeeId}/documents`).then((r: any) => r.data),
+    queryFn:  () => api.get('/ess/me/documents').then((r: any) => r.data),
     enabled:  !!employeeId,
     // Pro-active refresh every 45 min ensures signed URLs (1h TTL) never expire
     // while the tab is in focus, eliminating the need for on-click refresh in most cases.
     staleTime:       45 * 60 * 1000,
     refetchInterval: 45 * 60 * 1000,
+  })
+
+  const {
+    data: expiryData,
+    isLoading: expiryLoading,
+  } = useQuery<{ data: ExpiryItem[]; summary: ExpirySummary }>({
+    queryKey: ['ess-expiry', employeeId],
+    queryFn:  () => api.get('/ess/me/expiry'),
+    enabled:  !!employeeId,
   })
 
   const {
@@ -279,6 +371,46 @@ export function EssDocuments() {
     }
   }, [contractUpdatedAt, refetchContracts])
 
+  // ── Upload + delete ──────────────────────────────────────────────────────────
+  async function handleUpload() {
+    if (!upFile || !employeeId || !tenantId) return
+    if (upFile.size > 5 * 1024 * 1024) { toast.error('File exceeds 5 MB limit'); return }
+    setUploading(true)
+    try {
+      const path = await uploadEmployeeFile(tenantId, employeeId, 'documents', upFile)
+      await api.post('/ess/me/documents', {
+        name:         upName.trim() || upFile.name,
+        doc_type:     upType,
+        storage_path: path,
+        file_size:    upFile.size,
+        mime_type:    upFile.type || null,
+        expires_at:   upExpiry || undefined,
+      })
+      toast.success('Document uploaded')
+      setUploadOpen(false); setUpFile(null); setUpName(''); setUpType('certificate'); setUpExpiry('')
+      qc.invalidateQueries({ queryKey: ['ess-documents', employeeId] })
+      qc.invalidateQueries({ queryKey: ['ess-expiry', employeeId] })
+    } catch (e) {
+      toast.error('Upload failed', { description: e instanceof Error ? e.message : 'Please try again' })
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleDelete(doc: EmpDocument) {
+    setDeletingDocId(doc.id)
+    try {
+      await api.delete(`/ess/me/documents/${doc.id}`)
+      toast.success('Document deleted')
+      qc.invalidateQueries({ queryKey: ['ess-documents', employeeId] })
+      qc.invalidateQueries({ queryKey: ['ess-expiry', employeeId] })
+    } catch (e) {
+      toast.error('Delete failed', { description: e instanceof Error ? e.message : 'Please try again' })
+    } finally {
+      setDeletingDocId(null)
+    }
+  }
+
   if (!employeeId) {
     return (
       <PageContainer>
@@ -294,9 +426,13 @@ export function EssDocuments() {
     )
   }
 
+  const expiryItems   = expiryData?.data ?? []
+  const expiryActive  = expiryItems.filter(i => i.bucket === 'overdue' || i.bucket === 'due_7' || i.bucket === 'due_30').length
+
   const tabs = [
-    { key: 'documents' as const,  label: 'Documents',  count: documents.length  },
-    { key: 'contracts' as const,  label: 'Contracts',  count: contracts.length  },
+    { key: 'documents' as const,  label: 'Documents',     count: documents.length  },
+    { key: 'contracts' as const,  label: 'Contracts',     count: contracts.length  },
+    { key: 'expiry'    as const,  label: 'Expiry Alerts', count: expiryActive || undefined },
   ]
 
   return (
@@ -318,7 +454,51 @@ export function EssDocuments() {
         <SectionCard
           title="HR Documents"
           icon={<FileText className="h-4 w-4 text-muted-foreground" />}
+          action={!uploadOpen && (
+            <Button size="sm" variant="outline" onClick={() => setUploadOpen(true)}>
+              <Upload className="h-3.5 w-3.5 mr-1" />Upload
+            </Button>
+          )}
         >
+          {uploadOpen && (
+            <div className="mb-4 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">File (max 5 MB)</label>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    onChange={e => { const f = e.target.files?.[0] ?? null; setUpFile(f); if (f && !upName) setUpName(f.name) }}
+                    className="block w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-primary"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Name</label>
+                  <Input className="h-9 text-sm" placeholder="Document name" value={upName} onChange={e => setUpName(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Type</label>
+                  <select
+                    value={upType}
+                    onChange={e => setUpType(e.target.value)}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {UPLOAD_DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Expiry date (optional)</label>
+                  <Input className="h-9 text-sm" type="date" value={upExpiry} onChange={e => setUpExpiry(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="ghost" onClick={() => { setUploadOpen(false); setUpFile(null); setUpName(''); setUpExpiry('') }}>Cancel</Button>
+                <Button size="sm" onClick={handleUpload} disabled={!upFile || uploading}>
+                  {uploading && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Upload
+                </Button>
+              </div>
+            </div>
+          )}
           {docLoading ? (
             <div className="flex items-center gap-2 py-6 text-muted-foreground text-xs">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading documents…
@@ -328,7 +508,7 @@ export function EssDocuments() {
               <FolderOpen className="h-9 w-9 text-muted-foreground opacity-40" />
               <p className="text-sm font-medium text-foreground">No documents on record</p>
               <p className="text-xs text-muted-foreground text-center max-w-xs">
-                Documents uploaded by HR will appear here — offer letters, ID proofs, certificates, and more.
+                Documents uploaded by HR appear here — offer letters, ID proofs, certificates. You can also upload your own with the button above.
               </p>
             </div>
           ) : (
@@ -338,8 +518,10 @@ export function EssDocuments() {
                   key={doc.id}
                   doc={doc}
                   refreshing={refreshingDocId === doc.id}
+                  deleting={deletingDocId === doc.id}
                   onView={(d)     => openDocUrl(d, 'view')}
                   onDownload={(d) => openDocUrl(d, 'download')}
+                  onDelete={handleDelete}
                 />
               ))}
             </div>
@@ -405,6 +587,67 @@ export function EssDocuments() {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* ── Expiry Alerts tab ─────────────────────────────────────────────── */}
+      {activeTab === 'expiry' && (
+        <SectionCard
+          title="Expiry Alerts"
+          description="Your documents, identity records, passport, visa and contracts approaching expiry. Keep them current to avoid disruptions."
+          icon={<CalendarClock className="h-4 w-4 text-muted-foreground" />}
+        >
+          {expiryLoading ? (
+            <div className="flex items-center gap-2 py-6 text-muted-foreground text-xs">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />Checking expiries…
+            </div>
+          ) : expiryItems.length === 0 ? (
+            <div className="flex flex-col items-center gap-2.5 py-12">
+              <BadgeCheck className="h-9 w-9 text-success opacity-50" />
+              <p className="text-sm font-medium text-foreground">Nothing expiring</p>
+              <p className="text-xs text-muted-foreground text-center max-w-xs">
+                None of your records are overdue or due within the next year. We'll alert you here when something needs renewal.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {expiryItems
+                .slice()
+                .sort((a, b) => a.days_to_due - b.days_to_due)
+                .map(item => {
+                  const meta   = EXPIRY_CATEGORY_META[item.category]
+                  const bucket = BUCKET_META[item.bucket]
+                  const Icon   = meta?.icon ?? FileText
+                  return (
+                    <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg bg-muted', bucket.tone)}>
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">{item.label}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {meta?.label ?? item.category}
+                            {item.detail ? ` · ${item.detail}` : ''}
+                            {' · '}{fmtDate(item.due_date)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={cn('text-[10px] font-medium tabular-nums', bucket.tone)}>
+                          {item.bucket === 'overdue' ? `expired ${expiryHint(item.days_to_due)}` : expiryHint(item.days_to_due)}
+                        </span>
+                        <Badge variant={bucket.variant} className="rounded-full text-[9px]">{bucket.label}</Badge>
+                      </div>
+                    </div>
+                  )
+                })}
+              <div className="flex items-start gap-2 text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-2 mt-1">
+                <ShieldAlert className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-warning" />
+                <span>For passport, visa or identity records managed by HR, raise an HR support ticket to update them. Self-uploaded documents can be replaced from the Documents tab.</span>
+              </div>
             </div>
           )}
         </SectionCard>

@@ -20,6 +20,25 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr, optDate, optEnum, optUuid } from '../../lib/zod-form.js'
+import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
+
+const STORAGE_BUCKET = 'employee-files'
+const SIGNED_URL_TTL = 3600
+const MAX_FILE_SIZE  = 5 * 1024 * 1024  // 5 MB
+
+// Self-upload document types an employee may file themselves. Constrained to the
+// values permitted by the documents.doc_type CHECK; HR-issued types (offer_letter,
+// contract, relieving/experience letters) are intentionally excluded.
+const ESS_DOC_TYPES = ['certificate', 'aadhaar', 'pan', 'other'] as const
+
+const documentSchema = z.object({
+  name:         z.string().min(1).max(200),
+  doc_type:     z.enum(ESS_DOC_TYPES),
+  storage_path: z.string().min(1).max(500),
+  file_size:    z.number().int().positive().max(MAX_FILE_SIZE, 'File exceeds 5 MB limit').optional().nullable(),
+  mime_type:    z.string().max(100).optional().nullable(),
+  expires_at:   optDate,
+})
 
 // ── Schemas (mirror the HR-admin employee-master routes) ───────────────────────
 
@@ -320,5 +339,80 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.nomId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.code(204).send()
+  })
+
+  // ── Documents — self upload + delete-own (binary already in storage) ──────────
+  // GET lists ALL of the employee's documents (HR-uploaded + self-uploaded) with
+  // signed URLs. POST records metadata for a file the client uploaded to storage.
+  // DELETE is restricted to documents the employee uploaded themselves — HR-issued
+  // documents (offer letters, contracts) cannot be removed by the employee.
+  async function signedUrl(path: string | null): Promise<string | null> {
+    if (!path) return null
+    const { data } = await fastify.supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, SIGNED_URL_TTL)
+    return data?.signedUrl ?? null
+  }
+
+  fastify.get('/ess/me/documents', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    const { data, error } = await fastify.supabase
+      .from('documents')
+      .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, uploaded_by, created_at')
+      .eq('employee_id', empId).eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    const docs = await Promise.all((data ?? []).map(async (d: any) => ({
+      ...d,
+      is_own: d.uploaded_by === req.userId,
+      signed_url: await signedUrl(d.storage_path),
+      signed_url_expires_in: SIGNED_URL_TTL,
+    })))
+    return reply.send({ data: docs })
+  })
+
+  fastify.post('/ess/me/documents', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    const parsed = documentSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    const { data, error } = await fastify.supabase
+      .from('documents')
+      .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId, uploaded_by: req.userId })
+      .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, created_at')
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(201).send({ data: { ...data, is_own: true, signed_url: await signedUrl(data.storage_path), signed_url_expires_in: SIGNED_URL_TTL } })
+  })
+
+  fastify.delete('/ess/me/documents/:docId', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    // Only the uploader may delete — guards HR-issued documents from removal.
+    const { data: doc } = await fastify.supabase
+      .from('documents').select('id, storage_path, uploaded_by')
+      .eq('id', req.params.docId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!doc) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Document not found' })
+    if (doc.uploaded_by !== req.userId)
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only delete documents you uploaded. Contact HR to remove this document.' })
+    if (doc.storage_path) {
+      await fastify.supabase.storage.from(STORAGE_BUCKET).remove([doc.storage_path]).catch(() => {})
+    }
+    const { error } = await fastify.supabase
+      .from('documents').delete()
+      .eq('id', req.params.docId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(204).send()
+  })
+
+  // ── Expiry Awareness — own lifecycle risks (P4.2) ────────────────────────────
+  // Projects the Program 3A lifecycle engine to the caller only. One brain, many
+  // projections — no duplicate expiry logic. 365-day horizon so the employee sees
+  // documents/passport/visa/identity/contract expiries well ahead of time, plus
+  // anything already overdue.
+  fastify.get('/ess/me/expiry', auth, async (req: any, reply) => {
+    const empId = await selfOr400(req, reply); if (!empId) return
+    const all = await computeLifecycleRisks(fastify.supabase, req.tenantId, { withinDays: 365 }).catch(() => [])
+    // Probation is a confirmation matter for HR, not an employee "expiry" — drop it
+    // from the employee-facing view to avoid alarming language about themselves.
+    const items = all.filter(r => r.employee_id === empId && r.category !== 'probation')
+    return reply.send({ data: items, summary: summariseLifecycle(items) })
   })
 }
