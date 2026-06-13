@@ -47,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_run_snapshots_tenant_month
 -- Row-level security: same tenant isolation as all payroll tables
 ALTER TABLE payroll_run_snapshots ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS payroll_run_snapshots_tenant_isolation ON payroll_run_snapshots;
 CREATE POLICY payroll_run_snapshots_tenant_isolation
   ON payroll_run_snapshots
   FOR ALL
@@ -104,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_emp_snapshots_employee_id
 
 ALTER TABLE payroll_employee_snapshots ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS payroll_employee_snapshots_tenant_isolation ON payroll_employee_snapshots;
 CREATE POLICY payroll_employee_snapshots_tenant_isolation
   ON payroll_employee_snapshots
   FOR ALL
@@ -142,6 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_replay_sessions_tenant_id
 
 ALTER TABLE payroll_replay_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS payroll_replay_sessions_tenant_isolation ON payroll_replay_sessions;
 CREATE POLICY payroll_replay_sessions_tenant_isolation
   ON payroll_replay_sessions
   FOR ALL
