@@ -138,6 +138,7 @@ const EssLeaveBalance          = lazy(() => import('@/pages/ess/EssLeaveBalance'
 const EssDocuments             = lazy(() => import('@/pages/ess/EssDocuments').then(m => ({ default: m.EssDocuments })))
 const EssOnboarding            = lazy(() => import('@/pages/ess/EssOnboarding').then(m => ({ default: m.EssOnboarding })))
 const EssTeam                  = lazy(() => import('@/pages/ess/EssTeam').then(m => ({ default: m.EssTeam })))
+const EssTeamOff               = lazy(() => import('@/pages/ess/EssTeamOff').then(m => ({ default: m.EssTeamOff })))
 const EssPolicies              = lazy(() => import('@/pages/ess/EssPolicies').then(m => ({ default: m.EssPolicies })))
 const EssHRSupport             = lazy(() => import('@/pages/ess/EssHRSupport').then(m => ({ default: m.EssHRSupport })))
 // EssAttendanceCalendar retired — calendar view is embedded inside MyAttendance (/ess/attendance).
@@ -860,6 +861,7 @@ export default function App() {
                 <Route path="/ess/leave/balance"          element={<EssLeaveBalance />} />
                 <Route path="/ess/documents"              element={<EssDocuments />} />
                 <Route path="/ess/team"                   element={<EssTeam />} />
+                <Route path="/ess/whos-off"               element={<EssTeamOff />} />
                 <Route path="/ess/policies"               element={<EssPolicies />} />
                 <Route path="/ess/hr-support"             element={<EssHRSupport />} />
                 {/* Attendance Calendar retired — redirect to unified My Attendance workspace */}

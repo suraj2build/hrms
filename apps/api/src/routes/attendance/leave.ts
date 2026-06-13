@@ -795,7 +795,96 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     return reply.send({ data: result, year })
   })
 
-  // ── PUT /attendance/leave/balance ─────────────────────────────────────────────
+  // ── GET /attendance/leave/whos-off ────────────────────────────────────────────
+  // ESS "Team Who's Off": approved leave for the caller's DEPARTMENT teammates,
+  // overlapping a [from, to] date window. Available to every employee (not just
+  // managers). Scope is the caller's department (incl. self); falls back to self
+  // only when the caller has no department.
+  fastify.get('/attendance/leave/whos-off', auth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+
+    const q = z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'from must be YYYY-MM-DD'),
+      to:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'to must be YYYY-MM-DD'),
+    }).safeParse(req.query)
+    if (!q.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: q.error.issues[0]?.message })
+    }
+    const { from, to } = q.data
+
+    // Resolve caller → employee + department
+    const { data: callerProfile } = await fastify.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', req.userId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    const myEmpId = (callerProfile as any)?.employee_id as string | null
+    if (!myEmpId) {
+      return reply.send({ data: { members: [], leave: [], department: null } })
+    }
+
+    const { data: me } = await fastify.supabase
+      .from('employees')
+      .select('id, department_id, departments(name)')
+      .eq('id', myEmpId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    const myDeptId = (me as any)?.department_id as string | null
+
+    // Team = active employees in the same department (incl. self). No department → self only.
+    let memberQuery = fastify.supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+    memberQuery = myDeptId
+      ? memberQuery.eq('department_id', myDeptId)
+      : memberQuery.eq('id', myEmpId)
+
+    const { data: members } = await memberQuery
+    const memberIds = ((members ?? []) as any[]).map(m => m.id)
+
+    const deptRel = (me as any)?.departments
+    const department = (Array.isArray(deptRel) ? deptRel[0]?.name : deptRel?.name) ?? null
+
+    if (memberIds.length === 0) {
+      return reply.send({ data: { members: [], leave: [], department } })
+    }
+
+    // Approved leave overlapping the window: from_date <= to AND to_date >= from
+    const { data: leave } = await fastify.supabase
+      .from('leave_requests')
+      .select('id, employee_id, from_date, to_date, half_day, computed_days, leave_types(name)')
+      .eq('tenant_id', tenantId)
+      .in('employee_id', memberIds)
+      .eq('status', 'APPROVED')
+      .lte('from_date', to)
+      .gte('to_date', from)
+
+    const leaveOut = ((leave ?? []) as any[]).map(l => ({
+      id:          l.id,
+      employee_id: l.employee_id,
+      from_date:   l.from_date,
+      to_date:     l.to_date,
+      half_day:    l.half_day,
+      days:        Number(l.computed_days),
+      leave_type:  (Array.isArray(l.leave_types) ? l.leave_types[0]?.name : l.leave_types?.name) ?? 'Leave',
+    }))
+
+    const membersOut = ((members ?? []) as any[]).map(m => ({
+      employee_id:   m.id,
+      name:          `${m.first_name} ${m.last_name}`.trim(),
+      employee_code: m.employee_code,
+      is_self:       m.id === myEmpId,
+    }))
+
+    return reply.send({ data: { members: membersOut, leave: leaveOut, department } })
+  })
+
+
   fastify.put('/attendance/leave/balance', hrAdminAuth, async (req, reply) => {
     const balanceSchema = z.object({
       employee_id:   z.string().uuid(),
