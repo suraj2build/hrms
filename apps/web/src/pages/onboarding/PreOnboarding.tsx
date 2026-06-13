@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Copy, Check, Eye, UserCheck, UserX, Trash2, Link,
   Users, Clock, ClipboardList, CheckCircle2, Sparkles,
+  UserPlus, Package, Search, Loader2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -57,7 +58,26 @@ interface PreJoinee {
   session_id?: string | null
   submitted_at?: string | null
   created_at: string
+  employee_id?: string | null
+  buddy_employee_id?: string | null
   submission?: PreJoineeSubmission | null
+}
+
+interface EmployeeOption {
+  id: string
+  first_name: string
+  last_name: string
+  employee_code: string
+  designation?: string | null
+  department?: string | null
+}
+
+interface AssetOption {
+  id: string
+  asset_code: string
+  name: string
+  serial_number?: string | null
+  category_name?: string | null
 }
 
 interface PreJoineeSubmission {
@@ -349,6 +369,15 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
   // ── Delete confirm
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
+  // ── Buddy dialog
+  const [buddyTarget, setBuddyTarget]   = useState<PreJoinee | null>(null)
+  const [buddySearch, setBuddySearch]   = useState('')
+  const [buddyPicked, setBuddyPicked]   = useState<EmployeeOption | null>(null)
+
+  // ── Asset dialog
+  const [assetTarget, setAssetTarget]   = useState<PreJoinee | null>(null)
+  const [assetPicked, setAssetPicked]   = useState<Set<string>>(new Set())
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: statsData } = useQuery<StatsResponse>({
@@ -384,6 +413,24 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
     submitted: statsData?.submitted ?? invitations.filter(i => i.status === 'submitted').length,
     approved: statsData?.approved ?? invitations.filter(i => i.status === 'approved').length,
   }
+
+  // ── Buddy search query (fires when buddy dialog open + search ≥ 2 chars) ───
+  const { data: buddySearchResp, isFetching: buddyFetching } = useQuery<{ data: EmployeeOption[] }>({
+    queryKey: ['employee-search', buddySearch],
+    queryFn: () => api.get(`/employees?search=${encodeURIComponent(buddySearch)}&limit=20&status=active`),
+    enabled: !!buddyTarget && buddySearch.length >= 2,
+    staleTime: 30_000,
+  })
+  const buddyOptions: EmployeeOption[] = buddySearchResp?.data ?? []
+
+  // ── Available assets query (fires when asset dialog open) ─────────────────
+  const { data: assetsResp, isLoading: assetsLoading } = useQuery<{ data: AssetOption[] }>({
+    queryKey: ['assets-available'],
+    queryFn: () => api.get('/assets?status=available'),
+    enabled: !!assetTarget,
+    staleTime: 60_000,
+  })
+  const availableAssets: AssetOption[] = assetsResp?.data ?? []
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -440,6 +487,40 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
     },
     onError: () => toast.error('Failed to delete invitation'),
   })
+
+  const setBuddyMutation = useMutation({
+    mutationFn: ({ id, buddy_employee_id }: { id: string; buddy_employee_id: string | null }) =>
+      api.patch(`/onboarding/pre-joinee/${id}/buddy`, { buddy_employee_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
+      toast.success(buddyPicked ? `Buddy assigned — ${buddyPicked.first_name} will be notified` : 'Buddy removed')
+      setBuddyTarget(null)
+      setBuddySearch('')
+      setBuddyPicked(null)
+    },
+    onError: () => toast.error('Failed to assign buddy'),
+  })
+
+  const assignAssetMutation = useMutation({
+    mutationFn: ({ assetId, employeeId }: { assetId: string; employeeId: string }) =>
+      api.post(`/assets/${assetId}/assign`, { employee_id: employeeId }),
+  })
+
+  async function handleAssignAssets() {
+    if (!assetTarget?.employee_id || assetPicked.size === 0) return
+    const employeeId = assetTarget.employee_id
+    let success = 0
+    for (const assetId of assetPicked) {
+      try {
+        await assignAssetMutation.mutateAsync({ assetId, employeeId })
+        success++
+      } catch { /* continue on individual failures */ }
+    }
+    qc.invalidateQueries({ queryKey: ['assets-available'] })
+    toast.success(`${success} asset${success !== 1 ? 's' : ''} assigned to ${assetTarget.first_name}`)
+    setAssetTarget(null)
+    setAssetPicked(new Set())
+  }
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -604,6 +685,28 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
                               <Link className="mr-1 h-3 w-3" />
                             )}
                             Copy Link
+                          </Button>
+                        )}
+                        {inv.status === 'approved' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => { setBuddyTarget(inv); setBuddyPicked(null); setBuddySearch('') }}
+                            className="h-7 px-2 text-xs gap-1"
+                          >
+                            <UserPlus className="h-3 w-3" />
+                            {inv.buddy_employee_id ? 'Change Buddy' : 'Assign Buddy'}
+                          </Button>
+                        )}
+                        {inv.status === 'approved' && inv.employee_id && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => { setAssetTarget(inv); setAssetPicked(new Set()) }}
+                            className="h-7 px-2 text-xs gap-1"
+                          >
+                            <Package className="h-3 w-3" />
+                            Assign Assets
                           </Button>
                         )}
                         <Button
@@ -789,6 +892,151 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
         approving={approveMutation.isPending}
         rejecting={rejectMutation.isPending}
       />
+
+      {/* ── Buddy Assignment Dialog ─────────────────────────────────────────── */}
+      <Dialog open={!!buddyTarget} onOpenChange={v => { if (!v) { setBuddyTarget(null); setBuddySearch(''); setBuddyPicked(null) } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-[#15B8A6]" />
+              Assign Buddy — {buddyTarget?.first_name} {buddyTarget?.last_name}
+            </DialogTitle>
+            <DialogDescription>
+              Select an employee to be the onboarding buddy. They'll receive an email with their responsibilities.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name or employee code…"
+                value={buddySearch}
+                onChange={e => { setBuddySearch(e.target.value); setBuddyPicked(null) }}
+                className="pl-9"
+                autoFocus
+              />
+              {buddyFetching && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+            </div>
+
+            {/* Picked badge */}
+            {buddyPicked && (
+              <div className="flex items-center justify-between rounded-md border border-[#15B8A6]/40 bg-[#15B8A6]/5 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">{buddyPicked.first_name} {buddyPicked.last_name}</p>
+                  <p className="text-xs text-muted-foreground">{buddyPicked.employee_code}{buddyPicked.designation ? ` · ${buddyPicked.designation}` : ''}</p>
+                </div>
+                <button type="button" onClick={() => setBuddyPicked(null)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Suggestions list */}
+            {buddySearch.length >= 2 && !buddyPicked && (
+              <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
+                {buddyOptions.length === 0 && !buddyFetching && (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No employees found</p>
+                )}
+                {buddyOptions.map(emp => (
+                  <button
+                    key={emp.id}
+                    type="button"
+                    onClick={() => { setBuddyPicked(emp); setBuddySearch('') }}
+                    className="w-full text-left px-3 py-2.5 hover:bg-muted/50 transition-colors"
+                  >
+                    <p className="text-sm font-medium">{emp.first_name} {emp.last_name}</p>
+                    <p className="text-xs text-muted-foreground">{emp.employee_code}{emp.designation ? ` · ${emp.designation}` : ''}{emp.department ? ` · ${emp.department}` : ''}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {buddySearch.length < 2 && !buddyPicked && (
+              <p className="text-xs text-muted-foreground text-center py-2">Type at least 2 characters to search employees</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setBuddyTarget(null); setBuddySearch(''); setBuddyPicked(null) }}>Cancel</Button>
+            <Button
+              onClick={() => buddyTarget && setBuddyMutation.mutate({ id: buddyTarget.id, buddy_employee_id: buddyPicked?.id ?? null })}
+              disabled={!buddyPicked || setBuddyMutation.isPending}
+              className="bg-[#15B8A6] hover:bg-[#0d9488] text-white"
+            >
+              {setBuddyMutation.isPending ? 'Assigning…' : 'Assign Buddy'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Asset Assignment Dialog ─────────────────────────────────────────── */}
+      <Dialog open={!!assetTarget} onOpenChange={v => { if (!v) { setAssetTarget(null); setAssetPicked(new Set()) } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-[#2E6FE6]" />
+              Assign Assets — {assetTarget?.first_name} {assetTarget?.last_name}
+            </DialogTitle>
+            <DialogDescription>
+              Select available assets to assign. The assignment will be recorded in the asset ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-1">
+            {assetsLoading ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Loading available assets…</span>
+              </div>
+            ) : availableAssets.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">No available assets in inventory</p>
+            ) : (
+              <div className="max-h-64 overflow-y-auto rounded-md border divide-y">
+                {availableAssets.map(asset => {
+                  const picked = assetPicked.has(asset.id)
+                  return (
+                    <button
+                      key={asset.id}
+                      type="button"
+                      onClick={() => {
+                        const next = new Set(assetPicked)
+                        picked ? next.delete(asset.id) : next.add(asset.id)
+                        setAssetPicked(next)
+                      }}
+                      className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-3 ${picked ? 'bg-[#2E6FE6]/5 border-l-2 border-[#2E6FE6]' : 'hover:bg-muted/40'}`}
+                    >
+                      <div className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center ${picked ? 'bg-[#2E6FE6] border-[#2E6FE6]' : 'border-border'}`}>
+                        {picked && <Check className="h-2.5 w-2.5 text-white" />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{asset.name}</p>
+                        <p className="text-xs text-muted-foreground">{asset.asset_code}{asset.serial_number ? ` · SN: ${asset.serial_number}` : ''}{asset.category_name ? ` · ${asset.category_name}` : ''}</p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {assetPicked.size > 0 && (
+              <p className="text-xs text-[#2E6FE6] font-medium mt-2">{assetPicked.size} asset{assetPicked.size !== 1 ? 's' : ''} selected</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAssetTarget(null); setAssetPicked(new Set()) }}>Cancel</Button>
+            <Button
+              onClick={handleAssignAssets}
+              disabled={assetPicked.size === 0 || assignAssetMutation.isPending}
+              className="bg-[#2E6FE6] hover:bg-[#2563eb] text-white"
+            >
+              {assignAssetMutation.isPending ? 'Assigning…' : `Assign ${assetPicked.size > 0 ? assetPicked.size + ' ' : ''}Asset${assetPicked.size !== 1 ? 's' : ''}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Wrapper>
   )
 }

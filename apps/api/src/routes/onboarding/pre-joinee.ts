@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import {
-  sendEmail, preJoineeInviteEmail, APP_PUBLIC_URL,
+  sendEmail, preJoineeInviteEmail, buddyAssignmentEmail, APP_PUBLIC_URL,
   type SendEmailResult,
 } from '../../lib/email-service.js'
 import { emitPreJoineeJoiningCompleted } from '../../lib/onboarding-orchestrator.js'
@@ -1165,5 +1165,64 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       invitation_id: invitation.id,
       session_id: mergedSessionId,
     })
+  })
+
+  // ── PATCH /onboarding/pre-joinee/:id/buddy ─────────────────────────────────
+  fastify.patch('/onboarding/pre-joinee/:id/buddy', auth, async (req: any, reply) => {
+    const { id }              = req.params as { id: string }
+    const { buddy_employee_id } = req.body as { buddy_employee_id: string | null }
+    const { tenantId }        = req
+
+    // Fetch invitation + validate ownership
+    const { data: inv, error: invErr } = await req.supabase
+      .from('pre_joinee_invitations')
+      .select('id, first_name, last_name, designation, joining_date, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (invErr || !inv) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    // Update buddy
+    const { error: updErr } = await req.supabase
+      .from('pre_joinee_invitations')
+      .update({ buddy_employee_id: buddy_employee_id ?? null, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (updErr) return reply.code(500).send({ error: updErr.message })
+
+    // Send buddy notification email (best-effort, never fail the request)
+    if (buddy_employee_id) {
+      try {
+        const [{ data: buddy }, { data: tenant }] = await Promise.all([
+          req.supabase
+            .from('employees')
+            .select('first_name, last_name, email, job_title')
+            .eq('id', buddy_employee_id)
+            .eq('tenant_id', tenantId)
+            .maybeSingle(),
+          req.supabase
+            .from('tenants')
+            .select('name')
+            .eq('id', tenantId)
+            .maybeSingle(),
+        ])
+
+        if (buddy?.email) {
+          const { subject, html } = buddyAssignmentEmail({
+            buddyName:      `${buddy.first_name ?? ''} ${buddy.last_name ?? ''}`.trim(),
+            newJoinerName:  `${inv.first_name} ${inv.last_name}`.trim(),
+            newJoinerRole:  inv.designation ?? undefined,
+            companyName:    (tenant as any)?.name ?? 'your company',
+            joiningDate:    inv.joining_date ?? undefined,
+            hrSystemUrl:    APP_PUBLIC_URL,
+          })
+          await sendEmail({ to: buddy.email, subject, html })
+        }
+      } catch (_) { /* email is best-effort */ }
+    }
+
+    return reply.send({ ok: true })
   })
 }
