@@ -84,6 +84,26 @@ interface UpcomingPayrollImpact {
   lop_risk_level:    LopRiskLevel
 }
 
+interface AttendanceAnomaly {
+  id:        string
+  date:      string
+  type:      string
+  message:   string | null
+  severity:  string | null
+  resolved:  boolean
+  created_at: string
+}
+
+// ── Date helper ────────────────────────────────────────────────────────────────
+
+function fmtIsoDate(s: string | null) {
+  if (!s) return '—'
+  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  if (isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
+}
+
 // ── Badge / style helpers ──────────────────────────────────────────────────────
 
 type BadgeVariant = 'default' | 'secondary' | 'outline' | 'success' | 'warning' | 'destructive'
@@ -284,6 +304,16 @@ export function EssOperationalCenter() {
       enabled:  hasEmployee,
     })
 
+  // Attendance anomalies — last 90 days (P4.4 operational visibility).
+  const anomaliesFrom = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10)
+  const { data: anomaliesData, isLoading: anomaliesLoading } =
+    useQuery<{ data: AttendanceAnomaly[]; total: number }>({
+      queryKey: ['ess-attendance-anomalies'],
+      queryFn:  () => api.get(`/attendance/anomalies/my?from=${anomaliesFrom}&limit=50`),
+      staleTime: 60_000,
+      enabled:  hasEmployee,
+    })
+
   // ── Derived ──────────────────────────────────────────────────────────────────
 
   const notifications  = notificationsData?.data  ?? []
@@ -291,6 +321,8 @@ export function EssOperationalCenter() {
   const workload       = workloadData?.data
   const fairness       = fairnessData?.data
   const payrollImpact  = payrollImpactData?.data
+  const anomalies      = anomaliesData?.data ?? []
+  const openAnomalies  = anomalies.filter(a => !a.resolved)
 
   // ── No employee linked guard ──────────────────────────────────────────────────
 
@@ -359,6 +391,49 @@ export function EssOperationalCenter() {
                       </p>
                     )}
                   </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Section 1b: Attendance Anomalies (P4.4 operational visibility) ── */}
+      <SectionCard
+        title="Attendance Anomalies"
+        description="Flagged punch / attendance issues from the last 90 days. Raise a regularisation or contact HR to resolve."
+        icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
+        action={openAnomalies.length > 0 && (
+          <Badge variant="warning" className="rounded-full text-[10px] tabular-nums">{openAnomalies.length} open</Badge>
+        )}
+      >
+        {anomaliesLoading ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
+            <Loader2 className="h-4 w-4 animate-spin" />Checking anomalies…
+          </div>
+        ) : anomalies.length === 0 ? (
+          <div className="flex items-center gap-3 py-3 text-muted-foreground">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            <p className="text-sm">No attendance anomalies detected — your records are clean.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {anomalies.slice(0, 12).map(a => {
+              const sev = (a.severity ?? 'info').toLowerCase()
+              const tone = sev === 'high' || sev === 'critical' ? 'text-destructive'
+                : sev === 'medium' || sev === 'warning' ? 'text-warning' : 'text-muted-foreground'
+              return (
+                <div key={a.id} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AlertCircle className={cn('h-4 w-4 shrink-0', a.resolved ? 'text-muted-foreground/40' : tone)} />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{a.message ?? a.type.replace(/_/g, ' ')}</p>
+                      <p className="text-[10px] text-muted-foreground">{a.type.replace(/_/g, ' ')} · {fmtIsoDate(a.date)}</p>
+                    </div>
+                  </div>
+                  <Badge variant={a.resolved ? 'secondary' : sev === 'high' || sev === 'critical' ? 'destructive' : 'warning'} className="rounded-full text-[9px] capitalize shrink-0">
+                    {a.resolved ? 'Resolved' : sev}
+                  </Badge>
                 </div>
               )
             })}
