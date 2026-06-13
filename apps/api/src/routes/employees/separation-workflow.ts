@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
+import { computeFnfSettlement } from '../../lib/fnf-settlement-engine.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -329,15 +330,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
-    const net_payable =
-      (parsed.data.last_payroll_amount ?? 0) +
-      (parsed.data.leave_encashment_amount ?? 0) +
-      (parsed.data.gratuity_amount ?? 0) +
-      (parsed.data.other_additions ?? 0) -
-      (parsed.data.notice_period_deduction ?? 0) -
-      (parsed.data.other_deductions ?? 0)
-
-    // Upsert: create or replace existing F&F
+    // net_payable is a GENERATED column — never written by the app.
     const { data: existing } = await fastify.supabase
       .from('separation_ff_summary')
       .select('id')
@@ -353,7 +346,6 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         .from('separation_ff_summary')
         .update({
           ...parsed.data,
-          net_payable,
           updated_by: req.userId,
           updated_at: new Date().toISOString(),
         })
@@ -370,7 +362,6 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         .from('separation_ff_summary')
         .insert({
           ...parsed.data,
-          net_payable,
           employee_id:   req.params.id,
           tenant_id:     req.tenantId,
           separation_id: separation.id,
@@ -391,10 +382,80 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       action:      existing ? 'UPDATE' : 'INSERT',
       performedBy: req.userId,
       onBehalfOf:  req.params.id,
-      newData:     { ...parsed.data, net_payable } as Record<string, unknown>,
+      newData:     parsed.data as Record<string, unknown>,
     })
 
     return reply.code(statusCode).send({ data: result })
+  })
+
+  // ── POST /employees/:id/separation-ff/compute ────────────────────────────
+  // Auto-calculate the formula-driven settlement components (gratuity, leave
+  // encashment, notice shortfall) and upsert them onto the F&F draft. HR can
+  // still override any value via POST /separation-ff afterwards.
+  fastify.post('/employees/:id/separation-ff/compute', hrAdminAuth, async (req: any, reply) => {
+    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const separation = await getSeparationRecord(fastify, req.params.id, req.tenantId)
+    if (!separation)
+      return reply.code(409).send({ error: 'NO_SEPARATION', message: 'No separation record found. Initiate separation first.' })
+
+    const breakdown = await computeFnfSettlement(fastify.supabase, req.tenantId, req.params.id)
+    if ('error' in breakdown)
+      return reply.code(409).send({ error: 'COMPUTE_FAILED', message: breakdown.error })
+
+    // Preserve any manual last_payroll_amount / other +/- already entered.
+    const { data: existing } = await fastify.supabase
+      .from('separation_ff_summary')
+      .select('id, last_payroll_amount, other_additions, other_deductions')
+      .eq('employee_id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    const payload = {
+      last_payroll_amount:     existing?.last_payroll_amount ?? 0,
+      leave_encashment_amount: breakdown.leave_encashment_amount,
+      gratuity_amount:         breakdown.gratuity_amount,
+      notice_period_deduction: breakdown.notice_period_deduction,
+      other_additions:         existing?.other_additions ?? 0,
+      other_deductions:        existing?.other_deductions ?? 0,
+      // computed metadata
+      gratuity_eligible:       breakdown.gratuity_eligible,
+      gratuity_years:          breakdown.gratuity_years,
+      leave_encashment_days:   breakdown.leave_encashment_days,
+      leave_encashment_rate:   breakdown.leave_encashment_rate,
+      notice_shortfall_days:   breakdown.notice_shortfall_days,
+      salary_basis_basic:      breakdown.salary_basis_basic,
+      salary_basis_gross:      breakdown.salary_basis_gross,
+      computed_at:             new Date().toISOString(),
+      computed_by:             req.userId,
+      updated_by:              req.userId,
+      updated_at:              new Date().toISOString(),
+    }
+
+    let result: any
+    if (existing) {
+      const { data, error } = await fastify.supabase
+        .from('separation_ff_summary')
+        .update(payload).eq('id', existing.id).eq('tenant_id', req.tenantId).select().single()
+      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      result = data
+    } else {
+      const { data, error } = await fastify.supabase
+        .from('separation_ff_summary')
+        .insert({ ...payload, employee_id: req.params.id, tenant_id: req.tenantId, separation_id: separation.id, status: 'draft', created_by: req.userId })
+        .select().single()
+      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      result = data
+    }
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'separation_ff_summary', recordId: result.id,
+      action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+      newData: { computed: true, ...breakdown } as Record<string, unknown>,
+    })
+
+    return reply.send({ data: result, breakdown })
   })
 
   // ── PATCH /employees/:id/separation-ff/approve ────────────────────────────
@@ -719,6 +780,49 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     eventBus.emit({
       type: 'separation.archived', tenantId: req.tenantId, correlationId: req.correlationId,
       payload: { tenantId: req.tenantId, employeeId: req.params.id, separationId: sep.id },
+    })
+
+    return reply.send({ data })
+  })
+
+  // ── Gratuity configuration (per tenant) ───────────────────────────────────
+
+  const GRATUITY_DEFAULTS = { enabled: true, rate_numerator: 15, rate_denominator: 26, min_years: 5, max_amount: 2000000, basis: 'basic' as const }
+
+  // GET /settlement/gratuity-config — current config (defaults if unconfigured)
+  fastify.get('/settlement/gratuity-config', hrAdminAuth, async (req: any, reply) => {
+    const { data } = await fastify.supabase
+      .from('gratuity_config')
+      .select('enabled, rate_numerator, rate_denominator, min_years, max_amount, basis, updated_at')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    return reply.send({ data: data ?? { ...GRATUITY_DEFAULTS, is_default: true } })
+  })
+
+  // PUT /settlement/gratuity-config — upsert config
+  fastify.put('/settlement/gratuity-config', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      enabled:          z.boolean().default(true),
+      rate_numerator:   z.number().int().min(1).max(60),
+      rate_denominator: z.number().int().min(1).max(31),
+      min_years:        z.number().min(0).max(20),
+      max_amount:       z.number().min(0).max(100000000),
+      basis:            z.enum(['basic', 'gross']),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const { data, error } = await fastify.supabase
+      .from('gratuity_config')
+      .upsert({ tenant_id: req.tenantId, ...parsed.data, updated_at: new Date().toISOString(), updated_by: req.userId }, { onConflict: 'tenant_id' })
+      .select()
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'gratuity_config', recordId: (data as any).id,
+      action: 'UPDATE', performedBy: req.userId, newData: parsed.data as Record<string, unknown>,
     })
 
     return reply.send({ data })

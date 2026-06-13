@@ -7,7 +7,7 @@ import { useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LogOut, CheckCircle2, XCircle, Clock, ChevronRight,
-  Edit2, X, DollarSign, Users, Loader2, ExternalLink,
+  Edit2, X, DollarSign, Users, Loader2, ExternalLink, Calculator,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -409,6 +409,26 @@ function FnFSection({ row }: { row: SeparationRow }) {
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
+  const computeMutation = useMutation<{ breakdown?: any }, any>({
+    mutationFn: () => api.post(`/employees/${row.employee_id}/separation-ff/compute`, {}),
+    onSuccess: (res) => {
+      const b = res?.breakdown
+      if (b) {
+        setForm(prev => ({
+          ...prev,
+          leave_encashment_amount: b.leave_encashment_amount ?? prev.leave_encashment_amount,
+          gratuity_amount:         b.gratuity_amount ?? prev.gratuity_amount,
+          notice_period_deduction: b.notice_period_deduction ?? prev.notice_period_deduction,
+        }))
+        toast.success('Settlement auto-calculated', {
+          description: `Gratuity ${b.gratuity_eligible ? `(${b.gratuity_years} yrs service)` : '(not eligible)'} · ${b.leave_encashment_days} encashable leave days`,
+        })
+      }
+      qc.invalidateQueries({ queryKey: ['separations'] })
+    },
+    onError: (e: any) => toast.error('Auto-calculate failed', { description: e?.message ?? 'Check separation dates and last payroll' }),
+  })
+
   const f = row.fnf
 
   return (
@@ -476,6 +496,14 @@ function FnFSection({ row }: { row: SeparationRow }) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Edit F&amp;F Settlement</DialogTitle></DialogHeader>
           <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+              <span className="text-xs text-muted-foreground">Auto-fill gratuity, leave encashment &amp; notice recovery from records</span>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={computeMutation.isPending}
+                onClick={() => computeMutation.mutate()}>
+                {computeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calculator className="h-3.5 w-3.5" />}
+                Auto-calculate
+              </Button>
+            </div>
             {([
               ['last_payroll_amount',      'Last Month Payroll'],
               ['leave_encashment_amount',        'Leave Encashment'],
