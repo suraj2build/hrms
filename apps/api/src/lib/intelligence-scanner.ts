@@ -27,6 +27,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventBus }           from './event-bus.js'
+import { computeUpcoming }    from './compliance-calendar.js'
+import { notifyHrAdmins }     from './notify.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -414,6 +416,44 @@ async function scanAttendanceRisk(supabase: SupabaseClient, tenantId: string): P
   }
 }
 
+// ── Scanner 6 — Compliance filing deadlines ──────────────────────────────────
+// Reuses ComplianceCalendarService (single deadline source) + notifyHrAdmins
+// (existing inbox). Notifies HR only for overdue + due-within-7-days, once per
+// (deadline, status) so an item alerts when it becomes due-soon and again when
+// it tips into overdue — no spam.
+
+async function scanComplianceDeadlines(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const upcoming = await computeUpcoming(supabase, tenantId, 7).catch(() => [])
+  for (const d of upcoming) {
+    if (d.status !== 'overdue' && d.status !== 'due_soon') continue
+    const key = `compliance-deadline:${tenantId}:${d.id}:${d.status}`
+    if (!shouldEmit(key)) continue
+
+    const overdue  = d.status === 'overdue'
+    const critical = overdue && Math.abs(d.days_to_due) > 15
+    await notifyHrAdmins(supabase, {
+      tenantId,
+      item_type:    'compliance_alert',
+      severity:     critical ? 'critical' : overdue ? 'error' : 'warning',
+      title:        overdue
+        ? `Overdue: ${d.label} (${Math.abs(d.days_to_due)}d late)`
+        : `Due in ${d.days_to_due}d: ${d.label}`,
+      summary:      `${d.compliance_type} filing for ${d.jurisdiction} — due ${d.due_date}. ${overdue ? 'File immediately to avoid penalties.' : 'Prepare and file before the due date.'}`,
+      entity_type:  'compliance_filing',
+      entity_id:    d.id,
+      action_route: '/admin/payroll/compliance-calendar',
+      action_label: 'Open Compliance Calendar',
+      metadata:     { compliance_type: d.compliance_type, jurisdiction: d.jurisdiction, period: d.period, due_date: d.due_date, days_to_due: d.days_to_due, category: 'compliance' },
+    })
+
+    eventBus.emit({
+      type: 'compliance.deadline.alert',
+      tenantId,
+      payload: { tenantId, deadlineId: d.id, complianceType: d.compliance_type, status: d.status, dueDate: d.due_date, daysToDue: d.days_to_due },
+    } as any)
+  }
+}
+
 // ── Main scan orchestrator ─────────────────────────────────────────────────────
 
 async function runAllScans(supabase: SupabaseClient): Promise<void> {
@@ -427,6 +467,7 @@ async function runAllScans(supabase: SupabaseClient): Promise<void> {
       scanStaffingShortages(supabase, tenantId),
       scanPayrollBlockers(supabase, tenantId),
       scanAttendanceRisk(supabase, tenantId),
+      scanComplianceDeadlines(supabase, tenantId),
     ])
   }
 }

@@ -7,6 +7,7 @@
  * All routes are tenant-isolated via req.tenantId.
  */
 import type { FastifyInstance } from 'fastify'
+import { computeUpcoming } from '../../lib/compliance-calendar.js'
 
 interface SourceRecord { table: string; count: number; sample?: string }
 
@@ -218,6 +219,42 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const readyPct   = (readyCount ?? 0) + (rejCount ?? 0) + (activeOnb ?? 0) > 0
         ? Math.round(((readyCount ?? 0) / ((readyCount ?? 0) + (rejCount ?? 0) + (activeOnb ?? 0))) * 100)
         : null
+
+      // ── Compliance filing deadlines (single source: ComplianceCalendarService)
+      try {
+        const upcoming = await computeUpcoming(fastify.supabase, tenantId, 7)
+        const overdue = upcoming.filter(d => d.status === 'overdue')
+        const due3    = upcoming.filter(d => d.status !== 'overdue' && d.days_to_due <= 3)
+        const due7    = upcoming.filter(d => d.status !== 'overdue' && d.days_to_due > 3 && d.days_to_due <= 7)
+        const sample  = (arr: typeof upcoming) => arr.slice(0, 3).map(d => `${d.label} — due ${d.due_date}${d.status === 'overdue' ? ` (${Math.abs(d.days_to_due)}d late)` : ` (${d.days_to_due}d)`}`).join('; ')
+        if (overdue.length) {
+          observations.push({
+            id: 'compliance-overdue', category: 'compliance', severity: 'critical',
+            title: `${overdue.length} statutory filing${overdue.length > 1 ? 's' : ''} overdue`,
+            body: `Overdue filings risk penalties and interest. Most overdue: ${overdue[0].label} (${Math.abs(overdue[0].days_to_due)} days late, due ${overdue[0].due_date}). Recommended action: file immediately and record the challan reference.`,
+            source_records: [{ table: 'compliance_calendar', count: overdue.length, sample: sample(overdue) }],
+            generated_at: now.toISOString(),
+          })
+        }
+        if (due3.length) {
+          observations.push({
+            id: 'compliance-due-3', category: 'compliance', severity: 'high',
+            title: `${due3.length} statutory filing${due3.length > 1 ? 's' : ''} due within 3 days`,
+            body: `Filings due imminently. Next: ${due3[0].label} due ${due3[0].due_date} (${due3[0].days_to_due} day${due3[0].days_to_due === 1 ? '' : 's'} remaining). Recommended action: finalise figures and file before the due date.`,
+            source_records: [{ table: 'compliance_calendar', count: due3.length, sample: sample(due3) }],
+            generated_at: now.toISOString(),
+          })
+        }
+        if (due7.length) {
+          observations.push({
+            id: 'compliance-due-7', category: 'compliance', severity: 'medium',
+            title: `${due7.length} statutory filing${due7.length > 1 ? 's' : ''} due within 7 days`,
+            body: `Upcoming statutory deadlines. Recommended action: prepare the returns and challans this week. ${sample(due7)}.`,
+            source_records: [{ table: 'compliance_calendar', count: due7.length, sample: sample(due7) }],
+            generated_at: now.toISOString(),
+          })
+        }
+      } catch { /* compliance scan is best-effort; never break the command view */ }
 
       observations.sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3))
 

@@ -80,9 +80,10 @@ export default function ComplianceView() {
             <EmptyBody text="No statutory filings due in the next 30 days. Enable PF/ESI/PT/TDS (and LWF states) in statutory settings to populate this." />
           ) : (
             <div className="mt-2">
-              <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="grid grid-cols-3 gap-3 mb-3">
                 <StatTile label="Overdue" value={overdue.length.toLocaleString()} tone={overdue.length ? 'destructive' : 'muted'} />
-                <StatTile label="Due in 30 days" value={dueSoon.length ? dueSoon.length.toLocaleString() : (deadlines.length - overdue.length).toLocaleString()} tone="warning" />
+                <StatTile label="Due This Week" value={dueSoon.length.toLocaleString()} tone="warning" />
+                <StatTile label="Due This Month" value={(deadlines.length - overdue.length).toLocaleString()} tone="muted" />
               </div>
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                 {deadlines.slice(0, 12).map(d => (
