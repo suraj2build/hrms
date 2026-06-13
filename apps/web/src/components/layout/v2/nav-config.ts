@@ -468,6 +468,7 @@ export const DOMAINS: Domain[] = [
         label: 'Overview',
         items: [
           { id: 'compliance-dashboard', label: 'Dashboard', route: '/admin/payroll/statutory-dashboard', icon: BarChart3, keywords: ['statutory overview', 'compliance overview', 'PF ESI status', 'filing status', 'statutory dashboard'] },
+          { id: 'compliance-calendar', label: 'Calendar', route: '/admin/payroll/compliance-calendar', icon: CalendarClock, keywords: ['compliance calendar', 'filing deadlines', 'due dates', 'statutory deadlines', 'EPF ESI PT TDS LWF due', 'overdue filings', 'upcoming filings', '24Q deadline'] },
         ],
       },
       {

@@ -24,8 +24,14 @@ const RISK_TONE: Record<string, { ring: string; text: string; fill: string }> = 
   high:   { ring: 'text-destructive', text: 'text-destructive', fill: 'var(--destructive)' },
 }
 
+interface CalDeadline { id: string; label: string; compliance_type: string; jurisdiction: string; due_date: string; status: string; days_to_due: number }
+
 export default function ComplianceView() {
   const { data: c } = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get('/executive/compliance').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: cal } = useQuery<{ data: CalDeadline[] }>({ queryKey: ['exec-compliance-calendar'], queryFn: () => api.get('/compliance/calendar/upcoming?within_days=30'), staleTime: 5 * 60_000 })
+  const deadlines = cal?.data ?? []
+  const overdue   = deadlines.filter(d => d.status === 'overdue')
+  const dueSoon   = deadlines.filter(d => d.status === 'due_soon')
 
   const score = c?.compliance_risk_score ?? 0
   const status = c?.risk_status ?? 'low'
@@ -69,8 +75,30 @@ export default function ComplianceView() {
           ) : <EmptyBody text="Risk posture will appear once the compliance snapshot is generated." />}
         </Panel>
 
-        <Panel className="xl:col-span-2" icon={ClipboardCheck} iconClass="text-primary" title="Statutory Compliance Matrix" subtitle="PF / ESI / PT / TDS filing status">
-          <EmptyBody text="Statutory filing status (PF, ESI, PT, TDS) isn't tracked in the executive view yet — it needs the compliance filings module wired up." />
+        <Panel className="xl:col-span-2" icon={ClipboardCheck} iconClass="text-primary" title="Statutory Filing Deadlines" subtitle="EPF / ESI / PT / TDS / LWF / 24Q · next 30 days + overdue">
+          {deadlines.length === 0 ? (
+            <EmptyBody text="No statutory filings due in the next 30 days. Enable PF/ESI/PT/TDS (and LWF states) in statutory settings to populate this." />
+          ) : (
+            <div className="mt-2">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <StatTile label="Overdue" value={overdue.length.toLocaleString()} tone={overdue.length ? 'destructive' : 'muted'} />
+                <StatTile label="Due in 30 days" value={dueSoon.length ? dueSoon.length.toLocaleString() : (deadlines.length - overdue.length).toLocaleString()} tone="warning" />
+              </div>
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                {deadlines.slice(0, 12).map(d => (
+                  <div key={d.id} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{d.label}</p>
+                      <p className="text-[10px] text-muted-foreground">{d.jurisdiction} · {d.compliance_type}</p>
+                    </div>
+                    <span className={`text-[11px] font-medium tabular-nums whitespace-nowrap ${d.status === 'overdue' ? 'text-destructive' : d.status === 'due_soon' ? 'text-warning' : 'text-muted-foreground'}`}>
+                      {d.status === 'overdue' ? `${Math.abs(d.days_to_due)}d late` : `in ${d.days_to_due}d`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Panel>
       </section>
 
