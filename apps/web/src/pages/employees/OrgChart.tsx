@@ -9,21 +9,30 @@
  *   • Department filter (shows only matching nodes + their ancestors)
  *   • Live search highlight (matches name / code / designation)
  *   • Collapse / expand any subtree
+ *   • Click node → action popover → Change Manager dialog
  *   • Print / Save as PDF (browser print)
  */
 
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMemo, useState, useRef, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tree, TreeNode } from 'react-organizational-chart'
-import { Loader2, Users, Printer, ChevronDown, ChevronUp, Building2 } from 'lucide-react'
+import {
+  Loader2, Users, Printer, ChevronDown, ChevronUp, Building2,
+  UserCog, X, Search, Check,
+} from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { Input }         from '@/components/ui/input'
+import { Button }        from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from '@/components/ui/dialog'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +53,15 @@ interface OrgTreeResponse {
   data: { roots: OrgNode[]; total: number }
 }
 
+interface EmployeeSearchResult {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  designation?: string | null
+  department?: string | null
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function initials(name: string): string {
@@ -51,7 +69,6 @@ function initials(name: string): string {
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
 }
 
-// Collect every department present in the tree (for the filter dropdown).
 function collectDepartments(roots: OrgNode[]): string[] {
   const set = new Set<string>()
   const walk = (n: OrgNode) => {
@@ -62,50 +79,110 @@ function collectDepartments(roots: OrgNode[]): string[] {
   return Array.from(set).sort()
 }
 
+// ── Node action popover ───────────────────────────────────────────────────────
+
+function NodePopover({
+  node,
+  onClose,
+  onChangeManager,
+}: {
+  node: OrgNode
+  onClose: () => void
+  onChangeManager: (node: OrgNode) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  return (
+    <div
+      ref={ref}
+      className="absolute z-50 left-1/2 -translate-x-1/2 top-full mt-2 w-52 bg-card border border-border rounded-xl shadow-lg p-3"
+      onClick={e => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-foreground truncate">{node.name}</p>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <p className="text-[10px] text-muted-foreground mb-3">{node.designation ?? node.employee_code}</p>
+      <button
+        onClick={() => { onChangeManager(node); onClose() }}
+        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-primary/5 hover:bg-primary/10 text-primary transition-colors"
+      >
+        <UserCog className="h-3.5 w-3.5 flex-shrink-0" />
+        Change Reporting Manager
+      </button>
+    </div>
+  )
+}
+
 // ── Node card ─────────────────────────────────────────────────────────────────
 
 function NodeCard({
-  node, collapsed, onToggle, highlighted, dimmed,
+  node, collapsed, onToggle, highlighted, dimmed, isAdmin, onSelect,
 }: {
   node: OrgNode
   collapsed: boolean
   onToggle: () => void
   highlighted: boolean
   dimmed: boolean
+  isAdmin: boolean
+  onSelect: (node: OrgNode) => void
 }) {
+  const [popoverOpen, setPopoverOpen] = useState(false)
   const hasChildren = node.children.length > 0
-  return (
-    <div
-      className={cn(
-        'inline-flex flex-col items-center rounded-xl border bg-card px-4 py-3 shadow-sm transition-all min-w-[180px]',
-        highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border',
-        dimmed && 'opacity-40',
-      )}
-    >
-      <Avatar className="h-12 w-12 mb-2">
-        {node.profile_photo ? <AvatarImage src={node.profile_photo} alt={node.name} /> : null}
-        <AvatarFallback className="bg-primary/10 text-primary text-sm">{initials(node.name)}</AvatarFallback>
-      </Avatar>
-      <p className="text-sm font-semibold text-foreground text-center leading-tight">{node.name}</p>
-      {node.designation && (
-        <p className="text-[11px] text-muted-foreground text-center mt-0.5">{node.designation}</p>
-      )}
-      {node.department && (
-        <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-          <Building2 className="h-3 w-3" />{node.department}
-        </span>
-      )}
-      <span className="text-[10px] text-muted-foreground/70 mt-0.5 font-mono">{node.employee_code}</span>
 
-      {hasChildren && (
-        <button
-          onClick={onToggle}
-          className="mt-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
-        >
-          {collapsed
-            ? <><ChevronDown className="h-3 w-3" />{node.children.length} report{node.children.length > 1 ? 's' : ''}</>
-            : <><ChevronUp className="h-3 w-3" />Collapse</>}
-        </button>
+  return (
+    <div className="relative inline-block">
+      <div
+        className={cn(
+          'inline-flex flex-col items-center rounded-xl border bg-card px-4 py-3 shadow-sm transition-all min-w-[180px]',
+          highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border',
+          dimmed && 'opacity-40',
+          isAdmin && 'cursor-pointer hover:border-primary/50 hover:shadow-md',
+        )}
+        onClick={() => isAdmin && setPopoverOpen(v => !v)}
+      >
+        <Avatar className="h-12 w-12 mb-2">
+          {node.profile_photo ? <AvatarImage src={node.profile_photo} alt={node.name} /> : null}
+          <AvatarFallback className="bg-primary/10 text-primary text-sm">{initials(node.name)}</AvatarFallback>
+        </Avatar>
+        <p className="text-sm font-semibold text-foreground text-center leading-tight">{node.name}</p>
+        {node.designation && (
+          <p className="text-[11px] text-muted-foreground text-center mt-0.5">{node.designation}</p>
+        )}
+        {node.department && (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Building2 className="h-3 w-3" />{node.department}
+          </span>
+        )}
+        <span className="text-[10px] text-muted-foreground/70 mt-0.5 font-mono">{node.employee_code}</span>
+
+        {hasChildren && (
+          <button
+            onClick={e => { e.stopPropagation(); onToggle() }}
+            className="mt-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
+          >
+            {collapsed
+              ? <><ChevronDown className="h-3 w-3" />{node.children.length} report{node.children.length > 1 ? 's' : ''}</>
+              : <><ChevronUp className="h-3 w-3" />Collapse</>}
+          </button>
+        )}
+      </div>
+
+      {popoverOpen && isAdmin && (
+        <NodePopover
+          node={node}
+          onClose={() => setPopoverOpen(false)}
+          onChangeManager={onSelect}
+        />
       )}
     </div>
   )
@@ -119,6 +196,8 @@ function renderNode(
   toggle: (id: string) => void,
   search: string,
   deptFilter: string,
+  isAdmin: boolean,
+  onSelect: (node: OrgNode) => void,
 ): JSX.Element {
   const collapsed = collapsedIds.has(node.id)
   const term = search.trim().toLowerCase()
@@ -136,6 +215,8 @@ function renderNode(
       onToggle={() => toggle(node.id)}
       highlighted={highlighted}
       dimmed={dimmed}
+      isAdmin={isAdmin}
+      onSelect={onSelect}
     />
   )
 
@@ -145,8 +226,159 @@ function renderNode(
 
   return (
     <TreeNode label={card} key={node.id}>
-      {node.children.map(child => renderNode(child, collapsedIds, toggle, search, deptFilter))}
+      {node.children.map(child =>
+        renderNode(child, collapsedIds, toggle, search, deptFilter, isAdmin, onSelect)
+      )}
     </TreeNode>
+  )
+}
+
+// ── Change Manager Dialog ─────────────────────────────────────────────────────
+
+function ChangeManagerDialog({
+  target,
+  onClose,
+}: {
+  target: OrgNode | null
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [managerSearch, setManagerSearch] = useState('')
+  const [picked, setPicked] = useState<EmployeeSearchResult | null>(null)
+
+  const { data: searchResp, isFetching } = useQuery<{ data: EmployeeSearchResult[] }>({
+    queryKey: ['emp-search-manager', managerSearch],
+    queryFn:  () => api.get(`/employees?search=${encodeURIComponent(managerSearch)}&limit=20&status=active`),
+    enabled:  !!target && managerSearch.length >= 2,
+    staleTime: 20_000,
+  })
+  const results = searchResp?.data ?? []
+
+  const mutation = useMutation({
+    mutationFn: ({ empId, managerId }: { empId: string; managerId: string | null }) =>
+      api.put(`/employees/${empId}/manager`, { manager_id: managerId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees', 'org-tree'] })
+      toast.success(
+        picked
+          ? `Manager updated — ${target?.name} now reports to ${picked.first_name} ${picked.last_name}`
+          : `Reporting manager removed for ${target?.name}`
+      )
+      handleClose()
+    },
+    onError: (e: any) => toast.error('Could not update manager', {
+      description: e?.body?.message ?? e?.message ?? 'Check for circular reporting chains',
+    }),
+  })
+
+  function handleClose() {
+    onClose()
+    setManagerSearch('')
+    setPicked(null)
+  }
+
+  if (!target) return null
+
+  return (
+    <Dialog open={!!target} onOpenChange={v => { if (!v) handleClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCog className="h-5 w-5 text-primary" />
+            Change Reporting Manager
+          </DialogTitle>
+          <DialogDescription>
+            Reassign <strong>{target.name}</strong>'s reporting line. The org chart will update immediately.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Current manager info */}
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
+          <p className="text-xs text-muted-foreground mb-0.5">Employee</p>
+          <p className="font-semibold">{target.name}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{target.designation ?? target.employee_code} · {target.department ?? '—'}</p>
+        </div>
+
+        {/* Manager search */}
+        <div className="space-y-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search new manager by name or code…"
+              value={managerSearch}
+              onChange={e => { setManagerSearch(e.target.value); setPicked(null) }}
+              className="pl-9"
+              autoFocus
+            />
+            {isFetching && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+          </div>
+
+          {/* Picked badge */}
+          {picked && (
+            <div className="flex items-center justify-between rounded-md border border-primary/40 bg-primary/5 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium">{picked.first_name} {picked.last_name}</p>
+                <p className="text-xs text-muted-foreground">{picked.employee_code}{picked.designation ? ` · ${picked.designation}` : ''}</p>
+              </div>
+              <button type="button" onClick={() => setPicked(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Search results */}
+          {managerSearch.length >= 2 && !picked && (
+            <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
+              {results.length === 0 && !isFetching && (
+                <p className="py-4 text-center text-sm text-muted-foreground">No employees found</p>
+              )}
+              {results
+                .filter(e => e.id !== target.id)
+                .map(emp => (
+                  <button
+                    key={emp.id}
+                    type="button"
+                    onClick={() => { setPicked(emp); setManagerSearch('') }}
+                    className="w-full text-left px-3 py-2.5 hover:bg-muted/50 transition-colors"
+                  >
+                    <p className="text-sm font-medium">{emp.first_name} {emp.last_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {emp.employee_code}{emp.designation ? ` · ${emp.designation}` : ''}{emp.department ? ` · ${emp.department}` : ''}
+                    </p>
+                  </button>
+                ))}
+            </div>
+          )}
+
+          {managerSearch.length < 2 && !picked && (
+            <p className="text-xs text-center text-muted-foreground py-1">Type at least 2 characters to search</p>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={handleClose}>Cancel</Button>
+          {target.manager_id && (
+            <Button
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/5"
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate({ empId: target.id, managerId: null })}
+            >
+              Remove Manager
+            </Button>
+          )}
+          <Button
+            onClick={() => picked && mutation.mutate({ empId: target.id, managerId: picked.id })}
+            disabled={!picked || mutation.isPending}
+          >
+            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />}
+            Confirm
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -159,6 +391,7 @@ export function OrgChart() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
   const [search, setSearch]   = useState('')
   const [dept, setDept]       = useState('all')
+  const [editTarget, setEditTarget] = useState<OrgNode | null>(null)
 
   const { data, isLoading, isError } = useQuery<OrgTreeResponse>({
     queryKey: ['employees', 'org-tree'],
@@ -201,7 +434,7 @@ export function OrgChart() {
     <PageContainer>
       <PageHeader
         title="Organisation Chart"
-        subtitle={`Reporting hierarchy · ${total} active employee${total === 1 ? '' : 's'}`}
+        subtitle={`Reporting hierarchy · ${total} active employee${total === 1 ? '' : 's'} · Click any card to reassign manager`}
         actions={
           <div className="flex items-center gap-2 flex-wrap print:hidden">
             <Input
@@ -260,16 +493,25 @@ export function OrgChart() {
                         root.employee_code.toLowerCase().includes(search.trim().toLowerCase()))
                     }
                     dimmed={dept !== 'all' && root.department !== dept}
+                    isAdmin={isAdmin}
+                    onSelect={setEditTarget}
                   />
                 }
               >
                 {!collapsedIds.has(root.id) &&
-                  root.children.map(child => renderNode(child, collapsedIds, toggle, search, dept))}
+                  root.children.map(child =>
+                    renderNode(child, collapsedIds, toggle, search, dept, isAdmin, setEditTarget)
+                  )}
               </Tree>
             </div>
           ))}
         </div>
       )}
+
+      <ChangeManagerDialog
+        target={editTarget}
+        onClose={() => setEditTarget(null)}
+      />
     </PageContainer>
   )
 }
