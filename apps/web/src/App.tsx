@@ -64,6 +64,7 @@ const AdminCandidates   = lazy(() => import('@/pages/admin/AdminCandidates').the
 const AdminInterviews   = lazy(() => import('@/pages/admin/AdminInterviews').then(m => ({ default: m.AdminInterviews })))
 const AdminQuestionBank           = lazy(() => import('@/pages/admin/AdminQuestionBank').then(m => ({ default: m.AdminQuestionBank })))
 const AdminRecruitmentDashboard   = lazy(() => import('@/pages/admin/AdminRecruitmentDashboard').then(m => ({ default: m.AdminRecruitmentDashboard })))
+const AdminInterviewAnalytics     = lazy(() => import('@/pages/admin/AdminInterviewAnalytics').then(m => ({ default: m.AdminInterviewAnalytics })))
 const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
@@ -747,6 +748,7 @@ export default function App() {
                 <Route path="/admin/recruitment/pipeline"           element={<AdminPipeline />} />
                 <Route path="/admin/recruitment/candidates"         element={<AdminCandidates />} />
                 <Route path="/admin/recruitment/interviews"         element={<AdminInterviews />} />
+                <Route path="/admin/recruitment/interview-analytics" element={<AdminInterviewAnalytics />} />
                 <Route path="/admin/recruitment/question-bank"      element={<AdminQuestionBank />} />
                 {/* AI Workforce OS — Intelligence Layer */}
                 <Route path="/admin/intelligence/workforce-command"  element={<WorkforceCommand />} />

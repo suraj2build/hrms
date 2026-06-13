@@ -815,6 +815,160 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── GET /recruitment/analytics/interviewers ──────────────────────────────────
+  // INT-06 depth: interviewer/panel calibration + per-criterion effectiveness.
+  // Built entirely from existing interview_scores correlated with the final
+  // application outcome (hired/rejected). No per-question data required.
+  fastify.get('/analytics/interviewers', auth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+
+    const [{ data: scoreRows }, { data: roundRows }, { data: appRows }] = await Promise.all([
+      fastify.supabase
+        .from('interview_scores')
+        .select('round_id, interviewer_id, technical_score, communication_score, culture_score, overall_score, recommendation, profiles:interviewer_id(full_name)')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('interview_rounds')
+        .select('id, application_id')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('applications')
+        .select('id, status')
+        .eq('tenant_id', tenantId),
+    ])
+
+    const roundToApp = new Map<string, string>(((roundRows ?? []) as any[]).map(r => [r.id, r.application_id]))
+    const appStatus  = new Map<string, string>(((appRows ?? []) as any[]).map(a => [a.id, a.status]))
+    const scores = (scoreRows ?? []) as any[]
+
+    const outcomeOf = (roundId: string): string | null => {
+      const appId = roundToApp.get(roundId)
+      return appId ? (appStatus.get(appId) ?? null) : null
+    }
+    const POSITIVE = new Set(['strong_yes', 'yes'])
+    const NEGATIVE = new Set(['no', 'strong_no'])
+    const mean = (a: number[]) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null
+    const stddev = (a: number[]) => {
+      if (a.length < 2) return null
+      const m = a.reduce((s, v) => s + v, 0) / a.length
+      return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length)
+    }
+    const r1 = (n: number | null) => (n === null ? null : +n.toFixed(1))
+    const r2 = (n: number | null) => (n === null ? null : +n.toFixed(2))
+
+    const cohortAvg = mean(scores.map(s => s.overall_score).filter((v): v is number => v != null))
+
+    // ── Per-interviewer calibration ─────────────────────────────────────────
+    type Acc = {
+      name: string; overall: number[]; recs: Record<string, number>
+      posTerminal: number; posHired: number; negTerminal: number; negRejected: number
+    }
+    const byInterviewer = new Map<string, Acc>()
+    for (const s of scores) {
+      const id = s.interviewer_id
+      if (!byInterviewer.has(id)) {
+        byInterviewer.set(id, {
+          name: (Array.isArray(s.profiles) ? s.profiles[0]?.full_name : s.profiles?.full_name) ?? 'Interviewer',
+          overall: [], recs: {}, posTerminal: 0, posHired: 0, negTerminal: 0, negRejected: 0,
+        })
+      }
+      const acc = byInterviewer.get(id)!
+      if (s.overall_score != null) acc.overall.push(s.overall_score)
+      if (s.recommendation) acc.recs[s.recommendation] = (acc.recs[s.recommendation] ?? 0) + 1
+
+      const outcome = outcomeOf(s.round_id)
+      if (s.recommendation && POSITIVE.has(s.recommendation) && (outcome === 'hired' || outcome === 'rejected')) {
+        acc.posTerminal++; if (outcome === 'hired') acc.posHired++
+      }
+      if (s.recommendation && NEGATIVE.has(s.recommendation) && (outcome === 'hired' || outcome === 'rejected')) {
+        acc.negTerminal++; if (outcome === 'rejected') acc.negRejected++
+      }
+    }
+
+    const interviewers = [...byInterviewer.entries()].map(([id, a]) => {
+      const avgOverall = mean(a.overall)
+      const totalRecs = Object.values(a.recs).reduce((s, v) => s + v, 0)
+      const positive = (a.recs.strong_yes ?? 0) + (a.recs.yes ?? 0)
+      return {
+        interviewer_id: id,
+        name:           a.name,
+        scored_count:   a.overall.length,
+        avg_overall:    r2(avgOverall),
+        // leniency: how far above (+) / below (-) the cohort this interviewer scores
+        leniency:       avgOverall != null && cohortAvg != null ? r2(avgOverall - cohortAvg) : null,
+        // consistency: stddev of their overall scores (lower = more consistent)
+        consistency:    r2(stddev(a.overall)),
+        positive_rate:  totalRecs > 0 ? Math.round((positive / totalRecs) * 100) : null,
+        recommendations: a.recs,
+        // predictive accuracy vs. final outcome (only where outcome is terminal)
+        hire_accuracy:   a.posTerminal > 0 ? Math.round((a.posHired / a.posTerminal) * 100) : null,
+        reject_accuracy: a.negTerminal > 0 ? Math.round((a.negRejected / a.negTerminal) * 100) : null,
+        decisions_with_outcome: a.posTerminal + a.negTerminal,
+      }
+    }).sort((x, y) => (y.scored_count - x.scored_count))
+
+    // ── Per-criterion effectiveness (hired vs rejected separation) ───────────
+    const CRITERIA = ['technical_score', 'communication_score', 'culture_score', 'overall_score'] as const
+    const criteria = CRITERIA.map(key => {
+      const hired: number[] = []
+      const rejected: number[] = []
+      for (const s of scores) {
+        const v = s[key]
+        if (v == null) continue
+        const outcome = outcomeOf(s.round_id)
+        if (outcome === 'hired') hired.push(v)
+        else if (outcome === 'rejected') rejected.push(v)
+      }
+      const avgHired = mean(hired)
+      const avgRejected = mean(rejected)
+      return {
+        criterion:     key.replace('_score', ''),
+        avg_hired:     r1(avgHired),
+        avg_rejected:  r1(avgRejected),
+        // lift: how strongly this criterion separates hires from rejects (higher = more predictive)
+        lift:          avgHired != null && avgRejected != null ? r1(avgHired - avgRejected) : null,
+        sample_hired:   hired.length,
+        sample_rejected: rejected.length,
+      }
+    })
+
+    // ── Inter-rater agreement (rounds with ≥2 scorers) ──────────────────────
+    const roundScores = new Map<string, { overall: number[]; recs: string[] }>()
+    for (const s of scores) {
+      if (!roundScores.has(s.round_id)) roundScores.set(s.round_id, { overall: [], recs: [] })
+      const rs = roundScores.get(s.round_id)!
+      if (s.overall_score != null) rs.overall.push(s.overall_score)
+      if (s.recommendation) rs.recs.push(s.recommendation)
+    }
+    const spreads: number[] = []
+    let multiRounds = 0, unanimousDir = 0
+    for (const rs of roundScores.values()) {
+      if (rs.overall.length >= 2) {
+        spreads.push(Math.max(...rs.overall) - Math.min(...rs.overall))
+      }
+      if (rs.recs.length >= 2) {
+        multiRounds++
+        const dirs = new Set(rs.recs.map(r => POSITIVE.has(r) ? 'pos' : NEGATIVE.has(r) ? 'neg' : 'mid'))
+        if (dirs.size === 1) unanimousDir++
+      }
+    }
+    const agreement = {
+      multi_scorer_rounds:   multiRounds,
+      avg_score_spread:      r2(mean(spreads)),
+      unanimous_rate:        multiRounds > 0 ? Math.round((unanimousDir / multiRounds) * 100) : null,
+    }
+
+    return reply.send({
+      data: {
+        cohort_avg_overall: r2(cohortAvg),
+        total_scores:       scores.length,
+        interviewers,
+        criteria,
+        agreement,
+      },
+    })
+  })
+
   // ── Interviewers (profiles list for panel assignment) ─────────────────────
 
   fastify.get('/interviewers', auth, async (req: any, reply) => {
