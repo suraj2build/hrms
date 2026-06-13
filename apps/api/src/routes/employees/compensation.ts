@@ -52,6 +52,49 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 /**
+ * Ownership guard for compensation read endpoints.
+ * Returns null when access is permitted; returns { code, body } to send when denied.
+ *
+ * Permitted callers:
+ *   • super_admin / hr_admin  — unrestricted
+ *   • The employee themselves — self-view
+ *   • The employee's direct manager — managers may view their reports' pay
+ */
+async function assertCompensationAccess(
+  fastify:    any,
+  req:        any,
+  employeeId: string,
+): Promise<{ code: number; body: object } | null> {
+  if (['super_admin', 'hr_admin'].includes(req.userRole)) return null
+
+  const { data: profile } = await fastify.supabase
+    .from('profiles')
+    .select('employee_id')
+    .eq('id', req.userId)
+    .eq('tenant_id', req.tenantId)
+    .maybeSingle()
+
+  const callerEmpId = (profile as any)?.employee_id
+  if (!callerEmpId) {
+    return { code: 403, body: { error: 'FORBIDDEN', message: 'Profile not linked to an employee record' } }
+  }
+
+  if (callerEmpId === employeeId) return null  // self
+
+  // Allow the employee's direct manager
+  const { data: targetEmp } = await fastify.supabase
+    .from('employees')
+    .select('manager_id')
+    .eq('id', employeeId)
+    .eq('tenant_id', req.tenantId)
+    .maybeSingle()
+
+  if ((targetEmp as any)?.manager_id === callerEmpId) return null
+
+  return { code: 403, body: { error: 'FORBIDDEN', message: 'You can only view your own or your direct reports\' compensation' } }
+}
+
+/**
  * Fetch the tenant's compensation policy.
  * Falls back to DEFAULT_COMPENSATION_POLICY when no row exists.
  */
@@ -253,6 +296,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   // ── GET /employees/:id/compensation  → active compensation ──────────────────
   fastify.get('/employees/:id/compensation', auth, async (req: any, reply) => {
+    const accessDenied = await assertCompensationAccess(fastify, req, req.params.id)
+    if (accessDenied) return reply.code(accessDenied.code).send(accessDenied.body)
+
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
@@ -292,6 +338,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   // ── GET /employees/:id/compensation/history ──────────────────────────────────
   fastify.get('/employees/:id/compensation/history', auth, async (req: any, reply) => {
+    const accessDenied = await assertCompensationAccess(fastify, req, req.params.id)
+    if (accessDenied) return reply.code(accessDenied.code).send(accessDenied.body)
+
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
@@ -329,6 +378,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   // ── GET /employees/:id/compensation/:compId ──────────────────────────────────
   fastify.get('/employees/:id/compensation/:compId', auth, async (req: any, reply) => {
+    const accessDenied = await assertCompensationAccess(fastify, req, req.params.id)
+    if (accessDenied) return reply.code(accessDenied.code).send(accessDenied.body)
+
     const { data, error } = await fastify.supabase
       .from('employee_compensations')
       .select(

@@ -32,6 +32,25 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+
+    // Non-admins (employees, managers) may only see their own advances.
+    // Any supplied employee_id is ignored and replaced with the caller's own.
+    if (!isHrAdmin) {
+      const { data: profile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+
+      const callerEmpId = (profile as any)?.employee_id
+      if (!callerEmpId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Profile not linked to an employee record' })
+      }
+      parsed.data.employee_id = callerEmpId
+    }
+
     let q = fastify.supabase
       .from('advance_salary_requests')
       .select('*, employees(id, first_name, last_name, employee_code)')
