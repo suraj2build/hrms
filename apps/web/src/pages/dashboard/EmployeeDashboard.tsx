@@ -16,7 +16,7 @@ import {
   ChevronRight, ArrowRight, Check,
   TrendingUp, TrendingDown, Calendar,
   Leaf, Wallet, RefreshCw, Scale, FolderOpen, FileText,
-  Mail, CreditCard, AlertCircle,
+  Mail, CreditCard, AlertCircle, CalendarClock, ShieldCheck,
 } from 'lucide-react'
 import { useAuthStore }  from '@/stores/authStore'
 import { api }           from '@/lib/api/client'
@@ -892,6 +892,72 @@ function Upcoming({ holidays, navigate }: { holidays: Holiday[]; navigate: (to: 
   )
 }
 
+// ── Expiry Alerts (P4.5 productivity layer) ────────────────────────────────────
+
+interface DashExpiryItem {
+  id: string; category: string; label: string; due_date: string; days_to_due: number; bucket: string
+}
+
+function ExpiryAlerts({ items, navigate }: { items: DashExpiryItem[]; navigate: (to: string) => void }) {
+  // Surface only what needs attention soon — overdue + due within 90 days.
+  const actionable = useMemo(
+    () => items
+      .filter(i => i.bucket === 'overdue' || i.bucket === 'due_7' || i.bucket === 'due_30' || i.bucket === 'due_90')
+      .sort((a, b) => a.days_to_due - b.days_to_due)
+      .slice(0, 5),
+    [items],
+  )
+
+  return (
+    <section style={CARD}>
+      <div style={CARD_HEAD}>
+        <CardLabel>My Expiry Alerts</CardLabel>
+        <LinkBtn onClick={() => navigate('/ess/documents')}>
+          View all <ChevronRight style={{ width: 12, height: 12 }} />
+        </LinkBtn>
+      </div>
+      <div style={{ padding: '8px 16px 12px' }}>
+        {actionable.length > 0 ? actionable.map((it, i) => {
+          const overdue = it.days_to_due < 0
+          const soon    = it.days_to_due >= 0 && it.days_to_due <= 30
+          return (
+            <div key={it.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0',
+              borderTop: i > 0 ? '1px solid var(--border)' : undefined,
+            }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                background: overdue ? '#fdecec' : soon ? '#fff3da' : 'var(--muted)',
+                display: 'grid', placeItems: 'center',
+              }}>
+                <CalendarClock style={{ width: 12, height: 12, color: overdue ? '#b42318' : soon ? '#835500' : 'var(--muted-foreground)' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                  {it.label}
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 1, textTransform: 'capitalize' as const }}>{it.category}</div>
+              </div>
+              <div style={{
+                fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 999, flexShrink: 0,
+                background: overdue ? '#fdecec' : soon ? '#fff3da' : 'var(--muted)',
+                color:      overdue ? '#b42318' : soon ? '#835500' : 'var(--muted-foreground)',
+              }}>
+                {overdue ? 'Expired' : `${it.days_to_due}d`}
+              </div>
+            </div>
+          )
+        }) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
+            <ShieldCheck style={{ width: 14, height: 14, color: '#0a6d4a' }} />
+            Nothing expiring soon
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 // ── 5. Quick Actions Bar ──────────────────────────────────────────────────────
 
 type QaItem = { icon: React.ComponentType<{ style?: CSSProperties }>; label: string; tone: string; to: string }
@@ -1057,6 +1123,14 @@ export function EmployeeDashboard() {
     staleTime: 60 * 60_000,
   })
 
+  // My expiry alerts — own lifecycle risks projected from the Program 3A engine.
+  const { data: expiryResp } = useQuery<{ data: DashExpiryItem[] }>({
+    queryKey:  ['ess-dash-expiry', employeeId],
+    queryFn:   () => api.get('/ess/me/expiry'),
+    enabled:   !!employeeId,
+    staleTime: 5 * 60_000,
+  })
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const emp = (empResp as any)?.data ?? (empResp as any) ?? null
@@ -1073,6 +1147,7 @@ export function EmployeeDashboard() {
   const slips       = (slipsResp    as any)?.data ?? (Array.isArray(slipsResp) ? slipsResp : [])
   const comp        = (compResp     as any)?.data ?? null
   const holidays    = (holidaysResp as any)?.data ?? (Array.isArray(holidaysResp) ? holidaysResp : [])
+  const expiryItems = (expiryResp   as any)?.data ?? []
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1095,9 +1170,10 @@ export function EmployeeDashboard() {
           <CompStructure comp={comp} latestSlip={slips[0] ?? null} navigate={nav} />
           <MyRequests requests={requests} regRequests={regRequests} navigate={nav} />
         </div>
-        {/* Right: Leave usage + Upcoming */}
+        {/* Right: Leave usage + Expiry alerts + Upcoming */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <LeaveUsage balances={balances} navigate={nav} />
+          <ExpiryAlerts items={expiryItems} navigate={nav} />
           <Upcoming holidays={holidays} navigate={nav} />
         </div>
       </div>
