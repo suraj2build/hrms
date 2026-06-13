@@ -179,10 +179,7 @@ export default function ExecutiveIntelligenceCenter() {
   const kpis = [
     { label: 'Active Headcount', value: fmtNum(ceo?.employee_count), delta: ceo ? +(ceo.net_headcount_change / Math.max(1, ceo.employee_count) * 100).toFixed(1) : undefined, deltaLabel: '30D', icon: Users, tone: 'primary' as const, spark: headcountSpark, hint: ceo ? `+${ceo.joiners_30d} / -${ceo.exits_30d}` : undefined },
     { label: 'Attrition (TTM)', value: attritionTTM == null ? '—' : `${attritionTTM.toFixed(1)}%`, icon: UserMinus, tone: 'destructive' as const, spark: attritionSpark, hint: 'Annualised' },
-    { label: 'Open Positions', value: '—', icon: UserPlus, tone: 'warning' as const, hint: 'Recruitment not wired' },
-    { label: 'Time to Hire', value: '—', icon: CalendarCheck, tone: 'success' as const, hint: 'Recruitment not wired' },
     { label: 'Manpower Cost', value: cr(fin?.payroll_current_gross ?? 0), delta: fin?.payroll_mom_change, deltaLabel: 'MoM', icon: Wallet, tone: 'info' as const, spark: costSpark, hint: fin ? ceo?.payroll_cost_current ? undefined : undefined : undefined },
-    { label: 'Productivity Index', value: '—', icon: Gauge, tone: 'success' as const, hint: 'Not available yet' },
     { label: 'Diversity (F)', value: genderFemalePct == null ? '—' : `${genderFemalePct.toFixed(1)}%`, icon: Sparkles, tone: 'info' as const, hint: 'Org-wide' },
     { label: 'Open Exceptions', value: fmtNum(ceo?.open_exceptions), delta: undefined, icon: AlertTriangle, tone: 'destructive' as const, hint: ceo ? `${ceo.open_incidents} incidents` : undefined },
   ]

@@ -424,10 +424,12 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
     return reply.send({
       range,
       attendance: {
-        total_records:  total,
-        absent_rate:    total > 0 ? parseFloat((absent  / total * 100).toFixed(1)) : 0,
-        late_rate:      total > 0 ? parseFloat((late    / total * 100).toFixed(1)) : 0,
-        on_leave_rate:  total > 0 ? parseFloat((onLeave / total * 100).toFixed(1)) : 0,
+        total_records:    total,
+        // C4 canonical: absent_rate = (absent+leave)/total — headline absenteeism KPI
+        absent_rate:      total > 0 ? parseFloat(((absent + onLeave) / total * 100).toFixed(1)) : 0,
+        absent_only_rate: total > 0 ? parseFloat((absent  / total * 100).toFixed(1)) : 0,
+        late_rate:        total > 0 ? parseFloat((late    / total * 100).toFixed(1)) : 0,
+        on_leave_rate:    total > 0 ? parseFloat((onLeave / total * 100).toFixed(1)) : 0,
       },
       overtime: {
         employees_with_ot: new Set(otRes.data?.map((r: any) => r.employee_id) ?? []).size,

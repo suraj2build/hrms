@@ -231,7 +231,7 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
   // ── New intelligence API — 4-week operational summary ─────────────────────
   const { data: intelligenceSummary } = useQuery<{
     range: { from: string; to: string }
-    attendance:  { total_records: number; absent_rate: number; late_rate: number; on_leave_rate: number }
+    attendance:  { total_records: number; absent_rate: number; absent_only_rate: number; late_rate: number; on_leave_rate: number }
     overtime:    { employees_with_ot: number; total_ot_minutes: number }
     staffing_pressure: number
     unresolved_anomalies: number

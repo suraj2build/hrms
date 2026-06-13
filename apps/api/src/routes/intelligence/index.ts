@@ -347,8 +347,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   fastify.get('/manager-summary', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     const tenantId: string = req.tenantId
     const now = new Date()
-    const monthStart    = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
     try {
       const { data: profile } = await fastify.supabase.from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
       const managerId: string | null = profile?.employee_id ?? null
@@ -359,7 +358,13 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const teamSize   = team.length
       const teamIds    = team.map((e: any) => e.id as string)
       const newJoiners = team.filter((e: any) => e.joining_date && e.joining_date >= monthStart).length
-      const probDue    = team.filter((e: any) => e.joining_date && e.joining_date <= ninetyDaysAgo).length
+      // C2 canonical: lifecycle-expiry service (category-aware probation_days, confirmation_date gate)
+      let probDue = 0
+      if (teamIds.length > 0) {
+        const probRisks = await computeLifecycleRisks(fastify.supabase, tenantId, { categories: ['probation'] })
+        const teamIdSet = new Set(teamIds)
+        probDue = probRisks.filter(r => teamIdSet.has(r.employee_id)).length
+      }
       // Pending leave for the team: leave_requests are not assigned an approver until
       // actioned, so count PENDING requests raised by the manager's direct reports.
       let pendingLeave = 0
@@ -395,13 +400,15 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const [yr, mo]      = monthParam.split('-').map(Number)
     const periodStart   = new Date(yr, mo - 1, 1).toISOString().slice(0, 10)
     const periodEnd     = new Date(yr, mo, 0).toISOString().slice(0, 10)
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     try {
-      const { count: h }  = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active')
-      const { count: j }  = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('joining_date', periodStart).lte('joining_date', periodEnd)
-      const { count: e }  = await fastify.supabase.from('employee_separation').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', periodStart)
-      const { count: pb } = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active').lte('joining_date', ninetyDaysAgo)
-      const headcount = h ?? 0, joiners = j ?? 0, exits = e ?? 0, probBacklog = pb ?? 0
+      // C2 canonical: lifecycle-expiry service replaces crude joining_date ≤ 90d check
+      const [{ count: h }, { count: j }, { count: e }, probRisks] = await Promise.all([
+        fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
+        fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('joining_date', periodStart).lte('joining_date', periodEnd),
+        fastify.supabase.from('employee_separation').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', periodStart),
+        computeLifecycleRisks(fastify.supabase, tenantId, { categories: ['probation'] }),
+      ])
+      const headcount = h ?? 0, joiners = j ?? 0, exits = e ?? 0, probBacklog = probRisks.length
       const parts: string[] = []
       parts.push('Total active headcount stands at ' + headcount + ' employee' + (headcount !== 1 ? 's' : '') + '.')
       if (joiners > 0)     parts.push(joiners + ' employee' + (joiners > 1 ? 's' : '') + ' joined this period.')
