@@ -77,6 +77,67 @@ function quarterMonths(quarter: number, fy: string): string[] {
   return months
 }
 
+// Indian PAN format: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).
+const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/
+function panStatus(pan: string | undefined | null): 'OK' | 'MISSING' | 'INVALID' {
+  if (!pan) return 'MISSING'
+  return PAN_RE.test(String(pan).toUpperCase()) ? 'OK' : 'INVALID'
+}
+
+/**
+ * Build the Form 24Q dataset for a quarter from finalized payroll slips.
+ * Single source for both the CSV Annexure export and the readiness/validation
+ * endpoint — no duplicate aggregation.
+ */
+async function build24QDataset(supabase: any, tenantId: string, quarter: string, financialYear: string) {
+  const qNum   = Number(quarter.slice(1))
+  const months = quarterMonths(qNum, financialYear)
+
+  const { data: slipsData } = await supabase
+    .from('payroll_slips')
+    .select('employee_id, month, gross_pay, tds_deducted, employees(employee_code, first_name, last_name)')
+    .eq('tenant_id', tenantId).in('month', months).eq('status', 'finalized')
+  const slips = (slipsData ?? []) as any[]
+
+  const empIds = [...new Set(slips.map(r => r.employee_id))]
+  const panMap = new Map<string, string>()
+  if (empIds.length) {
+    const { data: panRows } = await supabase
+      .from('employee_bank_statutory').select('employee_id, pan_number')
+      .eq('tenant_id', tenantId).in('employee_id', empIds)
+    for (const p of (panRows ?? []) as any[]) if (p.pan_number) panMap.set(p.employee_id, p.pan_number)
+  }
+
+  const monthly = months.map(m => {
+    const ms = slips.filter(s => s.month === m)
+    return { month: m, tds_amount: r2(ms.reduce((s, r) => s + (r.tds_deducted ?? 0), 0)), employee_count: ms.length }
+  }).filter(r => r.employee_count > 0)
+
+  const dmap = new Map<string, any>()
+  for (const s of slips) {
+    const eid = s.employee_id
+    if (!dmap.has(eid)) {
+      const emp = s.employees ?? {}
+      dmap.set(eid, { employee_code: emp.employee_code ?? '', employee_name: `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim(), pan: panMap.get(eid) ?? '', gross_salary: 0, tds_deducted: 0, months: new Set<string>() })
+    }
+    const d = dmap.get(eid)
+    d.gross_salary = r2(d.gross_salary + (s.gross_pay ?? 0))
+    d.tds_deducted = r2(d.tds_deducted + (s.tds_deducted ?? 0))
+    d.months.add(s.month)
+  }
+  const deductees = [...dmap.values()].map(d => ({
+    employee_code: d.employee_code, employee_name: d.employee_name,
+    pan: d.pan || 'PANNOTAVBL', gross_salary: d.gross_salary, tds_deducted: d.tds_deducted,
+    months_in_quarter: d.months.size, pan_status: panStatus(d.pan),
+  }))
+  const totals = {
+    employee_count: deductees.length,
+    gross_total:    r2(deductees.reduce((s, d) => s + d.gross_salary, 0)),
+    tds_total:      r2(deductees.reduce((s, d) => s + d.tds_deducted, 0)),
+  }
+  return { months, monthly, deductees, totals }
+}
+
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export default async function filingPackRoutes(fastify: FastifyInstance) {
@@ -420,100 +481,41 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
     const { quarter, financial_year, sheet, format } = parsed.data
-    const qNum = Number(quarter.slice(1))  // 'Q1' → 1
-
-    // Expand FY "2024-25" → full year number 2024
-    const [fyStart] = financial_year.split('-').map(Number)
-    const months = quarterMonths(qNum, `${fyStart}-${String(fyStart + 1).slice(2)}`)
-
-    // Fetch finalized payroll slips for the quarter
-    const { data: slipsData, error: slipsErr } = await fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        employee_id, month, gross_pay, tds_deducted,
-        employees(employee_code, first_name, last_name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .in('month', months)
-      .eq('status', 'finalized')
-      .order('month', { ascending: true })
-
-    if (slipsErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: slipsErr.message })
-    const slips = (slipsData ?? []) as any[]
-
-    // Fetch PANs
-    const empIds = [...new Set(slips.map(r => r.employee_id))]
-    const panMap = new Map<string, string>()
-    if (empIds.length > 0) {
-      const { data: panRows } = await fastify.supabase
-        .from('employee_bank_statutory')
-        .select('employee_id, pan_number')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', empIds)
-      for (const p of (panRows ?? []) as any[]) {
-        if (p.pan_number) panMap.set(p.employee_id, p.pan_number)
-      }
-    }
+    // Single shared aggregation (also used by /24q/readiness — no duplicate logic).
+    const ds = await build24QDataset(fastify.supabase, req.tenantId, quarter, financial_year)
+    const { months } = ds
 
     // ── Annexure I — Challan summary (one row per month in the quarter) ────────
     // Note: BSR code, challan number, and deposit date are filled by the deductor
-    // AFTER they remit TDS to the bank. We provide the computed amounts.
-    const annexureI = months.map(m => {
-      const monthSlips = slips.filter(s => s.month === m)
-      const tdsAmt = r2(monthSlips.reduce((s, r) => s + (r.tds_deducted ?? 0), 0))
-      return {
-        quarter,
-        financial_year,
-        salary_month:      m,
-        section_code:      '192A',      // TDS on salary
-        tds_amount:        tdsAmt,
-        surcharge:         0,
-        education_cess:    0,
-        total_tax_deposited: tdsAmt,
-        bsr_code:          '',          // fill after bank remittance
-        challan_date:      '',          // fill after bank remittance
-        challan_number:    '',          // fill after bank remittance
-        deposit_type:      '(200)',     // normal (200) vs book entry (400)
-        employee_count:    monthSlips.length,
-      }
-    }).filter(r => r.employee_count > 0)
+    // AFTER they remit TDS to the bank (out of MVP scope).
+    const annexureI = ds.monthly.map(r => ({
+      quarter,
+      financial_year,
+      salary_month:        r.month,
+      section_code:        '192A',      // TDS on salary
+      tds_amount:          r.tds_amount,
+      surcharge:           0,
+      education_cess:      0,
+      total_tax_deposited: r.tds_amount,
+      bsr_code:            '',          // fill after bank remittance
+      challan_date:        '',          // fill after bank remittance
+      challan_number:      '',          // fill after bank remittance
+      deposit_type:        '(200)',     // normal (200) vs book entry (400)
+      employee_count:      r.employee_count,
+    }))
 
-    // ── Annexure II — Deductee details ─────────────────────────────────────────
-    // One row per employee per quarter (aggregated across all months)
-    const deducteeMap = new Map<string, any>()
-    for (const s of slips) {
-      const eid = s.employee_id
-      if (!deducteeMap.has(eid)) {
-        const emp = s.employees ?? {}
-        deducteeMap.set(eid, {
-          employee_code: emp.employee_code ?? '',
-          employee_name: `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim(),
-          pan:           panMap.get(eid) ?? 'PANNOTAVBL',
-          quarter,
-          financial_year,
-          section_code:  '192A',
-          gross_salary:  0,
-          tds_deducted:  0,
-          months_worked: new Set<string>(),
-        })
-      }
-      const d = deducteeMap.get(eid)!
-      d.gross_salary = r2(d.gross_salary + (s.gross_pay ?? 0))
-      d.tds_deducted = r2(d.tds_deducted + (s.tds_deducted ?? 0))
-      d.months_worked.add(s.month)
-    }
-
-    const annexureII = [...deducteeMap.values()].map(d => ({
+    // ── Annexure II — Deductee details (one row per employee per quarter) ──────
+    const annexureII = ds.deductees.map(d => ({
       employee_code:     d.employee_code,
       employee_name:     d.employee_name,
       pan:               d.pan,
-      quarter:           d.quarter,
-      financial_year:    d.financial_year,
-      section_code:      d.section_code,
+      quarter,
+      financial_year,
+      section_code:      '192A',
       gross_salary:      d.gross_salary,
       tds_deducted:      d.tds_deducted,
-      months_in_quarter: d.months_worked.size,
-      pan_status:        d.pan === 'PANNOTAVBL' ? 'MISSING' : 'OK',
+      months_in_quarter: d.months_in_quarter,
+      pan_status:        d.pan_status,
     }))
 
     if (format === 'json') {
@@ -555,6 +557,107 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
     setCsvHeaders(reply, `24Q_${financial_year}_${quarter}.csv`)
     return reply.send(combined)
+  })
+
+  // ── GET /payroll/filing-pack/deductor — deductor TAN/PAN + status ────────────
+  fastify.get('/deductor', adminAuth, async (req: any, reply) => {
+    const { data } = await fastify.supabase
+      .from('payroll_statutory_settings')
+      .select('deductor_tan, deductor_pan')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    const tan = (data as any)?.deductor_tan ?? null
+    const pan = (data as any)?.deductor_pan ?? null
+    // TAN format: 4 letters, 5 digits, 1 letter (e.g. MUMD12345E)
+    const tanValid = tan ? /^[A-Z]{4}[0-9]{5}[A-Z]$/.test(String(tan).toUpperCase()) : false
+    const panValid = pan ? PAN_RE.test(String(pan).toUpperCase()) : false
+    return reply.send({
+      data: {
+        deductor_tan: tan, deductor_pan: pan,
+        tan_status: !tan ? 'missing' : tanValid ? 'ok' : 'invalid',
+        pan_status: !pan ? 'missing' : panValid ? 'ok' : 'invalid',
+      },
+    })
+  })
+
+  // ── PUT /payroll/filing-pack/deductor — capture deductor TAN/PAN ──────────────
+  fastify.put('/deductor', adminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      deductor_tan: z.string().trim().max(15).optional().nullable(),
+      deductor_pan: z.string().trim().max(15).optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const payload = {
+      deductor_tan: parsed.data.deductor_tan ? parsed.data.deductor_tan.toUpperCase() : null,
+      deductor_pan: parsed.data.deductor_pan ? parsed.data.deductor_pan.toUpperCase() : null,
+    }
+    const { data, error } = await fastify.supabase
+      .from('payroll_statutory_settings')
+      .upsert({ tenant_id: req.tenantId, ...payload, updated_at: new Date().toISOString(), updated_by: req.userId }, { onConflict: 'tenant_id' })
+      .select('deductor_tan, deductor_pan')
+      .single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'payroll_statutory_settings', recordId: req.tenantId,
+      action: 'UPDATE', performedBy: req.userId, newData: payload as Record<string, unknown>,
+    })
+    return reply.send({ data })
+  })
+
+  // ── GET /payroll/filing-pack/24q/readiness ───────────────────────────────────
+  // Form 24Q dataset + validation report + explainable Ready/Warning/Blocked.
+  fastify.get('/24q/readiness', adminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      quarter:        z.enum(['Q1', 'Q2', 'Q3', 'Q4']),
+      financial_year: z.string().regex(/^\d{4}-\d{2}$/, 'financial_year must be YYYY-YY'),
+    })
+    const parsed = schema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { quarter, financial_year } = parsed.data
+
+    // Deductor
+    const { data: settings } = await fastify.supabase
+      .from('payroll_statutory_settings').select('deductor_tan, deductor_pan').eq('tenant_id', req.tenantId).maybeSingle()
+    const tan = (settings as any)?.deductor_tan ?? null
+    const pan = (settings as any)?.deductor_pan ?? null
+    const tanValid = tan ? /^[A-Z]{4}[0-9]{5}[A-Z]$/.test(String(tan).toUpperCase()) : false
+
+    // Dataset (shared aggregation)
+    const ds = await build24QDataset(fastify.supabase, req.tenantId, quarter, financial_year)
+    const missingPan = ds.deductees.filter(d => d.pan_status === 'MISSING')
+    const invalidPan = ds.deductees.filter(d => d.pan_status === 'INVALID')
+    const missingTds = ds.deductees.filter(d => d.gross_salary > 0 && d.tds_deducted === 0)
+
+    // Validation report
+    const validation: Array<{ code: string; severity: 'blocker' | 'warning' | 'info'; message: string; count?: number }> = []
+    if (!tan)                       validation.push({ code: 'TAN_MISSING', severity: 'blocker', message: 'Deductor TAN is not set. Capture it before filing Form 24Q.' })
+    else if (!tanValid)             validation.push({ code: 'TAN_INVALID', severity: 'warning', message: `Deductor TAN "${tan}" does not match the expected format (AAAA00000A).` })
+    if (ds.totals.employee_count === 0) validation.push({ code: 'NO_DEDUCTEES', severity: 'blocker', message: 'No finalized payroll slips found for this quarter — nothing to file.' })
+    if (missingPan.length)          validation.push({ code: 'PAN_MISSING', severity: 'warning', message: `${missingPan.length} deductee(s) have no PAN (reported as PANNOTAVBL — higher TDS rate applies).`, count: missingPan.length })
+    if (invalidPan.length)          validation.push({ code: 'PAN_INVALID', severity: 'warning', message: `${invalidPan.length} deductee(s) have an invalid PAN format.`, count: invalidPan.length })
+    if (missingTds.length)          validation.push({ code: 'TDS_ZERO', severity: 'warning', message: `${missingTds.length} deductee(s) have salary but zero TDS deducted — verify before filing.`, count: missingTds.length })
+
+    const hasBlocker = validation.some(v => v.severity === 'blocker')
+    const hasWarning = validation.some(v => v.severity === 'warning')
+    const status: 'ready' | 'warning' | 'blocked' = hasBlocker ? 'blocked' : hasWarning ? 'warning' : 'ready'
+
+    return reply.send({
+      data: {
+        deductor: { tan, pan, tan_valid: tanValid },
+        quarter, financial_year, months: ds.months,
+        summary: {
+          deductee_count: ds.totals.employee_count,
+          gross_total:    ds.totals.gross_total,   // salary paid (taxable income basis)
+          tds_total:      ds.totals.tds_total,
+        },
+        deductees:  ds.deductees,
+        validation,
+        readiness:  { status, reasons: validation.map(v => v.message) },
+      },
+    })
   })
 
   // ── GET /payroll/filing-pack/challan ─────────────────────────────────────────

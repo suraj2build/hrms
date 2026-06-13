@@ -9,7 +9,7 @@
  * Flow: Pre-flight readiness check → Generate → Track status (Generated → Submitted → Acknowledged)
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle2, XCircle, AlertTriangle, Download, Clock,
@@ -274,6 +274,40 @@ export function FilingPackCenter() {
   })
   const artifacts = artifactsData?.data ?? []
 
+  // ── Deductor TAN/PAN (P2.4) ──────────────────────────────────────────────────
+  const { data: deductor } = useQuery<{ data: { deductor_tan: string | null; deductor_pan: string | null; tan_status: string; pan_status: string } }>({
+    queryKey: ['filing-pack-deductor'],
+    queryFn:  () => api.get('/payroll/filing-pack/deductor'),
+    staleTime: 60_000,
+  })
+  const [tanInput, setTanInput] = useState('')
+  const [panInput, setPanInput] = useState('')
+  useEffect(() => {
+    if (deductor?.data) { setTanInput(deductor.data.deductor_tan ?? ''); setPanInput(deductor.data.deductor_pan ?? '') }
+  }, [deductor])
+  const saveDeductor = useMutation({
+    mutationFn: () => api.put('/payroll/filing-pack/deductor', { deductor_tan: tanInput.trim() || null, deductor_pan: panInput.trim() || null }),
+    onSuccess: () => {
+      toast.success('Deductor details saved')
+      qc.invalidateQueries({ queryKey: ['filing-pack-deductor'] })
+      qc.invalidateQueries({ queryKey: ['filing-pack-24q-readiness'] })
+    },
+    onError: (e: any) => toast.error('Save failed', { description: e?.message }),
+  })
+
+  // ── Form 24Q readiness + validation (P2.4) ───────────────────────────────────
+  const { data: ready24q } = useQuery<{ data: {
+    deductor: { tan: string | null; tan_valid: boolean }
+    summary: { deductee_count: number; gross_total: number; tds_total: number }
+    validation: Array<{ code: string; severity: 'blocker' | 'warning' | 'info'; message: string; count?: number }>
+    readiness: { status: 'ready' | 'warning' | 'blocked'; reasons: string[] }
+  } }>({
+    queryKey: ['filing-pack-24q-readiness', quarter, fy],
+    queryFn:  () => api.get(`/payroll/filing-pack/24q/readiness?quarter=${quarter}&financial_year=${fy}`),
+    staleTime: 60_000,
+  })
+  const r24 = ready24q?.data
+
   // ── Record artifact after download ─────────────────────────────────────────
   async function recordArtifact(type: string, fileName: string, rowCount?: number) {
     const body: Record<string, unknown> = {
@@ -473,9 +507,65 @@ export function FilingPackCenter() {
               <p className="text-[11.5px] text-muted-foreground">
                 Annexure I (challan summary) + Annexure II (deductee details). File via TRACES / NSDL RPU after obtaining BSR codes.
               </p>
+
+              {/* Deductor TAN / PAN capture */}
+              <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-muted-foreground">Deductor (TAN / PAN)</span>
+                  {deductor?.data && (
+                    <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded-full border',
+                      deductor.data.tan_status === 'ok' ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                        : deductor.data.tan_status === 'invalid' ? 'text-amber-700 bg-amber-50 border-amber-200'
+                        : 'text-red-700 bg-red-50 border-red-200')}>
+                      TAN {deductor.data.tan_status}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={tanInput} onChange={e => setTanInput(e.target.value.toUpperCase())} placeholder="TAN (AAAA00000A)"
+                    className="h-7 rounded-md border border-border bg-background px-2 text-[11px] font-mono uppercase" />
+                  <input value={panInput} onChange={e => setPanInput(e.target.value.toUpperCase())} placeholder="Employer PAN"
+                    className="h-7 rounded-md border border-border bg-background px-2 text-[11px] font-mono uppercase" />
+                </div>
+                <Button size="sm" variant="outline" className="h-7 w-full text-[11px]" disabled={saveDeductor.isPending}
+                  onClick={() => saveDeductor.mutate()}>
+                  {saveDeductor.isPending ? 'Saving…' : 'Save deductor details'}
+                </Button>
+              </div>
+
+              {/* Readiness + validation */}
+              {r24 && (
+                <div className="rounded-lg border border-border/70 p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-muted-foreground">Filing readiness</span>
+                    <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase',
+                      r24.readiness.status === 'ready' ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                        : r24.readiness.status === 'warning' ? 'text-amber-700 bg-amber-50 border-amber-200'
+                        : 'text-red-700 bg-red-50 border-red-200')}>
+                      {r24.readiness.status}
+                    </span>
+                  </div>
+                  <div className="flex gap-3 text-[10.5px] text-muted-foreground">
+                    <span>{r24.summary.deductee_count} deductees</span>
+                    <span>· TDS ₹{r24.summary.tds_total.toLocaleString('en-IN')}</span>
+                  </div>
+                  {r24.validation.length > 0 && (
+                    <ul className="space-y-0.5 pt-1">
+                      {r24.validation.map(v => (
+                        <li key={v.code} className={cn('text-[10.5px] flex items-start gap-1',
+                          v.severity === 'blocker' ? 'text-red-600' : v.severity === 'warning' ? 'text-amber-600' : 'text-muted-foreground')}>
+                          <span className="mt-px">{v.severity === 'blocker' ? '⛔' : v.severity === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                          <span>{v.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               <Button
                 className="w-full h-8 text-[12.5px]"
-                disabled={generating !== null || loadingReady}
+                disabled={generating !== null || loadingReady || r24?.readiness.status === 'blocked'}
                 onClick={() => handleGenerate('24q')}
               >
                 {generating === '24q'
