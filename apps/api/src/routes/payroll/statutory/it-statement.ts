@@ -70,11 +70,14 @@ async function buildITStatement(
     slipsResult,
     declResult,
     regimeResult,
+    panResult,
+    tenantResult,
+    regResult,
   ] = await Promise.all([
     // Employee profile
     fastify.supabase
       .from('employees')
-      .select('id, employee_code, profiles(full_name)')
+      .select('id, employee_code, joining_date, profiles(full_name)')
       .eq('id', employeeId)
       .eq('tenant_id', tenantId)
       .maybeSingle(),
@@ -112,6 +115,29 @@ async function buildITStatement(
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
+
+    // Form 16 header: employee PAN
+    fastify.supabase
+      .from('employee_bank_statutory')
+      .select('pan')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .maybeSingle(),
+
+    // Form 16 header: employer (deductor) name
+    fastify.supabase
+      .from('tenants')
+      .select('name')
+      .eq('id', tenantId)
+      .maybeSingle(),
+
+    // Form 16 header: employer TAN (statutory registration)
+    fastify.supabase
+      .from('statutory_registrations')
+      .select('statutory_type, registration_number')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .in('statutory_type', ['tds', 'tan']),
   ])
 
   const employee = empResult.data as any
@@ -233,8 +259,22 @@ async function buildITStatement(
   const profile = (employee.profiles as any) ?? {}
   const balance  = Math.max(0, taxResult.netTaxPayable - tdsYTD)
 
+  // ── Form 16 certificate header (employee + deductor identity) ─────────────
+  const tanRow = ((regResult.data as any[]) ?? [])[0]
+  const assessmentYear = `${parseInt(financialYear.split('-')[0], 10) + 1}-${(parseInt(financialYear.split('-')[0], 10) + 2).toString().slice(-2)}`
+  const header = {
+    employee_name:    profile.full_name ?? employee.employee_code ?? '—',
+    employee_code:    employee.employee_code ?? null,
+    joining_date:     (employee as any).joining_date ?? null,
+    pan:              (panResult.data as any)?.pan ?? null,
+    employer_name:    (tenantResult.data as any)?.name ?? '—',
+    employer_tan:     tanRow?.registration_number ?? null,
+    assessment_year:  assessmentYear,
+  }
+
   // ── Flat structure matching frontend ITStatementData interface ────────────
   return {
+    header,
     financial_year:             financialYear,
     regime,
     // A. Income

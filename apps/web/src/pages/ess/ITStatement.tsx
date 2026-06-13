@@ -17,6 +17,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
+import { printForm16, type Form16Data } from '@/lib/form16-print'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -157,7 +158,9 @@ export function ITStatement() {
   })
 
   const handleDownload = () => {
-    toast.info('PDF download coming soon')
+    if (!data) { toast.error('Statement not loaded yet'); return }
+    const ok = printForm16(data as unknown as Form16Data)
+    if (!ok) toast.error('Allow pop-ups to download your Form 16')
   }
 
   return (
@@ -175,7 +178,7 @@ export function ITStatement() {
               {FY_OPTIONS.map(f => <option key={f}>{f}</option>)}
             </select>
             <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="h-4 w-4 mr-1.5" /> Download PDF
+              <Download className="h-4 w-4 mr-1.5" /> Download Form 16
             </Button>
           </div>
         }
