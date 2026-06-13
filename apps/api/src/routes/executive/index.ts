@@ -18,6 +18,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -847,6 +848,48 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       : compliance_risk_score >= 25 ? 'medium'
       : 'low'
 
+    // ── Lifecycle expiry exposure (single source: lifecycle-expiry) ──────────
+    // Read-only roll-up. Drives Expiry Risk Index, Documentation Health,
+    // Contract Exposure and Probation Exposure. Best-effort — never breaks the view.
+    let lifecycle = {
+      expiry_risk_index: 0,
+      total_at_risk:     0,
+      overdue:           0,
+      due_7:             0,
+      due_30:            0,
+      documentation_health: 100,   // 0–100, higher is better
+      documents_at_risk:    0,
+      contract_exposure:    0,
+      probation_exposure:   0,
+      by_category:          {} as Record<string, Record<string, number>>,
+    }
+    try {
+      const risks   = await computeLifecycleRisks(fastify.supabase, req.tenantId, { withinDays: 90 })
+      const summary = summariseLifecycle(risks)
+      const overdue = summary.by_bucket.overdue
+      const due7    = summary.by_bucket.due_7
+      const due30   = summary.by_bucket.due_30
+      // Weighted index (0–100, higher = more exposure): overdue weigh most.
+      const expiry_risk_index = Math.min(100, overdue * 8 + due7 * 4 + due30 * 1)
+      const docCats = summary.by_category.document
+      const idCats  = summary.by_category.identity
+      const ppCats  = summary.by_category.passport
+      const documents_at_risk = (docCats.overdue + docCats.due_7 + docCats.due_30)
+        + (idCats.overdue + idCats.due_7 + idCats.due_30)
+        + (ppCats.overdue + ppCats.due_7 + ppCats.due_30)
+      const docsOverdue = docCats.overdue + idCats.overdue + ppCats.overdue
+      lifecycle = {
+        expiry_risk_index,
+        total_at_risk: summary.total,
+        overdue, due_7: due7, due_30: due30,
+        documentation_health: Math.max(0, 100 - (docsOverdue * 6 + documents_at_risk * 2)),
+        documents_at_risk,
+        contract_exposure:  summary.by_category.contract.overdue + summary.by_category.contract.due_7 + summary.by_category.contract.due_30,
+        probation_exposure: summary.by_category.probation.overdue + summary.by_category.probation.due_7 + summary.by_category.probation.due_30,
+        by_category: summary.by_category,
+      }
+    } catch { /* lifecycle roll-up is best-effort */ }
+
     return reply.send({
       // Incidents
       open_incidents,
@@ -876,6 +919,8 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       avg_trust_score,
       trust_distribution,
       trust_trend,
+      // P3.5 — workforce lifecycle expiry exposure
+      lifecycle,
       generated_at: new Date().toISOString(),
       period: { from: from30, to },
     })

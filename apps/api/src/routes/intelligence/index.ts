@@ -8,6 +8,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { computeUpcoming } from '../../lib/compliance-calendar.js'
+import { computeLifecycleRisks, type LifecycleCategory } from '../../lib/lifecycle-expiry.js'
 
 interface SourceRecord { table: string; count: number; sample?: string }
 
@@ -48,7 +49,6 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const now           = new Date()
     const sevenDaysAgo  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000).toISOString()
     const threeDaysAgo  = new Date(now.getTime() - 3  * 24 * 60 * 60 * 1000).toISOString()
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const monthStart    = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
 
     try {
@@ -119,20 +119,74 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // 5. Probation overdue
-      const { data: probationDue } = await fastify.supabase
-        .from('employees').select('id, first_name, last_name, joining_date')
-        .eq('tenant_id', tenantId).eq('status', 'active').lte('joining_date', ninetyDaysAgo).limit(50)
-      if (probationDue && probationDue.length > 0) {
-        observations.push({
-          id: 'probation-review-due', category: 'compliance',
-          severity: probationDue.length > 5 ? 'high' : 'medium',
-          title: probationDue.length + ' employee' + (probationDue.length > 1 ? 's' : '') + ' eligible for probation confirmation',
-          body: 'These employees joined more than 90 days ago and may be due for probation confirmation.',
-          source_records: [{ table: 'employees', count: probationDue.length, sample: probationDue.slice(0, 3).map((e: any) => e.first_name + ' ' + e.last_name).join(', ') }],
-          generated_at: now.toISOString(),
-        })
-      }
+      // 5. Workforce lifecycle expiry — single source: lifecycle-expiry service.
+      //    Accurate probation (category window + confirmation gate) + document /
+      //    identity / passport / visa / contract expiry. No joining_date proxy.
+      let probationDueCount = 0
+      try {
+        const risks = await computeLifecycleRisks(fastify.supabase, tenantId, { withinDays: 90 })
+        const actionable = (cats: LifecycleCategory[], maxDays: number) =>
+          risks.filter(r => cats.includes(r.category) && (r.bucket === 'overdue' || r.days_to_due <= maxDays))
+        const sampleOf = (arr: typeof risks) =>
+          arr.slice(0, 3).map(r => `${r.employee_name} — ${r.label} (${r.bucket === 'overdue' ? `${Math.abs(r.days_to_due)}d ago` : `${r.days_to_due}d`})`).join('; ')
+
+        // Probation confirmations (overdue + due within 90) — accurate count.
+        const probation = actionable(['probation'], 90)
+        probationDueCount = probation.length
+        if (probation.length) {
+          const overdueP = probation.filter(r => r.bucket === 'overdue').length
+          observations.push({
+            id: 'probation-confirmation-due', category: 'compliance',
+            severity: overdueP > 0 || probation.length > 5 ? 'high' : 'medium',
+            title: `${probation.length} probation confirmation${probation.length > 1 ? 's' : ''} ${overdueP > 0 ? `due (${overdueP} overdue)` : 'due'}`,
+            body: `These employees are on probation and reaching (or past) their confirmation date based on their employment category's probation period. Confirm or extend probation. ${sampleOf(probation)}.`,
+            source_records: [{ table: 'job_history', count: probation.length, sample: sampleOf(probation) }],
+            generated_at: now.toISOString(),
+          })
+        }
+
+        // Visas — passports/visas are time-critical for right-to-work.
+        const visas = actionable(['visa'], 30)
+        if (visas.length) {
+          const overdueV = visas.filter(r => r.bucket === 'overdue').length
+          observations.push({
+            id: 'lifecycle-visa-expiry', category: 'compliance',
+            severity: overdueV > 0 ? 'critical' : 'high',
+            title: `${visas.length} visa${visas.length > 1 ? 's' : ''} ${overdueV > 0 ? `expired or expiring` : 'expiring within 30 days'}`,
+            body: `Work-authorisation risk. ${overdueV > 0 ? `${overdueV} already expired. ` : ''}Renew before expiry to maintain right-to-work compliance. ${sampleOf(visas)}.`,
+            source_records: [{ table: 'employee_passport_visa', count: visas.length, sample: sampleOf(visas) }],
+            generated_at: now.toISOString(),
+          })
+        }
+
+        // Contracts — employment continuity.
+        const contracts = actionable(['contract'], 30)
+        if (contracts.length) {
+          const overdueC = contracts.filter(r => r.bucket === 'overdue').length
+          observations.push({
+            id: 'lifecycle-contract-expiry', category: 'compliance',
+            severity: overdueC > 0 ? 'high' : 'medium',
+            title: `${contracts.length} contract${contracts.length > 1 ? 's' : ''} ${overdueC > 0 ? 'expired or expiring' : 'expiring within 30 days'}`,
+            body: `Employment-continuity risk. Initiate renewals before the end date to avoid lapses. ${sampleOf(contracts)}.`,
+            source_records: [{ table: 'employee_contracts', count: contracts.length, sample: sampleOf(contracts) }],
+            generated_at: now.toISOString(),
+          })
+        }
+
+        // Documents, identity & passports — KYC / statutory document health.
+        const docs = actionable(['document', 'identity', 'passport'], 30)
+        if (docs.length) {
+          const overdueD = docs.filter(r => r.bucket === 'overdue').length
+          observations.push({
+            id: 'lifecycle-document-expiry', category: 'compliance',
+            severity: overdueD > 3 ? 'high' : 'medium',
+            title: `${docs.length} employee document${docs.length > 1 ? 's' : ''} ${overdueD > 0 ? `expired or expiring` : 'expiring within 30 days'}`,
+            body: `Documentation-health risk (identity / passport / general documents). ${overdueD > 0 ? `${overdueD} already expired. ` : ''}Request updated copies before expiry. ${sampleOf(docs)}.`,
+            source_records: [{ table: 'documents', count: docs.length, sample: sampleOf(docs) }],
+            generated_at: now.toISOString(),
+          })
+        }
+      } catch { /* lifecycle scan is best-effort; never break the command view */ }
 
       // 6. O3 — Sessions with no documents uploaded > 24h (missing mandatory docs)
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
@@ -271,7 +325,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
             stalled_onboarding:         stalledSessions?.length  ?? 0,
             pending_separations:        pendingSep?.length        ?? 0,
             assets_at_risk:             assetsAtRiskCount,
-            probation_due:              probationDue?.length      ?? 0,
+            probation_due:              probationDueCount,
             // O3 readiness KPIs
             onboarding_ready:           readyCount               ?? 0,
             onboarding_blocked:         rejCount                 ?? 0,

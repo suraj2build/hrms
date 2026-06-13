@@ -16,6 +16,18 @@ interface ComplianceData {
   avg_trust_score: number | null
   trust_distribution: Record<string, number>
   trust_trend: Array<{ month: string; avg_score: number }>
+  // P3.5 — workforce lifecycle expiry exposure
+  lifecycle?: {
+    expiry_risk_index: number
+    total_at_risk: number
+    overdue: number
+    due_7: number
+    due_30: number
+    documentation_health: number
+    documents_at_risk: number
+    contract_exposure: number
+    probation_exposure: number
+  }
 }
 
 const RISK_TONE: Record<string, { ring: string; text: string; fill: string }> = {
@@ -37,6 +49,10 @@ export default function ComplianceView() {
   const status = c?.risk_status ?? 'low'
   const tone = RISK_TONE[status]
   const gauge = [{ name: 'score', value: score, fill: tone.fill }]
+
+  const lc = c?.lifecycle
+  const lcStatus = !lc ? 'low' : lc.expiry_risk_index >= 50 ? 'high' : lc.expiry_risk_index >= 20 ? 'medium' : 'low'
+  const lcTone = RISK_TONE[lcStatus]
 
   const sevEntries = Object.entries(c?.gov_by_severity ?? {})
 
@@ -100,6 +116,44 @@ export default function ComplianceView() {
               </div>
             </div>
           )}
+        </Panel>
+      </section>
+
+      {/* P3.5 — Workforce Lifecycle Exposure (single source: lifecycle-expiry) */}
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Panel icon={Gauge} iconClass={lc && lc.expiry_risk_index >= 50 ? 'text-destructive' : lc && lc.expiry_risk_index >= 20 ? 'text-warning' : 'text-success'} title="Expiry Risk Index" subtitle="Composite lifecycle exposure (0–100)">
+          {lc ? (
+            <>
+              <div className="relative mx-auto mt-2 h-52 w-52">
+                <ResponsiveContainer>
+                  <RadialBarChart innerRadius="72%" outerRadius="100%" data={[{ name: 'idx', value: lc.expiry_risk_index, fill: lcTone.fill }]} startAngle={90} endAngle={-270}>
+                    <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                    <RadialBar background={{ fill: 'var(--muted)' }} dataKey="value" cornerRadius={12} />
+                  </RadialBarChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className={`text-4xl font-bold tabular-nums ${lcTone.text}`}>{lc.expiry_risk_index}</div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{lc.total_at_risk} at risk</div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                <StatTile label="Overdue" value={lc.overdue.toLocaleString()} tone={lc.overdue ? 'destructive' : 'muted'} />
+                <StatTile label="Due ≤7d" value={lc.due_7.toLocaleString()} tone="warning" />
+                <StatTile label="Due ≤30d" value={lc.due_30.toLocaleString()} tone="muted" />
+              </div>
+            </>
+          ) : <EmptyBody text="Lifecycle exposure appears once documents, contracts or probation records carry expiry dates." />}
+        </Panel>
+
+        <Panel className="xl:col-span-2" icon={ClipboardCheck} iconClass="text-primary" title="Lifecycle Exposure Breakdown" subtitle="Documentation health · contract & probation exposure">
+          {lc ? (
+            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-2">
+              <StatTile label="Documentation Health" value={`${lc.documentation_health}/100`} tone={lc.documentation_health >= 80 ? 'success' : lc.documentation_health >= 50 ? 'warning' : 'destructive'} />
+              <StatTile label="Documents at Risk" value={lc.documents_at_risk.toLocaleString()} tone={lc.documents_at_risk ? 'warning' : 'muted'} />
+              <StatTile label="Contract Exposure" value={lc.contract_exposure.toLocaleString()} tone={lc.contract_exposure ? 'warning' : 'muted'} />
+              <StatTile label="Probation Exposure" value={lc.probation_exposure.toLocaleString()} tone={lc.probation_exposure ? 'warning' : 'muted'} />
+            </div>
+          ) : <EmptyBody text="No workforce lifecycle exposure to report. Capture expiry dates on documents, identity records, passports/visas and contracts to populate this." />}
         </Panel>
       </section>
 
