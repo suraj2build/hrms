@@ -843,9 +843,11 @@ export default function App() {
                 <Route path="/manager/self/salary/hra"                 element={<HRADeclarations />} />
                 <Route path="/manager/self/salary/tds-recovery"        element={<TDSRecovery />} />
 
-                {/* Reports */}
-                <Route path="/manager/reports/team"          element={<Reports />} />
-                <Route path="/manager/reports/exports"       element={<Reports />} />
+                {/* Reports — the shared Reports surface exposes tenant-wide salary &
+                    statutory data and is now HR-admin-only (B3). Managers use their
+                    dedicated scoped surfaces (Team Leave Balances, Payroll Cost, etc.). */}
+                <Route path="/manager/reports/team"          element={<Navigate to="/manager/dashboard" replace />} />
+                <Route path="/manager/reports/exports"       element={<Navigate to="/manager/dashboard" replace />} />
 
               </Route>
 

@@ -18,7 +18,17 @@
 import type { FastifyInstance } from 'fastify'
 
 export default async function reportsRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  // All report endpoints expose tenant-wide data (full salary register,
+  // statutory PF/ESI/PT with bank/PAN/UAN, headcount). They are restricted to
+  // HR admins — a plain employee or manager must never read org-wide pay data.
+  function requireHrAdmin(req: any, reply: any, done: () => void) {
+    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return
+    }
+    done()
+  }
+  const auth = { preHandler: [fastify.authenticate, requireHrAdmin] }
 
   // ── 1. Headcount & Attrition ────────────────────────────────────────────────
   //

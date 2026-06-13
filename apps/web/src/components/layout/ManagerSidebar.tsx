@@ -34,7 +34,6 @@ import {
   HeadphonesIcon,
   CheckSquare,
   TrendingUp,
-  BarChart3,
   HelpCircle,
   ChevronLeft,
   ChevronRight,
@@ -160,7 +159,6 @@ const BASE_SECTIONS: NavSection[] = [
       { label: 'Leave Balances',    icon: Scale,           href: '/manager/team/leave-balances'               },
       { label: 'Payroll Cost',      icon: Coins,           href: '/manager/team/payroll-cost'                 },
       { label: 'Performance',       icon: TrendingUp,      href: '/manager/team/performance'                  },
-      { label: 'Team Reports',      icon: BarChart3,       href: '/manager/reports/team'                      },
     ],
   },
 ]
