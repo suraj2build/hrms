@@ -90,6 +90,7 @@ import {
   Target,
   // Setup
   GitBranch,
+  Network,
   Building2,
   MapPin,
   TrendingUp,
@@ -244,6 +245,7 @@ export const DOMAINS: Domain[] = [
         label: 'Employees',
         items: [
           { id: 'employees',             label: 'Employee Directory',   route: '/admin/employees',             exact: true, icon: Users,        keywords: ['staff', 'people', 'employees list', 'headcount', 'employee database'] },
+          { id: 'org-chart',             label: 'Org Chart',            route: '/admin/employees/org-chart',                  icon: Network,      keywords: ['org chart', 'organization chart', 'reporting structure', 'hierarchy', 'reporting manager', 'reassign manager', 'reporting line', 'who reports to whom'] },
           { id: 'workforce-ops',         label: 'Workforce Operations', route: '/admin/workforce/center',                     icon: Activity,     keywords: ['ops center', 'workforce operations', 'employee ops', 'manpower center', 'people ops'] },
           { id: 'admin-documents',       label: 'Documents',            route: '/admin/documents',                            icon: FileText,     keywords: ['employee documents', 'files', 'document management', 'document vault', 'upload document'] },
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
