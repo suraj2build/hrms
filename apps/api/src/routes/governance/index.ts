@@ -6,8 +6,10 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import intelligenceRoutes       from './intelligence.js'
+import intelligenceRoutes from './intelligence.js'
+import privacyRoutes      from './privacy.js'
 
 export default async function governanceRoutes(fastify: FastifyInstance) {
   await fastify.register(intelligenceRoutes, { prefix: '/governance' })
+  await fastify.register(privacyRoutes,      { prefix: '/governance' })
 }

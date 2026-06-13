@@ -320,6 +320,15 @@ const UsersManagement   = lazy(() => import('@/pages/settings/UsersManagement').
 const LettersAdmin = lazy(() => import('@/pages/letters/LettersAdmin').then(m => ({ default: m.LettersAdmin })))
 const EssLetters   = lazy(() => import('@/pages/letters/EssLetters').then(m => ({ default: m.EssLetters })))
 
+// Program 1 — Recruiting → Employee Lifecycle
+const AdminHiredPipeline = lazy(() => import('@/pages/recruitment/AdminHiredPipeline').then(m => ({ default: m.AdminHiredPipeline })))
+// Program 2 — Certification Governance
+const CertificationWorkspace = lazy(() => import('@/pages/workforce/CertificationWorkspace').then(m => ({ default: m.CertificationWorkspace })))
+// Program 3 — Governance & Privacy Workspace
+const GovernancePrivacyWorkspace = lazy(() => import('@/pages/admin/GovernancePrivacyWorkspace').then(m => ({ default: m.GovernancePrivacyWorkspace })))
+// Program 4 — Security Operations Workspace
+const SecurityOpsWorkspace = lazy(() => import('@/pages/admin/SecurityOpsWorkspace').then(m => ({ default: m.SecurityOpsWorkspace })))
+
 // ── Owner Panel (platform admin — completely separate from tenant app) ─────────
 import { OwnerLogin }        from '@/pages/owner/OwnerLogin'
 import { OwnerLayout }       from '@/pages/owner/OwnerLayout'
@@ -765,6 +774,10 @@ export default function App() {
                 <Route path="/admin/recruitment/interviews"         element={<AdminInterviews />} />
                 <Route path="/admin/recruitment/interview-analytics" element={<AdminInterviewAnalytics />} />
                 <Route path="/admin/recruitment/question-bank"      element={<AdminQuestionBank />} />
+                <Route path="/admin/recruitment/hired"             element={<AdminHiredPipeline />} />
+                <Route path="/admin/workforce/certifications"      element={<CertificationWorkspace />} />
+                <Route path="/admin/governance/privacy"            element={<GovernancePrivacyWorkspace />} />
+                <Route path="/admin/security/ops"                  element={<SecurityOpsWorkspace />} />
                 {/* AI Workforce OS — Intelligence Layer */}
                 <Route path="/admin/intelligence/workforce-command"  element={<WorkforceCommand />} />
                 <Route path="/admin/intelligence/org-health"        element={<OrgHealth />} />

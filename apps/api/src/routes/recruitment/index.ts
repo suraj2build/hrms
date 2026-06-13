@@ -690,6 +690,147 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Application rejected' })
   })
 
+  // ── Hired Pipeline — initiate preboarding ────────────────────────────────
+
+  fastify.get('/hired', hrAdminAuth, async (req: any, reply) => {
+    const querySchema = z.object({
+      preboarding_status: z.enum(['pending','initiated','all']).default('all'),
+      limit:  z.coerce.number().int().min(1).max(200).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    let q = fastify.supabase
+      .from('applications')
+      .select(`
+        id, status, offer_amount, expected_joining,
+        preboarding_initiated_at, pre_joinee_invitation_id,
+        created_at, updated_at,
+        candidates(id, first_name, last_name, email, phone, current_title),
+        job_requisitions(id, title, departments(name)),
+        pre_joinee:pre_joinee_invitations!applications_pre_joinee_invitation_id_fkey(
+          id, status, joining_date, submitted_at
+        )
+      `, { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'hired')
+      .order('updated_at', { ascending: false })
+
+    if (parsed.data.preboarding_status === 'pending') {
+      q = q.is('pre_joinee_invitation_id', null)
+    } else if (parsed.data.preboarding_status === 'initiated') {
+      q = q.not('pre_joinee_invitation_id', 'is', null)
+    }
+
+    q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
+  })
+
+  fastify.post('/applications/:id/initiate-preboarding', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      joining_date:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'joining_date must be YYYY-MM-DD'),
+      designation:    z.string().optional().nullable(),
+      department:     z.string().optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Fetch application + candidate data
+    const { data: app } = await fastify.supabase
+      .from('applications')
+      .select(`
+        id, status, offer_amount, expected_joining,
+        pre_joinee_invitation_id, tenant_id,
+        candidates(id, first_name, last_name, email, phone),
+        job_requisitions(title, departments(name))
+      `)
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!app) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
+    if ((app as any).status !== 'hired') {
+      return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only hired applications can be moved to preboarding' })
+    }
+    if ((app as any).pre_joinee_invitation_id) {
+      return reply.code(409).send({ error: 'ALREADY_INITIATED', message: 'Preboarding has already been initiated for this application' })
+    }
+
+    const cand = (app as any).candidates
+    const reqn = (app as any).job_requisitions
+
+    // Create the pre-joinee invitation from candidate data
+    const { data: invitation, error: invErr } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .insert({
+        tenant_id:             req.tenantId,
+        first_name:            cand?.first_name ?? '',
+        last_name:             cand?.last_name  ?? '',
+        email:                 cand?.email      ?? '',
+        phone:                 cand?.phone      ?? null,
+        designation:           parsed.data.designation ?? reqn?.title ?? null,
+        department:            parsed.data.department  ?? reqn?.departments?.name ?? null,
+        joining_date:          parsed.data.joining_date,
+        source_application_id: id,
+        source_candidate_id:   cand?.id ?? null,
+        invited_by:            req.userId,
+        token:                 require('crypto').randomUUID(),
+        expires_at:            new Date(Date.now() + 30 * 86400000).toISOString(),
+      })
+      .select()
+      .single()
+
+    if (invErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: invErr.message })
+
+    // Link the invitation back to the application
+    await fastify.supabase
+      .from('applications')
+      .update({
+        pre_joinee_invitation_id: (invitation as any).id,
+        preboarding_initiated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'applications',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { pre_joinee_invitation_id: (invitation as any).id, preboarding_initiated_at: new Date().toISOString() },
+    })
+
+    // Send pre-join invitation email (non-blocking)
+    void (async () => {
+      try {
+        const { preJoineeInviteEmail, sendEmail, APP_PUBLIC_URL } = await import('../../lib/email-service.js')
+        const portalUrl = `${APP_PUBLIC_URL}/pre-join/${(invitation as any).token}`
+        if (cand?.email) {
+          await sendEmail({
+            to: cand.email,
+            ...preJoineeInviteEmail({
+              candidateName: `${cand.first_name} ${cand.last_name}`.trim(),
+              joiningDate:   parsed.data.joining_date,
+              inviteUrl:     portalUrl,
+              companyName:   'Company',
+            }),
+          })
+        }
+      } catch { /* non-throwing */ }
+    })()
+
+    return reply.code(201).send({
+      data: invitation,
+      message: 'Preboarding initiated. Invitation email sent to candidate.',
+    })
+  })
+
   // ── Stats ─────────────────────────────────────────────────────────────────
 
   fastify.get('/stats', auth, async (req: any, reply) => {

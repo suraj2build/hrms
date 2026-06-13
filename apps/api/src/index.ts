@@ -174,6 +174,8 @@ import onboardingReadinessRoutes           from './routes/onboarding/readiness.j
 import helpdeskRoutes                      from './routes/helpdesk/index.js'
 import benefitsRoutes                      from './routes/benefits/index.js'
 import recruitmentRoutes                   from './routes/recruitment/index.js'
+import certificationRoutes                 from './routes/certifications/index.js'
+import securityRoutes                      from './routes/security/index.js'
 
 // Routes — Upload session lifecycle management
 import uploadSessionRoutes                 from './routes/uploads/index.js'
@@ -664,6 +666,8 @@ async function start() {
   await fastify.register(helpdeskRoutes,                     { prefix: '/helpdesk' })                  // ESS-05 HR helpdesk tickets — employee + HR-admin endpoints
   await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
+  await fastify.register(certificationRoutes,               { prefix: '' })                            // Certification Governance — /certifications/*
+  await fastify.register(securityRoutes,                    { prefix: '/security' })                   // Security Operations Workspace — /security/*
 
   // ── Workspace aggregated stats (must precede individual resource routes) ──
   await fastify.register(workspaceStatsRoutes)          // GET /onboarding/stats|events, /employees/overview, /attendance/stats|events, /payroll/runs/stats|events, /payroll/compliance/stats, /payroll/reconciliation, /ops/health|events

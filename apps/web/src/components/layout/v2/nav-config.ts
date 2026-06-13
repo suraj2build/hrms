@@ -236,6 +236,7 @@ export const DOMAINS: Domain[] = [
       '/admin/assets',
       '/admin/recruitment',
       '/admin/workforce/center',
+      '/admin/workforce/certifications',
       '/admin/documents',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
@@ -252,6 +253,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
+          { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
           { id: 'assets',                label: 'Assets',               route: '/admin/assets',                               icon: Package,      keywords: ['asset management', 'equipment', 'laptop', 'device', 'asset assignment', 'asset allocation', 'inventory'] },
           { id: 'letters',               label: 'Letters',              route: '/admin/letters',                              icon: ScrollText,   keywords: ['offer letter', 'appointment letter', 'salary letter', 'experience letter', 'generate letter'] },
           { id: 'benefits',              label: 'Benefits',             route: '/admin/benefits',                             icon: ShieldCheck,  keywords: ['benefits', 'enrolment', 'enrollment', 'insurance', 'group health', 'mediclaim', 'term life', 'accident cover', 'wellness', 'dependents', 'employee benefits'] },
@@ -267,6 +269,7 @@ export const DOMAINS: Domain[] = [
           { id: 'req-interviews',   label: 'Interviews',    route: '/admin/recruitment/interviews',    icon: CalendarCheck, keywords: ['schedule interview', 'panel', 'rounds', 'interview calendar'] },
           { id: 'req-int-analytics',label: 'Interview Analytics', route: '/admin/recruitment/interview-analytics', icon: Target, keywords: ['interviewer calibration', 'panel consistency', 'leniency', 'inter-rater', 'criterion effectiveness', 'hire accuracy', 'interview quality', 'scorecard analytics'] },
           { id: 'req-qbank',        label: 'Question Bank', route: '/admin/recruitment/question-bank', icon: HelpCircle,    keywords: ['questions', 'interview questions', 'question bank', 'behavioural', 'technical questions'] },
+          { id: 'req-hired',        label: 'Hired Pipeline', route: '/admin/recruitment/hired',        icon: BadgeCheck,    keywords: ['hired candidates', 'preboarding', 'offer accepted', 'initiate preboarding', 'joining pipeline', 'new hire pipeline', 'pre-joinee'] },
         ],
       },
     ],
@@ -596,6 +599,8 @@ export const DOMAINS: Domain[] = [
       '/admin/enterprise',
       '/admin/trust',
       '/admin/fabric',
+      '/admin/governance/privacy',
+      '/admin/security/ops',
     ],
     defaultRoute: '/admin/workforce/optimization',
     groups: [
@@ -603,6 +608,8 @@ export const DOMAINS: Domain[] = [
         label: 'Risk & Governance',
         items: [
           { id: 'governance-matrix',    label: 'Approval Matrix',       route: '/admin/approvals/governance-matrix', icon: GitMerge,     keywords: ['approval chain', 'approval hierarchy', 'approval rules', 'who approves', 'delegation'] },
+          { id: 'governance-privacy',   label: 'Privacy & Compliance',  route: '/admin/governance/privacy',          icon: ShieldCheck,  keywords: ['privacy workspace', 'GDPR', 'DPDPA', 'data erasure', 'PII access log', 'compliance controls', 'SOC2', 'ISO27001', 'erasure request', 'right to erasure', 'data privacy', 'PII audit'] },
+          { id: 'security-ops',         label: 'Security Operations',   route: '/admin/security/ops',                icon: ShieldCheck,  keywords: ['security events', 'security alerts', 'threat detection', 'anomaly detection', 'security dashboard', 'SIEM', 'detection rules', 'incident response', 'security monitoring'] },
           { id: 'event-governance',     label: 'Event Log',             route: '/admin/system/event-governance',     icon: Radio,        roles: ['super_admin'], keywords: ['system events', 'event history', 'audit events', 'system log'] },
           { id: 'attendance-risk',      label: 'Attendance Risk',       route: '/admin/attendance/risk',             icon: AlertTriangle, keywords: ['risk score', 'attendance risk', 'at risk employees', 'risk analysis'] },
           { id: 'attendance-confidence',label: 'Attendance Confidence', route: '/admin/attendance/confidence',       icon: Target,        keywords: ['confidence score', 'data quality', 'attendance accuracy', 'reliability'] },

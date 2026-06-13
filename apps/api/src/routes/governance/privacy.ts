@@ -1,0 +1,261 @@
+/**
+ * Governance & Privacy Workspace Routes — /governance/*
+ *
+ * Surfaces the existing DB infrastructure (no new engines) as a readable
+ * workspace for HR admins:
+ *
+ * GET  /governance/privacy/controls           — compliance controls catalog
+ * GET  /governance/privacy/pii-access         — PII access log
+ * GET  /governance/privacy/erasure-requests   — data erasure requests
+ * POST /governance/privacy/erasure-requests   — raise new erasure request
+ * PATCH /governance/privacy/erasure-requests/:id — update status
+ * GET  /governance/privacy/health             — privacy health KPIs
+ *
+ * Access: super_admin / hr_admin only.
+ */
+
+import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+
+function requireHrAdmin(req: any, reply: any, done: () => void) {
+  if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    return
+  }
+  done()
+}
+
+const hrAuth = (fastify: FastifyInstance) => ({
+  preHandler: [fastify.authenticate, requireHrAdmin],
+})
+
+export default async function privacyRoutes(fastify: FastifyInstance) {
+  const auth = hrAuth(fastify)
+
+  // ── GET /governance/privacy/controls ─────────────────────────────────────
+  // Compliance controls catalog (SOC2, DPDPA, ISO 27001)
+
+  fastify.get('/privacy/controls', auth, async (req: any, reply) => {
+    const { framework, status, limit = '200', offset = '0' } = req.query as Record<string, string>
+
+    let q = fastify.supabase
+      .from('compliance_controls')
+      .select('*', { count: 'exact' })
+      .order('control_id', { ascending: true })
+
+    if (framework) q = q.eq('framework', framework)
+    if (status)    q = q.eq('status', status)
+    q = q.range(Number(offset), Number(offset) + Number(limit) - 1)
+
+    const { data, error, count } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    // Attach latest evidence snapshot per control
+    const controlIds = (data ?? []).map((c: any) => c.control_id)
+    let evidenceMap: Record<string, any> = {}
+    if (controlIds.length > 0) {
+      const { data: evidence } = await fastify.supabase
+        .from('compliance_evidence_snapshots')
+        .select('control_id, snapshot_date, pass, failure_reason')
+        .in('control_id', controlIds)
+        .order('snapshot_date', { ascending: false })
+
+      for (const ev of (evidence ?? []) as any[]) {
+        if (!evidenceMap[ev.control_id]) evidenceMap[ev.control_id] = ev
+      }
+    }
+
+    const enriched = (data ?? []).map((c: any) => ({
+      ...c,
+      latest_evidence: evidenceMap[c.control_id] ?? null,
+    }))
+
+    return reply.send({ data: enriched, total: count ?? 0 })
+  })
+
+  // ── GET /governance/privacy/pii-access ───────────────────────────────────
+  // PII access audit log
+
+  fastify.get('/privacy/pii-access', auth, async (req: any, reply) => {
+    const q = z.object({
+      purpose:      z.string().optional(),
+      accessor_id:  z.string().uuid().optional(),
+      flagged:      z.coerce.boolean().optional(),
+      from:         z.string().optional(),
+      to:           z.string().optional(),
+      limit:        z.coerce.number().int().min(1).max(500).default(100),
+      offset:       z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = q.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { purpose, accessor_id, flagged, from, to, limit, offset } = parsed.data
+
+    let query = fastify.supabase
+      .from('pii_access_log')
+      .select(`
+        id, accessor_id, accessor_role, accessed_table, accessed_fields,
+        access_purpose, justification, record_count, accessed_at,
+        flagged, flag_reason, source_ip, correlation_id
+      `, { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('accessed_at', { ascending: false })
+
+    if (purpose)     query = query.eq('access_purpose', purpose)
+    if (accessor_id) query = query.eq('accessor_id', accessor_id)
+    if (flagged !== undefined) query = query.eq('flagged', flagged)
+    if (from) query = query.gte('accessed_at', from)
+    if (to)   query = query.lte('accessed_at', to)
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+  })
+
+  // ── GET /governance/privacy/erasure-requests ──────────────────────────────
+  // Data erasure requests (GDPR Art. 17, DPDPA §12)
+
+  fastify.get('/privacy/erasure-requests', auth, async (req: any, reply) => {
+    const q = z.object({
+      status:  z.string().optional(),
+      limit:   z.coerce.number().int().min(1).max(200).default(50),
+      offset:  z.coerce.number().int().min(0).default(0),
+    })
+    const parsed = q.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { status, limit, offset } = parsed.data
+
+    let query = fastify.supabase
+      .from('erasure_requests')
+      .select('*', { count: 'exact' })
+      .eq('tenant_id', req.tenantId)
+      .order('requested_at', { ascending: false })
+
+    if (status) query = query.eq('status', status)
+    query = query.range(offset, offset + limit - 1)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const today = new Date()
+    const enriched = (data ?? []).map((r: any) => ({
+      ...r,
+      sla_breached: r.status === 'pending' && r.sla_deadline && new Date(r.sla_deadline) < today,
+    }))
+
+    return reply.send({ data: enriched, total: count ?? 0, limit, offset })
+  })
+
+  // ── POST /governance/privacy/erasure-requests ─────────────────────────────
+
+  fastify.post('/privacy/erasure-requests', auth, async (req: any, reply) => {
+    const schema = z.object({
+      subject_email:  z.string().email().optional().nullable(),
+      subject_name:   z.string().optional().nullable(),
+      employee_id:    z.string().uuid().optional().nullable(),
+      request_source: z.enum(['subject','hr_admin','regulator','legal']).default('hr_admin'),
+      notes:          z.string().optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase
+      .from('erasure_requests')
+      .insert({
+        ...parsed.data,
+        tenant_id:    req.tenantId,
+        requested_by: req.userId,
+        status:       'pending',
+      })
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  // ── PATCH /governance/privacy/erasure-requests/:id ────────────────────────
+
+  fastify.patch('/privacy/erasure-requests/:id', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      status:           z.enum(['in_progress','completed','rejected','partial','on_hold']).optional(),
+      rejection_reason: z.string().optional().nullable(),
+      fields_erased:    z.record(z.array(z.string())).optional().nullable(),
+      fields_retained:  z.record(z.unknown()).optional().nullable(),
+      retention_basis:  z.string().optional().nullable(),
+      notes:            z.string().optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const update: Record<string, any> = { ...parsed.data }
+    if (parsed.data.status === 'completed') {
+      update.completed_at = new Date().toISOString()
+      update.completed_by = req.userId
+    }
+
+    const { error } = await fastify.supabase
+      .from('erasure_requests')
+      .update(update)
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ message: 'Erasure request updated' })
+  })
+
+  // ── GET /governance/privacy/health ───────────────────────────────────────
+  // KPI summary: open requests, SLA breaches, flagged access, control health
+
+  fastify.get('/privacy/health', auth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const today = new Date().toISOString().split('T')[0]
+
+    const [
+      { data: erasureRows },
+      { data: flaggedRows },
+      { data: controlRows },
+    ] = await Promise.all([
+      fastify.supabase
+        .from('erasure_requests')
+        .select('status, sla_deadline')
+        .eq('tenant_id', tenantId),
+      fastify.supabase
+        .from('pii_access_log')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('flagged', true)
+        .gte('accessed_at', new Date(Date.now() - 30 * 86400000).toISOString()),
+      fastify.supabase
+        .from('compliance_controls')
+        .select('status'),
+    ])
+
+    const erasure = (erasureRows ?? []) as any[]
+    const openErasure    = erasure.filter(r => ['pending','in_progress','on_hold'].includes(r.status)).length
+    const breachedSla    = erasure.filter(r => ['pending','in_progress','on_hold'].includes(r.status) && r.sla_deadline && r.sla_deadline < today).length
+    const completedTotal = erasure.filter(r => r.status === 'completed').length
+
+    const controls = (controlRows ?? []) as any[]
+    const controlHealth = {
+      total:       controls.length,
+      implemented: controls.filter(c => c.status === 'implemented').length,
+      verified:    controls.filter(c => c.status === 'verified').length,
+      in_progress: controls.filter(c => c.status === 'in_progress').length,
+      not_started: controls.filter(c => c.status === 'not_started').length,
+      waived:      controls.filter(c => c.status === 'waived').length,
+    }
+
+    return reply.send({
+      erasure_requests: {
+        open:      openErasure,
+        breached_sla: breachedSla,
+        completed: completedTotal,
+        total:     erasure.length,
+      },
+      flagged_pii_access_30d: (flaggedRows ?? []).length,
+      control_health: controlHealth,
+    })
+  })
+}
