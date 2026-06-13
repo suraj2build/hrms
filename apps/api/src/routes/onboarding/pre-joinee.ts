@@ -646,10 +646,26 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   })
 
   // ── 4. POST /onboarding/pre-joinee/:id/approve — approve + create employee ─
+  //
+  // RH-01: On first call (no body / no action), the handler checks for an
+  // existing employee record matching by email, phone, PAN, or Aadhaar.
+  // If found it returns { action_required: 'rehire_check', existing_employee, match_reason }
+  // without creating anything.  HR then chooses:
+  //   { action: 'rehire',       employee_id } → reactivate existing record
+  //   { action: 'new_employee'              } → skip the check, create fresh
+
+  const approveBodySchema = z.object({
+    action:      z.enum(['rehire', 'new_employee']).optional(),
+    employee_id: z.string().uuid().optional(),
+  })
 
   fastify.post('/onboarding/pre-joinee/:id/approve', auth, async (req: any, reply) => {
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
+
+    const parsedBody    = approveBodySchema.safeParse(req.body ?? {})
+    const action        = parsedBody.success ? parsedBody.data.action        : undefined
+    const rehireEmpId   = parsedBody.success ? parsedBody.data.employee_id   : undefined
 
     // Fetch invitation
     const { data: invitation, error: invErr } = await fastify.supabase
@@ -677,6 +693,128 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('invitation_id', id)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+
+    // ── RH-01: Rehire detection (skip when HR has already made a choice) ─────
+    if (!action) {
+      const empSelect = 'id, employee_code, first_name, last_name, email, phone, status, joining_date'
+
+      let existing: Record<string, unknown> | null = null
+      let matchReason: string | null = null
+
+      // 1. Email match
+      if (!existing && invitation.email) {
+        const { data } = await fastify.supabase
+          .from('employees')
+          .select(empSelect)
+          .eq('tenant_id', tenantId)
+          .eq('email', invitation.email)
+          .maybeSingle()
+        if (data) { existing = data; matchReason = 'email' }
+      }
+
+      // 2. Phone match
+      if (!existing && invitation.phone) {
+        const { data } = await fastify.supabase
+          .from('employees')
+          .select(empSelect)
+          .eq('tenant_id', tenantId)
+          .eq('phone', invitation.phone)
+          .maybeSingle()
+        if (data) { existing = data; matchReason = 'phone' }
+      }
+
+      // 3. PAN match (via employee_identity)
+      if (!existing && submission?.pan_number) {
+        const { data: idRow } = await fastify.supabase
+          .from('employee_identity')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .eq('identity_type', 'pan')
+          .eq('identity_number', submission.pan_number)
+          .maybeSingle()
+        if (idRow?.employee_id) {
+          const { data } = await fastify.supabase
+            .from('employees')
+            .select(empSelect)
+            .eq('id', idRow.employee_id)
+            .maybeSingle()
+          if (data) { existing = data; matchReason = 'pan' }
+        }
+      }
+
+      // 4. Aadhaar match (via employee_identity)
+      if (!existing && submission?.aadhaar_number) {
+        const { data: idRow } = await fastify.supabase
+          .from('employee_identity')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .eq('identity_type', 'aadhaar')
+          .eq('identity_number', submission.aadhaar_number)
+          .maybeSingle()
+        if (idRow?.employee_id) {
+          const { data } = await fastify.supabase
+            .from('employees')
+            .select(empSelect)
+            .eq('id', idRow.employee_id)
+            .maybeSingle()
+          if (data) { existing = data; matchReason = 'aadhaar' }
+        }
+      }
+
+      if (existing) {
+        return reply.send({
+          action_required:   'rehire_check',
+          existing_employee: existing,
+          match_reason:      matchReason,
+        })
+      }
+    }
+
+    // ── RH-01: Rehire path — reactivate existing employee ───────────────────
+    if (action === 'rehire') {
+      if (!rehireEmpId) {
+        return reply.code(400).send({ error: 'MISSING_EMPLOYEE_ID', message: 'employee_id is required for rehire action' })
+      }
+
+      await fastify.supabase
+        .from('employees')
+        .update({ status: 'active', joining_date: invitation.joining_date, updated_at: new Date().toISOString() })
+        .eq('id', rehireEmpId)
+        .eq('tenant_id', tenantId)
+
+      await fastify.supabase
+        .from('pre_joinee_invitations')
+        .update({ status: 'approved', employee_id: rehireEmpId, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+
+      await logAction(fastify.supabase, {
+        tenantId,
+        tableName:   'pre_joinee_invitations',
+        recordId:    id,
+        action:      'UPDATE',
+        performedBy: req.userId,
+        onBehalfOf:  rehireEmpId,
+        oldData:     { status: invitation.status },
+        newData:     { status: 'approved', employee_id: rehireEmpId, rehired: true },
+      })
+
+      emitPreJoineeJoiningCompleted({
+        tenantId,
+        invitationId: id,
+        employeeId:   rehireEmpId,
+        employeeCode: '',
+        joiningDate:  invitation.joining_date ?? null,
+      })
+
+      return reply.send({
+        message:     'Candidate rehired — existing employee record reactivated',
+        employee_id: rehireEmpId,
+        rehired:     true,
+      })
+    }
+
+    // ── New employee path (action === 'new_employee' or no match found) ──────
 
     // Generate employee_code (NOT NULL on employees) — same scheme as the
     // draft-approval path so both onboarding routes stay consistent.

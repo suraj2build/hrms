@@ -80,6 +80,32 @@ interface AssetOption {
   category_name?: string | null
 }
 
+interface ExistingEmployee {
+  id: string
+  employee_code: string
+  first_name: string
+  last_name: string
+  email: string
+  phone?: string | null
+  status: string
+  joining_date?: string | null
+}
+
+interface RehireCheckData {
+  invitationId: string
+  existing_employee: ExistingEmployee
+  match_reason: 'email' | 'phone' | 'pan' | 'aadhaar'
+}
+
+interface ApproveResponse {
+  action_required?: 'rehire_check'
+  existing_employee?: ExistingEmployee
+  match_reason?: string
+  employee_id?: string
+  message?: string
+  rehired?: boolean
+}
+
 interface PreJoineeSubmission {
   // Personal
   dob?: string | null
@@ -178,6 +204,113 @@ const EMPTY_FORM: InviteForm = {
   designation: '',
   department: '',
   joining_date: '',
+}
+
+// ── RH-01 Rehire Check Dialog ─────────────────────────────────────────────────
+
+const MATCH_REASON_LABEL: Record<string, string> = {
+  email:   'email address',
+  phone:   'phone number',
+  pan:     'PAN number',
+  aadhaar: 'Aadhaar number',
+}
+
+const EMPLOYEE_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+  active:     { label: 'Active',     className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  inactive:   { label: 'Inactive',   className: 'bg-gray-100 text-gray-600 border-gray-200' },
+  terminated: { label: 'Terminated', className: 'bg-red-100 text-red-800 border-red-200' },
+  on_leave:   { label: 'On Leave',   className: 'bg-amber-100 text-amber-800 border-amber-200' },
+}
+
+interface RehireCheckDialogProps {
+  data: RehireCheckData | null
+  onClose: () => void
+  onRehire: (invitationId: string, employeeId: string) => void
+  onNewEmployee: (invitationId: string) => void
+  isPending: boolean
+}
+
+function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }: RehireCheckDialogProps) {
+  if (!data) return null
+  const { existing_employee: emp, match_reason, invitationId } = data
+  const statusCfg = EMPLOYEE_STATUS_CONFIG[emp.status] ?? { label: emp.status, className: 'bg-gray-100 text-gray-600 border-gray-200' }
+
+  return (
+    <Dialog open={!!data} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="h-5 w-5 text-amber-500" />
+            Existing Employee Found
+          </DialogTitle>
+          <DialogDescription>
+            This candidate matches an existing employee record by <strong>{MATCH_REASON_LABEL[match_reason] ?? match_reason}</strong>.
+            How would you like to proceed?
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-lg border bg-muted/40 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold">{emp.first_name} {emp.last_name}</p>
+              <p className="text-xs text-muted-foreground font-mono">{emp.employee_code}</p>
+            </div>
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusCfg.className}`}>
+              {statusCfg.label}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1">
+            <div>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Email</p>
+              <p className="text-xs truncate">{emp.email}</p>
+            </div>
+            {emp.phone && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Phone</p>
+                <p className="text-xs">{emp.phone}</p>
+              </div>
+            )}
+            {emp.joining_date && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Last Joining</p>
+                <p className="text-xs">{formatDate(emp.joining_date)}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2 text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-md p-3">
+          <p><strong>Rehire:</strong> Reactivates this existing record. Employment history is preserved.</p>
+          <p><strong>New Employee:</strong> Creates a separate record. Only use if this is truly a different person.</p>
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-blue-300 text-blue-700 hover:bg-blue-50"
+            disabled={isPending}
+            onClick={() => onNewEmployee(invitationId)}
+          >
+            {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Users className="h-3.5 w-3.5 mr-1.5" />}
+            Create as New Employee
+          </Button>
+          <Button
+            size="sm"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            disabled={isPending}
+            onClick={() => onRehire(invitationId, emp.id)}
+          >
+            {isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <UserCheck className="h-3.5 w-3.5 mr-1.5" />}
+            Rehire
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -378,6 +511,9 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
   const [assetTarget, setAssetTarget]   = useState<PreJoinee | null>(null)
   const [assetPicked, setAssetPicked]   = useState<Set<string>>(new Set())
 
+  // ── RH-01: Rehire check dialog
+  const [rehireCheck, setRehireCheck] = useState<RehireCheckData | null>(null)
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: statsData } = useQuery<StatsResponse>({
@@ -455,12 +591,29 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/onboarding/pre-joinee/${id}/approve`),
-    onSuccess: () => {
+    mutationFn: ({ id, action, employee_id }: { id: string; action?: 'rehire' | 'new_employee'; employee_id?: string }) =>
+      api.post<ApproveResponse>(
+        `/onboarding/pre-joinee/${id}/approve`,
+        action ? { action, employee_id } : undefined,
+      ),
+    onSuccess: (data, vars) => {
+      if (data?.action_required === 'rehire_check' && data.existing_employee) {
+        setRehireCheck({
+          invitationId:      vars.id,
+          existing_employee: data.existing_employee,
+          match_reason:      (data.match_reason ?? 'email') as RehireCheckData['match_reason'],
+        })
+        return
+      }
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
       setDrawerOpen(false)
-      toast.success('Candidate approved — employee record created')
+      setRehireCheck(null)
+      if (data?.rehired) {
+        toast.success('Candidate rehired — existing employee record reactivated')
+      } else {
+        toast.success('Candidate approved — employee record created')
+      }
     },
     onError: () => toast.error('Failed to approve candidate'),
   })
@@ -887,7 +1040,7 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
         joinee={drawerJoinee}
         open={drawerOpen}
         onClose={() => { setDrawerOpen(false); setDrawerJoinee(null) }}
-        onApprove={id => approveMutation.mutate(id)}
+        onApprove={id => approveMutation.mutate({ id })}
         onReject={(id, notes) => rejectMutation.mutate({ id, notes })}
         approving={approveMutation.isPending}
         rejecting={rejectMutation.isPending}
@@ -1037,6 +1190,19 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── RH-01: Rehire Check Dialog ─────────────────────────────────────── */}
+      <RehireCheckDialog
+        data={rehireCheck}
+        onClose={() => setRehireCheck(null)}
+        onRehire={(invitationId, employeeId) =>
+          approveMutation.mutate({ id: invitationId, action: 'rehire', employee_id: employeeId })
+        }
+        onNewEmployee={(invitationId) =>
+          approveMutation.mutate({ id: invitationId, action: 'new_employee' })
+        }
+        isPending={approveMutation.isPending}
+      />
     </Wrapper>
   )
 }
