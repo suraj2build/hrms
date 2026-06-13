@@ -960,6 +960,60 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       }
     } catch { /* lifecycle roll-up is best-effort */ }
 
+    // ── R2 · Risk Posture Index ───────────────────────────────────────────────
+    // RSK.posture_index — the single L1 composite of the six risk domains:
+    //   Trust · Compliance · Governance · Security · Privacy · Certification.
+    // Each sub-signal is normalised to a 0–100 *risk* scale (higher = worse), then
+    // blended by fixed weights summing to 1.0. This is the canonical surface for
+    // the index per the R0 KPI registry; every other view consumes it read-only.
+    // Security & privacy are queried best-effort here so a missing table never
+    // breaks the compliance view.
+    let sec_open_critical = 0, sec_open_high = 0
+    let privacy_flagged = 0, privacy_erasure_breached = 0
+    try {
+      const nowIso = new Date().toISOString()
+      const [secCritRes, secHighRes, piiRes, eraseRes] = await Promise.all([
+        fastify.supabase.from('security_alerts').select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId).eq('severity', 'critical').neq('status', 'resolved'),
+        fastify.supabase.from('security_alerts').select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId).eq('severity', 'high').neq('status', 'resolved'),
+        fastify.supabase.from('pii_access_log').select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId).eq('flagged', true).gte('accessed_at', `${from30}T00:00:00`),
+        fastify.supabase.from('erasure_requests').select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId).in('status', ['pending', 'in_progress']).lt('sla_deadline', nowIso),
+      ])
+      sec_open_critical        = secCritRes.count  ?? 0
+      sec_open_high            = secHighRes.count   ?? 0
+      privacy_flagged          = piiRes.count       ?? 0
+      privacy_erasure_breached = eraseRes.count     ?? 0
+    } catch { /* security/privacy roll-up is best-effort */ }
+
+    // Six sub-signals, each 0–100 risk (higher = worse)
+    const trust_risk      = avg_trust_score != null
+      ? Math.max(0, 100 - avg_trust_score)
+      : Math.round(safeRate(trust_high_risk, trust_total))
+    const compliance_risk = compliance_risk_score
+    const governance_risk = Math.min(100,
+      (govBySeverity.critical ?? 0) * 20 + (govBySeverity.high ?? 0) * 8 + (govBySeverity.medium ?? 0) * 2)
+    const security_risk   = Math.min(100, sec_open_critical * 20 + sec_open_high * 8)
+    const privacy_risk    = Math.min(100, privacy_erasure_breached * 15 + privacy_flagged * 5)
+    const certCat         = lifecycle.by_category.certification ?? { overdue: 0, due_7: 0, due_30: 0 }
+    const certification_risk = Math.min(100, certCat.overdue * 8 + certCat.due_7 * 4 + certCat.due_30 * 1)
+
+    const posture_components = {
+      trust:         { score: trust_risk,         weight: 0.20 },
+      compliance:    { score: compliance_risk,    weight: 0.25 },
+      governance:    { score: governance_risk,    weight: 0.15 },
+      security:      { score: security_risk,      weight: 0.15 },
+      privacy:       { score: privacy_risk,       weight: 0.10 },
+      certification: { score: certification_risk, weight: 0.15 },
+    }
+    const posture_index = Math.round(
+      Object.values(posture_components).reduce((s, c) => s + c.score * c.weight, 0),
+    )
+    const posture_band: 'low' | 'medium' | 'high' | 'critical' =
+      posture_index >= 75 ? 'critical' : posture_index >= 50 ? 'high' : posture_index >= 25 ? 'medium' : 'low'
+
     return reply.send({
       // Incidents
       open_incidents,
@@ -985,6 +1039,12 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Composite
       compliance_risk_score,
       risk_status,
+      // R2 — Risk Posture Index (canonical composite of the six risk domains)
+      posture_index,
+      posture_band,
+      posture_components,
+      security_risk_inputs: { open_critical: sec_open_critical, open_high: sec_open_high },
+      privacy_risk_inputs:  { flagged_access_30d: privacy_flagged, erasure_sla_breached: privacy_erasure_breached },
       // O5.9 — trust intelligence metrics
       avg_trust_score,
       trust_distribution,

@@ -12,6 +12,10 @@ interface ComplianceData {
   trust_total: number; trust_verified: number; trust_verification_pct: number
   gov_total_30d: number; gov_by_severity: Record<string, number>
   open_duplicates: number; compliance_risk_score: number; risk_status: 'low' | 'medium' | 'high'
+  // R2 — Risk Posture Index
+  posture_index?: number
+  posture_band?: 'low' | 'medium' | 'high' | 'critical'
+  posture_components?: Record<'trust' | 'compliance' | 'governance' | 'security' | 'privacy' | 'certification', { score: number; weight: number }>
   // O5.9
   avg_trust_score: number | null
   trust_distribution: Record<string, number>
@@ -31,9 +35,15 @@ interface ComplianceData {
 }
 
 const RISK_TONE: Record<string, { ring: string; text: string; fill: string }> = {
-  low:    { ring: 'text-success',     text: 'text-success',     fill: 'var(--success)' },
-  medium: { ring: 'text-warning',     text: 'text-warning',     fill: 'var(--warning)' },
-  high:   { ring: 'text-destructive', text: 'text-destructive', fill: 'var(--destructive)' },
+  low:      { ring: 'text-success',     text: 'text-success',     fill: 'var(--success)' },
+  medium:   { ring: 'text-warning',     text: 'text-warning',     fill: 'var(--warning)' },
+  high:     { ring: 'text-destructive', text: 'text-destructive', fill: 'var(--destructive)' },
+  critical: { ring: 'text-destructive', text: 'text-destructive', fill: 'var(--destructive)' },
+}
+
+const POSTURE_LABELS: Record<string, string> = {
+  trust: 'Trust', compliance: 'Compliance', governance: 'Governance',
+  security: 'Security', privacy: 'Privacy', certification: 'Certification',
 }
 
 interface CalDeadline { id: string; label: string; compliance_type: string; jurisdiction: string; due_date: string; status: string; days_to_due: number }
@@ -56,14 +66,64 @@ export default function ComplianceView() {
 
   const sevEntries = Object.entries(c?.gov_by_severity ?? {})
 
+  const postureIdx  = c?.posture_index ?? 0
+  const postureBand = c?.posture_band ?? 'low'
+  const postureTone = RISK_TONE[postureBand]
+  const postureGauge = [{ name: 'posture', value: postureIdx, fill: postureTone.fill }]
+  const postureComps = c?.posture_components
+    ? (['compliance', 'trust', 'governance', 'security', 'privacy', 'certification'] as const)
+        .map(k => ({ key: k, ...c.posture_components![k] }))
+    : []
+
   return (
     <ExecLayout title="Compliance & Risk" subtitle="Statutory risk, incidents and governance posture · live data">
       {/* KPIs */}
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard label="Risk Posture Index" value={c?.posture_index != null ? `${postureIdx}` : '—'} icon={ShieldAlert} tone={postureBand === 'high' || postureBand === 'critical' ? 'destructive' : postureBand === 'medium' ? 'warning' : 'success'} hint={`${postureBand} · 6-domain composite`} />
         <KpiCard label="Compliance Score" value={c ? `${score}` : '—'} icon={Gauge} tone={status === 'high' ? 'destructive' : status === 'medium' ? 'warning' : 'success'} hint={`Risk: ${status}`} />
         <KpiCard label="Open Breaches" value={(c?.sla_breached_30d ?? 0).toLocaleString()} icon={FileWarning} tone="destructive" hint={c ? `${(c.sla_breach_rate * 100).toFixed(0)}% breach rate` : undefined} />
-        <KpiCard label="At-Risk (Trust)" value={(c?.trust_at_risk ?? 0).toLocaleString()} icon={ShieldAlert} tone="warning" hint={c ? `${c.trust_high_risk} high · ${c.trust_medium_risk} med` : undefined} />
         <KpiCard label="Open Incidents" value={(c?.open_incidents ?? 0).toLocaleString()} icon={AlertTriangle} tone="info" hint={c ? `${c.critical_incidents} critical` : undefined} />
+      </section>
+
+      {/* R2 — Risk Posture Index: canonical 6-domain composite */}
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Panel icon={ShieldAlert} iconClass={postureTone.text} title="Risk Posture Index" subtitle="Weighted composite of six risk domains (0–100, higher = more risk)">
+          {c?.posture_index != null ? (
+            <>
+              <div className="relative mx-auto mt-2 h-52 w-52">
+                <ResponsiveContainer>
+                  <RadialBarChart innerRadius="72%" outerRadius="100%" data={postureGauge} startAngle={90} endAngle={-270}>
+                    <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                    <RadialBar background={{ fill: 'var(--muted)' }} dataKey="value" cornerRadius={12} />
+                  </RadialBarChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className={`text-4xl font-bold tabular-nums ${postureTone.text}`}>{postureIdx}</div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{postureBand} risk</div>
+                </div>
+              </div>
+            </>
+          ) : <EmptyBody text="Risk posture index appears once the compliance snapshot is generated." />}
+        </Panel>
+
+        <Panel className="xl:col-span-2" icon={Gauge} iconClass="text-primary" title="Posture Breakdown" subtitle="Per-domain risk contribution · sorted by weight">
+          {postureComps.length > 0 ? (
+            <div className="mt-3 space-y-2.5">
+              {postureComps.map(({ key, score: s, weight }) => {
+                const color = s >= 50 ? 'var(--destructive)' : s >= 25 ? 'var(--warning)' : 'var(--success)'
+                return (
+                  <div key={key}>
+                    <div className="mb-1 flex justify-between text-xs">
+                      <span>{POSTURE_LABELS[key]} <span className="text-muted-foreground">· {(weight * 100).toFixed(0)}% wt</span></span>
+                      <span className="font-medium tabular-nums">{s}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${s}%`, background: color }} /></div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : <EmptyBody text="Per-domain breakdown appears once the compliance snapshot is generated." />}
+        </Panel>
       </section>
 
       {/* Risk posture (real radial) + Statutory matrix (empty) */}
