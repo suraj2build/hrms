@@ -78,19 +78,21 @@ function shell(bodyHtml: string): string {
   const { primary, teal } = brandConfig.colors
   const logoImg = brandConfig.assets.logoUrl
     ? `<img src="${brandConfig.assets.logoUrl}" alt="${brandConfig.productName}" style="height:36px;width:auto;display:block;margin:0 auto;" />`
-    : `<div style="display:inline-block;width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,${primary} 0%,#2392C8 50%,${teal} 100%);"></div>
-       <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:8px;letter-spacing:-0.5px;">${brandConfig.productName}</div>`
+    : `<div style="display:inline-block;width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,${primary} 0%,#2392C8 50%,${teal} 100%);margin-bottom:10px;"></div>
+       <div style="font-size:22px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;line-height:1;">Cognix<span style="color:${teal};">HR</span></div>
+       <div style="font-size:11px;color:#94a3b8;margin-top:3px;letter-spacing:0.04em;">${brandConfig.tagline}</div>`
   return `
-  <div style="margin:0;padding:0;background:#f4f6fb;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-    <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
-      <div style="text-align:center;margin-bottom:24px;">
+  <div style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <div style="max-width:560px;margin:0 auto;padding:36px 20px;">
+      <div style="text-align:center;margin-bottom:28px;">
         ${logoImg}
       </div>
-      <div style="background:#ffffff;border-radius:16px;padding:32px;border:1px solid #e2e8f0;">
+      <div style="background:#ffffff;border-radius:16px;padding:36px;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
         ${bodyHtml}
       </div>
-      <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:20px;">
-        ${brandConfig.productName} — ${brandConfig.tagline}
+      <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:20px;line-height:1.6;">
+        Cognix<span style="color:${teal};font-weight:700;">HR</span> &nbsp;·&nbsp; ${brandConfig.tagline}<br>
+        <span style="font-size:11px;">Questions? <a href="mailto:${brandConfig.supportEmail}" style="color:${primary};text-decoration:none;">${brandConfig.supportEmail}</a></span>
       </p>
     </div>
   </div>`
@@ -104,6 +106,7 @@ export function preJoineeInviteEmail(opts: {
 }): { subject: string; html: string } {
   const firstName = opts.candidateName.split(' ')[0] || 'there'
   const subject = `Welcome to ${opts.companyName} — complete your onboarding`
+  const { primary, teal } = brandConfig.colors
   const html = shell(`
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Welcome aboard, ${firstName}! 🎉</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
@@ -112,13 +115,13 @@ export function preJoineeInviteEmail(opts: {
     </p>
     <div style="text-align:center;margin:28px 0;">
       <a href="${opts.inviteUrl}"
-         style="display:inline-block;background:linear-gradient(135deg,#047857 0%,#0F766E 50%,#1E40AF 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;">
+         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;letter-spacing:0.02em;">
         Complete My Details
       </a>
     </div>
     <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:16px 0 0;">
       Or paste this link into your browser:<br>
-      <a href="${opts.inviteUrl}" style="color:#0F766E;word-break:break-all;">${opts.inviteUrl}</a>
+      <a href="${opts.inviteUrl}" style="color:${teal};word-break:break-all;">${opts.inviteUrl}</a>
     </p>
     <p style="color:#cbd5e1;font-size:12px;margin-top:20px;">This link is private to you and expires in 30 days.</p>
   `)
@@ -128,38 +131,66 @@ export function preJoineeInviteEmail(opts: {
 // ── ONB-04: Post-joining welcome email to new employee ─────────────────────────
 
 export function joiningWelcomeEmail(opts: {
-  firstName:     string
-  employeeCode:  string
-  companyName:   string
-  joiningDate?:  string
-  managerName?:  string
-  managerEmail?: string
-  loginUrl:      string
+  firstName:        string
+  employeeCode:     string
+  companyName:      string
+  joiningDate?:     string
+  managerName?:     string
+  managerEmail?:    string
+  workstation?:     string   // e.g. "MacBook Pro 14" / "Dell Latitude 5540"
+  officeLocation?:  string   // e.g. "Mumbai HQ — Floor 3"
+  loginUrl:         string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
   const firstName = opts.firstName || 'there'
   const subject = `Welcome to ${opts.companyName} — your account is ready`
+
+  const infoRows: string[] = []
+  infoRows.push(`<tr>
+    <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;width:40%;color:#374151;">Employee ID</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;font-weight:700;">${opts.employeeCode}</td>
+  </tr>`)
+  if (opts.joiningDate) infoRows.push(`<tr>
+    <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Joining Date</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.joiningDate}</td>
+  </tr>`)
+  if (opts.managerName) infoRows.push(`<tr>
+    <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Reporting Manager</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.managerName}${opts.managerEmail ? ` &mdash; <a href="mailto:${opts.managerEmail}" style="color:${primary};">${opts.managerEmail}</a>` : ''}</td>
+  </tr>`)
+  if (opts.workstation) infoRows.push(`<tr>
+    <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Workstation</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.workstation}</td>
+  </tr>`)
+  if (opts.officeLocation) infoRows.push(`<tr>
+    <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Office Location</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.officeLocation}</td>
+  </tr>`)
+
   const html = shell(`
-    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Welcome aboard, ${firstName}! 🎉</h1>
-    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      Your joining at <strong>${opts.companyName}</strong> has been confirmed${opts.joiningDate ? ` — joining date <strong>${opts.joiningDate}</strong>` : ''}.
-      Your employee ID is <strong>${opts.employeeCode}</strong>.
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#fff;font-weight:700;font-size:12px;padding:4px 14px;border-radius:999px;letter-spacing:0.5px;">WELCOME ABOARD</span>
+    </div>
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 10px;text-align:center;">Hi ${firstName}, you're all set! 🎉</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px;text-align:center;">
+      Your joining at <strong>${opts.companyName}</strong> has been confirmed. Here are your Day 1 details:
     </p>
-    ${opts.managerName ? `
-    <div style="background:#f8fafc;border-radius:8px;padding:14px 16px;margin:0 0 20px;border-left:3px solid ${teal};">
-      <p style="margin:0;color:#475569;font-size:13px;"><strong>Reporting Manager:</strong>&nbsp;${opts.managerName}${opts.managerEmail ? ` &mdash; <a href="mailto:${opts.managerEmail}" style="color:${primary};">${opts.managerEmail}</a>` : ''}</p>
-    </div>` : ''}
-    <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 20px;">
-      Access your employee workspace to view payslips, apply for leave, and complete your onboarding checklist.
+    <table style="width:100%;border-collapse:collapse;margin:0 0 24px;border-radius:8px;overflow:hidden;">
+      ${infoRows.join('')}
+    </table>
+    <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 24px;">
+      Use the link below to access your employee workspace — view payslips, apply for leave,
+      check your schedule, and complete your onboarding checklist.
     </p>
-    <div style="text-align:center;margin:28px 0;">
+    <div style="text-align:center;margin:24px 0;">
       <a href="${opts.loginUrl}"
-         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;">
-        Go to My Workspace
+         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 36px;border-radius:999px;letter-spacing:0.02em;">
+        Open My Workspace
       </a>
     </div>
-    <p style="color:#94a3b8;font-size:12px;margin-top:16px;">
-      If you have any questions reach out to your HR team. We're excited to have you on board.
+    <p style="color:#94a3b8;font-size:12px;margin-top:20px;text-align:center;line-height:1.6;">
+      If you have any questions your HR team is here to help.<br>
+      We're thrilled to have you on the team!
     </p>
   `)
   return { subject, html }
@@ -474,6 +505,51 @@ export function itProvisioningEmail(opts: {
     </div>
     <p style="color:#94a3b8;font-size:12px;margin-top:16px;">
       Full onboarding checklist and asset requirements are available in the HR system.
+    </p>
+  `)
+  return { subject, html }
+}
+
+// ── ONB-05b: Buddy assignment notification to the assigned buddy ───────────────
+
+export function buddyAssignmentEmail(opts: {
+  buddyName:       string
+  newJoinerName:   string
+  newJoinerRole?:  string
+  companyName:     string
+  joiningDate?:    string
+  hrSystemUrl:     string
+}): { subject: string; html: string } {
+  const { primary, teal } = brandConfig.colors
+  const buddyFirst  = opts.buddyName.split(' ')[0] || opts.buddyName
+  const joinerFirst = opts.newJoinerName.split(' ')[0] || opts.newJoinerName
+  const subject = `You've been assigned as buddy — ${opts.newJoinerName} is joining${opts.joiningDate ? ` on ${opts.joiningDate}` : ''}`
+  const html = shell(`
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#fff;font-weight:700;font-size:12px;padding:4px 14px;border-radius:999px;letter-spacing:0.5px;">BUDDY ASSIGNMENT</span>
+    </div>
+    <h1 style="font-size:21px;color:#0f172a;margin:0 0 10px;">Hi ${buddyFirst}, meet your new buddy! 👋</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;">
+      You've been selected as the onboarding buddy for <strong>${opts.newJoinerName}</strong>${opts.newJoinerRole ? `, joining as <strong>${opts.newJoinerRole}</strong>` : ''} at
+      <strong>${opts.companyName}</strong>${opts.joiningDate ? ` on <strong>${opts.joiningDate}</strong>` : ''}.
+    </p>
+    <div style="background:#f0fdf8;border-radius:10px;padding:16px 20px;margin:0 0 20px;border-left:4px solid ${teal};">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#0f172a;">Your role as buddy:</p>
+      <ul style="color:#475569;font-size:13px;line-height:1.9;margin:0;padding-left:18px;">
+        <li>Welcome ${joinerFirst} on their first day and introduce them to the team</li>
+        <li>Help them navigate the workplace, tools, and processes</li>
+        <li>Be the go-to person for informal questions during their first 30 days</li>
+        <li>Check in regularly and share feedback with HR if needed</li>
+      </ul>
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${opts.hrSystemUrl}"
+         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:999px;">
+        View in HR System
+      </a>
+    </div>
+    <p style="color:#94a3b8;font-size:12px;margin-top:16px;text-align:center;">
+      Thank you for helping ${joinerFirst} feel welcome at ${opts.companyName}!
     </p>
   `)
   return { subject, html }
