@@ -43,6 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_gl_mappings_tenant_code
   ON payroll_gl_mappings (tenant_id, component_code, is_active);
 
 ALTER TABLE payroll_gl_mappings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payroll_gl_mappings_tenant_isolation ON payroll_gl_mappings;
 CREATE POLICY payroll_gl_mappings_tenant_isolation
   ON payroll_gl_mappings FOR ALL
   USING (tenant_id = (SELECT tenant_id FROM profiles WHERE id = auth.uid() LIMIT 1));
@@ -99,6 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_financial_ledgers_status
   ON payroll_financial_ledgers (tenant_id, ledger_status);
 
 ALTER TABLE payroll_financial_ledgers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payroll_financial_ledgers_tenant_isolation ON payroll_financial_ledgers;
 CREATE POLICY payroll_financial_ledgers_tenant_isolation
   ON payroll_financial_ledgers FOR ALL
   USING (tenant_id = (SELECT tenant_id FROM profiles WHERE id = auth.uid() LIMIT 1));
@@ -173,6 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_ledger_entries_accounting_date
   ON payroll_ledger_entries (tenant_id, accounting_date);
 
 ALTER TABLE payroll_ledger_entries ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payroll_ledger_entries_tenant_isolation ON payroll_ledger_entries;
 CREATE POLICY payroll_ledger_entries_tenant_isolation
   ON payroll_ledger_entries FOR ALL
   USING (tenant_id = (SELECT tenant_id FROM profiles WHERE id = auth.uid() LIMIT 1));
@@ -210,6 +213,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_cost_allocations_department
   ON payroll_cost_allocations (tenant_id, department_id);
 
 ALTER TABLE payroll_cost_allocations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payroll_cost_allocations_tenant_isolation ON payroll_cost_allocations;
 CREATE POLICY payroll_cost_allocations_tenant_isolation
   ON payroll_cost_allocations FOR ALL
   USING (tenant_id = (SELECT tenant_id FROM profiles WHERE id = auth.uid() LIMIT 1));
@@ -257,6 +261,7 @@ CREATE INDEX IF NOT EXISTS idx_payroll_payout_recon_status
   ON payroll_payout_reconciliation (tenant_id, payment_status);
 
 ALTER TABLE payroll_payout_reconciliation ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payroll_payout_reconciliation_tenant_isolation ON payroll_payout_reconciliation;
 CREATE POLICY payroll_payout_reconciliation_tenant_isolation
   ON payroll_payout_reconciliation FOR ALL
   USING (tenant_id = (SELECT tenant_id FROM profiles WHERE id = auth.uid() LIMIT 1));
