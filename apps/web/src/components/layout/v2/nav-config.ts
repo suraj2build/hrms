@@ -253,6 +253,7 @@ export const DOMAINS: Domain[] = [
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
           { id: 'assets',                label: 'Assets',               route: '/admin/assets',                               icon: Package,      keywords: ['asset management', 'equipment', 'laptop', 'device', 'asset assignment', 'asset allocation', 'inventory'] },
           { id: 'letters',               label: 'Letters',              route: '/admin/letters',                              icon: ScrollText,   keywords: ['offer letter', 'appointment letter', 'salary letter', 'experience letter', 'generate letter'] },
+          { id: 'benefits',              label: 'Benefits',             route: '/admin/benefits',                             icon: ShieldCheck,  keywords: ['benefits', 'enrolment', 'enrollment', 'insurance', 'group health', 'mediclaim', 'term life', 'accident cover', 'wellness', 'dependents', 'employee benefits'] },
         ],
       },
       {

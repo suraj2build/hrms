@@ -95,6 +95,7 @@ const BASE_GROUPS: NavGroup[] = [
       { label: 'Reimbursements',    icon: CreditCard, href: '/ess/reimbursements'                  },
       { label: 'Loans & Advances',  icon: Wallet,     href: '/ess/loans'                           },
       { label: 'Flexible Benefits', icon: Receipt,    href: '/ess/fbp'                             },
+      { label: 'Benefits',          icon: ShieldCheck, href: '/ess/benefits'                       },
     ],
   },
   {

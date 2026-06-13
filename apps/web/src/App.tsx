@@ -56,6 +56,7 @@ import type { Profile, Tenant } from '@/types'
 const Organization      = lazy(() => import('@/pages/organization/Organization').then(m => ({ default: m.Organization })))
 const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m => ({ default: m.OrgChart })))
 const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
+const AdminBenefits     = lazy(() => import('@/pages/admin/AdminBenefits').then(m => ({ default: m.AdminBenefits })))
 const AuditTrail        = lazy(() => import('@/pages/admin/AuditTrail').then(m => ({ default: m.AuditTrail })))
 const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').then(m => ({ default: m.AdminRecruitment })))
 const AdminPipeline     = lazy(() => import('@/pages/admin/AdminPipeline').then(m => ({ default: m.AdminPipeline })))
@@ -232,6 +233,7 @@ const CompensationMaster    = lazy(() => import('@/pages/payroll/CompensationMas
 const CompensationSetup     = lazy(() => import('@/pages/payroll/CompensationSetup').then(m => ({ default: m.CompensationSetup })))
 const FbpReconciliation     = lazy(() => import('@/pages/payroll/FbpReconciliation').then(m => ({ default: m.FbpReconciliation })))
 const EssFBP                = lazy(() => import('@/pages/ess/EssFBP').then(m => ({ default: m.EssFBP })))
+const EssBenefits           = lazy(() => import('@/pages/ess/EssBenefits').then(m => ({ default: m.EssBenefits })))
 const PayrollLedger         = lazy(() => import('@/pages/payroll/PayrollLedger').then(m => ({ default: m.PayrollLedger })))
 const PayrollGovernance     = lazy(() => import('@/pages/payroll/PayrollGovernance').then(m => ({ default: m.PayrollGovernance })))
 const PayrollValidation     = lazy(() => import('@/pages/payroll/PayrollValidation').then(m => ({ default: m.PayrollValidation })))
@@ -565,6 +567,7 @@ export default function App() {
                 <Route path="/admin/employees/:id"    element={<ProfilePlatform />} />
                 <Route path="/admin/organization"     element={<Organization />} />
                 <Route path="/admin/helpdesk"         element={<AdminHelpdesk />} />
+                <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
                 <Route path="/admin/documents"        element={<Documents />} />
 
@@ -845,6 +848,7 @@ export default function App() {
                 <Route path="/ess/payroll/my-slips"        element={<Navigate to="/ess/compensation" replace />} />
                 <Route path="/ess/compensation"            element={<EssCompensation />} />
                 <Route path="/ess/fbp"                     element={<EssFBP />} />
+                <Route path="/ess/benefits"                element={<EssBenefits />} />
                 <Route path="/ess/profile"                element={<EssMyProfile />} />
                 <Route path="/ess/letters"                element={<EssLetters />} />
                 <Route path="/ess/operational-center"     element={<EssOperationalCenter />} />

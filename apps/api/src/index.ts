@@ -165,6 +165,7 @@ import preJoineeRoutes                     from './routes/onboarding/pre-joinee.
 import onboardingTimelineRoutes            from './routes/onboarding/timeline.js'
 import onboardingReadinessRoutes           from './routes/onboarding/readiness.js'
 import helpdeskRoutes                      from './routes/helpdesk/index.js'
+import benefitsRoutes                      from './routes/benefits/index.js'
 import recruitmentRoutes                   from './routes/recruitment/index.js'
 
 // Routes — Upload session lifecycle management
@@ -646,6 +647,7 @@ async function start() {
   await fastify.register(notificationTemplatesRoute,        { prefix: '/notifications/templates' })  // GET/POST /notifications/templates/*
   await fastify.register(notificationInboxRoute,            { prefix: '/notifications/inbox' })        // GET/POST /notifications/inbox/*
   await fastify.register(helpdeskRoutes,                     { prefix: '/helpdesk' })                  // ESS-05 HR helpdesk tickets — employee + HR-admin endpoints
+  await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
 
   // ── Workspace aggregated stats (must precede individual resource routes) ──
