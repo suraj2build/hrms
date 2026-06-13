@@ -43,6 +43,8 @@ interface Ticket {
   assigned_to: string | null
   sla_due_at: string | null
   sla_breached_at: string | null
+  resolution_due_at: string | null
+  resolution_breached_at: string | null
   resolution_note: string | null
   created_at: string
   employees?: { first_name: string; last_name: string; employee_code: string } | null
@@ -50,7 +52,8 @@ interface Ticket {
 }
 
 interface Agent { id: string; full_name: string | null; role: string }
-interface Stats { total: number; open: number; breached: number; by_status: Record<string, number> }
+interface Stats { total: number; open: number; breached: number; resolution_breached: number; by_status: Record<string, number> }
+interface SlaPolicy { priority: TicketPriority; response_hours: number; resolution_hours: number; is_custom: boolean }
 
 const STATUSES: TicketStatus[] = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed']
 
@@ -120,6 +123,31 @@ export function AdminHelpdesk() {
     enabled:  !!openId,
   })
 
+  // ── SLA policy configuration ───────────────────────────────────────────────
+  const [showSla, setShowSla] = useState(false)
+  const [slaDraft, setSlaDraft] = useState<SlaPolicy[] | null>(null)
+  const { data: slaPolicies = [] } = useQuery<SlaPolicy[]>({
+    queryKey: ['admin-helpdesk', 'sla-policies'],
+    queryFn:  () => api.get('/helpdesk/sla-policies').then((r: any) => r.data ?? []),
+    enabled:  isAdmin,
+  })
+  const policyRows = slaDraft ?? slaPolicies
+  const saveSla = useMutation({
+    mutationFn: (policies: SlaPolicy[]) =>
+      api.put('/helpdesk/sla-policies', {
+        policies: policies.map(p => ({ priority: p.priority, response_hours: p.response_hours, resolution_hours: p.resolution_hours })),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-helpdesk', 'sla-policies'] })
+      setSlaDraft(null)
+      toast.success('SLA policy saved')
+    },
+    onError: (e: Error) => toast.error('Failed to save SLA policy', { description: e.message }),
+  })
+  const editPolicy = (priority: TicketPriority, field: 'response_hours' | 'resolution_hours', value: number) => {
+    setSlaDraft(policyRows.map(p => p.priority === priority ? { ...p, [field]: value } : p))
+  }
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin-helpdesk'] })
   }
@@ -162,23 +190,84 @@ export function AdminHelpdesk() {
 
   return (
     <PageContainer>
-      <PageHeader title="HR Helpdesk" subtitle="Employee support tickets — assign, respond, and resolve" />
+      <PageHeader
+        title="HR Helpdesk"
+        subtitle="Employee support tickets — assign, respond, and resolve"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowSla(s => !s)}>
+            <Clock className="h-4 w-4 mr-1" /> SLA Policy
+          </Button>
+        }
+      />
 
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs text-muted-foreground mb-1">Open Tickets</p>
           <p className="text-xl font-semibold">{stats?.open ?? '—'}</p>
         </div>
         <div className="rounded-lg border border-border p-3">
-          <p className="text-xs text-muted-foreground mb-1">SLA Breached</p>
+          <p className="text-xs text-muted-foreground mb-1">Response Breached</p>
           <p className={cn('text-xl font-semibold', (stats?.breached ?? 0) > 0 && 'text-red-600')}>{stats?.breached ?? '—'}</p>
+        </div>
+        <div className="rounded-lg border border-border p-3">
+          <p className="text-xs text-muted-foreground mb-1">Resolution Breached</p>
+          <p className={cn('text-xl font-semibold', (stats?.resolution_breached ?? 0) > 0 && 'text-red-600')}>{stats?.resolution_breached ?? '—'}</p>
         </div>
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs text-muted-foreground mb-1">Total</p>
           <p className="text-xl font-semibold">{stats?.total ?? '—'}</p>
         </div>
       </div>
+
+      {/* SLA policy editor */}
+      {showSla && (
+        <SectionCard
+          title="SLA Policy"
+          action={
+            <div className="flex items-center gap-2">
+              {slaDraft && (
+                <Button size="sm" variant="ghost" onClick={() => setSlaDraft(null)} disabled={saveSla.isPending}>Reset</Button>
+              )}
+              <Button size="sm" disabled={!slaDraft || saveSla.isPending} onClick={() => slaDraft && saveSla.mutate(slaDraft)}>
+                {saveSla.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-xs text-muted-foreground mb-3">
+            Hours from ticket creation to first HR response and to resolution, per priority. Applies to newly created tickets.
+          </p>
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                  <th className="text-left py-2 px-3 text-xs font-medium">Priority</th>
+                  <th className="text-left py-2 px-3 text-xs font-medium">Response (h)</th>
+                  <th className="text-left py-2 px-3 text-xs font-medium">Resolution (h)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {policyRows.map(p => (
+                  <tr key={p.priority} className="border-b border-border/50">
+                    <td className="py-2 px-3"><Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(p.priority))}>{p.priority}</Badge></td>
+                    <td className="py-2 px-3">
+                      <input type="number" min={1} max={720} value={p.response_hours}
+                        onChange={e => editPolicy(p.priority, 'response_hours', Math.max(1, Number(e.target.value) || 1))}
+                        className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
+                    </td>
+                    <td className="py-2 px-3">
+                      <input type="number" min={1} max={2160} value={p.resolution_hours}
+                        onChange={e => editPolicy(p.priority, 'resolution_hours', Math.max(1, Number(e.target.value) || 1))}
+                        className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard
         title="Ticket Queue"
@@ -256,7 +345,19 @@ export function AdminHelpdesk() {
                 <Badge variant={statusBadge(detail.status).variant as any} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
                 <span className="text-[10px] text-muted-foreground capitalize">{detail.category.replace('_', ' ')}</span>
                 {detail.employees && <span className="text-[10px] text-muted-foreground">· {detail.employees.first_name} {detail.employees.last_name} ({detail.employees.employee_code})</span>}
+                {detail.sla_breached_at && !['resolved', 'closed'].includes(detail.status) && (
+                  <Badge variant="outline" className="text-[10px] text-red-600 border-red-200 bg-red-50 gap-1"><AlertTriangle className="h-3 w-3" />Response SLA breached</Badge>
+                )}
+                {detail.resolution_breached_at && !['resolved', 'closed'].includes(detail.status) && (
+                  <Badge variant="outline" className="text-[10px] text-red-600 border-red-200 bg-red-50 gap-1"><AlertTriangle className="h-3 w-3" />Resolution SLA breached</Badge>
+                )}
               </div>
+              {(detail.sla_due_at || detail.resolution_due_at) && !['resolved', 'closed'].includes(detail.status) && (
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground -mt-1">
+                  {detail.sla_due_at && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />Response due {fmtDateTime(detail.sla_due_at)}</span>}
+                  {detail.resolution_due_at && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />Resolution due {fmtDateTime(detail.resolution_due_at)}</span>}
+                </div>
+              )}
 
               <p className="text-sm text-foreground border border-border rounded-md p-3 bg-muted/20">{detail.description}</p>
 

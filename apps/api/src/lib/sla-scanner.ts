@@ -226,6 +226,46 @@ async function scan(supabase: SupabaseClient): Promise<void> {
 
       notifiedIds.add(dedupeKey)
     }
+
+    // ── 4. Resolution-SLA breaches (ESS-05) ────────────────────────────────────
+    // resolution_due_at is set per-ticket from priority at creation. A ticket
+    // breaches its resolution SLA when now > resolution_due_at and it is still
+    // open. Stamp resolution_breached_at once and alert HR.
+    const { data: unresolved } = await supabase
+      .from('helpdesk_tickets')
+      .select('id, subject, resolution_due_at, created_at, employees(first_name, last_name)')
+      .eq('tenant_id', tenantId)
+      .is('resolution_breached_at', null)
+      .not('resolution_due_at', 'is', null)
+      .not('status', 'in', '(resolved,closed)')
+      .lt('resolution_due_at', nowIso)
+
+    for (const row of (unresolved ?? [])) {
+      const dedupeKey = `helpdesk-res:${row.id}`
+      if (notifiedIds.has(dedupeKey)) continue
+
+      const emp     = Array.isArray(row.employees) ? row.employees[0] : row.employees
+      const name    = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
+      const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
+
+      try {
+        await supabase
+          .from('helpdesk_tickets')
+          .update({ resolution_breached_at: nowIso })
+          .eq('id', row.id)
+          .eq('tenant_id', tenantId)
+      } catch { /* non-fatal */ }
+
+      await writeNotifications(
+        supabase, tenantId, hrProfileIds,
+        'Resolution SLA Breach — Helpdesk Ticket',
+        `${name}'s ticket "${(row as any).subject}" has breached its resolution SLA (open ${elapsed}h). Please resolve it.`,
+        '/admin/helpdesk',
+        row.id,
+      ).catch(() => void 0)
+
+      notifiedIds.add(dedupeKey)
+    }
   }
 }
 

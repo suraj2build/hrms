@@ -12,13 +12,45 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { notify, notifyHrAdmins } from '../../lib/notify.js'
+import { logAction } from '../../lib/audit-service.js'
 
-// SLA hours by priority — used to compute sla_due_at on creation.
+// Default SLA windows by priority (used when no tenant policy row exists).
+// Response = time to first HR reply; Resolution = time to resolve/close.
 const SLA_HOURS: Record<string, number> = { urgent: 4, high: 8, medium: 24, low: 48 }
+const RESOLUTION_HOURS: Record<string, number> = { urgent: 24, high: 48, medium: 72, low: 120 }
 
 const CATEGORIES = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'other'] as const
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const
 const STATUSES   = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed'] as const
+
+/**
+ * Resolve the response + resolution SLA windows (hours) for a priority.
+ * Prefers the tenant's configured helpdesk_sla_policies row; falls back to the
+ * built-in defaults (and degrades gracefully if the table doesn't exist yet).
+ */
+async function resolveSla(
+  fastify: any, tenantId: string, priority: string,
+): Promise<{ response_hours: number; resolution_hours: number }> {
+  const fallback = {
+    response_hours:   SLA_HOURS[priority] ?? 24,
+    resolution_hours: RESOLUTION_HOURS[priority] ?? 72,
+  }
+  try {
+    const { data, error } = await fastify.supabase
+      .from('helpdesk_sla_policies')
+      .select('response_hours, resolution_hours')
+      .eq('tenant_id', tenantId)
+      .eq('priority', priority)
+      .maybeSingle()
+    if (error || !data) return fallback
+    return {
+      response_hours:   Number((data as any).response_hours)   || fallback.response_hours,
+      resolution_hours: Number((data as any).resolution_hours) || fallback.resolution_hours,
+    }
+  } catch {
+    return fallback
+  }
+}
 
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
@@ -73,27 +105,40 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const slaHours = SLA_HOURS[parsed.data.priority] ?? 24
-    const slaDueAt = new Date(Date.now() + slaHours * 3_600_000).toISOString()
+    const sla        = await resolveSla(fastify, req.tenantId, parsed.data.priority)
+    const now        = Date.now()
+    const slaDueAt   = new Date(now + sla.response_hours   * 3_600_000).toISOString()
+    const resDueAt   = new Date(now + sla.resolution_hours * 3_600_000).toISOString()
 
     const { data, error } = await fastify.supabase
       .from('helpdesk_tickets')
       .insert({
-        tenant_id:   req.tenantId,
-        subject:     parsed.data.subject,
-        description: parsed.data.description,
-        category:    parsed.data.category,
-        priority:    parsed.data.priority,
-        status:      'open',
-        employee_id: employeeId,
-        created_by:  req.userId,
-        sla_hours:   slaHours,
-        sla_due_at:  slaDueAt,
+        tenant_id:        req.tenantId,
+        subject:          parsed.data.subject,
+        description:      parsed.data.description,
+        category:         parsed.data.category,
+        priority:         parsed.data.priority,
+        status:           'open',
+        employee_id:      employeeId,
+        created_by:       req.userId,
+        sla_hours:        sla.response_hours,
+        sla_due_at:       slaDueAt,
+        resolution_due_at: resDueAt,
       })
       .select()
       .single()
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'helpdesk_tickets',
+      recordId:    (data as any).id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      newData:     { subject: parsed.data.subject, category: parsed.data.category, priority: parsed.data.priority, status: 'open' },
+    })
 
     // Notify HR admins (best-effort)
     await notifyHrAdmins(fastify.supabase, {
@@ -101,7 +146,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       senderId:     req.userId,
       item_type:    'general',
       title:        `New helpdesk ticket: ${parsed.data.subject}`,
-      summary:      `A ${parsed.data.priority} priority ${parsed.data.category} ticket was raised. SLA ${slaHours}h.`,
+      summary:      `A ${parsed.data.priority} priority ${parsed.data.category} ticket was raised. Response SLA ${sla.response_hours}h, resolution ${sla.resolution_hours}h.`,
       severity:     parsed.data.priority === 'urgent' ? 'warning' : 'info',
       entity_type:  'helpdesk_ticket',
       entity_id:    (data as any).id,
@@ -280,18 +325,20 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
   fastify.get('/stats', hrAdminAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('helpdesk_tickets')
-      .select('status, sla_breached_at')
+      .select('status, sla_breached_at, resolution_breached_at')
       .eq('tenant_id', req.tenantId)
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
     const rows = (data ?? []) as any[]
-    const open = rows.filter(r => !['resolved', 'closed'].includes(r.status)).length
-    const breached = rows.filter(r => r.sla_breached_at && !['resolved', 'closed'].includes(r.status)).length
+    const isLive = (r: any) => !['resolved', 'closed'].includes(r.status)
+    const open = rows.filter(isLive).length
+    const breached = rows.filter(r => r.sla_breached_at && isLive(r)).length
+    const resolutionBreached = rows.filter(r => r.resolution_breached_at && isLive(r)).length
     const byStatus: Record<string, number> = {}
     for (const r of rows) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1
 
-    return reply.send({ data: { total: rows.length, open, breached, by_status: byStatus } })
+    return reply.send({ data: { total: rows.length, open, breached, resolution_breached: resolutionBreached, by_status: byStatus } })
   })
 
   // POST /helpdesk/tickets/:id/assign — assign to an HR agent
@@ -310,6 +357,15 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'helpdesk_tickets',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { assigned_to: parsed.data.assigned_to },
+    })
 
     // Notify the newly assigned agent.
     if (parsed.data.assigned_to) {
@@ -365,6 +421,17 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'helpdesk_tickets',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  (ticket as any).employee_id ?? null,
+      oldData:     { status: (ticket as any).status },
+      newData:     { status: parsed.data.status, resolution_note: parsed.data.resolution_note ?? null },
+    })
+
     // Notify the employee on resolution / status change.
     const { data: prof } = await fastify.supabase
       .from('profiles').select('id').eq('employee_id', (ticket as any).employee_id).eq('tenant_id', req.tenantId).maybeSingle()
@@ -399,5 +466,64 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.send({ data: data ?? [] })
+  })
+
+  // ── GET /helpdesk/sla-policies — current SLA windows per priority ─────────────
+  // Returns one row per priority, merging any tenant overrides over the defaults
+  // so the UI always shows all four priorities.
+  fastify.get('/sla-policies', hrAdminAuth, async (req: any, reply) => {
+    const { data } = await fastify.supabase
+      .from('helpdesk_sla_policies')
+      .select('priority, response_hours, resolution_hours, updated_at')
+      .eq('tenant_id', req.tenantId)
+
+    const overrides = new Map<string, any>(((data ?? []) as any[]).map(r => [r.priority, r]))
+    const policies = PRIORITIES.map(p => ({
+      priority:         p,
+      response_hours:   overrides.get(p)?.response_hours   ?? SLA_HOURS[p],
+      resolution_hours: overrides.get(p)?.resolution_hours ?? RESOLUTION_HOURS[p],
+      is_custom:        overrides.has(p),
+    }))
+    return reply.send({ data: policies })
+  })
+
+  // ── PUT /helpdesk/sla-policies — configure SLA windows ───────────────────────
+  // Upserts the per-priority response/resolution windows for this tenant.
+  fastify.put('/sla-policies', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      policies: z.array(z.object({
+        priority:         z.enum(PRIORITIES),
+        response_hours:   z.number().int().min(1).max(720),
+        resolution_hours: z.number().int().min(1).max(2160),
+      })).min(1),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const rows = parsed.data.policies.map(p => ({
+      tenant_id:        req.tenantId,
+      priority:         p.priority,
+      response_hours:   p.response_hours,
+      resolution_hours: p.resolution_hours,
+      updated_at:       new Date().toISOString(),
+      updated_by:       req.userId,
+    }))
+
+    const { error } = await fastify.supabase
+      .from('helpdesk_sla_policies')
+      .upsert(rows, { onConflict: 'tenant_id,priority' })
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'helpdesk_sla_policies',
+      recordId:    req.tenantId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { policies: parsed.data.policies },
+    })
+
+    return reply.send({ data: { updated: rows.length } })
   })
 }
