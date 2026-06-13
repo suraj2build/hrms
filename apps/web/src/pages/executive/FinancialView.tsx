@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Wallet, IndianRupee, Users, Clock, PieChart as PieIcon, Building2, TrendingUp } from 'lucide-react'
+import { Wallet, IndianRupee, Users, Clock, PieChart as PieIcon, Building2, TrendingUp, Gauge, CalendarClock, LogOut, Activity } from 'lucide-react'
 import {
   Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line,
   ResponsiveContainer, Tooltip, XAxis, YAxis, Legend,
@@ -9,8 +9,12 @@ import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { ExecLayout, Panel, EmptyBody, StatTile, TIP, PALETTE, cr, fmtMonth } from '@/components/exec/ExecShell'
 
+type FlagTone = 'high' | 'medium' | 'normal'
+
 interface FinancialData {
   payroll_current_gross: number; payroll_current_net: number; payroll_mom_change: number
+  payroll_current_month?: string
+  variance_flag?: FlagTone
   payroll_cost_trend: Array<{ month: string; total_gross: number; employee_count: number; avg_cost_per_head: number }>
   dept_cost_breakdown: Array<{ dept: string; headcount: number; total_gross: number; total_net: number; ot_cost: number }>
   total_revision_delta?: number; avg_revision_pct?: number
@@ -20,7 +24,14 @@ interface FinancialData {
     ot_cost: number; employee_deductions: number; gross_total: number; has_data: boolean
   }
   ot_trend?: Array<{ month: string; ot_cost: number }>
+  ot_cost_total?: number
+  ot_dependency_pct?: number; ot_dependency_flag?: FlagTone
+  leave_liability?: number; leave_liability_employees?: number; leave_liability_days?: number
+  ff_exposure?: number; ff_active_separations?: number
 }
+
+const flagTone = (f?: FlagTone): 'warning' | 'destructive' | 'success' =>
+  f === 'high' ? 'destructive' : f === 'medium' ? 'warning' : 'success'
 
 export default function FinancialView() {
   const { data: fin } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get('/executive/financial').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
@@ -31,7 +42,11 @@ export default function FinancialView() {
   const cphSpark   = trend.map(t => +(t.avg_cost_per_head / 1000).toFixed(1))
 
   const latestCph = trend.length ? trend[trend.length - 1].avg_cost_per_head : 0
-  const totalOt = (fin?.dept_cost_breakdown ?? []).reduce((s, d) => s + (d.ot_cost ?? 0), 0)
+  // Canonical full-month OT (CST.ot_cost) from the API; fall back to the top-N dept sum.
+  const totalOt = fin?.ot_cost_total ?? (fin?.dept_cost_breakdown ?? []).reduce((s, d) => s + (d.ot_cost ?? 0), 0)
+  const otDepPct = fin?.ot_dependency_pct ?? 0
+  const leaveLiability = fin?.leave_liability ?? 0
+  const ffExposure = fin?.ff_exposure ?? 0
 
   const trendData = trend.map(t => ({ month: fmtMonth(t.month), gross: +(t.total_gross / 1e7).toFixed(2), head: t.employee_count }))
   const deptRows = useMemo(
@@ -63,7 +78,39 @@ export default function FinancialView() {
         <KpiCard label="Gross Payroll (MTD)" value={cr(fin?.payroll_current_gross ?? 0)} delta={fin?.payroll_mom_change} deltaLabel="MoM" icon={Wallet} tone="primary" spark={grossSpark} />
         <KpiCard label="Net Payout" value={cr(fin?.payroll_current_net ?? 0)} icon={IndianRupee} tone="success" spark={grossSpark} hint={fin ? `${((fin.payroll_current_net / Math.max(1, fin.payroll_current_gross)) * 100).toFixed(0)}% of gross` : undefined} />
         <KpiCard label="Cost / Head" value={latestCph ? cr(latestCph) : '—'} icon={Users} tone="info" spark={cphSpark} hint="Per month" />
-        <KpiCard label="Overtime Cost" value={totalOt ? cr(totalOt) : '—'} icon={Clock} tone="warning" hint="Current period" />
+        <KpiCard label="Overtime Cost" value={totalOt ? cr(totalOt) : '—'} icon={Clock} tone="warning" hint={fin?.payroll_current_month ? `Month ${fmtMonth(fin.payroll_current_month)}` : 'Current period'} />
+      </section>
+
+      {/* R3 — Financial Exposure: OT dependency, payroll variance, leave liability, F&F */}
+      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard
+          label="OT Dependency"
+          value={`${otDepPct.toFixed(1)}%`}
+          icon={Gauge}
+          tone={flagTone(fin?.ot_dependency_flag)}
+          hint={fin?.ot_dependency_flag === 'high' ? 'High — OT >25% of gross' : fin?.ot_dependency_flag === 'medium' ? 'Elevated — OT >15%' : 'Healthy'}
+        />
+        <KpiCard
+          label="Payroll Variance"
+          value={`${fin?.payroll_mom_change != null ? (fin.payroll_mom_change > 0 ? '+' : '') + fin.payroll_mom_change.toFixed(1) : '0.0'}%`}
+          icon={Activity}
+          tone={flagTone(fin?.variance_flag)}
+          hint={fin?.variance_flag === 'high' ? 'High swing MoM' : fin?.variance_flag === 'medium' ? 'Notable swing MoM' : 'Stable MoM'}
+        />
+        <KpiCard
+          label="Leave Liability"
+          value={leaveLiability ? cr(leaveLiability) : '—'}
+          icon={CalendarClock}
+          tone="info"
+          hint={fin?.leave_liability_days ? `${fin.leave_liability_days.toLocaleString('en-IN')} encashable days` : 'Encashable balance'}
+        />
+        <KpiCard
+          label="F&F Exposure"
+          value={ffExposure ? cr(ffExposure) : '—'}
+          icon={LogOut}
+          tone={ffExposure > 0 ? 'warning' : 'success'}
+          hint={fin?.ff_active_separations ? `${fin.ff_active_separations} pending settlement${fin.ff_active_separations !== 1 ? 's' : ''}` : 'No pending settlements'}
+        />
       </section>
 
       {/* Payroll trend (real) + payroll mix (empty) */}

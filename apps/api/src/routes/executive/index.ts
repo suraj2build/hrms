@@ -726,12 +726,93 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, ot_cost]) => ({ month, ot_cost: Math.round(ot_cost) }))
 
+    // ── R3 — OT Dependency (CST.ot_dependency), elevated to L1 headline ─────────
+    // Full-month OT (from all dept snapshots, not the top-10 breakdown) ÷ gross.
+    const ot_cost_month = otByMonth.get(payroll_current_month) ?? ot_cost_current
+    const ot_dependency_pct = payroll_current_gross > 0
+      ? parseFloat((ot_cost_month / payroll_current_gross * 100).toFixed(1))
+      : 0
+    const ot_dependency_flag: 'high' | 'medium' | 'normal' =
+      ot_dependency_pct > 25 ? 'high' : ot_dependency_pct > 15 ? 'medium' : 'normal'
+    const ot_cost_total = Math.round(ot_cost_month)
+
+    // ── R3 — Payroll Variance flag (CST.variance), elevated to L1 ───────────────
+    const variance_flag: 'high' | 'medium' | 'normal' =
+      Math.abs(payroll_mom_change) > 20 ? 'high' : Math.abs(payroll_mom_change) > 10 ? 'medium' : 'normal'
+
+    // ── R3 — Leave Liability (CST.leave_liability) & F&F Exposure (CST.ff_exposure)
+    // Both best-effort: missing tables/columns must never break the financial view.
+    let leave_liability = 0
+    let leave_liability_employees = 0
+    let leave_liability_days = 0
+    try {
+      const currentYear = new Date().getUTCFullYear()
+      const [encashRulesRes, compRes] = await Promise.all([
+        fastify.supabase
+          .from('leave_accrual_rules')
+          .select('leave_type_id, encashable')
+          .eq('tenant_id', req.tenantId)
+          .eq('encashable', true),
+        fastify.supabase
+          .from('employee_compensations')
+          .select('employee_id, ctc_monthly')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', true),
+      ])
+      const encashableTypeIds = (encashRulesRes.data ?? []).map((r: any) => r.leave_type_id).filter(Boolean)
+      const dailyRateByEmp = new Map<string, number>()
+      for (const c of (compRes.data ?? []) as any[]) {
+        if (c.ctc_monthly) dailyRateByEmp.set(c.employee_id, Number(c.ctc_monthly) / 26)
+      }
+      if (encashableTypeIds.length > 0) {
+        const { data: balRows } = await fastify.supabase
+          .from('employee_leave_balance')
+          .select('employee_id, balance, leave_type_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('year', currentYear)
+          .in('leave_type_id', encashableTypeIds)
+          .gt('balance', 0)
+        const empSet = new Set<string>()
+        for (const b of (balRows ?? []) as any[]) {
+          const rate = dailyRateByEmp.get(b.employee_id)
+          if (!rate) continue
+          const days = Number(b.balance ?? 0)
+          leave_liability     += days * rate
+          leave_liability_days += days
+          empSet.add(b.employee_id)
+        }
+        leave_liability_employees = empSet.size
+      }
+      leave_liability = Math.round(leave_liability)
+      leave_liability_days = parseFloat(leave_liability_days.toFixed(1))
+    } catch (e) {
+      req.log?.warn?.({ err: e }, 'leave_liability best-effort failed')
+    }
+
+    let ff_exposure = 0
+    let ff_active_separations = 0
+    try {
+      const { data: ffRows } = await fastify.supabase
+        .from('separation_ff_summary')
+        .select('net_payable, status')
+        .eq('tenant_id', req.tenantId)
+        .neq('status', 'paid')
+      for (const r of (ffRows ?? []) as any[]) {
+        ff_exposure += Number(r.net_payable ?? 0)
+        ff_active_separations++
+      }
+      ff_exposure = Math.round(ff_exposure)
+    } catch (e) {
+      req.log?.warn?.({ err: e }, 'ff_exposure best-effort failed')
+    }
+
     return reply.send({
       payroll_current_gross,
       payroll_current_net,
       payroll_current_headcount,
       payroll_current_month,
       payroll_mom_change,
+      variance_flag,
       payroll_cost_trend,
       total_revision_delta,
       avg_revision_pct,
@@ -740,6 +821,14 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       dept_cost_breakdown,
       component_mix,
       ot_trend,
+      ot_cost_total,
+      ot_dependency_pct,
+      ot_dependency_flag,
+      leave_liability,
+      leave_liability_employees,
+      leave_liability_days,
+      ff_exposure,
+      ff_active_separations,
       generated_at: new Date().toISOString(),
     })
   })
