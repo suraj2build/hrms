@@ -41,6 +41,7 @@ import Handlebars from 'handlebars'
 import { STANDARD_LETTER_TEMPLATES } from '../../lib/standard-letter-templates.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { logAction } from '../../lib/audit-service.js'
 
 // ── Variable resolver ─────────────────────────────────────────────────────────
 
@@ -448,6 +449,17 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .single()
 
     if (letErr) return reply.status(500).send({ error: letErr.message })
+
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'generated_letters',
+      recordId:    letter.id,
+      action:      'INSERT',
+      performedBy: userId,
+      onBehalfOf:  employee_id,
+      newData:     { template_id, employee_id, subject, approval_status, letter_type: tmpl.letter_type },
+    })
+
     return reply.status(201).send({ data: letter, missing_vars: missing })
   })
 
@@ -509,7 +521,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
   // POST /letters/issued/:letterId/submit-for-approval
   fastify.post('/letters/issued/:letterId/submit-for-approval', hrAdminAuth, async (req, reply) => {
-    const { tenantId } = req as any
+    const { tenantId, userId } = req as any
     const { letterId } = req.params as any
 
     const { error } = await supabase
@@ -520,6 +532,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('approval_status', 'draft')
 
     if (error) return reply.status(500).send({ error: error.message })
+
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'generated_letters',
+      recordId:    letterId,
+      action:      'UPDATE',
+      performedBy: userId,
+      newData:     { approval_status: 'pending_approval', current_level: 1 },
+    })
+
     return { success: true }
   })
 
@@ -561,6 +583,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
 
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'generated_letters',
+      recordId:    letterId,
+      action:      'UPDATE',
+      performedBy: userId,
+      oldData:     { approval_status: 'pending_approval', current_level: currentLevel },
+      newData:     { approval_status: newStatus, current_level: newLevel, approved_level: currentLevel, comments },
+    })
+
     return { success: true, fully_approved: isLastLevel }
   })
 
@@ -589,6 +621,15 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
 
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'generated_letters',
+      recordId:    letterId,
+      action:      'UPDATE',
+      performedBy: userId,
+      newData:     { approval_status: 'rejected', rejection_reason: comments, rejected_level: letter?.current_level ?? 1 },
+    })
+
     return { success: true }
   })
 
@@ -612,12 +653,22 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .in('approval_status', ['approved', 'draft'])   // can issue approved or approval-exempt drafts
 
     if (error) return reply.status(500).send({ error: error.message })
+
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'generated_letters',
+      recordId:    letterId,
+      action:      'UPDATE',
+      performedBy: userId,
+      newData:     { approval_status: 'issued', issued_by: actor?.id ?? null },
+    })
+
     return { success: true }
   })
 
   // DELETE /letters/issued/:letterId  (draft only)
   fastify.delete('/letters/issued/:letterId', hrAdminAuth, async (req, reply) => {
-    const { tenantId } = req as any
+    const { tenantId, userId } = req as any
     const { letterId } = req.params as any
 
     const { error } = await supabase
@@ -628,6 +679,15 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('approval_status', 'draft')
 
     if (error) return reply.status(500).send({ error: error.message })
+
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'generated_letters',
+      recordId:    letterId,
+      action:      'DELETE',
+      performedBy: userId,
+    })
+
     return { success: true }
   })
 
@@ -726,6 +786,17 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return reply.status(500).send({ error: error.message })
+
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'letter_requests',
+      recordId:    data.id,
+      action:      'INSERT',
+      performedBy: userId,
+      onBehalfOf:  emp.id,
+      newData:     { template_id, reason, status: 'pending' },
+    })
+
     return reply.status(201).send({ data })
   })
 
@@ -834,6 +905,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
 
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'letter_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: userId,
+      onBehalfOf:  request.employee_id,
+      newData:     { status: 'fulfilled', generated_letter_id: letter.id },
+    })
+
     return { data: letter, missing_vars: missing }
   })
 
@@ -858,6 +939,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if (error) return reply.status(500).send({ error: error.message })
+
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'letter_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: userId,
+      newData:     { status: 'rejected', rejection_reason: reason },
+    })
+
     return { success: true }
   })
 }

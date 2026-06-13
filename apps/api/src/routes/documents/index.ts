@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { logAction } from '../../lib/audit-service.js'
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
 
@@ -174,6 +175,16 @@ export default async function documentRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'documents',
+      recordId:    data.id,
+      action:      'INSERT',
+      performedBy: req.userId,
+      onBehalfOf:  employee_id,
+      newData:     { name: data.name, doc_type: data.doc_type, employee_id, storage_path: data.storage_path },
+    })
+
     // Return with signed URL so the client can immediately display the file
     const signed_url = data.storage_path
       ? await createSignedUrl(fastify, data.storage_path)
@@ -191,7 +202,7 @@ export default async function documentRoutes(fastify: FastifyInstance) {
     // Fetch storage_path before deleting metadata
     const { data: doc, error: fetchErr } = await (fastify as any).supabase
       .from('documents')
-      .select('id, storage_path')
+      .select('id, name, doc_type, storage_path, employee_id')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
@@ -223,6 +234,17 @@ export default async function documentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (deleteErr) return reply.code(500).send({ error: 'DB_ERROR', message: deleteErr.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'documents',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+      onBehalfOf:  doc.employee_id ?? null,
+      oldData:     { name: doc.name, doc_type: doc.doc_type, storage_path: doc.storage_path },
+    })
+
     return reply.code(204).send()
   })
 }

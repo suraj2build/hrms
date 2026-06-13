@@ -6,6 +6,7 @@ import {
   type SendEmailResult,
 } from '../../lib/email-service.js'
 import { emitPreJoineeJoiningCompleted } from '../../lib/onboarding-orchestrator.js'
+import { logAction } from '../../lib/audit-service.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -509,6 +510,15 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     }
 
+    await logAction(fastify.supabase, {
+      tenantId,
+      tableName:   'pre_joinee_invitations',
+      recordId:    data.id,
+      action:      existing ? 'UPDATE' : 'INSERT',
+      performedBy: req.userId,
+      newData:     { first_name: body.first_name, last_name: body.last_name, email, designation: body.designation ?? null, joining_date: body.joining_date, status: 'pending' },
+    })
+
     // invite_url points at the PUBLIC candidate page route, not the API route.
     const inviteUrl     = `/pre-join/${token}`
     const fullInviteUrl = `${APP_PUBLIC_URL}${inviteUrl}`
@@ -557,6 +567,14 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       fastify.log.error({ event: 'pre_joinee.delete', tenant_id: tenantId, id, err: error })
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId,
+      tableName:   'pre_joinee_invitations',
+      recordId:    id,
+      action:      'DELETE',
+      performedBy: req.userId,
+    })
 
     return reply.code(204).send()
   })
@@ -782,6 +800,17 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       fastify.log.warn({ event: 'pre_joinee.approve.status_update', tenant_id: tenantId, id, err: updateErr })
     }
 
+    await logAction(fastify.supabase, {
+      tenantId,
+      tableName:   'pre_joinee_invitations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  employeeId,
+      oldData:     { status: invitation.status },
+      newData:     { status: 'approved', employee_id: employeeId, employee_code: employeeCode },
+    })
+
     // Trigger welcome email (ONB-04) + IT provisioning notification (ONB-05)
     emitPreJoineeJoiningCompleted({
       tenantId,
@@ -836,6 +865,16 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       fastify.log.error({ event: 'pre_joinee.reject', tenant_id: tenantId, id, err: error })
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId,
+      tableName:   'pre_joinee_invitations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      oldData:     { status: invitation.status },
+      newData:     { status: 'rejected', notes },
+    })
 
     return reply.send({ message: 'Invitation rejected', id, notes })
   })
@@ -1191,6 +1230,16 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if (updErr) return reply.code(500).send({ error: updErr.message })
+
+    await logAction(fastify.supabase, {
+      tenantId,
+      tableName:   'pre_joinee_invitations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  inv.employee_id ?? null,
+      newData:     { buddy_employee_id: buddy_employee_id ?? null },
+    })
 
     // Send buddy notification email (best-effort, never fail the request)
     if (buddy_employee_id) {
