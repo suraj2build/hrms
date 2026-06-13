@@ -36,6 +36,7 @@ import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { MyPersonalTab } from './MyPersonalTab'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -154,10 +155,11 @@ const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
 
 // ── Tab definition ─────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'employment' | 'attendance' | 'leave' | 'payroll' | 'documents'
+type Tab = 'overview' | 'personal' | 'employment' | 'attendance' | 'leave' | 'payroll' | 'documents'
 
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{className?: string}> }[] = [
   { id: 'overview',    label: 'Overview',    icon: Star       },
+  { id: 'personal',    label: 'Personal',    icon: User       },
   { id: 'employment',  label: 'Employment',  icon: Briefcase  },
   { id: 'attendance',  label: 'Attendance',  icon: CalendarDays },
   { id: 'leave',       label: 'Leave',       icon: CalendarOff },
@@ -1180,6 +1182,9 @@ export function EssMyProfile({ employeeId: propEmployeeId }: { employeeId?: stri
           regRequests={regRequests}
           warnings={summaryData?.warnings ?? []}
         />
+      )}
+      {activeTab === 'personal' && (
+        <MyPersonalTab employeeId={employeeId} />
       )}
       {activeTab === 'employment' && (
         <EmploymentTab data={profileData} />

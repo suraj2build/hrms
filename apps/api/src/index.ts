@@ -236,6 +236,7 @@ import governanceEvolutionRoute            from './routes/approvals/governance-e
 import executiveIntelligenceRoute          from './routes/analytics/executive-intelligence.js'
 import executiveRoutes                     from './routes/executive/index.js'
 import essOperationalRoute                 from './routes/notifications/ess-operational.js'
+import essSelfServiceRoute                  from './routes/ess/self-service.js'
 
 // Routes — Governance Intelligence (Sprint 2)
 import governanceRoutes from './routes/governance/index.js'
@@ -677,6 +678,7 @@ async function start() {
 
   // ── ESS Operational Experience ────────────────────────────────────────────
   await fastify.register(essOperationalRoute)           // GET /ess/*
+  await fastify.register(essSelfServiceRoute)           // GET/POST/PUT/DELETE /ess/me/* (P4.1 data ownership)
 
   // ── System: Event Governance + Orchestration + Incidents + Webhooks + Integrations ──
   await fastify.register(eventGovernanceRoute)          // GET/POST /system/event-governance/*
