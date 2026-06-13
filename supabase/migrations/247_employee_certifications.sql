@@ -58,6 +58,11 @@ CREATE POLICY ec_hr_all ON employee_certifications
     tenant_id = get_user_tenant_id()
     AND (
       get_user_role() IN ('super_admin','hr_admin')
-      OR employee_id = get_user_employee_id()
+      OR employee_id = (
+        SELECT employee_id FROM profiles
+        WHERE id = auth.uid()
+        AND employee_id IS NOT NULL
+        LIMIT 1
+      )
     )
   );
