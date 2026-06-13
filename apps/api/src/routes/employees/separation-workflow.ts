@@ -4,6 +4,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
 import { computeFnfSettlement } from '../../lib/fnf-settlement-engine.js'
+import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -205,9 +206,33 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
   // ── PATCH /employees/:id/separation-clearances/:clearanceId ──────────────
 
-  fastify.patch('/employees/:id/separation-clearances/:clearanceId', hrAdminAuth, async (req: any, reply) => {
+  fastify.patch('/employees/:id/separation-clearances/:clearanceId', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    // P6.0d — ownership guard. HR admins may action any department's clearance.
+    // A manager may only action the 'manager' clearance of a direct report; every
+    // other caller is rejected. This both opens the manager clearance action and
+    // closes the prior gap where ownership was never validated.
+    if (!isHrAdmin(req.userRole)) {
+      if (req.userRole !== 'manager') {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR admin access required' })
+      }
+      const { data: clearance } = await fastify.supabase
+        .from('separation_clearances')
+        .select('department')
+        .eq('id', req.params.clearanceId)
+        .eq('employee_id', req.params.id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!clearance)
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Clearance record not found' })
+      if ((clearance as any).department !== 'manager')
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Managers may only action the manager clearance' })
+      const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!myEmpId || !(await isDirectReport(fastify.supabase, req.tenantId, myEmpId, req.params.id)))
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'This employee is not one of your direct reports' })
+    }
 
     const parsed = clearanceStatusSchema.safeParse(req.body)
     if (!parsed.success)

@@ -269,13 +269,15 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     const { from, to, status: statusFilter } = req.query as { from?: string; to?: string; status?: string }
 
-    // Get direct reports
+    // Get direct reports. The org hierarchy is keyed on employees.manager_id /
+    // status (see lib/manager-scope.ts) — `reporting_manager_id` and
+    // `employment_status` are not columns on employees and silently match nothing.
     const { data: directReports } = await fastify.supabase
       .from('employees')
       .select('id')
       .eq('tenant_id', req.tenantId)
-      .eq('reporting_manager_id', profile.employee_id)
-      .eq('employment_status', 'active')
+      .eq('manager_id', profile.employee_id)
+      .eq('status', 'active')
 
     if (!directReports || directReports.length === 0) {
       return reply.send({ data: [], total: 0 })

@@ -29,6 +29,7 @@ import {
 import { useAuthStore } from '@/stores/authStore'
 import { api }          from '@/lib/api/client'
 import { ManagerInsights } from '@/pages/intelligence/ManagerInsights'
+import { ManagerLifecycleRails } from '@/pages/manager/ManagerLifecycleRails'
 import type { Employee } from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1255,6 +1256,9 @@ export function ManagerDashboardPage() {
 
         {/* Team intelligence (read-only; renders nothing when no signals) */}
         <ManagerInsights />
+
+        {/* Lifecycle intelligence rails — probation / joiners / trust / expiry / separation (P6.2) */}
+        <ManagerLifecycleRails />
 
         {/* KPI strip */}
         <KPIStrip summary={summary} pendingLeave={leaveRequests.length} pendingReg={regularisations.length} />

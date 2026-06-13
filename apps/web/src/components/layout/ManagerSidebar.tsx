@@ -45,6 +45,7 @@ import {
   ScrollText,
   Wallet,
   IndianRupee,
+  UserCog,
 } from 'lucide-react'
 import { cn }         from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -144,6 +145,7 @@ const BASE_SECTIONS: NavSection[] = [
       { label: 'Approvals',        icon: CheckSquare,     href: '/manager/approvals'                        },
       { label: 'Loan Approvals',   icon: Wallet,          href: '/manager/loans-approvals'                  },
       { label: 'Team Compensation',icon: IndianRupee,     href: '/manager/team/compensation'                },
+      { label: 'Team Lifecycle',   icon: UserCog,         href: '/manager/team/lifecycle'                   },
       { label: 'Leave Balances',   icon: Scale,           href: '/manager/team/leave-balances'              },
       { label: 'Performance',      icon: TrendingUp,      href: '/manager/team/performance'                 },
       { label: 'Team Reports',     icon: BarChart3,       href: '/manager/reports/team'                     },

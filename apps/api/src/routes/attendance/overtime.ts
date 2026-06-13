@@ -25,6 +25,9 @@ import {
   approveOtRequest,
   rejectOtRequest,
 }                               from '../../lib/ot-engine.js'
+import {
+  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
+}                               from '../../lib/manager-scope.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -42,6 +45,31 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
   function requireManagerOrAdmin(req: any, reply: any): boolean {
     if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR admin access required' })
+      return false
+    }
+    return true
+  }
+
+  /**
+   * P6.0b — ownership guard. HR admins may action any OT request; a manager may
+   * only action requests belonging to their own direct reports. Returns true when
+   * the caller is authorised, otherwise sends the response and returns false.
+   */
+  async function authorizeOtTarget(req: any, reply: any, otRequestId: string): Promise<boolean> {
+    if (isHrAdmin(req.userRole)) return true
+    const { data: ot } = await fastify.supabase
+      .from('overtime_requests')
+      .select('employee_id')
+      .eq('id', otRequestId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!ot) {
+      reply.code(404).send({ error: 'NOT_FOUND', message: 'OT request not found' })
+      return false
+    }
+    const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+    if (!myEmpId || !(await isDirectReport(fastify.supabase, req.tenantId, myEmpId, (ot as any).employee_id))) {
+      reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only action overtime for your direct reports' })
       return false
     }
     return true
@@ -239,7 +267,6 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const isAdmin = ['super_admin', 'hr_admin', 'manager'].includes(req.userRole)
     let q = fastify.supabase
       .from('overtime_requests')
       .select(`
@@ -253,19 +280,24 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('attendance_date', { ascending: false })
 
-    if (!isAdmin) {
+    if (isHrAdmin(req.userRole)) {
+      // HR admin sees everything; optional employee filter
+      if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+    } else if (req.userRole === 'manager') {
+      // P6.0b — managers are scoped to their direct reports
+      const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!myEmpId) return reply.send({ data: [] })
+      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      if (!reportIds.length) return reply.send({ data: [] })
+      if (parsed.data.employee_id && !reportIds.includes(parsed.data.employee_id)) {
+        return reply.send({ data: [] })
+      }
+      q = q.in('employee_id', parsed.data.employee_id ? [parsed.data.employee_id] : reportIds)
+    } else {
       // Employees see only their own requests
-      const { data: profile } = await fastify.supabase
-        .from('profiles')
-        .select('employee_id')
-        .eq('id', req.userId)
-        .eq('tenant_id', req.tenantId)
-        .maybeSingle()
-      const empId = (profile as { employee_id: string | null } | null)?.employee_id
+      const empId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!empId) return reply.send({ data: [] })
       q = q.eq('employee_id', empId)
-    } else if (parsed.data.employee_id) {
-      q = q.eq('employee_id', parsed.data.employee_id)
     }
 
     if (parsed.data.status)    q = q.eq('status', parsed.data.status)
@@ -354,6 +386,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
   fastify.post('/overtime/requests/:id/approve', auth, async (req: any, reply) => {
     if (!requireManagerOrAdmin(req, reply)) return
     const { id } = req.params as { id: string }
+    if (!await authorizeOtTarget(req, reply, id)) return
     const schema = z.object({
       approved_minutes: z.number().int().min(0).optional(),
     })
@@ -381,6 +414,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
   fastify.post('/overtime/requests/:id/reject', auth, async (req: any, reply) => {
     if (!requireManagerOrAdmin(req, reply)) return
     const { id } = req.params as { id: string }
+    if (!await authorizeOtTarget(req, reply, id)) return
     const schema = z.object({
       rejection_reason: z.string().max(500).optional(),
     })

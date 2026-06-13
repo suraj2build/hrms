@@ -33,6 +33,9 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { generateCompOffRequests } from '../../lib/comp-off-service.js'
+import {
+  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
+} from '../../lib/manager-scope.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -56,6 +59,31 @@ export default async function compOffRoute(fastify: FastifyInstance) {
         }
       },
     ],
+  }
+
+  /**
+   * P6.0c — ownership guard. HR admins may action any comp-off request; a manager
+   * may only action requests belonging to their own direct reports. Returns true
+   * when authorised, otherwise sends the response and returns false.
+   */
+  async function authorizeCompOffTarget(req: any, reply: any, coRequestId: string): Promise<boolean> {
+    if (isHrAdmin(req.userRole)) return true
+    const { data: co } = await fastify.supabase
+      .from('comp_off_requests')
+      .select('employee_id')
+      .eq('id', coRequestId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!co) {
+      reply.code(404).send({ error: 'NOT_FOUND', message: 'Comp off request not found' })
+      return false
+    }
+    const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+    if (!myEmpId || !(await isDirectReport(fastify.supabase, req.tenantId, myEmpId, (co as any).employee_id))) {
+      reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only action comp-off for your direct reports' })
+      return false
+    }
+    return true
   }
 
   // ── POST /attendance/comp-off/generate ──────────────────────────────────
@@ -126,7 +154,6 @@ export default async function compOffRoute(fastify: FastifyInstance) {
   // ── GET /attendance/comp-off ─────────────────────────────────────────────
   fastify.get('/attendance/comp-off', auth, async (req: any, reply) => {
     const statusFilter = (req.query as any).status as string | undefined
-    const isAdmin      = ['super_admin', 'hr_admin', 'manager'].includes(req.userRole)
 
     let q = fastify.supabase
       .from('comp_off_requests')
@@ -139,19 +166,20 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('worked_date', { ascending: false })
 
-    // Non-admins see only their own requests
-    if (!isAdmin) {
-      const { data: profile } = await fastify.supabase
-        .from('profiles')
-        .select('employee_id')
-        .eq('id', req.userId)
-        .eq('tenant_id', req.tenantId)
-        .single()
-
-      if (!profile?.employee_id) {
-        return reply.send({ data: [] })
-      }
-      q = q.eq('employee_id', profile.employee_id)
+    if (isHrAdmin(req.userRole)) {
+      // HR admin sees the whole tenant
+    } else if (req.userRole === 'manager') {
+      // P6.0c — managers see only their direct reports' requests
+      const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!myEmpId) return reply.send({ data: [] })
+      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      if (!reportIds.length) return reply.send({ data: [] })
+      q = q.in('employee_id', reportIds)
+    } else {
+      // Employees see only their own requests
+      const empId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!empId) return reply.send({ data: [] })
+      q = q.eq('employee_id', empId)
     }
 
     if (statusFilter && ['pending', 'approved', 'rejected'].includes(statusFilter)) {
@@ -186,6 +214,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
   // ── POST /attendance/comp-off/:id/approve ────────────────────────────────
   fastify.post('/attendance/comp-off/:id/approve', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (!await authorizeCompOffTarget(req, reply, id)) return
 
     const parsed = approveSchema.safeParse(req.body ?? {})
     if (!parsed.success) {
@@ -331,6 +360,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
   // ── POST /attendance/comp-off/:id/reject ─────────────────────────────────
   fastify.post('/attendance/comp-off/:id/reject', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (!await authorizeCompOffTarget(req, reply, id)) return
 
     const parsed = approveSchema.safeParse(req.body ?? {})  // notes optional
     if (!parsed.success) {
