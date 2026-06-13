@@ -8,7 +8,7 @@
 
 import { useState, useMemo }    from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Globe, CheckCircle2, AlertCircle, Settings, Plus } from 'lucide-react'
+import { RefreshCw, Globe, CheckCircle2, AlertCircle, Settings, Plus, Download } from 'lucide-react'
 import { toast }                from 'sonner'
 import { PageContainer }        from '@/components/layout/PageContainer'
 import { PageHeader }           from '@/components/layout/PageHeader'
@@ -126,6 +126,25 @@ export function LWFManagement() {
     onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message }),
   })
 
+  // ── Export the monthly LWF register as CSV ───────────────────────────────────
+  const [exporting, setExporting] = useState(false)
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const res = await api.getRaw(`/payroll/exports/lwf?month=${viewMonth}&format=csv`)
+      if (!res.ok) throw new Error(`Export failed (${res.status})`)
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = `lwf-${viewMonth}.csv`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      toast.error('Export failed', { description: e?.message })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   // ── Contributions (current month) ────────────────────────────────────────────
   const { data: contribData } = useQuery<LWFContribution[]>({
     queryKey: ['lwf-contributions', viewMonth],
@@ -200,6 +219,10 @@ export function LWFManagement() {
               onClick={() => computeMutation.mutate(viewMonth)} disabled={computeMutation.isPending || !viewMonth}>
               <RefreshCw className={cn('h-3.5 w-3.5', computeMutation.isPending && 'animate-spin')} />
               Compute Contributions
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+              onClick={exportCsv} disabled={exporting || !viewMonth}>
+              <Download className={cn('h-3.5 w-3.5', exporting && 'animate-pulse')} />Export CSV
             </Button>
             <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
               onClick={() => refetchStates()} disabled={statesLoading}>

@@ -257,6 +257,77 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     return reply.send(toCSV(headers, records))
   })
 
+  // ── GET /payroll/exports/lwf ──────────────────────────────────────────────────
+  // P2.3 — Labour Welfare Fund monthly register. Mirrors the ptax export;
+  // registration number is resolved from lwf_state_settings (per-state).
+  fastify.get('/lwf', adminAuth, async (req: any, reply) => {
+    const querySchema = z.object({
+      month:        z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
+      state_code:   z.string().optional(),
+      employee_id:  z.string().uuid().optional(),
+      format:       z.enum(['csv','json']).optional().default('csv'),
+    })
+
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const { month, state_code, employee_id, format } = parsed.data
+
+    let q = fastify.supabase
+      .from('lwf_contributions')
+      .select(`
+        employee_id, contribution_month, state_code,
+        gross_salary, employee_contribution, employer_contribution, is_eligible,
+        employees(employee_code, first_name, last_name)
+      `)
+      .eq('tenant_id', req.tenantId)
+      .eq('contribution_month', month)
+
+    if (state_code)  q = q.eq('state_code', state_code)
+    if (employee_id) q = q.eq('employee_id', employee_id)
+
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const rows = (data ?? []) as any[]
+
+    // Resolve LWF registration number per state from lwf_state_settings
+    const states = [...new Set(rows.map(r => r.state_code).filter(Boolean))]
+    const regMap = new Map<string, string>()
+    if (states.length > 0) {
+      const { data: regs } = await fastify.supabase
+        .from('lwf_state_settings')
+        .select('state_code, registration_number')
+        .eq('tenant_id', req.tenantId)
+        .in('state_code', states)
+      for (const r of (regs ?? []) as any[]) regMap.set(r.state_code, r.registration_number ?? '')
+    }
+
+    const records = rows.map(r => ({
+      lwf_registration:      regMap.get(r.state_code) ?? '',
+      state_code:            r.state_code,
+      employee_code:         r.employees?.employee_code ?? '',
+      employee_name:         r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : '',
+      contribution_month:    r.contribution_month,
+      gross_salary:          r.gross_salary,
+      employee_contribution: r.employee_contribution,
+      employer_contribution: r.employer_contribution,
+      total_contribution:    Number(r.employee_contribution ?? 0) + Number(r.employer_contribution ?? 0),
+      is_eligible:           r.is_eligible,
+    }))
+
+    if (format === 'json') return reply.send({ data: records, month, count: records.length })
+
+    const headers = [
+      'lwf_registration','state_code','employee_code','employee_name',
+      'contribution_month','gross_salary','employee_contribution',
+      'employer_contribution','total_contribution','is_eligible',
+    ]
+    setCsvHeaders(reply, `lwf-${month}.csv`)
+    return reply.send(toCSV(headers, records))
+  })
+
   // ── GET /payroll/exports/tds ──────────────────────────────────────────────────
   fastify.get('/tds', adminAuth, async (req: any, reply) => {
     const querySchema = z.object({
