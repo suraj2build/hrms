@@ -24,7 +24,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { api }           from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { toast }         from 'sonner'
 import { cn }            from '@/lib/utils'
@@ -131,7 +131,13 @@ export function CompOff() {
       setNotes('')
       toast.success('Comp-off approved and balance credited')
     },
-    onError: (e: Error) => toast.error('Approval failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'This request belongs to a locked attendance period and can no longer be modified.' })
+      } else {
+        toast.error('Approval failed', { description: e.message })
+      }
+    },
   })
 
   const rejectMutation = useMutation({

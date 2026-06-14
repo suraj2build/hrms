@@ -17,7 +17,7 @@ import { SectionCard } from '@/components/layout/SectionCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { api } from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 
 interface LadderRow { present_days: number; wo_credit: number }
 interface WoStructure {
@@ -82,6 +82,19 @@ export function WeeklyOffCredit() {
     enabled: tab === 'review',
   })
 
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`
+  const { data: periodLock } = useQuery<{ state: string } | null>({
+    queryKey: ['period-lock', monthKey],
+    queryFn: () =>
+      api.get(`/attendance/period-locks/${monthKey}`)
+        .then((r: any) => r?.data ?? r ?? null)
+        .catch(() => null),
+    enabled: tab === 'review',
+    staleTime: 30_000,
+  })
+  const periodLocked = periodLock ? periodLock.state !== 'OPEN' : false
+  const periodState  = periodLock?.state ?? null
+
   const saveStructure = useMutation({
     mutationFn: (s: Partial<WoStructure>) =>
       s.id ? api.put(`/attendance/wo-credit/structures/${s.id}`, s) : api.post('/attendance/wo-credit/structures', s),
@@ -109,7 +122,13 @@ export function WeeklyOffCredit() {
       const d = r?.data
       toast.success('Reconciliation complete', { description: d ? `${d.applied} applied · ${d.pending} pending · ${d.carried} carried` : undefined })
     },
-    onError: (e: Error) => toast.error('Reconcile failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'WO-credit cannot be reconciled — this attendance period is locked for payroll.' })
+      } else {
+        toast.error('Reconcile failed', { description: e.message })
+      }
+    },
   })
 
   const finalize = useMutation({
@@ -119,7 +138,13 @@ export function WeeklyOffCredit() {
       const d = r?.data
       toast.success('Month finalised', { description: d ? `${d.credited} carried-over · ${d.lop} LOP day(s)` : undefined })
     },
-    onError: (e: Error) => toast.error('Finalise failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'This attendance period is locked for payroll and cannot be finalised.' })
+      } else {
+        toast.error('Finalise failed', { description: e.message })
+      }
+    },
   })
 
   function newStructure() {
@@ -206,15 +231,33 @@ export function WeeklyOffCredit() {
               <select value={month} onChange={e => setMonth(+e.target.value)} className="h-8 text-xs border border-border rounded-md px-2 bg-background text-foreground">
                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
-              <Button size="sm" variant="outline" onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
-                <Play className="h-3.5 w-3.5 mr-1" />Run now
-              </Button>
-              <Button size="sm" onClick={() => finalize.mutate()} disabled={finalize.isPending}>
-                <Lock className="h-3.5 w-3.5 mr-1" />Finalise
-              </Button>
+              {periodLocked ? (
+                <Badge variant="secondary" className="gap-1 px-2 py-1 text-xs">
+                  <Lock className="h-3 w-3" />Locked for Payroll
+                </Badge>
+              ) : (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
+                    <Play className="h-3.5 w-3.5 mr-1" />Run now
+                  </Button>
+                  <Button size="sm" onClick={() => finalize.mutate()} disabled={finalize.isPending}>
+                    <Lock className="h-3.5 w-3.5 mr-1" />Finalise
+                  </Button>
+                </>
+              )}
             </div>
           }
         >
+          {periodLocked && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-300 mb-4">
+              <Lock className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-medium">Locked for Payroll</span>
+                {periodState && <span className="ml-1 text-xs opacity-70">({periodState})</span>}
+                <p className="text-xs mt-0.5 opacity-80">Attendance and WO-credit calculations can no longer be changed for this period.</p>
+              </div>
+            </div>
+          )}
           {reviewRows.length === 0 ? (
             <div className="text-sm text-muted-foreground py-6 text-center">
               <CalendarClock className="h-5 w-5 mx-auto mb-2 opacity-50" />
