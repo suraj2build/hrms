@@ -2030,6 +2030,79 @@ export function EmployeeProfile() {
               now render inside the Overview's 360 cockpit (no duplicate tab).
           ──────────────────────────────────────────────────────────────────── */}
 
+          {/* DOCUMENTS › Files (primary — leads the Documents tab) */}
+          {subTab === 'documents' && (
+            <div className="space-y-4">
+              {/* Missing mandatory docs warning */}
+              {(() => {
+                const uploadedTypes = (docsData?.data ?? []).map((d: any) => (d.doc_type ?? '').trim())
+                const missing = MANDATORY_DOC_TYPES.filter(
+                  t => !uploadedTypes.some((u: string) => u.toLowerCase().includes(t.toLowerCase()))
+                )
+                if (!missing.length) return null
+                return (
+                  <div className="flex items-start gap-2 p-3 rounded-md border border-warning/40 bg-warning/5">
+                    <AlertTriangle className="h-4 w-4 text-warning mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-warning">Missing mandatory documents</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{missing.join(', ')}</p>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold">Documents</CardTitle>
+                  {isAdmin && (
+                    <>
+                      <input ref={docInputRef} type="file" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (!f) return; setDocFile(f); setDocMeta({ name: f.name.replace(/\.[^.]+$/, ''), doc_type: '' }); setDocMetaOpen(true); e.target.value = '' }} />
+                      <Button size="sm" className="h-7 text-xs gap-1" onClick={() => docInputRef.current?.click()}>
+                        <Plus className="h-3.5 w-3.5" />Upload
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {!(docsData?.data?.length)
+                  ? <div className="px-6 pb-6"><EmptySection icon={Files} title="No documents" subtitle="Upload documents using the button above." /></div>
+                  : <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b border-border">{['Name','Type','Mandatory','Uploaded',''].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2">{h}</th>)}</tr></thead>
+                        <tbody>
+                          {docsData!.data.map((d: any) => {
+                            const isMandatory = MANDATORY_DOC_TYPES.some(
+                              t => (d.doc_type ?? '').toLowerCase().includes(t.toLowerCase())
+                            )
+                            return (
+                            <tr key={d.id} className="border-b border-border/50">
+                              <td className="px-4 py-2 font-medium">{d.name}</td>
+                              <td className="px-4 py-2 text-muted-foreground">{d.doc_type}</td>
+                              <td className="px-4 py-2">
+                                {isMandatory
+                                  ? <Badge variant="outline" className="rounded-full text-[9px] border-success text-success">Required</Badge>
+                                  : <span className="text-muted-foreground text-[10px]">—</span>}
+                              </td>
+                              <td className="px-4 py-2 text-muted-foreground">{fmtDate(d.created_at)}</td>
+                              <td className="px-4 py-2">
+                                <div className="flex gap-1">
+                                  {d.storage_path && <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openSignedUrl(d.storage_path)}><Files className="h-3 w-3" /></Button>}
+                                  {isAdmin && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => delDocMutation.mutate(d.id)}><Trash2 className="h-3 w-3" /></Button>}
+                                </div>
+                              </td>
+                            </tr>
+                          )})}
+                        </tbody>
+                      </table>
+                    </div>}
+              </CardContent>
+            </Card>
+            </div>
+          )}
+
           {/* DOCUMENTS › Identity */}
           {/* Merged into the Documents tab */}
           {subTab === 'documents' && (
@@ -2571,22 +2644,10 @@ export function EmployeeProfile() {
                         : <p className="text-sm text-muted-foreground italic">No date override — policy applies</p>}
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground mb-0.5">Roster</p>
-                      {orgCtx?.roster
-                        ? <><p className="text-sm font-medium">{orgCtx.roster.name}</p><p className="text-xs text-muted-foreground">{orgCtx.roster.cycle_days}-day cycle{orgCtx.roster_source === 'site' ? ' · inherited from site' : ''}</p></>
-                        : <p className="text-sm text-muted-foreground italic">No roster</p>}
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-0.5">Rotation Policy</p>
-                      {orgCtx?.rotation_policy
-                        ? <><p className="text-sm font-medium">{orgCtx.rotation_policy.name}</p><p className="text-xs text-muted-foreground">{orgCtx.rotation_source === 'site' ? 'inherited from site' : 'employee-specific'}</p></>
-                        : <p className="text-sm text-muted-foreground italic">None</p>}
-                    </div>
-                    <div>
                       <p className="text-xs text-muted-foreground mb-0.5">Weekly Off</p>
                       <p className="text-sm text-muted-foreground italic">Via roster policy</p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground col-span-full">Roster &amp; rotation are set in <button className="underline hover:text-foreground" onClick={() => { setSubTab('workforce'); openJobEditor() }}>Edit Job Details</button>.</p>
+                    <p className="text-[11px] text-muted-foreground col-span-full">Roster &amp; rotation policy are shown and managed on the <button className="underline hover:text-foreground" onClick={() => { setSubTab('workforce') }}>Job &amp; Position</button> tab (Site &amp; Roster Assignment).</p>
                   </Grid2>
                 </CardContent>
               </Card>
@@ -3746,77 +3807,8 @@ export function EmployeeProfile() {
           </Dialog>
 
           {/* DOCUMENTS › Documents */}
-          {subTab === 'documents' && (
-            <div className="space-y-4">
-              {/* Missing mandatory docs warning */}
-              {(() => {
-                const uploadedTypes = (docsData?.data ?? []).map((d: any) => (d.doc_type ?? '').trim())
-                const missing = MANDATORY_DOC_TYPES.filter(
-                  t => !uploadedTypes.some((u: string) => u.toLowerCase().includes(t.toLowerCase()))
-                )
-                if (!missing.length) return null
-                return (
-                  <div className="flex items-start gap-2 p-3 rounded-md border border-warning/40 bg-warning/5">
-                    <AlertTriangle className="h-4 w-4 text-warning mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-semibold text-warning">Missing mandatory documents</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{missing.join(', ')}</p>
-                    </div>
-                  </div>
-                )
-              })()}
+          {/* DOCUMENTS › Files — moved to lead the Documents tab (see above) */}
 
-              <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold">Documents</CardTitle>
-                  {isAdmin && (
-                    <>
-                      <input ref={docInputRef} type="file" className="hidden"
-                        onChange={e => { const f = e.target.files?.[0]; if (!f) return; setDocFile(f); setDocMeta({ name: f.name.replace(/\.[^.]+$/, ''), doc_type: '' }); setDocMetaOpen(true); e.target.value = '' }} />
-                      <Button size="sm" className="h-7 text-xs gap-1" onClick={() => docInputRef.current?.click()}>
-                        <Plus className="h-3.5 w-3.5" />Upload
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                {!(docsData?.data?.length)
-                  ? <div className="px-6 pb-6"><EmptySection icon={Files} title="No documents" subtitle="Upload documents using the button above." /></div>
-                  : <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead><tr className="border-b border-border">{['Name','Type','Mandatory','Uploaded',''].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2">{h}</th>)}</tr></thead>
-                        <tbody>
-                          {docsData!.data.map((d: any) => {
-                            const isMandatory = MANDATORY_DOC_TYPES.some(
-                              t => (d.doc_type ?? '').toLowerCase().includes(t.toLowerCase())
-                            )
-                            return (
-                            <tr key={d.id} className="border-b border-border/50">
-                              <td className="px-4 py-2 font-medium">{d.name}</td>
-                              <td className="px-4 py-2 text-muted-foreground">{d.doc_type}</td>
-                              <td className="px-4 py-2">
-                                {isMandatory
-                                  ? <Badge variant="outline" className="rounded-full text-[9px] border-success text-success">Required</Badge>
-                                  : <span className="text-muted-foreground text-[10px]">—</span>}
-                              </td>
-                              <td className="px-4 py-2 text-muted-foreground">{fmtDate(d.created_at)}</td>
-                              <td className="px-4 py-2">
-                                <div className="flex gap-1">
-                                  {d.storage_path && <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => openSignedUrl(d.storage_path)}><Files className="h-3 w-3" /></Button>}
-                                  {isAdmin && <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => delDocMutation.mutate(d.id)}><Trash2 className="h-3 w-3" /></Button>}
-                                </div>
-                              </td>
-                            </tr>
-                          )})}
-                        </tbody>
-                      </table>
-                    </div>}
-              </CardContent>
-            </Card>
-            </div>
-          )}
 
           {/* DOCUMENTS › Passport & Visa */}
           {/* Merged into the Documents tab */}
