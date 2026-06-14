@@ -10,7 +10,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Play, CalendarClock } from 'lucide-react'
+import { Plus, Trash2, Play, Lock, CalendarClock } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
@@ -39,6 +39,7 @@ interface ReviewRow {
   auto_applied: number
   pending_absent_days: number
   carried_out: number
+  lop_days: number
   extra_pay_days: number
   status: string
 }
@@ -107,6 +108,16 @@ export function WeeklyOffCredit() {
       toast.success('Reconciliation complete', { description: d ? `${d.applied} applied · ${d.pending} pending · ${d.carried} carried` : undefined })
     },
     onError: (e: Error) => toast.error('Reconcile failed', { description: e.message }),
+  })
+
+  const finalize = useMutation({
+    mutationFn: () => api.post('/attendance/wo-credit/finalize', { year, month }),
+    onSuccess: (r: any) => {
+      qc.invalidateQueries({ queryKey: ['wo-credit', 'review'] })
+      const d = r?.data
+      toast.success('Month finalised', { description: d ? `${d.credited} carried-over · ${d.lop} LOP day(s)` : undefined })
+    },
+    onError: (e: Error) => toast.error('Finalise failed', { description: e.message }),
   })
 
   function newStructure() {
@@ -193,8 +204,11 @@ export function WeeklyOffCredit() {
               <select value={month} onChange={e => setMonth(+e.target.value)} className="h-8 text-xs border border-border rounded-md px-2 bg-background text-foreground">
                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
-              <Button size="sm" onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
+              <Button size="sm" variant="outline" onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
                 <Play className="h-3.5 w-3.5 mr-1" />Run now
+              </Button>
+              <Button size="sm" onClick={() => finalize.mutate()} disabled={finalize.isPending}>
+                <Lock className="h-3.5 w-3.5 mr-1" />Finalise
               </Button>
             </div>
           }
@@ -216,7 +230,9 @@ export function WeeklyOffCredit() {
                     <th className="text-right py-2 px-2">Applied</th>
                     <th className="text-right py-2 px-2">Pending</th>
                     <th className="text-right py-2 px-2">Carried</th>
+                    <th className="text-right py-2 px-2">LOP</th>
                     <th className="text-right py-2 px-2">Extra pay</th>
+                    <th className="text-center py-2 px-2">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -229,7 +245,11 @@ export function WeeklyOffCredit() {
                       <td className="py-2 px-2 text-right text-success">{r.auto_applied}</td>
                       <td className="py-2 px-2 text-right text-amber-600">{r.pending_absent_days}</td>
                       <td className="py-2 px-2 text-right">{r.carried_out}</td>
+                      <td className="py-2 px-2 text-right text-destructive">{r.lop_days}</td>
                       <td className="py-2 px-2 text-right">{r.extra_pay_days}</td>
+                      <td className="py-2 px-2 text-center">
+                        <Badge variant={r.status === 'finalized' ? 'secondary' : 'outline'} className="text-[10px]">{r.status}</Badge>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

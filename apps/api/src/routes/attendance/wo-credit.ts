@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { reconcileTenantMonth } from '../../lib/wo-credit-reconciler.js'
+import { reconcileTenantMonth, finalizeTenantMonth } from '../../lib/wo-credit-reconciler.js'
 
 const ladderRowSchema = z.object({
   present_days: z.number().int().min(1).max(31),
@@ -72,15 +72,37 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     return reply.send({ data: structs.map(s => ({ ...s, ladder: ladders.get(s.id) ?? [] })) })
   })
 
+  // Ensure a paid "Weekly Off Credit" leave type exists for the tenant so carried
+  // credit can be redeemed via the normal leave-request flow. Returns its id.
+  async function ensureWoLeaveType(tenantId: string): Promise<string | null> {
+    const { data: existing } = await fastify.supabase
+      .from('leave_types')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('name', 'Weekly Off Credit')
+      .maybeSingle()
+    if ((existing as any)?.id) return (existing as any).id
+    const { data: created, error } = await fastify.supabase
+      .from('leave_types')
+      .insert({ tenant_id: tenantId, name: 'Weekly Off Credit', is_paid: true, is_active: true })
+      .select('id')
+      .single()
+    if (error) return null
+    return (created as any).id
+  }
+
   // ── POST /structures ──────────────────────────────────────────────────────
   fastify.post('/wo-credit/structures', hrAdminAuth, async (req: any, reply) => {
     const parsed = structureSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     const { ladder, ...fields } = parsed.data
 
+    // Auto-provision the redemption leave type if the caller didn't pick one.
+    const woLeaveTypeId = fields.wo_leave_type_id ?? await ensureWoLeaveType(req.tenantId)
+
     const { data, error } = await fastify.supabase
       .from('wo_credit_structure')
-      .insert({ ...fields, tenant_id: req.tenantId })
+      .insert({ ...fields, wo_leave_type_id: woLeaveTypeId, tenant_id: req.tenantId })
       .select('*')
       .single()
     if (error) {
@@ -172,6 +194,29 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     } catch (err: unknown) {
       fastify.log.error({ err }, 'wo-credit/reconcile error')
       return reply.code(500).send({ error: 'RECONCILE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  })
+
+  // ── POST /finalize ─────────────────────────────────────────────────────────
+  // Month-close: credit leftover credit into the WO leave type (carry-over with
+  // expiry), record LOP for uncovered absences, and lock the month. Idempotent.
+  fastify.post('/wo-credit/finalize', hrAdminAuth, async (req: any, reply) => {
+    const now = new Date()
+    const body = (req.body ?? {}) as { year?: number; month?: number }
+    const year  = body.year  ?? now.getUTCFullYear()
+    const month = body.month ?? now.getUTCMonth() + 1
+    try {
+      const results = await finalizeTenantMonth(fastify.supabase, req.tenantId, year, month)
+      const summary = {
+        employees: results.length,
+        carried:   results.reduce((s, r) => s + r.carried_out, 0),
+        lop:       results.reduce((s, r) => s + r.lop_days, 0),
+        credited:  results.filter(r => r.credited).length,
+      }
+      return reply.send({ data: summary })
+    } catch (err: unknown) {
+      fastify.log.error({ err }, 'wo-credit/finalize error')
+      return reply.code(500).send({ error: 'FINALIZE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
     }
   })
 }

@@ -46,6 +46,7 @@ export interface WoStructure {
   rollover_expiry_days: number
   holiday_work_reward:  'wo_credit' | 'extra_pay'
   overflow_terminal:    'lop'
+  wo_leave_type_id:     string | null
 }
 interface LadderRow { present_days: number; wo_credit: number }
 
@@ -88,7 +89,7 @@ export async function resolveWoEmployees(
   const structIds = [...new Set(rosterToStruct.values())]
   const { data: structRows } = await supabase
     .from('wo_credit_structure')
-    .select('id, name, monthly_cap, rollover_expiry_days, holiday_work_reward, overflow_terminal, is_active')
+    .select('id, name, monthly_cap, rollover_expiry_days, holiday_work_reward, overflow_terminal, wo_leave_type_id, is_active')
     .eq('tenant_id', tenantId)
     .in('id', structIds)
   const structById = new Map<string, WoStructure>()
@@ -293,17 +294,125 @@ export async function reconcileTenantMonth(
   return results
 }
 
+// ── Month-close finalisation (Phase 2) ──────────────────────────────────────
+// Credits leftover current-month credit into the WO leave type (carry-over with
+// rollover expiry) for later manual redemption, records LOP for uncovered
+// absences, and locks the snapshot. Idempotent — a finalized snapshot is skipped.
+
+export interface WoFinalizeResult {
+  employee_id:  string
+  carried_out:  number
+  lop_days:     number
+  credited:     boolean
+}
+
+export async function finalizeEmployeeMonth(
+  supabase: SupabaseClient,
+  tenantId: string,
+  emp: EmployeeWo,
+  year: number,
+  month: number,
+  graceDays: number,
+): Promise<WoFinalizeResult> {
+  // Refresh to the final state first.
+  const recon = await reconcileEmployeeMonth(supabase, tenantId, emp, year, month, graceDays)
+
+  const { data: snap } = await supabase
+    .from('wo_credit_monthly')
+    .select('id, status, carried_out, pending_absent_days')
+    .eq('tenant_id', tenantId).eq('employee_id', emp.employeeId)
+    .eq('year', year).eq('month', month)
+    .maybeSingle()
+
+  // Already finalized → no double-credit.
+  if ((snap as any)?.status === 'finalized') {
+    return { employee_id: emp.employeeId, carried_out: recon.carried_out, lop_days: recon.pending_absent_days, credited: false }
+  }
+
+  const carriedOut = recon.carried_out
+  const lopDays    = recon.pending_absent_days
+  let credited = false
+
+  // ── Carry-over: credit leftover into the WO leave type (ledger + balance) ──
+  if (carriedOut > 0 && emp.structure.wo_leave_type_id) {
+    const monthEnd  = iso(year, month, daysInMonth(year, month))
+    const expiresOn = new Date(new Date(`${monthEnd}T12:00:00Z`).getTime() + emp.structure.rollover_expiry_days * 86_400_000)
+      .toISOString().slice(0, 10)
+    const { error: ledgerErr } = await supabase
+      .from('leave_accrual_ledger')
+      .upsert({
+        tenant_id:     tenantId,
+        employee_id:   emp.employeeId,
+        leave_type_id: emp.structure.wo_leave_type_id,
+        accrual_type:  'wo_credit',
+        days:          carriedOut,
+        year,
+        accrued_on:    monthEnd,
+        expires_on:    expiresOn,
+        is_expired:    false,
+        notes:         `WO credit carry-over for ${year}-${String(month).padStart(2, '0')}`,
+      }, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+    if (!ledgerErr) {
+      credited = true
+      try {
+        await supabase.rpc('credit_leave_balance', {
+          p_tenant_id: tenantId, p_employee_id: emp.employeeId,
+          p_leave_type_id: emp.structure.wo_leave_type_id, p_days: carriedOut, p_year: year,
+        })
+      } catch { /* non-fatal if RPC absent */ }
+    }
+  }
+
+  // ── Lock the snapshot, record LOP ──
+  await supabase
+    .from('wo_credit_monthly')
+    .update({ status: 'finalized', lop_days: lopDays, updated_at: new Date().toISOString() })
+    .eq('tenant_id', tenantId).eq('employee_id', emp.employeeId).eq('year', year).eq('month', month)
+
+  return { employee_id: emp.employeeId, carried_out: carriedOut, lop_days: lopDays, credited }
+}
+
+export async function finalizeTenantMonth(
+  supabase: SupabaseClient, tenantId: string, year: number, month: number,
+): Promise<WoFinalizeResult[]> {
+  const employees = await resolveWoEmployees(supabase, tenantId)
+  if (!employees.length) return []
+  const graceDays = await getGraceDays(supabase, tenantId)
+  const out: WoFinalizeResult[] = []
+  for (const emp of employees) {
+    try {
+      out.push(await finalizeEmployeeMonth(supabase, tenantId, emp, year, month, graceDays))
+    } catch (e) {
+      console.error(`[wo-credit] finalize employee=${emp.employeeId} error:`, (e as Error).message)
+    }
+  }
+  return out
+}
+
 // ── Scheduler ───────────────────────────────────────────────────────────────
 async function tick(supabase: SupabaseClient): Promise<void> {
   const now = new Date()
   const year = now.getUTCFullYear()
   const month = now.getUTCMonth() + 1
+  const dayOfMonth = now.getUTCDate()
+
+  // Once the new month is past the grace window (~10th), finalise the prior month.
+  const finalizePrior = dayOfMonth >= 10
+  const priorMonth = month === 1 ? 12 : month - 1
+  const priorYear  = month === 1 ? year - 1 : year
+
   const { data: tenants } = await supabase.from('tenants').select('id')
   for (const t of (tenants ?? []) as any[]) {
     try {
       const res = await reconcileTenantMonth(supabase, t.id, year, month)
       const applied = res.reduce((s, r) => s + r.auto_applied, 0)
       if (applied > 0) console.log(`[wo-credit] tenant=${t.id} applied ${applied} weekly-off(s) across ${res.length} employees`)
+
+      if (finalizePrior) {
+        const fin = await finalizeTenantMonth(supabase, t.id, priorYear, priorMonth)
+        const credited = fin.filter(f => f.credited).length
+        if (credited > 0) console.log(`[wo-credit] tenant=${t.id} finalised ${priorYear}-${priorMonth}: carried ${fin.reduce((s, f) => s + f.carried_out, 0)} for ${credited} employees`)
+      }
     } catch (e) {
       console.error(`[wo-credit] tenant=${t.id} error:`, (e as Error).message)
     }
