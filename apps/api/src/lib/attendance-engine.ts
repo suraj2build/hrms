@@ -48,13 +48,14 @@
  *   Otherwise the unclosed session contributes 0 minutes.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { writeAuditLogs }                    from './attendance-processor.js'
+import { writeAuditLogs, writeComputeLogs }  from './attendance-processor.js'
 import { eventService }                      from './event-service.js'
 import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-service.js'
 import { resolveEmployeeOrgContext, getWeeklyOffDays } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
 import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
+import { isShiftAttributionEnabled } from './attendance-flags.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
 import { resolveLeaveDayFraction }                      from './leave-engine.js'
 
@@ -603,77 +604,6 @@ async function fetchTenantTz(supabase: SupabaseClient, tenantId: string): Promis
   return (data as { timezone?: string } | null)?.timezone ?? 'UTC'
 }
 
-async function resolveShift(
-  supabase:   SupabaseClient,
-  tenantId:   string,
-  employeeId: string,
-  date:       string,
-): Promise<ShiftMeta | null> {
-  // 1. Roster override for the specific local date
-  const { data: rosterRow } = await supabase
-    .from('shift_roster')
-    .select('shift_id')
-    .eq('tenant_id', tenantId)
-    .eq('employee_id', employeeId)
-    .eq('date', date)
-    .maybeSingle()
-
-  let shiftId: string | null = (rosterRow as { shift_id: string } | null)?.shift_id ?? null
-
-  // 2. Rotation Policy — employee override → site default → condition from date
-  if (!shiftId) {
-    const rotMeta = await resolveViaRotationPolicy(supabase, tenantId, employeeId, date)
-    if (rotMeta) {
-      return {
-        startTime:    rotMeta.startTime,
-        endTime:      rotMeta.endTime,
-        graceMinutes: rotMeta.graceMinutes,
-        isNightShift: rotMeta.isNightShift,
-        durationMin:  rotMeta.durationMin,
-      }
-    }
-  }
-
-  // 3. Fall back to standing assignment
-  if (!shiftId) {
-    const { data: standing } = await supabase
-      .from('employee_shifts')
-      .select('shift_id')
-      .eq('tenant_id', tenantId)
-      .eq('employee_id', employeeId)
-      .eq('is_current', true)
-      .maybeSingle()
-    shiftId = (standing as { shift_id: string } | null)?.shift_id ?? null
-  }
-
-  if (!shiftId) return null
-
-  // 4. Fetch shift details
-  const { data: shift } = await supabase
-    .from('shifts')
-    .select('id, start_time, end_time, grace_minutes, is_night_shift')
-    .eq('id', shiftId)
-    .maybeSingle()
-
-  if (!shift) return null
-
-  const s = shift as {
-    start_time:     string
-    end_time:       string
-    grace_minutes:  number
-    is_night_shift: boolean
-  }
-
-  return {
-    startTime:    s.start_time,
-    endTime:      s.end_time,
-    graceMinutes: s.grace_minutes ?? DEFAULT_POLICY.grace_minutes,
-    isNightShift: s.is_night_shift ?? false,
-    // weeklyOffDays removed — shifts carry timing rules only; use roster for weekly-off
-    durationMin:  shiftDurationMinutes(s.start_time, s.end_time, s.is_night_shift ?? false),
-  }
-}
-
 /**
  * Fetch punch logs for a given employee on a given tenant-local date.
  *
@@ -850,7 +780,9 @@ export async function computeDay(
   const shift = resolvedShiftAttr ? toShiftMeta(resolvedShiftAttr) : null
 
   // Attribution snapshot — spread into every return to persist alongside the row.
-  const shiftAttribution = resolvedShiftAttr ? {
+  // Gated by the AHI-1 rollout flag: when disabled the columns are left null,
+  // but shift resolution itself is unchanged (the flag only gates persistence).
+  const shiftAttribution = (resolvedShiftAttr && isShiftAttributionEnabled()) ? {
     expected_shift_id:       resolvedShiftAttr.shift_id,
     shift_start_time:        resolvedShiftAttr.start_time,
     shift_end_time:          resolvedShiftAttr.end_time,
@@ -1317,6 +1249,44 @@ export async function recomputeRange(
     if (error) {
       throw new Error(`attendance_daily batch upsert failed: ${error.message}`)
     }
+
+    // ── Compute-log parity (AHI-1) ───────────────────────────────────────────
+    // The batch processor records a compute-log entry per computed day with the
+    // shift attribution used. The single-day recompute path must do the same so
+    // the audit trail is identical regardless of which path produced the row.
+    // Fire-and-forget — writeComputeLogs never throws.
+    const attributionEnabled = isShiftAttributionEnabled()
+    await writeComputeLogs(
+      supabase,
+      tenant_id,
+      safeComputed.map((r) => ({
+        employee_id: r.employee_id,
+        date:        r.date,
+        inputs: {
+          shift_meta: r.expected_shift_id ? {
+            shift_id:           attributionEnabled ? (r.expected_shift_id ?? null) : null,
+            start_time:         r.shift_start_time ?? null,
+            end_time:           r.shift_end_time ?? null,
+            grace_minutes:      r.shift_grace_minutes ?? null,
+            is_night_shift:     r.shift_is_night_shift ?? null,
+            resolution_source:  attributionEnabled ? (r.resolution_source ?? null) : null,
+            rotation_policy_id: attributionEnabled ? (r.rotation_policy_id ?? null) : null,
+          } : null,
+        },
+        result: {
+          status:               r.status,
+          work_hours:           r.work_hours,
+          late_minutes:         r.late_minutes,
+          overtime_minutes:     r.overtime_minutes,
+          is_payable:           r.is_payable,
+          day_fraction:         r.day_fraction,
+          worked_on_holiday:    r.worked_on_holiday,
+          worked_on_weekly_off: r.worked_on_weekly_off,
+        },
+        reason: r.reason,
+        source: 'recompute' as const,
+      })),
+    )
 
     // Auto-generate pending comp-off for any worked-on-weekly-off / worked-on-holiday
     // day. Idempotent (unique on tenant_id,employee_id,worked_date) and gated by HR

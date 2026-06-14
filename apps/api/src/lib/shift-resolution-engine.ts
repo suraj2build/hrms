@@ -103,17 +103,21 @@ export async function resolveShiftWithAttribution(
   }
 
   // ── Priority 2: rotation policy (employee override → site default) ────────
+  // One query fetches everything the lower priorities also need: the site's
+  // default rotation policy AND its default shift (snapshot), so the
+  // site_default fallback below never has to re-query.
   const { data: empRow } = await supabase
     .from('employees')
-    .select('rotation_policy_id, sites!employees_site_id_fkey(default_rotation_policy_id)')
+    .select('site_id, rotation_policy_id, sites!employees_site_id_fkey(default_rotation_policy_id, default_shift_id, shifts!sites_default_shift_id_fkey(id, name, start_time, end_time, grace_minutes, is_night_shift))')
     .eq('id', employeeId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
   const emp = empRow as any
+  const empSite = emp ? (Array.isArray(emp.sites) ? emp.sites[0] : emp.sites) : null
   const rotPolicyId: string | null =
     emp?.rotation_policy_id ??
-    emp?.sites?.default_rotation_policy_id ??
+    empSite?.default_rotation_policy_id ??
     null
 
   if (rotPolicyId) {
@@ -150,21 +154,10 @@ export async function resolveShiftWithAttribution(
   }
 
   // ── Priority 4: sites.default_shift_id (deprecated legacy fallback) ───────
-  if (emp?.sites) {
-    // Re-query site for default_shift_id since the first query only fetched rotation col
-    const siteRow = empRow as any
-    const siteId = siteRow?.site_id ?? null
-    if (siteId) {
-      const { data: site } = await supabase
-        .from('sites')
-        .select('default_shift_id, shifts!sites_default_shift_id_fkey(id, name, start_time, end_time, grace_minutes, is_night_shift)')
-        .eq('id', siteId)
-        .maybeSingle()
-
-      const s = (site as any)?.shifts as RawShift | null
-      if (s) return buildResolved(s, 'site_default')
-    }
-  }
+  // Uses the site default shift already embedded by the Priority-2 query —
+  // identical to the batch resolver's site_default branch.
+  const siteShift = empSite ? (Array.isArray(empSite.shifts) ? empSite.shifts[0] : empSite.shifts) as RawShift | null : null
+  if (siteShift) return buildResolved(siteShift, 'site_default')
 
   return null
 }

@@ -34,6 +34,7 @@ import {
   type EmployeeOrgContext,
 } from './org-context.js'
 import { resolveShiftBatch, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
+import { isShiftAttributionEnabled } from './attendance-flags.js'
 
 // ── Shift defaults (no shift master yet) ──────────────────────────────────────
 const SHIFT_START_HOUR   = 9   // 09:00
@@ -287,7 +288,7 @@ function computeDaily(
 // Stores per-employee inputs, result, and derivation reason for each
 // computeDaily() invocation.  Fire-and-forget — never throws.
 
-async function writeComputeLogs(
+export async function writeComputeLogs(
   supabase:  SupabaseClient,
   tenantId:  string,
   rows: Array<{
@@ -676,6 +677,11 @@ export async function processAttendanceForDate(
   }
   const computeLogRows: ComputeLogEntry[] = []
 
+  // AHI-1 rollout flag — when off, the shift-attribution snapshot is not
+  // persisted (columns left null) and is omitted from the compute log. Shift
+  // resolution above is unaffected; this only gates the new write behaviour.
+  const attributionEnabled = isShiftAttributionEnabled()
+
   for (const [empId, logs] of byEmployee) {
     const sorted   = [...logs].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -731,7 +737,7 @@ export async function processAttendanceForDate(
     allLogRows.push(...sessions)
 
     // Inject shift attribution snapshot into the daily row before persisting
-    if (shiftAttr.shift_id) {
+    if (attributionEnabled && shiftAttr.shift_id) {
       daily.expected_shift_id       = shiftAttr.shift_id
       daily.shift_start_time        = shiftAttr.start_time ?? null
       daily.shift_end_time          = shiftAttr.end_time ?? null
@@ -753,13 +759,13 @@ export async function processAttendanceForDate(
         sessions_count:    sessions.length,
         complete_sessions: sessions.filter((s) => s.is_complete).length,
         shift_meta:        shiftMeta ? {
-          shift_id:            shiftAttr.shift_id ?? null,
+          shift_id:            attributionEnabled ? (shiftAttr.shift_id ?? null) : null,
           start_time:          shiftMeta.startTime,
           end_time:            shiftMeta.endTime,
           grace_minutes:       shiftMeta.graceMinutes,
           is_night_shift:      shiftMeta.isNightShift,
-          resolution_source:   shiftAttr.resolution_source ?? null,
-          rotation_policy_id:  shiftAttr.rotation_policy_id ?? null,
+          resolution_source:   attributionEnabled ? (shiftAttr.resolution_source ?? null) : null,
+          rotation_policy_id:  attributionEnabled ? (shiftAttr.rotation_policy_id ?? null) : null,
         } : null,
         day_of_week: dayOfWeek,
         is_holiday:       orgIsHoliday(holidays, empCtx),
