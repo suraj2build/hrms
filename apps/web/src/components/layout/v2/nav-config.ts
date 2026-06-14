@@ -237,6 +237,8 @@ export const DOMAINS: Domain[] = [
       '/admin/recruitment',
       '/admin/workforce/center',
       '/admin/workforce/certifications',
+      '/admin/workforce/expiry-management',
+      '/admin/benefits',
       '/admin/documents',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
