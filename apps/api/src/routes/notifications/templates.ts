@@ -5,20 +5,20 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import {
+  NOTIFICATION_CATEGORIES,
+  NOTIFICATION_SEVERITIES,
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_VARIABLES,
+  renderNotificationTemplate,
+  resolveNotificationVariables,
+  extractPlaceholders,
+} from '../../lib/notification-catalog.js'
 
-const TEMPLATE_CATEGORIES = [
-  'payroll',
-  'leave',
-  'attendance',
-  'hr_action',
-  'compliance',
-  'onboarding',
-  'offboarding',
-  'general',
-  'system',
-] as const
-
-const TEMPLATE_SEVERITIES = ['info', 'warning', 'error', 'success'] as const
+// SINGLE SOURCE OF TRUTH lives in lib/notification-catalog.ts — these aliases
+// keep the zod enums in lockstep with the catalog (and the DB CHECK constraints).
+const TEMPLATE_CATEGORIES = NOTIFICATION_CATEGORIES
+const TEMPLATE_SEVERITIES = NOTIFICATION_SEVERITIES
 
 export default async function notificationTemplatesRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -30,6 +30,21 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
     }
     done()
   }
+
+  // ── GET /notifications/templates/meta ──────────────────────────────────────
+  // Single source of truth for the template editor: categories, severities,
+  // channels, and the variable catalog (for the placeholder picker).
+  fastify.get('/meta', auth, async (_req: any, reply) => {
+    return reply.send({
+      data: {
+        categories: NOTIFICATION_CATEGORIES,
+        severities: NOTIFICATION_SEVERITIES,
+        channels:   NOTIFICATION_CHANNELS,
+        variables:  NOTIFICATION_VARIABLES,
+      },
+    })
+  })
+
 
   // ── GET /notifications/templates/channels ──────────────────────────────────
   fastify.get('/channels', auth, async (req: any, reply) => {
@@ -120,9 +135,13 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Auto-derive placeholders from the actual subject/body so the column is a
+    // true reflection of which catalog variables the template uses.
+    const placeholders = extractPlaceholders(parsed.data.subject, parsed.data.body_template)
+
     const { data, error } = await fastify.supabase
       .from('notification_templates')
-      .insert({ ...parsed.data, tenant_id: req.tenantId, is_active: true })
+      .insert({ ...parsed.data, placeholders, tenant_id: req.tenantId, is_active: true })
       .select()
       .single()
 
@@ -160,9 +179,15 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Re-derive placeholders whenever subject or body is edited.
+    const updatePayload: Record<string, unknown> = { ...parsed.data, updated_at: new Date().toISOString() }
+    if (parsed.data.subject !== undefined || parsed.data.body_template !== undefined) {
+      updatePayload.placeholders = extractPlaceholders(parsed.data.subject, parsed.data.body_template)
+    }
+
     const { data, error } = await fastify.supabase
       .from('notification_templates')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select()
@@ -245,6 +270,16 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       body = (template as any).body_template
       subject = (template as any).subject ?? null
     }
+
+    // Substitute {{variables}} using the catalog resolver. Event-specific values
+    // (status, leave_type, …) can be passed in `metadata`; employee/company/date
+    // are resolved from the recipient + tenant.
+    const values = await resolveNotificationVariables(fastify.supabase, req.tenantId, {
+      employeeId: parsed.data.recipient_employee_id ?? null,
+      extra:      parsed.data.metadata ?? undefined,
+    })
+    body    = renderNotificationTemplate(body, values)
+    subject = subject ? renderNotificationTemplate(subject, values) : subject
 
     const { data, error } = await fastify.supabase
       .from('notification_log')

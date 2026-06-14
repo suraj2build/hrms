@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Mail, Phone, Bell, Send, Link, Plus, Edit2 } from 'lucide-react'
@@ -29,12 +29,32 @@ interface NotifTemplate {
   id: string
   template_code: string
   template_name: string
-  channel_type: string
-  event_trigger: string
-  subject_template: string | null
+  category: string
+  severity: string
+  subject: string | null
   body_template: string
+  available_channels: string[]
+  placeholders: string[]
+  has_action_cta: boolean
+  cta_label: string | null
+  cta_route: string | null
   is_active: boolean
   created_at: string
+}
+
+interface NotifVariable {
+  key: string
+  label: string
+  description: string
+  sample: string
+  scope: string
+}
+
+interface TemplateMeta {
+  categories: string[]
+  severities: string[]
+  channels: string[]
+  variables: NotifVariable[]
 }
 
 interface NotifLog {
@@ -59,7 +79,6 @@ interface DigestStatusRow {
   created_at: string
 }
 
-const CHANNEL_TYPES: ChannelType[] = ['email', 'sms', 'in_app', 'push', 'webhook']
 const LOG_STATUSES = ['all', 'queued', 'sent', 'failed', 'bounced'] as const
 
 function channelIcon(type: string) {
@@ -86,20 +105,28 @@ function logStatusBadge(status: NotifLog['status']) {
 interface TemplateForm {
   template_code: string
   template_name: string
-  channel_type: ChannelType
-  event_trigger: string
-  subject_template: string
+  category: string
+  severity: string
+  subject: string
   body_template: string
+  available_channels: string[]
+  has_action_cta: boolean
+  cta_label: string
+  cta_route: string
   is_active: boolean
 }
 
 const defaultForm: TemplateForm = {
   template_code: '',
   template_name: '',
-  channel_type: 'email',
-  event_trigger: '',
-  subject_template: '',
+  category: 'general',
+  severity: 'info',
+  subject: '',
   body_template: '',
+  available_channels: ['in_app'],
+  has_action_cta: false,
+  cta_label: '',
+  cta_route: '',
   is_active: true,
 }
 
@@ -110,12 +137,39 @@ export function NotificationTemplates() {
   const [editingTemplate, setEditingTemplate] = useState<NotifTemplate | null>(null)
   const [form, setForm] = useState<TemplateForm>(defaultForm)
   const [logStatusFilter, setLogStatusFilter] = useState<string>('all')
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
 
   const { data: templates = [], isLoading: tLoading } = useQuery<NotifTemplate[]>({
     queryKey: ['notifications', 'templates'],
     queryFn: () => api.get('/notifications/templates').then((r: any) => r.data),
     enabled: activeTab === 'templates',
   })
+
+  // Single source of truth for the editor — categories, severities, channels, variables.
+  const { data: meta } = useQuery<TemplateMeta>({
+    queryKey: ['notifications', 'template-meta'],
+    queryFn: () => api.get('/notifications/templates/meta').then((r: any) => r.data),
+    staleTime: Infinity,
+  })
+
+  // Insert a {{variable}} token at the body textarea cursor (or append).
+  function insertVariable(key: string) {
+    const token = `{{${key}}}`
+    const el = bodyRef.current
+    if (!el) {
+      setForm(f => ({ ...f, body_template: f.body_template + token }))
+      return
+    }
+    const start = el.selectionStart ?? el.value.length
+    const end   = el.selectionEnd ?? el.value.length
+    const next  = el.value.slice(0, start) + token + el.value.slice(end)
+    setForm(f => ({ ...f, body_template: next }))
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + token.length
+      el.setSelectionRange(pos, pos)
+    })
+  }
 
   const { data: channels = [], isLoading: cLoading } = useQuery<NotifChannel[]>({
     queryKey: ['notifications', 'channels'],
@@ -177,10 +231,14 @@ export function NotificationTemplates() {
     setForm({
       template_code: t.template_code,
       template_name: t.template_name,
-      channel_type: t.channel_type as ChannelType,
-      event_trigger: t.event_trigger,
-      subject_template: t.subject_template ?? '',
+      category: t.category,
+      severity: t.severity ?? 'info',
+      subject: t.subject ?? '',
       body_template: t.body_template,
+      available_channels: t.available_channels?.length ? t.available_channels : ['in_app'],
+      has_action_cta: t.has_action_cta ?? false,
+      cta_label: t.cta_label ?? '',
+      cta_route: t.cta_route ?? '',
       is_active: t.is_active,
     })
     setDialogOpen(true)
@@ -249,8 +307,8 @@ export function NotificationTemplates() {
                   <tr className="border-b border-border text-muted-foreground">
                     <th className="text-left py-2 px-3 font-medium">Code</th>
                     <th className="text-left py-2 px-3 font-medium">Name</th>
-                    <th className="text-left py-2 px-3 font-medium">Channel</th>
-                    <th className="text-left py-2 px-3 font-medium">Event Trigger</th>
+                    <th className="text-left py-2 px-3 font-medium">Category</th>
+                    <th className="text-left py-2 px-3 font-medium">Channels</th>
                     <th className="text-left py-2 px-3 font-medium">Active</th>
                     <th className="text-left py-2 px-3 font-medium">Actions</th>
                   </tr>
@@ -261,12 +319,16 @@ export function NotificationTemplates() {
                       <td className="py-2 px-3 font-mono text-xs">{t.template_code}</td>
                       <td className="py-2 px-3 text-foreground">{t.template_name}</td>
                       <td className="py-2 px-3">
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          {channelIcon(t.channel_type)}
-                          {t.channel_type}
+                        <Badge variant="secondary" className="capitalize">{t.category}</Badge>
+                      </td>
+                      <td className="py-2 px-3">
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                          {(t.available_channels ?? []).map(c => (
+                            <span key={c} title={c}>{channelIcon(c)}</span>
+                          ))}
+                          {(!t.available_channels || t.available_channels.length === 0) && <span className="text-xs">—</span>}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-muted-foreground">{t.event_trigger}</td>
                       <td className="py-2 px-3">
                         <button
                           onClick={() => updateTemplate.mutate({ id: t.id, body: { is_active: !t.is_active } })}
@@ -467,7 +529,7 @@ export function NotificationTemplates() {
 
       {/* Template Dialog */}
       <Dialog open={dialogOpen} onOpenChange={open => { if (!open) closeDialog() }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTemplate ? 'Edit Template' : 'Add Template'}</DialogTitle>
           </DialogHeader>
@@ -495,68 +557,145 @@ export function NotificationTemplates() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Channel Type *</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Category *</label>
                 <select
-                  value={form.channel_type}
-                  onChange={e => setForm(f => ({ ...f, channel_type: e.target.value as ChannelType }))}
-                  className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground"
+                  value={form.category}
+                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground capitalize"
                   required
                 >
-                  {CHANNEL_TYPES.map(c => (
+                  {(meta?.categories ?? ['general']).map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Event Trigger *</label>
-                <Input
-                  value={form.event_trigger}
-                  onChange={e => setForm(f => ({ ...f, event_trigger: e.target.value }))}
-                  placeholder="e.g. leave.approved"
-                  required
-                />
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Severity</label>
+                <select
+                  value={form.severity}
+                  onChange={e => setForm(f => ({ ...f, severity: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground capitalize"
+                >
+                  {(meta?.severities ?? ['info']).map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Subject Template (optional)</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Delivery Channels</label>
+              <div className="flex flex-wrap gap-2">
+                {(meta?.channels ?? ['in_app', 'email']).map(c => {
+                  const on = form.available_channels.includes(c)
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        available_channels: on
+                          ? f.available_channels.filter(x => x !== c)
+                          : [...f.available_channels, c],
+                      }))}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 text-xs rounded-full border px-3 py-1.5 transition-colors capitalize',
+                        on ? 'bg-primary/10 border-primary/40 text-primary' : 'border-border text-muted-foreground hover:bg-muted/40',
+                      )}
+                    >
+                      {channelIcon(c)} {c.replace('_', '-')}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Subject (optional)</label>
               <Input
-                value={form.subject_template}
-                onChange={e => setForm(f => ({ ...f, subject_template: e.target.value }))}
+                value={form.subject}
+                onChange={e => setForm(f => ({ ...f, subject: e.target.value }))}
                 placeholder="e.g. Your leave has been {{status}}"
               />
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Body Template *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-muted-foreground block">Body *</label>
+                <span className="text-[10px] text-muted-foreground">Click a variable to insert it</span>
+              </div>
+              {/* Variable picker — single source of truth from GET /meta */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {(meta?.variables ?? []).map(v => (
+                  <button
+                    key={v.key}
+                    type="button"
+                    title={`${v.description} (e.g. ${v.sample})`}
+                    onClick={() => insertVariable(v.key)}
+                    className="text-[11px] font-mono rounded border border-border bg-muted/40 px-1.5 py-0.5 text-foreground hover:bg-primary/10 hover:border-primary/40 transition-colors"
+                  >
+                    {`{{${v.key}}}`}
+                  </button>
+                ))}
+              </div>
               <textarea
+                ref={bodyRef}
                 value={form.body_template}
                 onChange={e => setForm(f => ({ ...f, body_template: e.target.value }))}
-                placeholder="Hi {{employee_name}}, your leave request..."
-                rows={4}
+                placeholder="Hi {{employee_name}}, your {{leave_type}} request has been {{status}}."
+                rows={5}
                 required
                 className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
-                className={cn(
-                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
-                  form.is_active ? 'bg-primary' : 'bg-muted'
-                )}
-              >
-                <span
-                  className={cn(
-                    'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform',
-                    form.is_active ? 'translate-x-4' : 'translate-x-1'
-                  )}
+            {/* Optional call-to-action */}
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer mb-2">
+                <input
+                  type="checkbox"
+                  checked={form.has_action_cta}
+                  onChange={e => setForm(f => ({ ...f, has_action_cta: e.target.checked }))}
+                  className="h-4 w-4 rounded accent-primary"
                 />
-              </button>
-              <span className="text-sm text-foreground">Active</span>
+                <span className="text-xs font-medium text-foreground">Include an action button (CTA)</span>
+              </label>
+              {form.has_action_cta && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    value={form.cta_label}
+                    onChange={e => setForm(f => ({ ...f, cta_label: e.target.value }))}
+                    placeholder="Button label — e.g. View Request"
+                  />
+                  <Input
+                    value={form.cta_route}
+                    onChange={e => setForm(f => ({ ...f, cta_route: e.target.value }))}
+                    placeholder="Route — e.g. /ess/leave"
+                  />
+                </div>
+              )}
             </div>
+
+            {editingTemplate && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
+                  className={cn(
+                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
+                    form.is_active ? 'bg-primary' : 'bg-muted'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform',
+                      form.is_active ? 'translate-x-4' : 'translate-x-1'
+                    )}
+                  />
+                </button>
+                <span className="text-sm text-foreground">Active</span>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={closeDialog}>Cancel</Button>
