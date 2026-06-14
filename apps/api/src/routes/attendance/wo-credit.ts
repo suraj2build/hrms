@@ -60,7 +60,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   }
 
   // ── GET /structures ─────────────────────────────────────────────────────────
-  fastify.get('/wo-credit/structures', auth, async (req: any, reply) => {
+  fastify.get('/attendance/wo-credit/structures', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('wo_credit_structure')
       .select('*')
@@ -93,7 +93,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   }
 
   // ── POST /structures ──────────────────────────────────────────────────────
-  fastify.post('/wo-credit/structures', hrAdminAuth, async (req: any, reply) => {
+  fastify.post('/attendance/wo-credit/structures', hrAdminAuth, async (req: any, reply) => {
     const parsed = structureSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     const { ladder, ...fields } = parsed.data
@@ -115,7 +115,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   })
 
   // ── PUT /structures/:id ────────────────────────────────────────────────────
-  fastify.put('/wo-credit/structures/:id', hrAdminAuth, async (req: any, reply) => {
+  fastify.put('/attendance/wo-credit/structures/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const parsed = structureSchema.partial().safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -137,7 +137,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   })
 
   // ── DELETE /structures/:id ─────────────────────────────────────────────────
-  fastify.delete('/wo-credit/structures/:id', hrAdminAuth, async (req: any, reply) => {
+  fastify.delete('/attendance/wo-credit/structures/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const { error } = await fastify.supabase
       .from('wo_credit_structure').delete().eq('id', id).eq('tenant_id', req.tenantId)
@@ -146,7 +146,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /review?year&month ─────────────────────────────────────────────────
-  fastify.get('/wo-credit/review', auth, async (req: any, reply) => {
+  fastify.get('/attendance/wo-credit/review', auth, async (req: any, reply) => {
     const now = new Date()
     const year  = parseInt((req.query as any).year  ?? String(now.getUTCFullYear()), 10)
     const month = parseInt((req.query as any).month ?? String(now.getUTCMonth() + 1), 10)
@@ -178,7 +178,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /reconcile ────────────────────────────────────────────────────────
-  fastify.post('/wo-credit/reconcile', hrAdminAuth, async (req: any, reply) => {
+  fastify.post('/attendance/wo-credit/reconcile', hrAdminAuth, async (req: any, reply) => {
     const now = new Date()
     const body = (req.body ?? {}) as { year?: number; month?: number }
     const year  = body.year  ?? now.getUTCFullYear()
@@ -201,7 +201,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   // ── POST /finalize ─────────────────────────────────────────────────────────
   // Month-close: credit leftover credit into the WO leave type (carry-over with
   // expiry), record LOP for uncovered absences, and lock the month. Idempotent.
-  fastify.post('/wo-credit/finalize', hrAdminAuth, async (req: any, reply) => {
+  fastify.post('/attendance/wo-credit/finalize', hrAdminAuth, async (req: any, reply) => {
     const now = new Date()
     const body = (req.body ?? {}) as { year?: number; month?: number }
     const year  = body.year  ?? now.getUTCFullYear()
