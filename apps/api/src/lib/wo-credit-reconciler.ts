@@ -18,6 +18,7 @@
  * redemption and LOP finalisation are Phase 2.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isMonthLocked } from './period-lock.js'
 
 const RECON_INTERVAL_MS = 6 * 60 * 60 * 1_000   // every 6h (daily-grain; cheap + idempotent)
 const WARMUP_MS         = 7 * 60 * 1_000
@@ -281,6 +282,16 @@ export async function reconcileEmployeeMonth(
 export async function reconcileTenantMonth(
   supabase: SupabaseClient, tenantId: string, year: number, month: number,
 ): Promise<WoReconcileResult[]> {
+  // Period protection — the reconciler relabels attendance_daily rows, so it
+  // must not touch a month that has been locked/finalized for payroll. The DB
+  // trigger (migration 262) would reject the write anyway; skipping here avoids
+  // the noisy exceptions and wasted work, especially on the 6-hourly scheduler.
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`
+  if (await isMonthLocked(supabase, tenantId, monthKey)) {
+    console.log(`[wo-credit] tenant=${tenantId} skipping ${monthKey} — period locked`)
+    return []
+  }
+
   const employees = await resolveWoEmployees(supabase, tenantId)
   if (!employees.length) return []
   const graceDays = await getGraceDays(supabase, tenantId)

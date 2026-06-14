@@ -28,6 +28,7 @@ import {
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 }                               from '../../lib/manager-scope.js'
+import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -70,6 +71,26 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
     if (!myEmpId || !(await isDirectReport(fastify.supabase, req.tenantId, myEmpId, (ot as any).employee_id))) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only action overtime for your direct reports' })
+      return false
+    }
+    return true
+  }
+
+  // Period protection — block OT actions whose attendance day sits in a locked
+  // month. Returns false (and sends 409) when locked.
+  async function assertOtPeriodOpen(req: any, reply: any, otRequestId: string): Promise<boolean> {
+    const { data: ot } = await fastify.supabase
+      .from('overtime_requests')
+      .select('attendance_date')
+      .eq('id', otRequestId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    const date = (ot as any)?.attendance_date as string | undefined
+    if (date && await isMonthLocked(fastify.supabase, req.tenantId, monthOf(date))) {
+      reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${monthOf(date)} is locked for payroll — no changes allowed.`,
+      })
       return false
     }
     return true
@@ -387,6 +408,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!requireManagerOrAdmin(req, reply)) return
     const { id } = req.params as { id: string }
     if (!await authorizeOtTarget(req, reply, id)) return
+    if (!await assertOtPeriodOpen(req, reply, id)) return
     const schema = z.object({
       approved_minutes: z.number().int().min(0).optional(),
     })
@@ -415,6 +437,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!requireManagerOrAdmin(req, reply)) return
     const { id } = req.params as { id: string }
     if (!await authorizeOtTarget(req, reply, id)) return
+    if (!await assertOtPeriodOpen(req, reply, id)) return
     const schema = z.object({
       rejection_reason: z.string().max(500).optional(),
     })

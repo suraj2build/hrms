@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { recomputeRange }              from '../../lib/attendance-engine.js'
+import { assertRangeOpen, PeriodLockedError } from '../../lib/period-lock.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -45,6 +46,16 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
         error:   'INVALID_DATES',
         message: 'from_date must be ≤ to_date',
       })
+    }
+
+    // Period protection — refuse to recompute any month that is locked for payroll.
+    try {
+      await assertRangeOpen(fastify.supabase, req.tenantId, from_date, to_date)
+    } catch (err) {
+      if (err instanceof PeriodLockedError) {
+        return reply.code(409).send({ error: 'PERIOD_LOCKED', message: err.message })
+      }
+      throw err
     }
 
     const started = Date.now()

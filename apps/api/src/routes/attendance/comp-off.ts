@@ -37,6 +37,7 @@ import { resolveWoEmployees } from '../../lib/wo-credit-reconciler.js'
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
+import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -101,6 +102,16 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     }
 
     const { employee_id, from_date, to_date, leave_type_id } = parsed.data
+
+    // Period protection — don't mint comp-off for a month locked for payroll.
+    try {
+      await assertRangeOpen(fastify.supabase, req.tenantId, from_date, to_date)
+    } catch (err) {
+      if (err instanceof PeriodLockedError) {
+        return reply.code(409).send({ error: 'PERIOD_LOCKED', message: err.message })
+      }
+      throw err
+    }
 
     // Fetch qualifying attendance_daily rows
     let query = fastify.supabase
@@ -242,6 +253,15 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       return reply.code(409).send({
         error:   'INVALID_STATE',
         message: `Request is already ${(co as any).status}`,
+      })
+    }
+
+    // Period protection — the worked day that earns this credit must not sit in
+    // a locked/finalized month.
+    if (await isMonthLocked(fastify.supabase, req.tenantId, monthOf((co as any).worked_date))) {
+      return reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${monthOf((co as any).worked_date)} is locked for payroll — no changes allowed.`,
       })
     }
 
