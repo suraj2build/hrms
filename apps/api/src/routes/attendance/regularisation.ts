@@ -104,9 +104,12 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     const { date, regularization_type, requested_check_in, requested_check_out, reason } = parsed.data
 
     // ── Load tenant regularisation policy ──────────────────────────────────────
+    // select('*') so this works whether or not migration 251 has run on this DB.
+    // New columns (limit_period, exclude_rejected, per_type_limits) fall back to
+    // safe defaults via the ?? operators below.
     const { data: policy } = await fastify.supabase
       .from('regularisation_policy')
-      .select('submission_window_days, max_per_month, sla_hours, limit_period, exclude_rejected, per_type_limits')
+      .select('*')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
