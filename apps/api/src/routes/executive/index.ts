@@ -419,6 +419,63 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       ? safeRate(total_days_taken, employee_count * 30)
       : 0
 
+    // ── R10 — Recruitment KPI elevation (SUP.hiring_velocity, SUP.offer_acceptance)
+    // Canonical CHRO surface for the recruitment funnel. Best-effort: the
+    // recruitment module's tables may be absent in some deployments, so missing
+    // tables must never break the CHRO snapshot.
+    const hiring_funnel = { applied: 0, screening: 0, interviewing: 0, offer: 0, hired: 0, rejected: 0, withdrawn: 0 }
+    let offers_extended = 0
+    let offers_accepted = 0
+    let offer_acceptance_rate: number = 0
+    let avg_time_to_offer: number | null = null
+    let avg_time_to_hire: number | null = null
+    let open_requisitions = 0
+    let recruitment_active = false
+    try {
+      const since = daysAgo(180)   // rolling 6-month window on application date
+      const [appsRes, reqRes] = await Promise.all([
+        fastify.supabase
+          .from('applications')
+          .select('status, created_at, updated_at, offer_date, offer_accepted')
+          .eq('tenant_id', req.tenantId)
+          .gte('created_at', `${since}T00:00:00`)
+          .limit(5000),
+        fastify.supabase
+          .from('job_requisitions')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'open'),
+      ])
+
+      const apps = (appsRes.data ?? []) as any[]
+      recruitment_active = !appsRes.error
+      const offerTimes: number[] = []
+      const hireTimes: number[]  = []
+      for (const a of apps) {
+        if (a.status && a.status in hiring_funnel) {
+          hiring_funnel[a.status as keyof typeof hiring_funnel]++
+        }
+        // Offer acceptance: an offer is "extended" once offer_date is set.
+        if (a.offer_date) {
+          offers_extended++
+          if (a.offer_accepted === true || a.status === 'hired') offers_accepted++
+          const t = (new Date(a.offer_date).getTime() - new Date(a.created_at).getTime()) / 86400000
+          if (Number.isFinite(t) && t >= 0) offerTimes.push(t)
+        }
+        if (a.status === 'hired') {
+          const t = (new Date(a.updated_at).getTime() - new Date(a.created_at).getTime()) / 86400000
+          if (Number.isFinite(t) && t >= 0) hireTimes.push(t)
+        }
+      }
+      offer_acceptance_rate = Number(safeRate(offers_accepted, offers_extended))
+      const mean = (arr: number[]) => arr.length ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length) : null
+      avg_time_to_offer = mean(offerTimes)
+      avg_time_to_hire  = mean(hireTimes)
+      open_requisitions = reqRes.count ?? 0
+    } catch (e) {
+      req.log?.warn?.({ err: e }, 'CHRO recruitment block best-effort failed')
+    }
+
     const narrative = chroNarrative({
       employee_count, absence_rate, pending_revisions,
       trust_high_risk, leave_utilization_pct,
@@ -447,6 +504,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       trust_verified,
       trust_total,
       trust_verification_pct,
+      // Recruitment / Talent (R10)
+      recruitment_active,
+      hiring_funnel,
+      offers_extended,
+      offers_accepted,
+      offer_acceptance_rate,
+      avg_time_to_offer,
+      avg_time_to_hire,
+      open_requisitions,
       // Narrative
       narrative,
       generated_at: new Date().toISOString(),

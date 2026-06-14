@@ -372,7 +372,7 @@ export default function ExecutiveIntelligenceCenter() {
         {/* Position ageing / tenure / reasons — all empty */}
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Panel icon={Clock} iconClass="text-warning" title="Open Position Ageing" subtitle="Days since requisition opened">
-            <EmptyBody text="Requisition ageing needs the recruitment module, which isn't enabled yet." />
+            <EmptyBody text="Requisition ageing isn't surfaced here yet. Open requisitions and the hiring funnel live in the CHRO view → Talent Acquisition." />
           </Panel>
           <Panel icon={UserMinus} iconClass="text-destructive" title="Attrition Ageing · Tenure" subtitle="Exits by tenure band">
             <EmptyBody text="Tenure-band attrition isn't available yet." />
@@ -386,7 +386,7 @@ export default function ExecutiveIntelligenceCenter() {
         {/* Hiring funnel (empty) + Diversity (empty) */}
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Panel icon={UserPlus} iconClass="text-info" title="Hiring Funnel" subtitle="Conversion across stages">
-            <EmptyBody text="Hiring funnel needs the recruitment module, which isn't enabled yet." />
+            <EmptyBody text="The hiring funnel and offer-acceptance rate are published in the CHRO view → Talent Acquisition (canonical surface)." />
           </Panel>
           <Panel className="xl:col-span-2" icon={Target} iconClass="text-primary" title="Gender Diversity by Department"
             subtitle="Per-department breakdown not available"
