@@ -318,7 +318,6 @@ export const DOMAINS: Domain[] = [
           { id: 'shift-roster',  label: 'Shift Roster',    route: '/admin/roster',              icon: CalendarClock, keywords: ['roster', 'shift schedule', 'shift plan', 'team schedule', 'staff schedule'] },
           { id: 'emp-shifts',    label: 'Shift Overrides', route: '/admin/employee-shifts',     icon: AlarmClock,    keywords: ['employee shift', 'shift assignment', 'individual shift', 'shift change'] },
           { id: 'roster-intel',  label: 'Roster Analytics', route: '/admin/roster/intelligence', icon: Brain,       keywords: ['roster report', 'shift analytics', 'coverage analytics', 'roster insights'] },
-          { id: 'wo-credit',     label: 'Weekly-Off Credit', route: '/admin/attendance/wo-credit', icon: CalendarClock, keywords: ['weekly off credit', 'WO credit', 'retail roster', 'earned off', 'floating weekly off', 'present days work off', 'retail leave'] },
         ],
       },
       {
@@ -707,6 +706,8 @@ export const DOMAINS: Domain[] = [
       '/admin/shift-master',
       '/admin/attendance/policy',
       '/admin/attendance/groups',
+      '/admin/attendance/wo-credit',          // Weekly-Off Credit config → Setup › Workforce Rules
+      '/admin/attendance/regularisation-policy',
       // Leave config overrides (longer than /admin/leave)
       '/admin/leave-types',
       '/admin/leave-policy',
@@ -764,6 +765,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'shifts',            label: 'Shifts',            route: '/admin/shift-master',              icon: AlarmClock,    keywords: ['shift master', 'shift timing', 'working hours', 'shift schedule', 'time slots', 'shift setup'] },
           { id: 'rosters',           label: 'Roster Policies',   route: '/admin/masters/rosters',           icon: CalendarClock, keywords: ['roster policy', 'roster setup', 'shift roster policy', 'roster configuration'] },
+          { id: 'wo-credit',         label: 'Weekly-Off Credit', route: '/admin/attendance/wo-credit',     icon: CalendarClock, keywords: ['weekly off credit', 'WO credit', 'retail roster', 'earned off', 'floating weekly off', 'present days work off', 'retail leave'] },
           { id: 'rotation-policies', label: 'Rotation Policies', route: '/admin/masters/rotation-policies', icon: CalendarClock, keywords: ['rotation', 'rotating shift', 'shift rotation', 'cycle schedule'] },
           { id: 'holidays',          label: 'Holiday Calendar',  route: '/admin/holidays',                  icon: CalendarDays,  keywords: ['public holiday', 'gazetted holiday', 'national holiday', 'holiday list', 'bank holiday', 'weekly off'] },
           { id: 'att-policy',        label: 'Attendance Policy', route: '/admin/attendance/policy',         icon: ShieldCheck,   keywords: ['attendance rules', 'late mark rules', 'half day rules', 'grace period', 'OT policy', 'attendance configuration'] },
