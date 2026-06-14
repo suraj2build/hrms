@@ -27,6 +27,7 @@ interface WoStructure {
   monthly_cap: 'sundays' | 'none'
   rollover_expiry_days: number
   holiday_work_reward: 'wo_credit' | 'extra_pay'
+  holiday_pay_multiplier: number
   ladder: LadderRow[]
 }
 interface Roster { id: string; name: string; wo_credit_structure_id: string | null }
@@ -41,6 +42,7 @@ interface ReviewRow {
   carried_out: number
   lop_days: number
   extra_pay_days: number
+  extra_pay_amount: number
   status: string
 }
 
@@ -121,7 +123,7 @@ export function WeeklyOffCredit() {
   })
 
   function newStructure() {
-    setEditing({ name: '', monthly_cap: 'sundays', rollover_expiry_days: 60, holiday_work_reward: 'wo_credit', is_active: true, ladder: DEFAULT_LADDER })
+    setEditing({ name: '', monthly_cap: 'sundays', rollover_expiry_days: 60, holiday_work_reward: 'wo_credit', holiday_pay_multiplier: 1, is_active: true, ladder: DEFAULT_LADDER })
   }
 
   const reviewRows = review?.data ?? []
@@ -156,7 +158,7 @@ export function WeeklyOffCredit() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
                         Cap: {s.monthly_cap === 'sundays' ? 'Sundays/month' : 'none'} · Expiry: {s.rollover_expiry_days}d ·
-                        Holiday work → {s.holiday_work_reward === 'wo_credit' ? 'WO credit' : 'extra pay'} ·
+                        Holiday work → {s.holiday_work_reward === 'wo_credit' ? 'WO credit' : `extra pay (${s.holiday_pay_multiplier}×)`} ·
                         Ladder: {s.ladder.map(l => `${l.present_days}→${l.wo_credit}`).join(', ')}
                       </p>
                     </div>
@@ -231,7 +233,8 @@ export function WeeklyOffCredit() {
                     <th className="text-right py-2 px-2">Pending</th>
                     <th className="text-right py-2 px-2">Carried</th>
                     <th className="text-right py-2 px-2">LOP</th>
-                    <th className="text-right py-2 px-2">Extra pay</th>
+                    <th className="text-right py-2 px-2">Extra pay (d)</th>
+                    <th className="text-right py-2 px-2">Extra pay (₹)</th>
                     <th className="text-center py-2 px-2">Status</th>
                   </tr>
                 </thead>
@@ -247,6 +250,7 @@ export function WeeklyOffCredit() {
                       <td className="py-2 px-2 text-right">{r.carried_out}</td>
                       <td className="py-2 px-2 text-right text-destructive">{r.lop_days}</td>
                       <td className="py-2 px-2 text-right">{r.extra_pay_days}</td>
+                      <td className="py-2 px-2 text-right">{r.extra_pay_amount > 0 ? `₹${r.extra_pay_amount.toLocaleString()}` : '—'}</td>
                       <td className="py-2 px-2 text-center">
                         <Badge variant={r.status === 'finalized' ? 'secondary' : 'outline'} className="text-[10px]">{r.status}</Badge>
                       </td>
@@ -300,6 +304,14 @@ function StructureEditor({ value, onChange, onSave, onCancel, saving }: {
             <option value="extra_pay">Extra pay day</option>
           </select>
         </div>
+        {value.holiday_work_reward === 'extra_pay' && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Pay multiplier (× daily rate)</label>
+            <Input type="number" step="0.1" min={0.1} value={value.holiday_pay_multiplier ?? 1}
+              onChange={e => onChange({ ...value, holiday_pay_multiplier: +e.target.value })} />
+            <p className="text-[10px] text-muted-foreground mt-1">1.0 = one day's pay per worked holiday. Posted as a pending payroll adjustment.</p>
+          </div>
+        )}
       </div>
 
       <div>

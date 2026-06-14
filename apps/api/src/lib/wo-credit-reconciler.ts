@@ -45,6 +45,7 @@ export interface WoStructure {
   monthly_cap:          'sundays' | 'none'
   rollover_expiry_days: number
   holiday_work_reward:  'wo_credit' | 'extra_pay'
+  holiday_pay_multiplier: number
   overflow_terminal:    'lop'
   wo_leave_type_id:     string | null
 }
@@ -89,7 +90,7 @@ export async function resolveWoEmployees(
   const structIds = [...new Set(rosterToStruct.values())]
   const { data: structRows } = await supabase
     .from('wo_credit_structure')
-    .select('id, name, monthly_cap, rollover_expiry_days, holiday_work_reward, overflow_terminal, wo_leave_type_id, is_active')
+    .select('id, name, monthly_cap, rollover_expiry_days, holiday_work_reward, holiday_pay_multiplier, overflow_terminal, wo_leave_type_id, is_active')
     .eq('tenant_id', tenantId)
     .in('id', structIds)
   const structById = new Map<string, WoStructure>()
@@ -363,10 +364,46 @@ export async function finalizeEmployeeMonth(
     }
   }
 
-  // ── Lock the snapshot, record LOP ──
+  // ── Extra holiday-work pay (extra_pay mode) → pending payroll adjustment ──
+  // amount = extra_pay_days × (ctc_monthly / days_in_month) × multiplier.
+  // The core payroll run pays fixed gross − LOP, so additive pay is handed off
+  // through the payroll_adjustments ops flow (pending → approve → apply to run).
+  let extraPayAmount = 0
+  if (emp.structure.holiday_work_reward === 'extra_pay' && recon.extra_pay_days > 0) {
+    try {
+      const { data: comp } = await supabase
+        .from('employee_compensations')
+        .select('ctc_monthly')
+        .eq('tenant_id', tenantId).eq('employee_id', emp.employeeId)
+        .order('effective_from', { ascending: false })
+        .limit(1).maybeSingle()
+      const ctcMonthly = Number((comp as any)?.ctc_monthly ?? 0)
+      const dailyRate  = ctcMonthly > 0 ? ctcMonthly / daysInMonth(year, month) : 0
+      extraPayAmount = Math.round(recon.extra_pay_days * dailyRate * emp.structure.holiday_pay_multiplier * 100) / 100
+
+      if (extraPayAmount > 0) {
+        const lockedMonth = `${year}-${String(month).padStart(2, '0')}`
+        await supabase.from('payroll_adjustments').insert({
+          tenant_id:       tenantId,
+          employee_id:     emp.employeeId,
+          locked_month:    lockedMonth,
+          apply_to_month:  lockedMonth,
+          adjustment_type: 'manual',
+          amount:          extraPayAmount,
+          reason:          `WO holiday-work pay: ${recon.extra_pay_days} day(s) × ${emp.structure.holiday_pay_multiplier}× daily rate`,
+          source_type:     'manual',
+          status:          'pending',
+        })
+      }
+    } catch (e) {
+      console.error(`[wo-credit] extra-pay adjustment employee=${emp.employeeId} error:`, (e as Error).message)
+    }
+  }
+
+  // ── Lock the snapshot, record LOP + extra-pay amount ──
   await supabase
     .from('wo_credit_monthly')
-    .update({ status: 'finalized', lop_days: lopDays, updated_at: new Date().toISOString() })
+    .update({ status: 'finalized', lop_days: lopDays, extra_pay_amount: extraPayAmount, updated_at: new Date().toISOString() })
     .eq('tenant_id', tenantId).eq('employee_id', emp.employeeId).eq('year', year).eq('month', month)
 
   return { employee_id: emp.employeeId, carried_out: carriedOut, lop_days: lopDays, credited }

@@ -24,6 +24,7 @@ const structureSchema = z.object({
   monthly_cap:          z.enum(['sundays', 'none']).optional(),
   rollover_expiry_days: z.number().int().min(1).max(365).optional(),
   holiday_work_reward:  z.enum(['wo_credit', 'extra_pay']).optional(),
+  holiday_pay_multiplier: z.number().min(0.1).max(10).optional(),
   wo_leave_type_id:     z.string().uuid().optional().nullable(),
   ladder:               z.array(ladderRowSchema).max(31).optional(),
 })
