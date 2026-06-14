@@ -49,8 +49,20 @@ interface NotifLog {
   recipient_name?: string
 }
 
-type Tab = 'templates' | 'channels' | 'log'
+interface DigestPref {
+  frequency: 'daily' | 'weekly' | 'monthly'
+  in_app: boolean
+  email: boolean
+}
+
+type Tab = 'templates' | 'channels' | 'digests' | 'log'
 type ChannelType = 'email' | 'sms' | 'in_app' | 'push' | 'webhook'
+
+const DIGEST_COPY: Record<DigestPref['frequency'], string> = {
+  daily:   'New joiners, separations, asset moves and pending approvals — every morning.',
+  weekly:  'Joiners, exits, onboarding completions and probation reviews due — each Monday.',
+  monthly: 'Headcount, net change and probation backlog — on the 1st.',
+}
 
 const CHANNEL_TYPES: ChannelType[] = ['email', 'sms', 'in_app', 'push', 'webhook']
 const LOG_STATUSES = ['all', 'queued', 'sent', 'failed', 'bounced'] as const
@@ -142,6 +154,28 @@ export function NotificationTemplates() {
     onError: (e: Error) => toast.error('Channel setting updated', { description: e.message }),
   })
 
+  const { data: digests = [], isLoading: dLoading } = useQuery<DigestPref[]>({
+    queryKey: ['notifications', 'preferences'],
+    queryFn: () => api.get('/notifications/preferences').then((r: any) => r.data),
+    enabled: activeTab === 'digests',
+  })
+
+  const togglePref = useMutation({
+    mutationFn: (body: { frequency: string; channel: 'in_app' | 'email'; enabled: boolean }) =>
+      api.put('/notifications/preferences', body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notifications', 'preferences'] }) },
+    onError: (e: Error) => toast.error('Preference update failed', { description: e.message }),
+  })
+
+  const runDigest = useMutation({
+    mutationFn: (frequency: string) => api.post('/notifications/digest/run', { frequency }),
+    onSuccess: (r: any) => {
+      const d = r?.data
+      toast.success('Digest sent', { description: d ? `${d.in_app} in-app · ${d.email} email · ${d.recipients} recipients` : undefined })
+    },
+    onError: (e: Error) => toast.error('Send failed', { description: e.message }),
+  })
+
   function openAdd() {
     setEditingTemplate(null)
     setForm(defaultForm)
@@ -184,6 +218,7 @@ export function NotificationTemplates() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'templates', label: 'Templates' },
     { key: 'channels', label: 'Channels' },
+    { key: 'digests', label: 'Digests' },
     { key: 'log', label: 'Delivery Log' },
   ]
 
@@ -312,6 +347,62 @@ export function NotificationTemplates() {
                       )}
                     />
                   </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* Digests Tab */}
+      {activeTab === 'digests' && (
+        <SectionCard title="Scheduled Digests">
+          <p className="text-sm text-muted-foreground mb-4">
+            Choose how you want each workforce digest delivered. In-app lands in your notification bell;
+            email requires the Email channel to be enabled. Sends are de-duplicated per period.
+          </p>
+          {dLoading ? (
+            <p className="text-muted-foreground text-sm py-4">Loading preferences…</p>
+          ) : (
+            <div className="space-y-3">
+              {digests.map(d => (
+                <div key={d.frequency} className="border border-border rounded-lg p-4 bg-muted/20">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground capitalize">{d.frequency} digest</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{DIGEST_COPY[d.frequency]}</p>
+                    </div>
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={() => runDigest.mutate(d.frequency)}
+                      disabled={runDigest.isPending}
+                    >
+                      <Send className="h-3.5 w-3.5 mr-1" /> Send now
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-6 mt-3">
+                    {(['in_app', 'email'] as const).map(ch => {
+                      const enabled = d[ch]
+                      return (
+                        <label key={ch} className="flex items-center gap-2 cursor-pointer">
+                          <button
+                            type="button"
+                            onClick={() => togglePref.mutate({ frequency: d.frequency, channel: ch, enabled: !enabled })}
+                            className={cn(
+                              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
+                              enabled ? 'bg-primary' : 'bg-muted',
+                            )}
+                          >
+                            <span className={cn(
+                              'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform',
+                              enabled ? 'translate-x-4' : 'translate-x-1',
+                            )} />
+                          </button>
+                          <span className="text-sm text-foreground">{ch === 'in_app' ? 'In-app' : 'Email'}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
                 </div>
               ))}
             </div>

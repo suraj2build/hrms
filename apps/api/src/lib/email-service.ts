@@ -554,3 +554,48 @@ export function buddyAssignmentEmail(opts: {
   `)
   return { subject, html }
 }
+
+// ── R9: Scheduled intelligence digest email ────────────────────────────────────
+
+const FREQ_LABEL: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
+
+/** Renders a daily/weekly/monthly workforce digest as a branded email. */
+export function digestEmail(opts: {
+  frequency:    'daily' | 'weekly' | 'monthly'
+  periodLabel:  string
+  summaryText:  string
+  metrics:      Record<string, number>
+  companyName?: string
+  appUrl?:      string
+}): { subject: string; html: string } {
+  const { primary, teal } = brandConfig.colors
+  const freq = FREQ_LABEL[opts.frequency] ?? 'Workforce'
+  const subject = `${freq} workforce digest — ${opts.periodLabel}`
+  const ctaUrl = `${opts.appUrl ?? APP_PUBLIC_URL}/admin/insights`
+
+  const metricRows = Object.entries(opts.metrics)
+    .map(([k, v]) => `
+      <tr>
+        <td style="padding:8px 0;color:#475569;font-size:14px;border-bottom:1px solid #f1f5f9;">${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
+        <td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">${v}</td>
+      </tr>`)
+    .join('')
+
+  const html = shell(`
+    <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${teal};font-weight:600;margin:0 0 6px;">${freq} Digest</div>
+    <h1 style="font-size:21px;color:#0f172a;margin:0 0 12px;">${opts.periodLabel}</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 18px;">${opts.summaryText}</p>
+    <table style="width:100%;border-collapse:collapse;margin:0 0 22px;">${metricRows}</table>
+    <div style="text-align:center;margin:26px 0;">
+      <a href="${ctaUrl}"
+         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:999px;letter-spacing:0.02em;">
+        Open Insights Hub
+      </a>
+    </div>
+    <p style="color:#94a3b8;font-size:12px;line-height:1.5;margin:18px 0 0;">
+      You're receiving this because digest delivery is enabled for your account${opts.companyName ? ` at ${opts.companyName}` : ''}.
+      Manage your preferences in Settings → Notifications.
+    </p>
+  `)
+  return { subject, html }
+}

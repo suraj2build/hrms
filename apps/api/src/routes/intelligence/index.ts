@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify'
 import { computeUpcoming } from '../../lib/compliance-calendar.js'
 import { computeLifecycleRisks, type LifecycleCategory } from '../../lib/lifecycle-expiry.js'
+import { buildDailyDigest, buildWeeklyDigest, buildMonthlyDigest } from '../../lib/digest-builder.js'
 
 interface SourceRecord { table: string; count: number; sample?: string }
 
@@ -1036,47 +1037,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     const tenantId: string = req.tenantId
-    const now = new Date()
-    const todayStr      = now.toISOString().slice(0, 10)
-    const twentyFourAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
     try {
-      const { count: newJoiners } = await fastify.supabase
-        .from('employees').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('joining_date', todayStr)
-      const { count: separationsToday } = await fastify.supabase
-        .from('employee_separation').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', twentyFourAgo)
-      const { count: assetsToday } = await fastify.supabase
-        .from('employee_asset_ledger').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('action', 'assigned').gte('created_at', twentyFourAgo)
-      let pendingApprovals = 0
-      try {
-        const { count: leaveP } = await fastify.supabase
-          .from('leave_requests').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('status', 'PENDING')
-        pendingApprovals += leaveP ?? 0
-      } catch (_) {}
-      const j = newJoiners ?? 0, s = separationsToday ?? 0, a = assetsToday ?? 0, p = pendingApprovals
-      const parts: string[] = [`Daily digest for ${todayStr}.`]
-      if (j > 0) parts.push(`${j} new joiner${j > 1 ? 's' : ''} today.`)
-      else        parts.push('No new joiners today.')
-      if (s > 0) parts.push(`${s} separation${s > 1 ? 's' : ''} completed today.`)
-      if (a > 0) parts.push(`${a} asset${a > 1 ? 's' : ''} assigned today.`)
-      if (p > 0) parts.push(`${p} approval${p > 1 ? 's' : ''} pending.`)
-      if (s === 0 && a === 0 && p === 0) parts.push('No outstanding actions.')
-      const metrics = { new_joiners_today: j, separations_today: s, assets_assigned_today: a, pending_approvals: p }
-      return reply.send({
-        period: 'daily',
-        summary_text: parts.join(' '),
-        metrics,
-        generated_at: now.toISOString(),
-        sources: [
-          { table: 'employees',             description: 'joining_date = today' },
-          { table: 'employee_separation',   description: 'lifecycle_stage in (relieved, archived), last 24h' },
-          { table: 'employee_asset_ledger', description: 'action=assigned last 24h' },
-          { table: 'leave_requests',        description: 'status = pending' },
-        ],
-      })
+      return reply.send(await buildDailyDigest(fastify.supabase, tenantId))
     } catch (err: unknown) {
       fastify.log.error({ err }, 'intelligence/digest/daily error')
       return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
@@ -1089,42 +1051,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     const tenantId: string = req.tenantId
-    const now = new Date()
-    const sevenDaysAgo  = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-    const weekStart     = sevenDaysAgo.toISOString().slice(0, 10)
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     try {
-      const { count: joiners } = await fastify.supabase
-        .from('employees').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).gte('joining_date', weekStart)
-      const { count: exits } = await fastify.supabase
-        .from('employee_separation').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', sevenDaysAgo.toISOString())
-      const { count: onboardingCompleted } = await fastify.supabase
-        .from('onboarding_sessions').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('status', 'employee_created').gte('updated_at', sevenDaysAgo.toISOString())
-      const { count: probationDue } = await fastify.supabase
-        .from('employees').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('status', 'active').lte('joining_date', ninetyDaysAgo)
-      const j = joiners ?? 0, e = exits ?? 0, o = onboardingCompleted ?? 0, pb = probationDue ?? 0
-      const parts: string[] = [`Weekly digest — last 7 days (from ${weekStart}).`]
-      parts.push(`${j} new joiner${j !== 1 ? 's' : ''} this week.`)
-      if (e > 0) parts.push(`${e} exit${e !== 1 ? 's' : ''} this week.`)
-      if (o > 0) parts.push(`${o} onboarding${o !== 1 ? 's' : ''} completed.`)
-      if (pb > 0) parts.push(`${pb} probation review${pb !== 1 ? 's' : ''} due.`)
-      if (e === 0 && pb === 0) parts.push('No exits or probation concerns this week.')
-      const metrics = { joiners_7d: j, exits_7d: e, onboarding_completions_7d: o, probation_reviews_due: pb }
-      return reply.send({
-        period: 'weekly',
-        summary_text: parts.join(' '),
-        metrics,
-        generated_at: now.toISOString(),
-        sources: [
-          { table: 'employees',          description: 'joining_date last 7d; joining_date <= 90 days ago for probation' },
-          { table: 'employee_separation', description: 'lifecycle_stage in (relieved, archived), last 7d' },
-          { table: 'onboarding_sessions', description: 'status = employee_created, last 7d' },
-        ],
-      })
+      return reply.send(await buildWeeklyDigest(fastify.supabase, tenantId))
     } catch (err: unknown) {
       fastify.log.error({ err }, 'intelligence/digest/weekly error')
       return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
@@ -1431,37 +1359,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     const tenantId: string = req.tenantId
-    const now = new Date()
-    const monthStart    = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-    const monthEnd      = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     try {
-      const { count: h }  = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active')
-      const { count: j }  = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('joining_date', monthStart).lte('joining_date', monthEnd)
-      const { count: e }  = await fastify.supabase.from('employee_separation').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', monthStart)
-      const { count: pb } = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active').lte('joining_date', ninetyDaysAgo)
-      const headcount = h ?? 0, joiners = j ?? 0, exits = e ?? 0, probBacklog = pb ?? 0
-      const netChange = joiners - exits
-      const monthLabel = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-      const parts: string[] = [`Monthly digest for ${monthLabel}.`]
-      parts.push(`Active headcount: ${headcount} employee${headcount !== 1 ? 's' : ''}.`)
-      if (joiners > 0) parts.push(`${joiners} joined this month.`)
-      if (exits > 0)   parts.push(`${exits} exited this month.`)
-      if (netChange > 0)       parts.push(`Net headcount change: +${netChange}.`)
-      else if (netChange < 0)  parts.push(`Net headcount change: ${netChange}.`)
-      if (probBacklog > 0) parts.push(`${probBacklog} probation confirmation${probBacklog !== 1 ? 's' : ''} overdue.`)
-      if (exits === 0 && probBacklog === 0) parts.push('No exits or probation concerns this month.')
-      const metrics = { headcount, joiners_mtd: joiners, exits_mtd: exits, net_change: netChange, probation_backlog: probBacklog }
-      return reply.send({
-        period: 'monthly',
-        summary_text: parts.join(' '),
-        metrics,
-        generated_at: now.toISOString(),
-        sources: [
-          { table: 'employees',           description: 'active headcount; joining_date current month; probation backlog' },
-          { table: 'employee_separation', description: 'lifecycle_stage in (relieved, archived), current month' },
-        ],
-      })
+      return reply.send(await buildMonthlyDigest(fastify.supabase, tenantId))
     } catch (err: unknown) {
       fastify.log.error({ err }, 'intelligence/digest/monthly error')
       return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })

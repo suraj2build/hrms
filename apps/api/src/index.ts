@@ -19,6 +19,7 @@ import { registerAttendanceApiScheduler }    from './lib/attendance-api-schedule
 import { registerEventBusAutomation }    from './lib/event-bus-automation.js'
 import { registerSlaScanner }            from './lib/sla-scanner.js'
 import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
+import { registerDigestScheduler }       from './lib/digest-scheduler.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
@@ -424,6 +425,11 @@ async function start() {
   // Intelligence scanner — emits Phase 4 operational events every 6 hours
   await safeRegisterModule('intelligence-scanner', async () => {
     registerIntelligenceScanner(fastify.supabase)
+  }, fastify.log)
+
+  // Digest scheduler (R9) — pushes daily/weekly/monthly workforce digests to HR admins
+  await safeRegisterModule('digest-scheduler', async () => {
+    registerDigestScheduler(fastify.supabase)
   }, fastify.log)
 
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.

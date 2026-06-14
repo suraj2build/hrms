@@ -47,6 +47,7 @@ const OPTIONAL_MODULES = [
   'event-bus-automation',
   'sla-scanner',
   'intelligence-scanner',
+  'digest-scheduler',
   'durable-queue',
   'webhook-service',
   'onboarding',

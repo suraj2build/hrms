@@ -7,9 +7,29 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { runDigestForTenant } from '../../lib/digest-scheduler.js'
+import type { DigestFrequency } from '../../lib/digest-builder.js'
+
+const CHANNEL_DEFAULTS: { id: string; channel_type: string; is_enabled: boolean }[] = [
+  { id: 'in_app',  channel_type: 'in_app',  is_enabled: true  },
+  { id: 'email',   channel_type: 'email',   is_enabled: false },
+  { id: 'sms',     channel_type: 'sms',     is_enabled: false },
+  { id: 'push',    channel_type: 'push',    is_enabled: false },
+  { id: 'webhook', channel_type: 'webhook', is_enabled: false },
+]
+
+const DIGEST_FREQUENCIES: DigestFrequency[] = ['daily', 'weekly', 'monthly']
+const DIGEST_CHANNELS = ['in_app', 'email'] as const
+// Mirrors digest-scheduler DEFAULT_PREFS — what a user gets with no explicit row.
+const PREF_DEFAULTS: Record<DigestFrequency, { in_app: boolean; email: boolean }> = {
+  daily:   { in_app: false, email: false },
+  weekly:  { in_app: true,  email: false },
+  monthly: { in_app: true,  email: false },
+}
 
 export default async function notificationsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  const isHrAdmin = (req: any) => req.userRole === 'super_admin' || req.userRole === 'hr_admin'
 
   // GET /notifications?offset=0&limit=50
   // Supports pagination via ?offset (default 0) and ?limit (default 50, max 100).
@@ -136,27 +156,108 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // GET /notifications/channels — delivery channel config (shape matches NotifChannel interface)
-  fastify.get('/channels', auth, async (_req: any, reply) => {
+  // GET /notifications/channels — tenant channel config (R9: now persisted in
+  // notification_channel_settings; defaults merged for channels with no row yet).
+  fastify.get('/channels', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('notification_channel_settings')
+      .select('channel_type, is_enabled, config')
+      .eq('tenant_id', req.tenantId)
+    if (error) {
+      // Graceful fallback (e.g. migration not yet run) — return defaults.
+      return reply.send({ data: CHANNEL_DEFAULTS.map(c => ({ ...c, config: {} })) })
+    }
+    const saved = new Map((data ?? []).map((r: any) => [r.channel_type, r]))
     return reply.send({
-      data: [
-        { id: 'in_app',  channel_type: 'in_app',  is_enabled: true,  config: {} },
-        { id: 'email',   channel_type: 'email',   is_enabled: false, config: {} },
-        { id: 'sms',     channel_type: 'sms',     is_enabled: false, config: {} },
-        { id: 'push',    channel_type: 'push',    is_enabled: false, config: {} },
-        { id: 'webhook', channel_type: 'webhook', is_enabled: false, config: {} },
-      ],
+      data: CHANNEL_DEFAULTS.map(c => {
+        const row = saved.get(c.channel_type)
+        return {
+          id: c.channel_type,
+          channel_type: c.channel_type,
+          is_enabled: row ? row.is_enabled : c.is_enabled,
+          config: row?.config ?? {},
+        }
+      }),
     })
   })
 
-  // PUT /notifications/channels/:id — toggle a channel (stub — acknowledges but doesn't persist)
+  // PUT /notifications/channels/:id — toggle a channel (R9: persisted, HR-admin only).
   fastify.put('/channels/:id', auth, async (req: any, reply) => {
+    if (!isHrAdmin(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     const { id } = req.params as { id: string }
     const { is_enabled } = req.body as { is_enabled: boolean }
-    // In-memory stub — no DB table yet; reflect the change back so the UI updates
+    if (!CHANNEL_DEFAULTS.some(c => c.channel_type === id)) {
+      return reply.code(400).send({ error: 'INVALID_CHANNEL', message: `Unknown channel "${id}"` })
+    }
+    const { error } = await fastify.supabase
+      .from('notification_channel_settings')
+      .upsert(
+        { tenant_id: req.tenantId, channel_type: id, is_enabled: is_enabled ?? false, updated_at: new Date().toISOString() },
+        { onConflict: 'tenant_id,channel_type' },
+      )
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: { id, channel_type: id, is_enabled: is_enabled ?? false, config: {} } })
+  })
+
+  // GET /notifications/preferences — current user's effective digest preferences.
+  // Returns one entry per frequency with in_app/email flags (defaults merged).
+  fastify.get('/preferences', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('user_notification_preferences')
+      .select('frequency, channel, enabled')
+      .eq('tenant_id', req.tenantId)
+      .eq('user_id', req.userId)
+    if (error) {
+      return reply.send({ data: DIGEST_FREQUENCIES.map(f => ({ frequency: f, ...PREF_DEFAULTS[f] })) })
+    }
+    const rows = (data ?? []) as any[]
     return reply.send({
-      data: { id, channel_type: id, is_enabled: is_enabled ?? false, config: {} },
+      data: DIGEST_FREQUENCIES.map(f => {
+        const eff = { ...PREF_DEFAULTS[f] }
+        for (const r of rows.filter(r => r.frequency === f)) {
+          if (r.channel === 'in_app') eff.in_app = r.enabled
+          if (r.channel === 'email')  eff.email  = r.enabled
+        }
+        return { frequency: f, ...eff }
+      }),
     })
+  })
+
+  // PUT /notifications/preferences — upsert the current user's digest subscription.
+  // Body: { frequency, channel, enabled }
+  fastify.put('/preferences', auth, async (req: any, reply) => {
+    const { frequency, channel, enabled } = req.body as { frequency?: string; channel?: string; enabled?: boolean }
+    if (!frequency || !DIGEST_FREQUENCIES.includes(frequency as DigestFrequency)) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'frequency must be daily|weekly|monthly' })
+    }
+    if (!channel || !DIGEST_CHANNELS.includes(channel as any)) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'channel must be in_app|email' })
+    }
+    const { error } = await fastify.supabase
+      .from('user_notification_preferences')
+      .upsert(
+        { tenant_id: req.tenantId, user_id: req.userId, frequency, channel, enabled: enabled === true, updated_at: new Date().toISOString() },
+        { onConflict: 'tenant_id,user_id,frequency,channel' },
+      )
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: { frequency, channel, enabled: enabled === true } })
+  })
+
+  // POST /notifications/digest/run — manually push a digest now (HR-admin).
+  // Body: { frequency }. force=true bypasses period de-dup so a test always sends.
+  fastify.post('/digest/run', auth, async (req: any, reply) => {
+    if (!isHrAdmin(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    const { frequency } = req.body as { frequency?: string }
+    if (!frequency || !DIGEST_FREQUENCIES.includes(frequency as DigestFrequency)) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'frequency must be daily|weekly|monthly' })
+    }
+    try {
+      const result = await runDigestForTenant(fastify.supabase, req.tenantId, frequency as DigestFrequency, { force: true })
+      return reply.send({ data: result })
+    } catch (err: unknown) {
+      fastify.log.error({ err }, 'notifications/digest/run error')
+      return reply.code(500).send({ error: 'DIGEST_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+    }
   })
 
   // POST /notifications/escalate — mark inbox items as escalated
