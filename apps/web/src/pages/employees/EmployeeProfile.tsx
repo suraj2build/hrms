@@ -159,6 +159,33 @@ function Grid2({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{children}</div>
 }
 
+function titleCaseWord(s?: string | null): string {
+  if (!s) return '—'
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+// Dashboard stat tile for the employee Overview.
+function DashTile({ icon: Icon, label, value, tone = 'default' }: {
+  icon: React.ElementType; label: string; value: React.ReactNode
+  tone?: 'default' | 'primary' | 'success' | 'warning'
+}) {
+  const toneCls = {
+    default: 'text-muted-foreground',
+    primary: 'text-primary',
+    success: 'text-success',
+    warning: 'text-warning',
+  }[tone]
+  return (
+    <div className="rounded-xl border border-border bg-card px-3.5 py-3 flex flex-col gap-1.5 min-w-0">
+      <div className="flex items-center gap-1.5">
+        <Icon className={`h-3.5 w-3.5 ${toneCls}`} />
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground truncate">{label}</p>
+      </div>
+      <p className="text-sm font-bold text-foreground truncate">{value}</p>
+    </div>
+  )
+}
+
 function EmptySection({ icon: Icon, title, subtitle }: { icon: React.ElementType; title: string; subtitle?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
@@ -1886,21 +1913,16 @@ export function EmployeeProfile() {
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6 items-start">
         <div className="space-y-4 min-w-0">
 
-          {/* CORE › Profile */}
-          {subTab === 'profile' && (
+          {/* CORE › Overview — employee dashboard */}
+          {subTab === 'profile' && editProfile && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold">Profile</CardTitle>
-                  {!editProfile
-                    ? <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
-                        onClick={() => { setProfileForm({ first_name: emp.first_name, last_name: emp.last_name, email: emp.email, phone: emp.phone ?? '', joining_date: emp.joining_date?.slice(0,10) ?? '', status: emp.status }); setEditProfile(true) }}>
-                        <Edit2 className="h-3.5 w-3.5" />Edit
-                      </Button>
-                    : <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => profileMutation.mutate(profileForm)} disabled={profileMutation.isPending}><Check className="h-3.5 w-3.5 text-success" /></Button>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditProfile(false)}><X className="h-3.5 w-3.5" /></Button>
-                      </div>}
+                  <CardTitle className="text-sm font-semibold">Edit Profile</CardTitle>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => profileMutation.mutate(profileForm)} disabled={profileMutation.isPending}><Check className="h-3.5 w-3.5 text-success" /></Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditProfile(false)}><X className="h-3.5 w-3.5" /></Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -1908,22 +1930,116 @@ export function EmployeeProfile() {
                   {([{ label: 'First Name', key: 'first_name' }, { label: 'Last Name', key: 'last_name' }, { label: 'Email', key: 'email' }, { label: 'Phone', key: 'phone' }, { label: 'Joining Date', key: 'joining_date', type: 'date' }] as Array<{label:string;key:string;type?:string}>).map(f => (
                     <div key={f.key}>
                       <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
-                      {editProfile
-                        ? <Input className="h-7 text-xs" type={f.type ?? 'text'} value={profileForm[f.key] ?? ''} onChange={e => setProfileForm((p: any) => ({ ...p, [f.key]: e.target.value }))} />
-                        : <p className="text-sm font-medium">{fmt((emp as any)[f.key])}</p>}
+                      <Input className="h-7 text-xs" type={f.type ?? 'text'} value={profileForm[f.key] ?? ''} onChange={e => setProfileForm((p: any) => ({ ...p, [f.key]: e.target.value }))} />
                     </div>
                   ))}
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">Status</p>
-                    {editProfile
-                      ? <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={profileForm.status ?? ''} onChange={e => setProfileForm((p: any) => ({ ...p, status: e.target.value }))}>
-                          {['active','inactive','on_notice','separated'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
-                        </select>
-                      : <Badge variant={STATUS_VARIANT[emp.status] ?? 'secondary'} className="rounded-full text-[10px] capitalize">{emp.status.replace('_',' ')}</Badge>}
+                    <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={profileForm.status ?? ''} onChange={e => setProfileForm((p: any) => ({ ...p, status: e.target.value }))}>
+                      {['active','inactive','on_notice','separated'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
+                    </select>
                   </div>
                 </Grid2>
               </CardContent>
             </Card>
+          )}
+
+          {subTab === 'profile' && !editProfile && (
+            <div className="space-y-4">
+              {/* Snapshot tiles */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <DashTile icon={CalendarClock} label="Tenure" value={tenureStr} tone="primary" />
+                <DashTile icon={Briefcase} label="Employment" value={titleCaseWord(job?.employment_type)} />
+                {isAdmin && comp
+                  ? <DashTile icon={Banknote} label="Annual CTC" value={fmtMoney(comp.ctc_annual)} tone="success" />
+                  : <DashTile icon={Award} label="Grade" value={job?.grades?.name ?? '—'} />}
+                <DashTile
+                  icon={job?.employment_type === 'probation' ? AlertTriangle : CheckCircle2}
+                  label="Confirmation"
+                  value={job?.employment_type === 'probation' ? 'On Probation' : 'Confirmed'}
+                  tone={job?.employment_type === 'probation' ? 'warning' : 'success'}
+                />
+              </div>
+
+              {/* Employment details */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Employment Details</CardTitle>
+                    {isAdmin && (
+                      <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs"
+                        onClick={() => { setProfileForm({ first_name: emp.first_name, last_name: emp.last_name, email: emp.email, phone: emp.phone ?? '', joining_date: emp.joining_date?.slice(0,10) ?? '', status: emp.status }); setEditProfile(true) }}>
+                        <Edit2 className="h-3.5 w-3.5" />Edit
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3.5">
+                    <KV label="Employee Code" value={emp.employee_code} />
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-0.5">Status</p>
+                      <Badge variant={STATUS_VARIANT[emp.status] ?? 'secondary'} className="rounded-full text-[10px] capitalize">{emp.status.replace('_',' ')}</Badge>
+                    </div>
+                    <KV label="Designation" value={job?.designations?.name} />
+                    <KV label="Department" value={job?.departments?.name} />
+                    <KV label="Grade" value={job?.grades?.name} />
+                    <KV label="Employment Type" value={titleCaseWord(job?.employment_type)} />
+                    <KV label="Reporting Manager" value={job?.manager ? `${job.manager.first_name} ${job.manager.last_name}` : '—'} />
+                    <KV label="Date Joined" value={fmtDate(emp.joining_date)} />
+                    <KV label="Position Effective" value={fmtDate(job?.effective_from)} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Personal snapshot */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Personal</CardTitle>
+                    <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setSubTab('personal')}>
+                      View <Pencil className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3.5">
+                    <KV label="Date of Birth" value={fmtDate(pi?.dob)} />
+                    <KV label="Gender" value={titleCaseWord(pi?.gender)} />
+                    <KV label="Blood Group" value={pi?.blood_group} />
+                    <KV label="Marital Status" value={titleCaseWord(pi?.marital_status)} />
+                    <KV label="Nationality" value={pi?.nationality} />
+                    <KV label="Email" value={emp.email} />
+                    <KV label="Phone" value={emp.phone} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Compensation snapshot (admin) */}
+              {isAdmin && comp?.totals && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold">Compensation Snapshot</CardTitle>
+                      <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => { setSection('compensation'); setVisited(v => new Set(v).add('compensation')); setSubTab('compensation') }}>
+                        Details <TrendingUp className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3.5">
+                      <KV label="Annual CTC" value={fmtMoney(comp.ctc_annual)} />
+                      <KV label="Monthly Gross" value={fmtMoney(comp.totals.gross_monthly)} />
+                      <KV label="Monthly Net" value={fmtMoney(comp.totals.net_monthly)} />
+                      <KV label="Basic (Monthly)" value={fmtMoney(comp.totals.basic_monthly)} />
+                    </div>
+                    {comp.structure?.name && (
+                      <p className="mt-3 text-[11px] text-muted-foreground">Structure: <span className="font-medium text-foreground">{comp.structure.name}</span></p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           )}
 
           {/* CORE › Personal Info */}
