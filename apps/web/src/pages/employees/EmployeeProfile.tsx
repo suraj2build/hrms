@@ -1245,9 +1245,9 @@ export function EmployeeProfile() {
       // Map known tab slugs → section + subTab
       const TAB_MAP: Record<string, { section: Section; subTab: string }> = {
         personal:     { section: 'core',         subTab: 'personal'     },
-        employment:   { section: 'employment',   subTab: 'job'          },
+        employment:   { section: 'employment',   subTab: 'workforce'    },
         compensation: { section: 'compensation', subTab: 'compensation' },
-        documents:    { section: 'documents',    subTab: 'docs'         },
+        documents:    { section: 'documents',    subTab: 'documents'    },
         separation:   { section: 'employment',   subTab: 'separation'   },
         payroll:      { section: 'compensation', subTab: 'compensation' },
       }
@@ -2034,13 +2034,14 @@ export function EmployeeProfile() {
           {/* Merged into the Documents tab */}
           {subTab === 'documents' && (
             <div className="space-y-3">
-              {isAdmin && (
-                <div className="flex justify-end">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Fingerprint className="h-4 w-4 text-muted-foreground" />Identity Documents</h3>
+                {isAdmin && (
                   <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setIdForm({}); setIdOpen(true) }}>
                     <Plus className="h-3.5 w-3.5" />Add Identity Document
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
               {!(identityData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Fingerprint} title="No identity documents" subtitle={isAdmin ? 'Click Add Identity Document to record one.' : undefined} /></CardContent></Card>
                 : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{identityData!.data.map((it: any) => (
@@ -2060,66 +2061,6 @@ export function EmployeeProfile() {
             </div>
           )}
 
-          {/* CORE › Job Info — single clean read-only snapshot */}
-          {subTab === 'jobinfo' && (
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold">Current Job Information</CardTitle>
-                  {isAdmin && job && (
-                    <span className="text-[10px] text-muted-foreground">
-                      To change — use <button className="underline hover:text-foreground transition-colors" onClick={() => { changeSection('employment'); setSubTab('workforce') }}>Workforce Assignment</button>
-                    </span>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!job
-                  ? <EmptySection icon={Briefcase} title="No job info on record" subtitle="Go to Employment › Position History to add a position." />
-                  : (
-                    <>
-                      <Grid2>
-                        <KV label="Department"      value={job.departments?.name} />
-                        <KV label="Designation"     value={job.designations?.name} />
-                        <KV label="Grade / Band"    value={job.grades ? `${job.grades.name} (${job.grades.code})` : null} />
-                        <KV label="Employment Type" value={job.employment_type ? job.employment_type.charAt(0).toUpperCase() + job.employment_type.slice(1) : undefined} />
-                        <KV label="Reporting Manager" value={job.manager ? `${job.manager.first_name} ${job.manager.last_name} #${job.manager.employee_code}` : undefined} />
-                        <KV label="Work Location"   value={job.work_locations ? `${job.work_locations.name}${job.work_locations.city ? ` · ${job.work_locations.city}` : ''}` : null} />
-                        <KV label="Cost Center"     value={job.cost_center ? `${job.cost_center.name} (${job.cost_center.code})` : null} />
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-0.5">Shift</p>
-                          {job.shifts
-                            ? <><p className="text-sm font-medium">{job.shifts.name}</p>
-                               {(job.shifts.start_time || job.shifts.end_time) && <p className="text-xs text-muted-foreground">{job.shifts.start_time} – {job.shifts.end_time}</p>}</>
-                            : <p className="text-sm text-muted-foreground italic">Policy default</p>}
-                        </div>
-                        <KV label="Effective From"  value={fmtDate(job.effective_from)} />
-                      </Grid2>
-
-                      {/* Site + Roster — compact, single row */}
-                      {(emp?.sites || emp?.rosters) && (
-                        <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Site</p>
-                            {emp.sites
-                              ? <><p className="text-sm font-medium">{emp.sites.name}</p><p className="text-xs text-muted-foreground font-mono">{emp.sites.timezone}</p></>
-                              : <p className="text-sm text-muted-foreground">Not assigned</p>}
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-0.5">Roster</p>
-                            {emp.rosters
-                              ? <><p className="text-sm font-medium">{emp.rosters.name}</p><p className="text-xs text-muted-foreground">{emp.rosters.cycle_days}-day cycle</p></>
-                              : emp.sites
-                                ? <p className="text-sm text-muted-foreground italic">Inherited from site</p>
-                                : <p className="text-sm text-muted-foreground">—</p>}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-              </CardContent>
-            </Card>
-          )}
 
           {/* ─────────────────────────────────────────────────────────────────
               CORE › Document Extraction Summary (Onboarding)
@@ -2858,103 +2799,6 @@ export function EmployeeProfile() {
             </Card>
           )}
 
-          {/* EMPLOYMENT › Site / Roster / Rotation — managed on the Workforce tab
-              (single source). This block is no longer shown on Shift & Roster to
-              avoid the duplicate editing surface; only the legacy
-              ?tab=organization deep-link still renders it. */}
-          {subTab === 'organization' && (
-            <div className="space-y-4">
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                      <Landmark className="h-4 w-4 text-muted-foreground" />
-                      Organisation Assignment
-                    </CardTitle>
-                    {isAdmin && (
-                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
-                        setOrgForm({
-                          site_id:            orgCtx?.site?.id          ?? '',
-                          roster_id:          orgCtx?.roster?.id        ?? '',
-                          rotation_policy_id: orgCtx?.rotation_policy_id ?? '',
-                          effective_from:     new Date().toISOString().slice(0, 10),
-                          reason:             '',
-                        })
-                        setOrgDlgOpen(true)
-                      }}>
-                        <Pencil className="h-3.5 w-3.5 mr-1" />Edit
-                      </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Site</p>
-                    {orgCtx?.site
-                      ? <div><p className="font-medium">{orgCtx.site.name}</p><p className="text-xs text-muted-foreground font-mono">{orgCtx.site.timezone}</p></div>
-                      : <span className="text-xs text-muted-foreground">Not assigned</span>}
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Roster</p>
-                    {orgCtx?.roster
-                      ? <div>
-                          <p className="font-medium">{orgCtx.roster.name}</p>
-                          {orgCtx.roster_source === 'site' && (
-                            <p className="text-xs text-muted-foreground">Inherited from site</p>
-                          )}
-                        </div>
-                      : <span className="text-xs text-muted-foreground">No roster</span>}
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Work Location</p>
-                    {job?.work_locations
-                      ? <div><p className="font-medium">{job.work_locations.name}</p>{job.work_locations.city && <p className="text-xs text-muted-foreground">{job.work_locations.city}</p>}</div>
-                      : <span className="text-xs text-muted-foreground">Not assigned</span>}
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Cost Center</p>
-                    {job?.cost_center
-                      ? <div><p className="font-medium">{job.cost_center.name}</p><p className="text-xs text-muted-foreground font-mono">{job.cost_center.code}</p></div>
-                      : <span className="text-xs text-muted-foreground">Not assigned</span>}
-                  </div>
-                  {orgCtx?.effective_from && (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Effective From</p>
-                      <p className="text-xs font-medium">{orgCtx.effective_from}</p>
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Source</p>
-                    <Badge variant={orgCtx?.source === 'history' ? 'outline' : 'secondary'} className="rounded-full text-[10px]">
-                      {orgCtx?.source === 'history' ? 'History record' : 'Current fields'}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Upcoming Holidays */}
-              {(orgCtx?.upcoming_holidays?.length ?? 0) > 0 && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold">Upcoming Holidays</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {orgCtx!.upcoming_holidays.map((h) => (
-                      <div key={h.date} className="flex items-center justify-between text-sm py-1 border-b border-border/40 last:border-0">
-                        <div>
-                          <p className="font-medium text-xs">{h.name}</p>
-                          <p className="text-[10px] text-muted-foreground">{h.date}</p>
-                        </div>
-                        {h.is_optional && <Badge variant="outline" className="rounded-full text-[10px]">Optional</Badge>}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Edit Dialog */}
-            </div>
-          )}
 
           {/* Organisation Assignment dialog — rendered at top level (NOT inside a
               subTab block) so the Reassign buttons on BOTH the Workforce and
@@ -3978,12 +3822,15 @@ export function EmployeeProfile() {
           {/* Merged into the Documents tab */}
           {subTab === 'documents' && (
             <div className="space-y-4">
-              {isAdmin && (
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'passport' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Passport</Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'visa' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Visa</Button>
-                </div>
-              )}
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Globe className="h-4 w-4 text-muted-foreground" />Passport &amp; Visa</h3>
+                {isAdmin && (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'passport' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Passport</Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setPvForm({ record_type: 'visa' }); setAddPvOpen(true) }}><Plus className="h-3.5 w-3.5" />Add Visa</Button>
+                  </div>
+                )}
+              </div>
               {(['passport', 'visa'] as const).map(rt => {
                 const items = (pvData?.data ?? []).filter((p: any) => p.record_type === rt)
                 return (
