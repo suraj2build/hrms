@@ -8,10 +8,18 @@ interface Props {
   fallback?: (error: Error, reset: () => void) => ReactNode
   /** Page-level title shown in the default error card. */
   title?: string
+  /**
+   * When this value changes, the boundary clears any captured error and
+   * re-renders its children. Pass the current route (e.g. location.pathname)
+   * so navigating away from a broken page automatically recovers — otherwise a
+   * single page crash leaves the boundary stuck, blanking every later page.
+   */
+  resetKey?: string | number
 }
 
 interface State {
   error: Error | null
+  prevResetKey?: string | number
 }
 
 /**
@@ -27,8 +35,17 @@ interface State {
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error }
+  }
+
+  // Clear the captured error whenever the reset key (route) changes, so a crash
+  // on one page never persists across navigation to a healthy page.
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    if (props.resetKey !== state.prevResetKey) {
+      return { error: null, prevResetKey: props.resetKey }
+    }
+    return null
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {

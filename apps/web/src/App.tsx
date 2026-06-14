@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster, toast } from 'sonner'
@@ -521,6 +521,14 @@ function RoleRedirect() {
   return <Navigate to="/admin/dashboard" replace />
 }
 
+// ── Route-aware error boundary ────────────────────────────────────────────────
+// Resets on every navigation so a crash on one page (or a stale lazy-chunk load
+// failure after a deploy) never blanks every page the user clicks afterwards.
+function RouteErrorBoundary({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  return <ErrorBoundary resetKey={location.pathname}>{children}</ErrorBoundary>
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -528,7 +536,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_relativeSplatPath: true }}>
         <AuthProvider>
-          <ErrorBoundary>
+          <RouteErrorBoundary>
           <Suspense fallback={<PageLoader />}>
             <Routes>
 
@@ -944,7 +952,7 @@ export default function App() {
 
             </Routes>
           </Suspense>
-          </ErrorBoundary>
+          </RouteErrorBoundary>
           <Toaster richColors position="top-right" />
         </AuthProvider>
       </BrowserRouter>
