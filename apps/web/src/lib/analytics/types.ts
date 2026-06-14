@@ -22,6 +22,10 @@ export type DimensionId =
   | 'gender'
   | 'leave_type'
   | 'exit_type'
+  // R5 — site geography dimensions
+  | 'site'
+  | 'region'
+  | 'zone'
 
 export type ChartTypeId = 'bar' | 'trend' | 'donut' | 'table' | 'heatmap'
 export type TimeRangeId = 'current_month' | 'last_3m' | 'last_6m' | 'last_12m'
@@ -92,6 +96,10 @@ export const DRILL_NEXT: Partial<Record<DimensionId, DimensionId>> = {
   employment_type: 'department',
   leave_type:      'department',
   exit_type:       'department',
+  // R5 — region → zone → site → department
+  region:          'zone',
+  zone:            'site',
+  site:            'department',
 }
 
 /** Dimension → API filter param name */
@@ -101,6 +109,10 @@ export const DRILL_FILTER_PARAM: Partial<Record<DimensionId, string>> = {
   grade:       'filter_grade_id',
   designation: 'filter_designation_id',
   gender:      'filter_gender',
+  // R5 — site geography drill filters
+  site:        'filter_site_id',
+  region:      'filter_region',
+  zone:        'filter_zone',
 }
 
 export interface SavedView {
@@ -282,6 +294,29 @@ export const DATASET_CATALOG: DatasetMeta[] = [
         id: 'employment_type', label: 'Employment Type',
         measures: [
           { id: 'headcount', label: 'Headcount', format: 'number' },
+        ],
+      },
+      // R5 — site geography dimensions (powered by /datasets/employees group_by)
+      {
+        id: 'site', label: 'Site',
+        measures: [
+          { id: 'headcount',         label: 'Headcount',        format: 'number' },
+          { id: 'joiners',           label: 'New Joiners',      format: 'number' },
+          { id: 'avg_tenure_months', label: 'Avg Tenure (mo.)', format: 'number' },
+        ],
+      },
+      {
+        id: 'region', label: 'Region',
+        measures: [
+          { id: 'headcount', label: 'Headcount',   format: 'number' },
+          { id: 'joiners',   label: 'New Joiners', format: 'number' },
+        ],
+      },
+      {
+        id: 'zone', label: 'Zone',
+        measures: [
+          { id: 'headcount', label: 'Headcount',   format: 'number' },
+          { id: 'joiners',   label: 'New Joiners', format: 'number' },
         ],
       },
     ],

@@ -73,6 +73,10 @@ export const SURFACES: SurfaceConfig[] = [
       byGroup('grade',           'Grade',           'filter_grade_id'),
       byGroup('gender',          'Gender',          'filter_gender'),
       byGroup('employment_type', 'Employment Type'),
+      // R5 — site geography dimensions
+      byGroup('site',            'Site',            'filter_site_id'),
+      byGroup('region',          'Region',          'filter_region'),
+      byGroup('zone',            'Zone',            'filter_zone'),
     ],
     metrics: [
       { id: 'headcount',         label: 'Headcount',        format: 'number' },

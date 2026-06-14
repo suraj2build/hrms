@@ -520,7 +520,11 @@ export async function resolveQuery(q: AnalyticsQuery, drillStack: DrillStep[] = 
     case 'employees:designation':
     case 'employees:grade':
     case 'employees:gender':
-    case 'employees:employment_type': return employeesByGroup(q, months, drillFilters)
+    case 'employees:employment_type':
+    // R5 — site geography
+    case 'employees:site':
+    case 'employees:region':
+    case 'employees:zone':            return employeesByGroup(q, months, drillFilters)
     // R3.1 — Leave
     case 'leave:leave_type':
     case 'leave:department':

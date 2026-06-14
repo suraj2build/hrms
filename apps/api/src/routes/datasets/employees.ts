@@ -5,16 +5,19 @@
  * Supports flexible group_by across all people dimensions.
  *
  * GET /datasets/employees
- *   ?group_by    department|location|designation|grade|gender|employment_type
+ *   ?group_by    department|location|designation|grade|gender|employment_type|site|region|zone|site_type
  *   ?from        YYYY-MM  (default: 12 months ago)
  *   ?to          YYYY-MM  (default: current month)
  *   ?filter_department_id|filter_location_id|filter_grade_id|filter_gender   drill-down filters
+ *   ?filter_site_id|filter_region|filter_zone                               site drill-down filters (R5)
  */
 
 import type { FastifyInstance } from 'fastify'
 
-type GroupBy = 'department' | 'location' | 'designation' | 'grade' | 'gender' | 'employment_type'
-const VALID_GROUP_BY = new Set<string>(['department', 'location', 'designation', 'grade', 'gender', 'employment_type'])
+// R5 — site/region/zone/site_type added so headcount can be disaggregated by the
+// retail geography dimensions (migration 248). Same KPI, new GROUP BY axis.
+type GroupBy = 'department' | 'location' | 'designation' | 'grade' | 'gender' | 'employment_type' | 'site' | 'region' | 'zone' | 'site_type'
+const VALID_GROUP_BY = new Set<string>(['department', 'location', 'designation', 'grade', 'gender', 'employment_type', 'site', 'region', 'zone', 'site_type'])
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -52,6 +55,10 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     const filterLocId   = q.filter_location_id    ?? null
     const filterGradeId = q.filter_grade_id       ?? null
     const filterGender  = q.filter_gender         ?? null
+    // R5 — site geography drill filters
+    const filterSiteId  = q.filter_site_id        ?? null
+    const filterRegion  = q.filter_region         ?? null
+    const filterZone    = q.filter_zone           ?? null
 
     const now        = new Date()
     const curYYYYMM  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -66,7 +73,8 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     // grade/designation/confirmation_date live on job_history, gender on
     // employee_personal_info (lean employees, migration 016).
     const EMP_SELECT = `
-        id, joining_date, status,
+        id, joining_date, status, site_id,
+        sites ( id, name, region, zone, site_type ),
         employee_personal_info ( gender ),
         job_history!job_history_employee_id_fkey (
           department_id, work_location_id, grade_id, designation_id,
@@ -90,6 +98,7 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     if (filterLocId)   empQuery = empQuery.eq('job_history.work_location_id', filterLocId)
     if (filterGradeId) empQuery = empQuery.eq('job_history.grade_id', filterGradeId)
     if (filterGender)  empQuery = empQuery.eq('employee_personal_info.gender', filterGender)
+    if (filterSiteId)  empQuery = empQuery.eq('site_id', filterSiteId)
 
     const { data: empData, error: empErr } = await empQuery
 
@@ -103,10 +112,7 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       .gte('joining_date', fromFirst)
       .lte('joining_date', toLast)
 
-    const employees = (empData ?? []) as any[]
-    const joiners   = (joinerData ?? []) as any[]
-
-    // ── Group helper ──────────────────────────────────────────────────────────
+    // ── Group helpers ─────────────────────────────────────────────────────────
     function jh(emp: any) {
       const arr = emp.job_history
       return (Array.isArray(arr) ? arr[0] : arr) ?? {}
@@ -116,6 +122,25 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       const rec = Array.isArray(pi) ? pi[0] : pi
       return rec?.gender ?? null
     }
+    function siteOf(emp: any): { id: string | null; name: string | null; region: string | null; zone: string | null; site_type: string | null } {
+      const s = Array.isArray(emp.sites) ? emp.sites[0] : emp.sites
+      return { id: emp.site_id ?? null, name: s?.name ?? null, region: s?.region ?? null, zone: s?.zone ?? null, site_type: s?.site_type ?? null }
+    }
+
+    // R5 — region/zone filters live on the embedded site, so apply them in JS
+    // after fetch (PostgREST embedded-resource equality can't null-safely filter
+    // the parent here). site_id is already filtered at the DB layer above.
+    const siteFilter = (emp: any): boolean => {
+      if (!filterRegion && !filterZone && !filterSiteId) return true
+      const s = siteOf(emp)
+      if (filterSiteId && s.id     !== filterSiteId) return false
+      if (filterRegion && s.region !== filterRegion) return false
+      if (filterZone   && s.zone   !== filterZone)   return false
+      return true
+    }
+
+    const employees = ((empData ?? []) as any[]).filter(siteFilter)
+    const joiners   = ((joinerData ?? []) as any[]).filter(siteFilter)
 
     function getGroupKey(emp: any): { key: string; label: string } {
       const h = jh(emp)
@@ -134,6 +159,22 @@ export default async function employeesDataset(fastify: FastifyInstance) {
         }
         case 'employment_type':
           return { key: h.employment_type ?? 'unknown', label: h.employment_type ? titleCase(h.employment_type) : 'Unknown' }
+        case 'site': {
+          const s = siteOf(emp)
+          return { key: s.id ?? '__none__', label: s.name ?? 'Unassigned' }
+        }
+        case 'region': {
+          const s = siteOf(emp)
+          return { key: s.region ?? '__none__', label: s.region ?? 'Unassigned' }
+        }
+        case 'zone': {
+          const s = siteOf(emp)
+          return { key: s.zone ?? '__none__', label: s.zone ?? 'Unassigned' }
+        }
+        case 'site_type': {
+          const s = siteOf(emp)
+          return { key: s.site_type ?? '__none__', label: s.site_type ? titleCase(s.site_type) : 'Unassigned' }
+        }
       }
     }
 

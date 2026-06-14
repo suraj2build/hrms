@@ -17,7 +17,7 @@ import {
   TrendingUp, Activity, DollarSign, Command,
   BarChart3, Users, Search, FileText, CalendarClock,
   AlertTriangle, Target, Gauge, ShieldCheck, Sparkles,
-  LineChart, ArrowRight,
+  LineChart, ArrowRight, Table2, SlidersHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -116,6 +116,17 @@ const CATEGORIES: InsightCategory[] = [
       { title: 'Workforce Operations',   description: 'People-operations cockpit — attention queue, onboarding pipeline and distribution.', route: '/admin/workforce/center', icon: Users },
       { title: 'Attendance Operations',  description: 'Attendance cockpit — KPI strip, insight cards and recent operational events.', route: '/admin/attendance/center', icon: CalendarClock },
       { title: 'Payroll Operations',     description: 'The seven-step payroll execution cockpit, from pre-run checks to payout.', route: '/admin/payroll/center', icon: DollarSign },
+    ],
+  },
+  {
+    id:    'explore',
+    label: 'Explore & Build',
+    blurb: 'Self-serve analytics — slice the canonical datasets your own way.',
+    icon:  SlidersHorizontal,
+    accent: { tile: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', rail: 'group-hover:border-emerald-500/40' },
+    cards: [
+      { title: 'Analytics Studio',  description: 'Guided chart builder — pick a dataset, dimension and measure to chart headcount, cost, attendance and more. Now disaggregates by site, region and zone.', route: '/admin/reports/analytics', icon: SlidersHorizontal, engine: 'Analytics Studio (L4)' },
+      { title: 'Data Explorer',     description: 'Table-first investigation — read metrics as columns and drill row-by-row down to the employee list. Export to CSV / Excel.', route: '/admin/explorer', icon: Table2, engine: 'Data Explorer (L5)' },
     ],
   },
 ]
