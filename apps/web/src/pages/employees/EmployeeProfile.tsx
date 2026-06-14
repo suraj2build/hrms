@@ -1749,6 +1749,19 @@ export function EmployeeProfile() {
   })
   const rosterToday = rosterTodayData?.data ?? null
 
+  // Overview dashboard live signals — shares the React Query cache with the
+  // Employee 360 panel (same key) so this adds no extra network request.
+  const { data: e360 } = useQuery<any>({
+    queryKey: ['employee-360', id],
+    queryFn:  () => api.get(`/intelligence/employee/${id}/360`).then((r: any) => r.data),
+    enabled:  !!id && subTab === 'profile',
+    staleTime: 60_000,
+  })
+  const leaveBalanceTotal: number | null = e360?.leave?.balances
+    ? (e360.leave.balances as Array<{ balance: number }>).reduce((s, b) => s + (Number(b.balance) || 0), 0)
+    : null
+  const assetsAssigned: number | null = e360?.compliance?.assets_assigned ?? null
+
   // Monthly attendance summary removed from the employee master (lives in the
   // Attendance module).
 
@@ -1946,13 +1959,20 @@ export function EmployeeProfile() {
 
           {subTab === 'profile' && !editProfile && (
             <div className="space-y-4">
-              {/* Snapshot tiles */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Snapshot tiles — static profile + live operational signals */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <DashTile icon={CalendarClock} label="Tenure" value={tenureStr} tone="primary" />
                 <DashTile icon={Briefcase} label="Employment" value={titleCaseWord(job?.employment_type)} />
                 {isAdmin && comp
                   ? <DashTile icon={Banknote} label="Annual CTC" value={fmtMoney(comp.ctc_annual)} tone="success" />
                   : <DashTile icon={Award} label="Grade" value={job?.grades?.name ?? '—'} />}
+                <DashTile
+                  icon={CalendarClock}
+                  label="Leave Balance"
+                  value={leaveBalanceTotal == null ? '—' : `${leaveBalanceTotal} ${leaveBalanceTotal === 1 ? 'day' : 'days'}`}
+                  tone="primary"
+                />
+                <DashTile icon={Package} label="Assets" value={assetsAssigned == null ? '—' : assetsAssigned} />
                 <DashTile
                   icon={job?.employment_type === 'probation' ? AlertTriangle : CheckCircle2}
                   label="Confirmation"
