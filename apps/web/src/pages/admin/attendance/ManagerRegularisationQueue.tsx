@@ -31,6 +31,7 @@ import { cn }            from '@/lib/utils'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { toast }         from 'sonner'
+import { RegularisationPolicyCard } from './RegularisationPolicyCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -227,6 +228,13 @@ export default function ManagerRegularisationQueue() {
           </div>
         )}
       </div>
+
+      {/* ── Regularisation policy (HR admin only) ───────────────── */}
+      {isHrAdmin && (
+        <div className="mb-4">
+          <RegularisationPolicyCard />
+        </div>
+      )}
 
       {/* ── Search bar ──────────────────────────────────────────── */}
       <div className="relative mb-4 max-w-sm">
