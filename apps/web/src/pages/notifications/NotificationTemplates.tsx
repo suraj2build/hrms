@@ -49,19 +49,14 @@ interface NotifLog {
   recipient_name?: string
 }
 
-interface DigestPref {
-  frequency: 'daily' | 'weekly' | 'monthly'
-  in_app: boolean
-  email: boolean
-}
-
-type Tab = 'templates' | 'channels' | 'digests' | 'log'
+type Tab = 'templates' | 'channels' | 'digest-status' | 'log'
 type ChannelType = 'email' | 'sms' | 'in_app' | 'push' | 'webhook'
 
-const DIGEST_COPY: Record<DigestPref['frequency'], string> = {
-  daily:   'New joiners, separations, asset moves and pending approvals — every morning.',
-  weekly:  'Joiners, exits, onboarding completions and probation reviews due — each Monday.',
-  monthly: 'Headcount, net change and probation backlog — on the 1st.',
+interface DigestStatusRow {
+  id: string
+  action: 'DIGEST_SENT' | 'DIGEST_FAILED'
+  new_values: Record<string, unknown>
+  created_at: string
 }
 
 const CHANNEL_TYPES: ChannelType[] = ['email', 'sms', 'in_app', 'push', 'webhook']
@@ -154,24 +149,19 @@ export function NotificationTemplates() {
     onError: (e: Error) => toast.error('Channel setting updated', { description: e.message }),
   })
 
-  const { data: digests = [], isLoading: dLoading } = useQuery<DigestPref[]>({
-    queryKey: ['notifications', 'preferences'],
-    queryFn: () => api.get('/notifications/preferences').then((r: any) => r.data),
-    enabled: activeTab === 'digests',
-  })
-
-  const togglePref = useMutation({
-    mutationFn: (body: { frequency: string; channel: 'in_app' | 'email'; enabled: boolean }) =>
-      api.put('/notifications/preferences', body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notifications', 'preferences'] }) },
-    onError: (e: Error) => toast.error('Preference update failed', { description: e.message }),
+  const { data: digestStatus = [], isLoading: dsLoading } = useQuery<DigestStatusRow[]>({
+    queryKey: ['notifications', 'digest-status'],
+    queryFn: () => api.get('/notifications/digest/status').then((r: any) => r.data),
+    enabled: activeTab === 'digest-status',
+    refetchInterval: activeTab === 'digest-status' ? 30_000 : false,
   })
 
   const runDigest = useMutation({
     mutationFn: (frequency: string) => api.post('/notifications/digest/run', { frequency }),
     onSuccess: (r: any) => {
       const d = r?.data
-      toast.success('Digest sent', { description: d ? `${d.in_app} in-app · ${d.email} email · ${d.recipients} recipients` : undefined })
+      qc.invalidateQueries({ queryKey: ['notifications', 'digest-status'] })
+      toast.success('Digest sent', { description: d ? `${d.in_app} in-app · ${d.email} email · ${d.failed} failed` : undefined })
     },
     onError: (e: Error) => toast.error('Send failed', { description: e.message }),
   })
@@ -216,10 +206,10 @@ export function NotificationTemplates() {
     : logs.filter(l => l.status === logStatusFilter)
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'templates', label: 'Templates' },
-    { key: 'channels', label: 'Channels' },
-    { key: 'digests', label: 'Digests' },
-    { key: 'log', label: 'Delivery Log' },
+    { key: 'templates',      label: 'Templates' },
+    { key: 'channels',       label: 'Channels' },
+    { key: 'digest-status',  label: 'Digest Delivery' },
+    { key: 'log',            label: 'Delivery Log' },
   ]
 
   return (
@@ -354,57 +344,58 @@ export function NotificationTemplates() {
         </SectionCard>
       )}
 
-      {/* Digests Tab */}
-      {activeTab === 'digests' && (
-        <SectionCard title="Scheduled Digests">
-          <p className="text-sm text-muted-foreground mb-4">
-            Choose how you want each workforce digest delivered. In-app lands in your notification bell;
-            email requires the Email channel to be enabled. Sends are de-duplicated per period.
-          </p>
-          {dLoading ? (
-            <p className="text-muted-foreground text-sm py-4">Loading preferences…</p>
-          ) : (
-            <div className="space-y-3">
-              {digests.map(d => (
-                <div key={d.frequency} className="border border-border rounded-lg p-4 bg-muted/20">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground capitalize">{d.frequency} digest</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{DIGEST_COPY[d.frequency]}</p>
-                    </div>
-                    <Button
-                      variant="outline" size="sm"
-                      onClick={() => runDigest.mutate(d.frequency)}
-                      disabled={runDigest.isPending}
-                    >
-                      <Send className="h-3.5 w-3.5 mr-1" /> Send now
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-6 mt-3">
-                    {(['in_app', 'email'] as const).map(ch => {
-                      const enabled = d[ch]
-                      return (
-                        <label key={ch} className="flex items-center gap-2 cursor-pointer">
-                          <button
-                            type="button"
-                            onClick={() => togglePref.mutate({ frequency: d.frequency, channel: ch, enabled: !enabled })}
-                            className={cn(
-                              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
-                              enabled ? 'bg-primary' : 'bg-muted',
-                            )}
-                          >
-                            <span className={cn(
-                              'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform',
-                              enabled ? 'translate-x-4' : 'translate-x-1',
-                            )} />
-                          </button>
-                          <span className="text-sm text-foreground">{ch === 'in_app' ? 'In-app' : 'Email'}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
+      {/* Digest Delivery Tab */}
+      {activeTab === 'digest-status' && (
+        <SectionCard title="Digest Delivery">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <p className="text-sm text-muted-foreground">
+              Digests are delivered automatically to all HR admins — daily at 06:00 UTC, weekly on Monday, monthly on the 1st.
+              Use "Send now" to test delivery immediately.
+            </p>
+            <div className="flex gap-2">
+              {(['daily', 'weekly', 'monthly'] as const).map(f => (
+                <Button key={f} variant="outline" size="sm" disabled={runDigest.isPending}
+                  onClick={() => runDigest.mutate(f)}>
+                  <Send className="h-3.5 w-3.5 mr-1" />
+                  {f.charAt(0).toUpperCase() + f.slice(1)}
+                </Button>
               ))}
+            </div>
+          </div>
+          {dsLoading ? (
+            <p className="text-muted-foreground text-sm py-4">Loading delivery log…</p>
+          ) : digestStatus.length === 0 ? (
+            <p className="text-muted-foreground text-sm py-4">No digest sends yet. Use "Send now" to trigger a test delivery.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground uppercase tracking-wider text-[10px]">
+                    <th className="text-left py-2 pr-4 font-semibold">Status</th>
+                    <th className="text-left py-2 pr-4 font-semibold">Frequency</th>
+                    <th className="text-left py-2 pr-4 font-semibold">Channel</th>
+                    <th className="text-left py-2 pr-4 font-semibold">Period</th>
+                    <th className="text-left py-2 font-semibold">Sent at</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {digestStatus.map(row => (
+                    <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20">
+                      <td className="py-2 pr-4">
+                        <Badge variant={row.action === 'DIGEST_SENT' ? 'success' : 'destructive'} className="text-[10px]">
+                          {row.action === 'DIGEST_SENT' ? 'Sent' : 'Failed'}
+                        </Badge>
+                      </td>
+                      <td className="py-2 pr-4 capitalize">{String(row.new_values?.frequency ?? '—')}</td>
+                      <td className="py-2 pr-4 capitalize">{String(row.new_values?.channel ?? '—').replace('_', '-')}</td>
+                      <td className="py-2 pr-4 font-mono text-muted-foreground">{String(row.new_values?.period_key ?? '—')}</td>
+                      <td className="py-2 text-muted-foreground">
+                        {new Date(row.created_at).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </SectionCard>

@@ -1,144 +1,199 @@
 /**
- * Digest Scheduler (R9) — the last-mile delivery the audit found missing.
+ * Digest Scheduler — R9 Minimal
  *
- * Pushes the daily/weekly/monthly workforce digest to each tenant's HR admins
- * on a cadence, honouring per-user preferences and de-duplicating via
- * digest_send_log. Reuses the already-audited, tenant-safe primitives:
- *   - per-tenant loop (SELECT id FROM tenants → per-tenant build)
- *   - tenant-scoped HR recipient resolution (profiles role in super_admin/hr_admin)
- *   - notifications insert (in-app)  +  sendEmail (email)
+ * Activates delivery of existing intelligence using existing infrastructure.
+ * No preference tables, no subscription model, no channel settings.
  *
- * Multi-tenant safety: every query carries tenant_id; recipients and digests are
- * resolved within one tenant before any delivery. A send is reserved in
- * digest_send_log BEFORE delivery so concurrent ticks / instances cannot
- * double-send (UNIQUE(tenant, recipient, frequency, channel, period_key)).
+ * What it does:
+ *   - Runs hourly; fires each digest type once per period (idempotency via
+ *     digest_send_log UNIQUE constraint)
+ *   - Delivers to ALL active HR admins + super admins in every tenant
+ *   - In-app: inserts into notifications table (existing bell)
+ *   - Email: sends via Resend using digestEmail() template
+ *   - Audit: writes DIGEST_SENT / DIGEST_FAILED rows to audit_logs
+ *
+ * Delivery schedule (checked every hour, UTC):
+ *   daily   → any day,    after 06:00 UTC
+ *   weekly  → Monday,     after 06:00 UTC
+ *   monthly → 1st of month, after 06:00 UTC
+ *
+ * Executive narrative → delivered monthly alongside the monthly digest,
+ * pulling from the already-computed intelligence_digest table.
  */
+
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildDigest, periodKey, type DigestFrequency } from './digest-builder.js'
-import { sendEmail, digestEmail } from './email-service.js'
+import { sendEmail, digestEmail, APP_PUBLIC_URL } from './email-service.js'
 
-const TICK_MS       = 60 * 60 * 1000   // hourly — period_key dedup makes precise timing unnecessary
-const WARMUP_MS     = 6 * 60 * 1000    // 6-minute warm-up after startup
-const SEND_HOUR_UTC = 6                // don't push before 06:00 UTC
-
-// Default subscription when a user has no explicit preference row.
-// Weekly + monthly land in-app by default; daily and all email are opt-in.
-const DEFAULT_PREFS: Record<DigestFrequency, { in_app: boolean; email: boolean }> = {
-  daily:   { in_app: false, email: false },
-  weekly:  { in_app: true,  email: false },
-  monthly: { in_app: true,  email: false },
-}
+const TICK_MS    = 60 * 60 * 1_000   // hourly
+const WARMUP_MS  = 5 * 60 * 1_000    // 5-minute startup delay
+const SEND_HOUR  = 6                  // don't fire before 06:00 UTC
 
 const ALL_FREQ: DigestFrequency[] = ['daily', 'weekly', 'monthly']
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-interface RecipientPref { in_app: boolean; email: boolean }
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function effectivePrefs(
-  supabase: SupabaseClient, tenantId: string, userIds: string[], frequency: DigestFrequency,
-): Promise<Record<string, RecipientPref>> {
-  const out: Record<string, RecipientPref> = {}
-  for (const id of userIds) out[id] = { ...DEFAULT_PREFS[frequency] }
+async function getHrAdmins(
+  supabase: SupabaseClient, tenantId: string,
+): Promise<{ id: string; email: string | null }[]> {
   const { data } = await supabase
-    .from('user_notification_preferences')
-    .select('user_id, channel, enabled')
-    .eq('tenant_id', tenantId)
-    .eq('frequency', frequency)
-    .in('user_id', userIds)
-  for (const r of (data ?? []) as any[]) {
-    if (!out[r.user_id]) continue
-    if (r.channel === 'in_app') out[r.user_id].in_app = r.enabled
-    if (r.channel === 'email')  out[r.user_id].email  = r.enabled
-  }
-  return out
-}
-
-/** Reserve a send slot. Returns true if THIS call won the slot (so it must deliver). */
-async function reserve(
-  supabase: SupabaseClient, tenantId: string, recipientId: string,
-  frequency: DigestFrequency, channel: 'in_app' | 'email', pkey: string, force: boolean,
-): Promise<boolean> {
-  const key = force ? `${pkey}:force:${Date.now().toString(36)}` : pkey
-  const { error } = await supabase.from('digest_send_log').insert({
-    tenant_id: tenantId, recipient_id: recipientId, frequency, channel, period_key: key, status: 'sent',
-  })
-  // Unique-violation (23505) → already sent this period → not our slot.
-  return !error
-}
-
-export interface DigestRunResult { recipients: number; in_app: number; email: number; skipped: number }
-
-/**
- * Build the digest for one tenant + frequency and deliver it to each HR admin
- * per their effective preferences. Idempotent per period unless force=true.
- */
-export async function runDigestForTenant(
-  supabase: SupabaseClient, tenantId: string, frequency: DigestFrequency,
-  opts: { force?: boolean; companyName?: string } = {},
-): Promise<DigestRunResult> {
-  const result: DigestRunResult = { recipients: 0, in_app: 0, email: 0, skipped: 0 }
-
-  const { data: admins } = await supabase
     .from('profiles')
     .select('id')
     .eq('tenant_id', tenantId)
     .in('role', ['super_admin', 'hr_admin'])
     .eq('is_active', true)
-  const adminIds = (admins ?? []).map((a: any) => a.id)
-  if (!adminIds.length) return result
-  result.recipients = adminIds.length
 
-  const prefs  = await effectivePrefs(supabase, tenantId, adminIds, frequency)
-  const pkey   = periodKey(frequency)
+  const admins = data ?? []
+  const result: { id: string; email: string | null }[] = []
+
+  for (const a of admins as any[]) {
+    try {
+      const { data: u } = await supabase.auth.admin.getUserById(a.id)
+      result.push({ id: a.id, email: u?.user?.email ?? null })
+    } catch {
+      result.push({ id: a.id, email: null })
+    }
+  }
+  return result
+}
+
+/** Reserve an idempotency slot. Returns true if this call owns the send. */
+async function reserve(
+  supabase: SupabaseClient,
+  tenantId: string, recipientId: string,
+  frequency: DigestFrequency, channel: 'in_app' | 'email', pkey: string,
+): Promise<boolean> {
+  const { error } = await supabase.from('digest_send_log').insert({
+    tenant_id: tenantId, recipient_id: recipientId,
+    frequency, channel, period_key: pkey, status: 'sent',
+  })
+  return !error  // unique-violation = already sent = not our slot
+}
+
+function writeAuditLog(
+  supabase: SupabaseClient,
+  tenantId: string,
+  action: 'DIGEST_SENT' | 'DIGEST_FAILED',
+  detail: Record<string, unknown>,
+): void {
+  // Fire-and-forget; audit log is best-effort — failures are non-fatal.
+  supabase.from('audit_logs').insert({
+    tenant_id:  tenantId,
+    action,
+    table_name: 'digest_send_log',
+    record_id:  null,
+    new_values: detail,
+  }).then(null, () => {})
+}
+
+// ── Executive narrative (monthly only) ────────────────────────────────────────
+
+async function getExecutiveNarrative(
+  supabase: SupabaseClient, tenantId: string, monthLabel: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('intelligence_digest')
+    .select('narrative')
+    .eq('tenant_id', tenantId)
+    .eq('period_type', 'monthly')
+    .eq('period_start', `${monthLabel}-01`)
+    .maybeSingle()
+  return (data as any)?.narrative ?? null
+}
+
+// ── Per-tenant delivery ───────────────────────────────────────────────────────
+
+export interface DigestRunResult {
+  tenant_id:  string
+  frequency:  DigestFrequency
+  recipients: number
+  in_app:     number
+  email:      number
+  failed:     number
+}
+
+export async function runDigestForTenant(
+  supabase: SupabaseClient,
+  tenantId: string,
+  frequency: DigestFrequency,
+  companyName?: string,
+): Promise<DigestRunResult> {
+  const result: DigestRunResult = { tenant_id: tenantId, frequency, recipients: 0, in_app: 0, email: 0, failed: 0 }
+
+  const admins = await getHrAdmins(supabase, tenantId)
+  if (!admins.length) return result
+  result.recipients = admins.length
+
   const digest = await buildDigest(supabase, tenantId, frequency)
-  const force  = opts.force === true
+  const pkey   = periodKey(frequency)
 
-  for (const uid of adminIds) {
-    const p = prefs[uid]
+  // For monthly: also grab the executive narrative (may be null if not yet generated)
+  let execNarrative: string | null = null
+  if (frequency === 'monthly') {
+    execNarrative = await getExecutiveNarrative(supabase, tenantId, digest.period_label)
+  }
 
-    // ── In-app ──
-    if (p.in_app) {
-      if (await reserve(supabase, tenantId, uid, frequency, 'in_app', pkey, force)) {
-        const { error } = await supabase.from('notifications').insert({
-          tenant_id:    tenantId,
-          recipient_id: uid,
-          title:        `${cap(frequency)} workforce digest`,
-          body:         digest.summary_text,
-          link:         '/admin/insights',
-          event_id:     `digest:${frequency}:${pkey}`,
+  for (const admin of admins) {
+    // ── In-app ──────────────────────────────────────────────────────────────
+    if (await reserve(supabase, tenantId, admin.id, frequency, 'in_app', pkey)) {
+      const { error } = await supabase.from('notifications').insert({
+        tenant_id:    tenantId,
+        recipient_id: admin.id,
+        title:        `${digest.period.charAt(0).toUpperCase() + digest.period.slice(1)} workforce digest`,
+        body:         digest.summary_text,
+        link:         '/admin/insights',
+        event_id:     `digest:${frequency}:${pkey}`,
+      })
+      if (error) {
+        result.failed++
+        await writeAuditLog(supabase, tenantId, 'DIGEST_FAILED', {
+          frequency, channel: 'in_app', period_key: pkey,
+          recipient_id: admin.id, error: error.message,
         })
-        if (error) result.skipped++; else result.in_app++
-      } else { result.skipped++ }
+      } else {
+        result.in_app++
+      }
     }
 
-    // ── Email ──
-    if (p.email) {
-      if (await reserve(supabase, tenantId, uid, frequency, 'email', pkey, force)) {
-        try {
-          const { data: u } = await supabase.auth.admin.getUserById(uid)
-          const email = u?.user?.email
-          if (email) {
-            const { subject, html } = digestEmail({
-              frequency, periodLabel: digest.period_label,
-              summaryText: digest.summary_text, metrics: digest.metrics,
-              companyName: opts.companyName,
-            })
-            const res = await sendEmail({ to: email, subject, html })
-            if (res.sent) result.email++; else result.skipped++
-          } else { result.skipped++ }
-        } catch { result.skipped++ }
-      } else { result.skipped++ }
+    // ── Email ────────────────────────────────────────────────────────────────
+    if (admin.email) {
+      if (await reserve(supabase, tenantId, admin.id, frequency, 'email', pkey)) {
+        const { subject, html } = digestEmail({
+          frequency,
+          periodLabel:  digest.period_label,
+          summaryText:  execNarrative ?? digest.summary_text,
+          metrics:      digest.metrics,
+          companyName,
+          appUrl:       APP_PUBLIC_URL,
+        })
+        const sent = await sendEmail({ to: admin.email, subject, html })
+        if (sent.sent) {
+          result.email++
+          await writeAuditLog(supabase, tenantId, 'DIGEST_SENT', {
+            frequency, channel: 'email', period_key: pkey,
+            recipient_id: admin.id, resend_id: sent.id ?? null,
+          })
+        } else {
+          result.failed++
+          await writeAuditLog(supabase, tenantId, 'DIGEST_FAILED', {
+            frequency, channel: 'email', period_key: pkey,
+            recipient_id: admin.id, error: sent.error ?? 'send failed',
+          })
+        }
+      }
     }
   }
 
   return result
 }
 
+// ── Scheduler tick ────────────────────────────────────────────────────────────
+
 function isDue(frequency: DigestFrequency, now: Date): boolean {
-  if (now.getUTCHours() < SEND_HOUR_UTC) return false
+  if (now.getUTCHours() < SEND_HOUR) return false
   if (frequency === 'daily')   return true
   if (frequency === 'weekly')  return now.getUTCDay() === 1   // Monday
-  return now.getUTCDate() === 1                                // monthly: 1st
+  return now.getUTCDate() === 1                                // 1st of month
 }
 
 async function tick(supabase: SupabaseClient): Promise<void> {
@@ -150,25 +205,28 @@ async function tick(supabase: SupabaseClient): Promise<void> {
   for (const t of (tenants ?? []) as any[]) {
     for (const f of due) {
       try {
-        await runDigestForTenant(supabase, t.id, f, { companyName: t.name })
+        const r = await runDigestForTenant(supabase, t.id, f, t.name)
+        if (r.in_app + r.email > 0) {
+          console.log(`[digest] ${f} tenant=${t.id} → ${r.in_app} in-app, ${r.email} email, ${r.failed} failed`)
+        }
       } catch (e) {
-        console.error(`[digest-scheduler] ${f} tenant=${t.id} error:`, (e as Error).message)
+        console.error(`[digest] ${f} tenant=${t.id} error:`, (e as Error).message)
       }
     }
   }
 }
 
 /**
- * Register the digest scheduler. Call once at startup after the Supabase plugin
- * is registered. Wrapped in safeRegisterModule by the caller — must not throw.
+ * Register the R9-minimal digest scheduler.
+ * Call once at startup after the Supabase plugin is registered.
  */
 export function registerDigestScheduler(supabase: SupabaseClient): void {
   setTimeout(() => {
-    tick(supabase).catch(e => console.error('[digest-scheduler] initial tick error:', (e as Error).message))
+    tick(supabase).catch(e => console.error('[digest] initial tick error:', (e as Error).message))
     setInterval(
-      () => tick(supabase).catch(e => console.error('[digest-scheduler] tick error:', (e as Error).message)),
+      () => tick(supabase).catch(e => console.error('[digest] tick error:', (e as Error).message)),
       TICK_MS,
     )
-    console.log('📬 Digest scheduler active — daily/weekly/monthly push to HR admins')
+    console.log('📬 Digest scheduler active (R9-minimal) — daily/weekly/monthly to all HR admins')
   }, WARMUP_MS)
 }
