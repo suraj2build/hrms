@@ -24,6 +24,34 @@ import {
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
+const isoDate = (d: Date) => d.toISOString().slice(0, 10)
+
+/**
+ * Bounds of the configurable limit period containing `now` (UTC).
+ * Returns [start, end) as YYYY-MM-DD strings, comparable against created_at.
+ * The window is anchored to submission time (now), so the cap means
+ * "requests an employee raises per <period>", regardless of which date is
+ * being regularised.
+ */
+function limitPeriodBounds(period: string, now: Date): { start: string; end: string; label: string } {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth(), d = now.getUTCDate()
+  if (period === 'week') {
+    const dow = now.getUTCDay() === 0 ? 7 : now.getUTCDay()   // Mon=1 … Sun=7
+    const monday = new Date(Date.UTC(y, m, d - (dow - 1)))
+    const next   = new Date(Date.UTC(y, m, d - (dow - 1) + 7))
+    return { start: isoDate(monday), end: isoDate(next), label: 'week' }
+  }
+  if (period === 'quarter') {
+    const qStart = Math.floor(m / 3) * 3
+    return { start: isoDate(new Date(Date.UTC(y, qStart, 1))), end: isoDate(new Date(Date.UTC(y, qStart + 3, 1))), label: 'quarter' }
+  }
+  if (period === 'year') {
+    return { start: `${y}-01-01`, end: `${y + 1}-01-01`, label: 'year' }
+  }
+  // month (default)
+  return { start: isoDate(new Date(Date.UTC(y, m, 1))), end: isoDate(new Date(Date.UTC(y, m + 1, 1))), label: 'month' }
+}
+
 // All accepted regularization_type values.
 // Legacy abstract types kept for backward compat; ESS descriptive types added in migration 150.
 const REGULARIZATION_TYPES = [
@@ -78,13 +106,16 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     // ── Load tenant regularisation policy ──────────────────────────────────────
     const { data: policy } = await fastify.supabase
       .from('regularisation_policy')
-      .select('submission_window_days, max_per_month, sla_hours')
+      .select('submission_window_days, max_per_month, sla_hours, limit_period, exclude_rejected, per_type_limits')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    const windowDays = policy?.submission_window_days ?? 7
-    const maxPerMonth = policy?.max_per_month ?? 5
-    const slaHours = policy?.sla_hours ?? 48
+    const windowDays      = policy?.submission_window_days ?? 7
+    const maxPerPeriod    = policy?.max_per_month ?? 5
+    const slaHours        = policy?.sla_hours ?? 48
+    const limitPeriod     = policy?.limit_period ?? 'month'
+    const excludeRejected = policy?.exclude_rejected ?? true
+    const perTypeLimits   = (policy?.per_type_limits ?? {}) as Record<string, number>
 
     // ── Submission window check ────────────────────────────────────────────────
     const attendanceDate = new Date(`${date}T12:00:00.000Z`)
@@ -106,25 +137,51 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       })
     }
 
-    // ── Monthly frequency limit check ─────────────────────────────────────────
-    const monthStart = `${date.slice(0, 7)}-01`
-    const monthEnd = new Date(new Date(`${date.slice(0, 7)}-01`).setUTCMonth(
-      new Date(`${date.slice(0, 7)}-01`).getUTCMonth() + 1
-    )).toISOString().slice(0, 10)
+    // ── Frequency limit check (configurable period + status filter) ────────────
+    // Statuses that consume quota: pending + approved always; rejected too unless
+    // the policy excludes them. Cancelled requests never count.
+    const countedStatuses = excludeRejected
+      ? ['pending', 'approved']
+      : ['pending', 'approved', 'rejected']
 
-    const { count: monthCount } = await fastify.supabase
+    const { start: periodStart, end: periodEnd, label: periodLabel } = limitPeriodBounds(limitPeriod, new Date())
+
+    const { count: periodCount } = await fastify.supabase
       .from('attendance_regularisation')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', profile.employee_id)
-      .gte('created_at', monthStart)
-      .lt('created_at', monthEnd)
+      .in('status', countedStatuses)
+      .gte('created_at', periodStart)
+      .lt('created_at', periodEnd)
 
-    if ((monthCount ?? 0) >= maxPerMonth) {
+    if ((periodCount ?? 0) >= maxPerPeriod) {
       return reply.code(422).send({
         error:   'FREQUENCY_LIMIT_EXCEEDED',
-        message: `You have reached the maximum of ${maxPerMonth} regularisation requests for this month.`,
+        message: `You have reached the maximum of ${maxPerPeriod} regularisation requests for this ${periodLabel}.`,
       })
+    }
+
+    // ── Per-type sub-limit check ───────────────────────────────────────────────
+    // If the policy caps this specific request type, enforce it within the period.
+    const typeCap = regularization_type ? Number(perTypeLimits[regularization_type]) : NaN
+    if (regularization_type && Number.isFinite(typeCap) && typeCap > 0) {
+      const { count: typeCount } = await fastify.supabase
+        .from('attendance_regularisation')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', profile.employee_id)
+        .eq('regularization_type', regularization_type)
+        .in('status', countedStatuses)
+        .gte('created_at', periodStart)
+        .lt('created_at', periodEnd)
+
+      if ((typeCount ?? 0) >= typeCap) {
+        return reply.code(422).send({
+          error:   'TYPE_LIMIT_EXCEEDED',
+          message: `You have reached the maximum of ${typeCap} "${regularization_type.replace(/_/g, ' ')}" requests for this ${periodLabel}.`,
+        })
+      }
     }
 
     // ── Period lock check ──────────────────────────────────────────────────────

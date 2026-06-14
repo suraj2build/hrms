@@ -92,7 +92,29 @@ interface RegPolicy {
   sla_hours:                number
   auto_reject_on_sla_breach: boolean
   sla_breach_notify:        string | null
+  limit_period:             'week' | 'month' | 'quarter' | 'year'
+  exclude_rejected:         boolean
+  per_type_limits:          Record<string, number>
 }
+
+// Employee-facing regularisation types eligible for per-type caps.
+const REG_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'missed_punch',    label: 'Missed punch' },
+  { value: 'forgot_checkout', label: 'Forgot checkout' },
+  { value: 'onsite_duty',     label: 'Onsite duty' },
+  { value: 'biometric_issue', label: 'Biometric issue' },
+  { value: 'client_visit',    label: 'Client visit' },
+  { value: 'wfh',             label: 'Work from home' },
+  { value: 'field_work',      label: 'Field work' },
+  { value: 'system_issue',    label: 'System issue' },
+]
+
+const LIMIT_PERIOD_OPTIONS: { value: RegPolicy['limit_period']; label: string }[] = [
+  { value: 'week',    label: 'Per week' },
+  { value: 'month',   label: 'Per month' },
+  { value: 'quarter', label: 'Per quarter' },
+  { value: 'year',    label: 'Per year' },
+]
 
 interface DailyRecord {
   id:              string
@@ -721,7 +743,7 @@ export function RegularisationApproval() {
               <p className="text-[10px] text-muted-foreground">Max days after attendance date that an employee can submit a request.</p>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Max Requests / Month</label>
+              <label className="text-xs font-medium text-muted-foreground">Max Requests / Period</label>
               <Input
                 type="number"
                 min={1}
@@ -730,7 +752,32 @@ export function RegularisationApproval() {
                 onChange={e => { setPolicyForm(p => ({ ...p, max_per_month: +e.target.value })); setPolicyDirty(true) }}
                 className="h-8 text-xs"
               />
-              <p className="text-[10px] text-muted-foreground">Maximum regularisation requests per employee per calendar month.</p>
+              <p className="text-[10px] text-muted-foreground">Maximum regularisation requests per employee in each limit period.</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Limit Period</label>
+              <select
+                value={policyForm.limit_period ?? policy?.limit_period ?? 'month'}
+                onChange={e => { setPolicyForm(p => ({ ...p, limit_period: e.target.value as RegPolicy['limit_period'] })); setPolicyDirty(true) }}
+                className="h-8 text-xs w-full border border-border rounded-md px-2 bg-background text-foreground"
+              >
+                {LIMIT_PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <p className="text-[10px] text-muted-foreground">Window the request cap is counted over.</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Exclude rejected from limit</label>
+              <div className="flex items-center gap-2 h-8">
+                <input
+                  type="checkbox"
+                  id="exclude-rejected"
+                  checked={policyForm.exclude_rejected ?? policy?.exclude_rejected ?? true}
+                  onChange={e => { setPolicyForm(p => ({ ...p, exclude_rejected: e.target.checked })); setPolicyDirty(true) }}
+                  className="h-4 w-4 rounded accent-primary"
+                />
+                <label htmlFor="exclude-rejected" className="text-xs text-foreground">Don't count rejected requests</label>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Rejected requests won't consume an employee's quota. (Cancelled never counts.)</p>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">SLA (hours)</label>
@@ -769,6 +816,39 @@ export function RegularisationApproval() {
               />
             </div>
           </div>
+
+          {/* ── Per-type sub-limits ──────────────────────────────────────────── */}
+          <div className="mt-5 pt-4 border-t border-border">
+            <label className="text-xs font-medium text-muted-foreground">Per-type limits (optional)</label>
+            <p className="text-[10px] text-muted-foreground mb-3">Cap specific request types within the limit period. Leave blank or 0 for no per-type cap (only the overall cap applies).</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {REG_TYPE_OPTIONS.map(t => {
+                const current = policyForm.per_type_limits ?? policy?.per_type_limits ?? {}
+                const val = current[t.value]
+                return (
+                  <div key={t.value} className="space-y-1">
+                    <label className="text-[11px] text-foreground">{t.label}</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      placeholder="—"
+                      value={val ?? ''}
+                      onChange={e => {
+                        const next: Record<string, number> = { ...(policyForm.per_type_limits ?? policy?.per_type_limits ?? {}) }
+                        const n = e.target.value === '' ? 0 : Math.max(0, Math.min(100, +e.target.value))
+                        if (n > 0) next[t.value] = n; else delete next[t.value]
+                        setPolicyForm(p => ({ ...p, per_type_limits: next }))
+                        setPolicyDirty(true)
+                      }}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border">
             <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setShowPolicy(false); setPolicyDirty(false) }}>Cancel</Button>
             <Button

@@ -16,6 +16,10 @@ const policySchema = z.object({
   sla_hours:                z.number().int().min(1).max(720).optional(),
   auto_reject_on_sla_breach: z.boolean().optional(),
   sla_breach_notify:        z.string().max(500).nullable().optional(),
+  limit_period:             z.enum(['week', 'month', 'quarter', 'year']).optional(),
+  exclude_rejected:         z.boolean().optional(),
+  // Per-type sub-caps, e.g. { wfh: 2, missed_punch: 3 }. Zero/blank entries are dropped client-side.
+  per_type_limits:          z.record(z.string(), z.number().int().min(0).max(100)).optional(),
 })
 
 export default async function regularisationPolicyRoutes(fastify: FastifyInstance) {
