@@ -38,6 +38,7 @@ import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
 import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
+import { isSelfApproval } from '../../lib/approval-guards.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -253,6 +254,14 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       return reply.code(409).send({
         error:   'INVALID_STATE',
         message: `Request is already ${(co as any).status}`,
+      })
+    }
+
+    // Segregation of duties — a user may not approve their own comp-off (F3).
+    if (await isSelfApproval(fastify.supabase, req.tenantId, req.userId, (co as any).employee_id)) {
+      return reply.code(403).send({
+        error:   'SELF_APPROVAL_FORBIDDEN',
+        message: 'You cannot approve your own comp-off request.',
       })
     }
 

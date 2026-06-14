@@ -20,6 +20,7 @@ import {
   resolveLeaveDayFraction, type LeaveSession,
 } from '../../lib/leave-engine.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { isSelfApproval } from '../../lib/approval-guards.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction, logBulkAction } from '../../lib/audit-service.js'
 import { emitEvent } from '../../lib/event-emitter.js'
@@ -309,6 +310,14 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     }
     if (app.status !== 'pending') {
       return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: `Application is already ${app.status}` })
+    }
+
+    // Segregation of duties — a user may not approve their own leave (F3).
+    if (await isSelfApproval(fastify.supabase, req.tenantId as string, (req as any).userId, app.employee_id as string)) {
+      return reply.code(403).send({
+        error:   'SELF_APPROVAL_FORBIDDEN',
+        message: 'You cannot approve your own leave application.',
+      })
     }
 
     // Fetch leave type for paid flag + sandwich flag
