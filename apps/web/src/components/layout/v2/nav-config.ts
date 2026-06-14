@@ -1044,3 +1044,43 @@ export function getSearchableNavItems(role: UserRole | undefined): SearchableNav
   }
   return out
 }
+
+// ── Dev-only nav integrity check ──────────────────────────────────────────────
+// Runs once when this module loads. Logs a warning for any nav item whose route
+// is not covered by its domain's matchPrefixes — the exact class of bug that
+// caused Expiry Management and Benefits to show a blank sidebar.
+//
+// Zero runtime cost in production (import.meta.env.DEV is false-branched away
+// by Vite's tree-shaker). No throw — warnings only so the app still runs.
+if (import.meta.env.DEV) {
+  const allDomains = [...DOMAINS, ...EXECUTIVE_DOMAINS]
+  const issues: string[] = []
+
+  for (const domain of allDomains) {
+    for (const group of domain.groups) {
+      for (const item of group.items) {
+        const covered = domain.matchPrefixes.some(
+          prefix =>
+            item.route === prefix ||
+            item.route.startsWith(prefix + '/') ||
+            item.route.startsWith(prefix),
+        )
+        if (!covered) {
+          issues.push(
+            `[nav] "${item.label}" (${item.route}) is in domain "${domain.label}" ` +
+            `but its route is NOT covered by matchPrefixes → sidebar will be blank.\n` +
+            `  Fix: add '${item.route.split('/').slice(0, 3).join('/')}' to ${domain.label}.matchPrefixes`,
+          )
+        }
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    console.warn(
+      `%c⚠ Nav integrity check — ${issues.length} issue(s) found:\n\n` +
+      issues.join('\n\n'),
+      'color: orange; font-weight: bold',
+    )
+  }
+}
