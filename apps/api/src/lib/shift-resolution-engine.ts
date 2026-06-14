@@ -124,11 +124,18 @@ export async function resolveShiftWithAttribution(
     const dow = new Date(`${date}T12:00:00`).getDay()
     const condition = dayOfWeekToCondition(dow)
     if (condition) {
+      // Temporal: pick the rule version effective ON `date` (AHI-3). Falls back
+      // to the open version (effective_to IS NULL) and to backfilled rows whose
+      // window started in the past.
       const { data: ruleRow } = await supabase
         .from('rotation_policy_rules')
-        .select('shifts!inner(id, name, start_time, end_time, grace_minutes, is_night_shift)')
+        .select('effective_from, shifts!inner(id, name, start_time, end_time, grace_minutes, is_night_shift)')
         .eq('rotation_policy_id', rotPolicyId)
         .eq('condition_type', condition)
+        .lte('effective_from', date)
+        .or('effective_to.is.null,effective_to.gte.' + date)
+        .order('effective_from', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
       const s = (ruleRow as any)?.shifts as RawShift | null
@@ -228,15 +235,23 @@ export async function resolveShiftBatch(
 
   if (condition && rotationPolicyMap.size > 0) {
     const uniquePolicyIds = [...new Set([...rotationPolicyMap.values()].map(v => v.policyId))]
+    // Temporal (AHI-3): fetch all rule versions effective on `date`, newest
+    // effective_from first, then keep the first (latest-effective) per policy.
     const { data: ruleRows } = await supabase
       .from('rotation_policy_rules')
-      .select('rotation_policy_id, shift_id')
+      .select('rotation_policy_id, shift_id, effective_from')
       .in('rotation_policy_id', uniquePolicyIds)
       .eq('condition_type', condition)
+      .lte('effective_from', date)
+      .or('effective_to.is.null,effective_to.gte.' + date)
+      .order('effective_from', { ascending: false })
 
-    const policyToShift = new Map<string, string>(
-      (ruleRows ?? []).map((r: any) => [r.rotation_policy_id, r.shift_id])
-    )
+    const policyToShift = new Map<string, string>()
+    for (const r of (ruleRows ?? []) as any[]) {
+      if (!policyToShift.has(r.rotation_policy_id)) {
+        policyToShift.set(r.rotation_policy_id, r.shift_id)
+      }
+    }
 
     for (const [empId, { policyId }] of rotationPolicyMap) {
       const shiftId = policyToShift.get(policyId)

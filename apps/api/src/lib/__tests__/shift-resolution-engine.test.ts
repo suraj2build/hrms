@@ -85,7 +85,7 @@ describe('shift-resolution-engine — single/batch parity', () => {
       shift_roster: [],
       employees: [{ id: 'e2', tenant_id: TENANT, site_id: 'site1', rotation_policy_id: 'rp1',
         sites: { default_rotation_policy_id: null, default_shift_id: null, shifts: null } }],
-      rotation_policy_rules: [{ rotation_policy_id: 'rp1', condition_type: 'weekday_working', shift_id: SHIFTS.rot.id, shifts: SHIFTS.rot }],
+      rotation_policy_rules: [{ rotation_policy_id: 'rp1', condition_type: 'weekday_working', shift_id: SHIFTS.rot.id, effective_from: '2000-01-01', effective_to: null, shifts: SHIFTS.rot }],
       shifts: [SHIFTS.rot],
     }
     const { single, batch } = await bothResolve(tables, 'e2')
@@ -127,6 +127,30 @@ describe('shift-resolution-engine — single/batch parity', () => {
     const sb = makeSupabase(histTables)
     // Resolve for a date inside the OLD window → must return the night shift.
     const past = await resolveShiftWithAttribution(sb, TENANT, 'e3', '2026-02-15')
+    expect(past?.shift_id).toBe(SHIFTS.night.id)
+  })
+
+  it('priority 2 (temporal, AHI-3): a rotation rule edit does not change a past date', async () => {
+    // Two versions of the weekday rule: the old one (night) was effective
+    // through Feb; the new one (rot) is effective from March.
+    const tables = {
+      shift_roster: [],
+      employees: [{ id: 'e6', tenant_id: TENANT, site_id: 'site1', rotation_policy_id: 'rp9',
+        sites: { default_rotation_policy_id: null, default_shift_id: null, shifts: null } }],
+      rotation_policy_rules: [
+        { rotation_policy_id: 'rp9', condition_type: 'weekday_working', shift_id: SHIFTS.night.id, effective_from: '2026-01-01', effective_to: '2026-02-28', shifts: SHIFTS.night },
+        { rotation_policy_id: 'rp9', condition_type: 'weekday_working', shift_id: SHIFTS.rot.id,   effective_from: '2026-03-01', effective_to: null,         shifts: SHIFTS.rot },
+      ],
+      shifts: [SHIFTS.night, SHIFTS.rot],
+    }
+    // DATE is 2026-03-10 → resolves the current (rot) version.
+    const { single, batch } = await bothResolve(tables, 'e6')
+    expect(single?.shift_id).toBe(SHIFTS.rot.id)
+    expect(batch).toEqual(single)
+
+    // A February weekday (2026-02-17 is a Tuesday) must still resolve the
+    // version effective THEN (night), not the current one.
+    const past = await resolveShiftWithAttribution(makeSupabase(tables), TENANT, 'e6', '2026-02-17')
     expect(past?.shift_id).toBe(SHIFTS.night.id)
   })
 

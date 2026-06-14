@@ -1185,20 +1185,27 @@ export async function recomputeRange(
   )
 
   // Batch-fetch existing {status, day_fraction, computed_source} for delta detection
-  // and recompute-protection filtering.
+  // and recompute-protection filtering. Also pull the prior shift attribution so a
+  // shift change across a recompute can be recorded (AHI-3 / migration 261).
   const { data: existing } = await supabase
     .from('attendance_daily')
-    .select('employee_id, date, status, day_fraction, computed_source')
+    .select('employee_id, date, status, day_fraction, computed_source, expected_shift_id, shift_start_time, resolution_source')
     .eq('tenant_id', tenant_id)
     .eq('employee_id', employee_id)
     .in('date', dates)
 
-  const beforeMap = new Map<string, { status: string; day_fraction: number; computed_source: string }>(
-    ((existing ?? []) as Array<{ employee_id: string; date: string; status: string; day_fraction: number; computed_source: string }>)
+  const beforeMap = new Map<string, {
+    status: string; day_fraction: number; computed_source: string
+    expected_shift_id: string | null; shift_start_time: string | null; resolution_source: string | null
+  }>(
+    ((existing ?? []) as Array<any>)
       .map((r) => [`${r.employee_id}:${r.date}`, {
-        status:          r.status,
-        day_fraction:    r.day_fraction,
-        computed_source: r.computed_source ?? 'engine',
+        status:            r.status,
+        day_fraction:      r.day_fraction,
+        computed_source:   r.computed_source ?? 'engine',
+        expected_shift_id: r.expected_shift_id ?? null,
+        shift_start_time:  r.shift_start_time ?? null,
+        resolution_source: r.resolution_source ?? null,
       }]),
   )
 
@@ -1287,6 +1294,37 @@ export async function recomputeRange(
         source: 'recompute' as const,
       })),
     )
+
+    // ── Shift-change audit (AHI-3 / migration 261) ───────────────────────────
+    // When a recompute resolves a DIFFERENT shift than the one previously
+    // persisted, record it so HR can answer "did a config change alter this
+    // employee's historical attendance?". Only meaningful with attribution on.
+    if (attributionEnabled) {
+      const shiftChanges = safeComputed
+        .filter((r) => {
+          const before = beforeMap.get(`${r.employee_id}:${r.date}`)
+          return before?.expected_shift_id != null
+            && before.expected_shift_id !== (r.expected_shift_id ?? null)
+        })
+        .map((r) => {
+          const before = beforeMap.get(`${r.employee_id}:${r.date}`)!
+          return {
+            tenant_id, employee_id: r.employee_id, date: r.date,
+            old_shift_id:          before.expected_shift_id,
+            old_shift_start_time:  before.shift_start_time,
+            old_resolution_source: before.resolution_source,
+            new_shift_id:          r.expected_shift_id ?? null,
+            new_shift_start_time:  r.shift_start_time ?? null,
+            new_resolution_source: r.resolution_source ?? null,
+            change_reason:         'recompute',
+            changed_by:            changed_by ?? null,
+          }
+        })
+      if (shiftChanges.length > 0) {
+        const { error: auditErr } = await supabase.from('attendance_shift_audit_log').insert(shiftChanges)
+        if (auditErr) console.warn('[recomputeRange] shift audit log write failed:', auditErr.message)
+      }
+    }
 
     // Auto-generate pending comp-off for any worked-on-weekly-off / worked-on-holiday
     // day. Idempotent (unique on tenant_id,employee_id,worked_date) and gated by HR

@@ -208,18 +208,29 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
     }
 
-    // Replace rules if provided (delete all → re-insert)
+    // Replace rules if provided — TEMPORAL versioning (AHI-3). Instead of
+    // deleting history (which retroactively rewrote past attendance recomputes),
+    // close the currently-open versions as of yesterday and insert the new set
+    // effective today. Past dates continue to resolve to the version that was in
+    // effect then.
     if (Array.isArray(rules)) {
-      await fastify.supabase
+      const today     = new Date().toISOString().slice(0, 10)
+      const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+
+      const { error: closeErr } = await fastify.supabase
         .from('rotation_policy_rules')
-        .delete()
+        .update({ effective_to: yesterday })
         .eq('rotation_policy_id', req.params.id)
+        .is('effective_to', null)
+      if (closeErr) return reply.code(500).send({ error: 'DB_ERROR', message: closeErr.message })
 
       if (rules.length > 0) {
         const ruleRows = rules.map((r) => ({
           ...r,
           rotation_policy_id: req.params.id,
           tenant_id:          req.tenantId,
+          effective_from:     today,
+          effective_to:       null,
         }))
         const { error: re } = await fastify.supabase
           .from('rotation_policy_rules')
