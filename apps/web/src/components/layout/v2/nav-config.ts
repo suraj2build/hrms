@@ -764,6 +764,7 @@ export const DOMAINS: Domain[] = [
           { id: 'rotation-policies', label: 'Rotation Policies', route: '/admin/masters/rotation-policies', icon: CalendarClock, keywords: ['rotation', 'rotating shift', 'shift rotation', 'cycle schedule'] },
           { id: 'holidays',          label: 'Holiday Calendar',  route: '/admin/holidays',                  icon: CalendarDays,  keywords: ['public holiday', 'gazetted holiday', 'national holiday', 'holiday list', 'bank holiday', 'weekly off'] },
           { id: 'att-policy',        label: 'Attendance Policy', route: '/admin/attendance/policy',         icon: ShieldCheck,   keywords: ['attendance rules', 'late mark rules', 'half day rules', 'grace period', 'OT policy', 'attendance configuration'] },
+          { id: 'reg-policy',        label: 'Regularisation Policy', route: '/admin/attendance/regularisation-policy', icon: CheckSquare, keywords: ['regularisation limit', 'regularization limit', 'correction limit', 'max requests', 'request cap', 'per type limit', 'regularisation policy', 'frequency limit'] },
         ],
       },
 

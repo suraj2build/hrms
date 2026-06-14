@@ -50,8 +50,8 @@ const LIMIT_PERIOD_OPTIONS: { value: RegPolicy['limit_period']; label: string }[
   { value: 'year',    label: 'Per year' },
 ]
 
-export function RegularisationPolicyCard() {
-  const [open, setOpen]   = useState(false)
+export function RegularisationPolicyCard({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
+  const [open, setOpen]   = useState(defaultOpen)
   const [form, setForm]   = useState<Partial<RegPolicy>>({})
   const [dirty, setDirty] = useState(false)
 
