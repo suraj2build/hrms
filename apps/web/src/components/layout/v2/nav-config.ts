@@ -740,6 +740,7 @@ export const DOMAINS: Domain[] = [
         label: 'Organization',
         items: [
           { id: 'departments',  label: 'Departments & Roles', route: '/admin/organization',                  icon: GitBranch,  keywords: ['org chart', 'org structure', 'department structure', 'hierarchy', 'reporting structure', 'org setup', 'team structure'] },
+          { id: 'positions',    label: 'Positions',           route: '/admin/positions',                     icon: Briefcase,  keywords: ['position', 'sanctioned', 'sanctioned strength', 'vacancy', 'headcount budget', 'manpower', 'fill rate', 'open positions', 'position master', 'slot', 'establishment'] },
           { id: 'sites',        label: 'Sites',               route: '/admin/masters/sites',                 icon: Building2,  keywords: ['office', 'branch', 'site master', 'office address', 'branch list'] },
           { id: 'locations',    label: 'Work Locations',      route: '/admin/masters/work-locations',        icon: MapPin,     keywords: ['office location', 'remote location', 'work site', 'branch location', 'location master'] },
           { id: 'cost-centers', label: 'Cost Centers',        route: '/admin/masters/cost-centers',          icon: Scale,      keywords: ['cost centre', 'accounting code', 'GL mapping', 'finance code', 'cost code'] },

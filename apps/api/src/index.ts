@@ -32,6 +32,7 @@ registerNotificationHandlers()
 import employeeOptionsRoute from './routes/employees/options.js'
 import employeeRoutes from './routes/employees/index.js'
 import orgRoutes from './routes/departments/index.js'
+import positionsRoutes from './routes/positions/index.js'
 import documentRoutes from './routes/documents/index.js'
 import analyticsRoutes              from './routes/analytics/index.js'
 import reportsRoutes                from './routes/analytics/reports.js'
@@ -479,6 +480,7 @@ async function start() {
   await fastify.register(employeeOptionsRoute)  // /employees/options
   await fastify.register(employeeRoutes)
   await fastify.register(orgRoutes)
+  await fastify.register(positionsRoutes, { prefix: '/positions' })   // R7 — position management
   await fastify.register(documentRoutes)
   await fastify.register(analyticsRoutes)
   await fastify.register(reportsRoutes)

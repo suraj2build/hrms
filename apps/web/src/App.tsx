@@ -54,6 +54,7 @@ import type { Profile, Tenant } from '@/types'
 // Each uses .then(m => ({ default: m.X })) to unwrap named exports.
 
 const Organization      = lazy(() => import('@/pages/organization/Organization').then(m => ({ default: m.Organization })))
+const Positions         = lazy(() => import('@/pages/positions/Positions').then(m => ({ default: m.Positions })))
 const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m => ({ default: m.OrgChart })))
 const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
 const AdminBenefits     = lazy(() => import('@/pages/admin/AdminBenefits').then(m => ({ default: m.AdminBenefits })))
@@ -588,6 +589,7 @@ export default function App() {
                 <Route path="/admin/employees/org-chart" element={<OrgChart />} />
                 <Route path="/admin/employees/:id"    element={<ProfilePlatform />} />
                 <Route path="/admin/organization"     element={<Organization />} />
+                <Route path="/admin/positions"        element={<Positions />} />
                 <Route path="/admin/helpdesk"         element={<AdminHelpdesk />} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
