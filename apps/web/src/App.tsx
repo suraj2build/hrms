@@ -103,6 +103,7 @@ const LeaveAccrualLedger  = lazy(() => import('@/pages/attendance/LeaveAccrualLe
 const AttendancePolicy    = lazy(() => import('@/pages/attendance/AttendancePolicy').then(m => ({ default: m.AttendancePolicy })))
 const RegularisationPolicySettings = lazy(() => import('@/pages/admin/attendance/RegularisationPolicySettings').then(m => ({ default: m.RegularisationPolicySettings })))
 const CompOff             = lazy(() => import('@/pages/attendance/CompOff').then(m => ({ default: m.CompOff })))
+const WeeklyOffCredit     = lazy(() => import('@/pages/attendance/WeeklyOffCredit').then(m => ({ default: m.WeeklyOffCredit })))
 const OvertimeManagement  = lazy(() => import('@/pages/attendance/OvertimeManagement').then(m => ({ default: m.OvertimeManagement })))
 const PayrollReadiness    = lazy(() => import('@/pages/attendance/PayrollReadiness').then(m => ({ default: m.PayrollReadiness })))
 const LeaveAccrualAdmin   = lazy(() => import('@/pages/attendance/LeaveAccrualAdmin').then(m => ({ default: m.LeaveAccrualAdmin })))
@@ -619,6 +620,7 @@ export default function App() {
                 <Route path="/admin/attendance/periods"           element={<AttendancePeriods />} />
                 <Route path="/admin/attendance/policy"            element={<AttendancePolicy />} />
                 <Route path="/admin/attendance/regularisation-policy" element={<RegularisationPolicySettings />} />
+                <Route path="/admin/attendance/wo-credit"         element={<WeeklyOffCredit />} />
                 <Route path="/admin/attendance/forensics"         element={<AttendanceTimeline />} />
                 <Route path="/admin/attendance/who-is-in"        element={<WhoIsIn />} />
                 <Route path="/admin/shift-master"                 element={<ShiftMaster />} />

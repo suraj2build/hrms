@@ -75,11 +75,14 @@ const schema = z.object({
   cycle_days:   z.union([z.literal(7), z.literal(14), z.literal(28)]).default(7),
   pattern_json: patternJsonSchema.default({ weekly_off_days: [] }),
   is_active:    z.boolean().optional(),
+  // WO-credit (retail floating weekly-off): tag this roster with a structure.
+  // Null = normal fixed-weekly-off roster.
+  wo_credit_structure_id: z.string().uuid().optional().nullable(),
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const SELECT_COLS = 'id, name, code, description, cycle_days, pattern_json, is_active, created_at, updated_at'
+const SELECT_COLS = 'id, name, code, description, cycle_days, pattern_json, is_active, wo_credit_structure_id, created_at, updated_at'
 
 const DOW_MAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
 

@@ -318,6 +318,7 @@ export const DOMAINS: Domain[] = [
           { id: 'shift-roster',  label: 'Shift Roster',    route: '/admin/roster',              icon: CalendarClock, keywords: ['roster', 'shift schedule', 'shift plan', 'team schedule', 'staff schedule'] },
           { id: 'emp-shifts',    label: 'Shift Overrides', route: '/admin/employee-shifts',     icon: AlarmClock,    keywords: ['employee shift', 'shift assignment', 'individual shift', 'shift change'] },
           { id: 'roster-intel',  label: 'Roster Analytics', route: '/admin/roster/intelligence', icon: Brain,       keywords: ['roster report', 'shift analytics', 'coverage analytics', 'roster insights'] },
+          { id: 'wo-credit',     label: 'Weekly-Off Credit', route: '/admin/attendance/wo-credit', icon: CalendarClock, keywords: ['weekly off credit', 'WO credit', 'retail roster', 'earned off', 'floating weekly off', 'present days work off', 'retail leave'] },
         ],
       },
       {

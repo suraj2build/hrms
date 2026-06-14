@@ -33,6 +33,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { generateCompOffRequests } from '../../lib/comp-off-service.js'
+import { resolveWoEmployees } from '../../lib/wo-credit-reconciler.js'
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
@@ -114,12 +115,17 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       query = query.eq('employee_id', employee_id)
     }
 
-    const { data: qualifying, error: fetchErr } = await query
+    const { data: qualifyingRaw, error: fetchErr } = await query
     if (fetchErr) {
       return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
     }
 
-    if (!qualifying?.length) {
+    // Mutual exclusivity: employees on a WO-credit roster do NOT earn comp-off —
+    // their off accounting is owned entirely by the WO-credit reconciler.
+    const woEmpIds = new Set((await resolveWoEmployees(fastify.supabase, req.tenantId)).map(e => e.employeeId))
+    const qualifying = (qualifyingRaw ?? []).filter((r: any) => !woEmpIds.has(r.employee_id))
+
+    if (!qualifying.length) {
       return reply.send({ data: { created: 0, skipped: 0, message: 'No qualifying attendance records found' } })
     }
 

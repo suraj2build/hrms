@@ -86,7 +86,7 @@ export type AttendanceStatus =
  * The engine MUST NOT overwrite rows with source 'leave_approval' or 'manual'.
  * See recomputeRange for the enforcement filter.
  */
-export type AttendanceComputedSource = 'engine' | 'leave_approval' | 'regularization' | 'manual'
+export type AttendanceComputedSource = 'engine' | 'leave_approval' | 'regularization' | 'manual' | 'wo_credit'
 
 /** DB-shaped row — exactly what is written to attendance_daily. */
 export interface AttendanceDailyRecord {
@@ -1247,7 +1247,9 @@ export async function recomputeRange(
   // 'regularization' rows ARE re-evaluated: an HR regularisation submission
   // means the HR admin wants the engine to re-derive attendance from corrected
   // punch data.
-  const PROTECTED_SOURCES = new Set(['leave_approval', 'manual'])
+  // 'wo_credit' rows are weekly-offs the WO-credit reconciler applied to off-days;
+  // the engine must not undo them (the reconciler is their sole owner).
+  const PROTECTED_SOURCES = new Set(['leave_approval', 'manual', 'wo_credit'])
 
   const datesToSkip = new Set<string>()
   for (const [key, before] of beforeMap) {

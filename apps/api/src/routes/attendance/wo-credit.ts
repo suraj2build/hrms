@@ -1,0 +1,177 @@
+/**
+ * Weekly-Off Credit Routes — Phase 1
+ *
+ * GET    /attendance/wo-credit/structures            — list structures (+ ladder)
+ * POST   /attendance/wo-credit/structures            — create structure (+ ladder)   [HR]
+ * PUT    /attendance/wo-credit/structures/:id        — update structure (+ ladder)   [HR]
+ * DELETE /attendance/wo-credit/structures/:id        — delete structure              [HR]
+ * GET    /attendance/wo-credit/review?year&month     — monthly review grid
+ * POST   /attendance/wo-credit/reconcile             — run reconciliation now        [HR]
+ */
+import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { reconcileTenantMonth } from '../../lib/wo-credit-reconciler.js'
+
+const ladderRowSchema = z.object({
+  present_days: z.number().int().min(1).max(31),
+  wo_credit:    z.number().int().min(0).max(31),
+})
+
+const structureSchema = z.object({
+  name:                 z.string().min(1).max(120),
+  is_active:            z.boolean().optional(),
+  monthly_cap:          z.enum(['sundays', 'none']).optional(),
+  rollover_expiry_days: z.number().int().min(1).max(365).optional(),
+  holiday_work_reward:  z.enum(['wo_credit', 'extra_pay']).optional(),
+  wo_leave_type_id:     z.string().uuid().optional().nullable(),
+  ladder:               z.array(ladderRowSchema).max(31).optional(),
+})
+
+export default async function woCreditRoutes(fastify: FastifyInstance) {
+  const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
+  // Load ladders for a set of structure ids → map
+  async function loadLadders(structureIds: string[]) {
+    if (!structureIds.length) return new Map<string, any[]>()
+    const { data } = await fastify.supabase
+      .from('wo_credit_ladder')
+      .select('structure_id, present_days, wo_credit')
+      .in('structure_id', structureIds)
+      .order('present_days', { ascending: true })
+    const map = new Map<string, any[]>()
+    for (const r of (data ?? []) as any[]) {
+      const arr = map.get(r.structure_id) ?? []
+      arr.push({ present_days: r.present_days, wo_credit: r.wo_credit })
+      map.set(r.structure_id, arr)
+    }
+    return map
+  }
+
+  async function replaceLadder(structureId: string, ladder: { present_days: number; wo_credit: number }[]) {
+    await fastify.supabase.from('wo_credit_ladder').delete().eq('structure_id', structureId)
+    if (ladder.length) {
+      await fastify.supabase.from('wo_credit_ladder').insert(
+        ladder.map(l => ({ structure_id: structureId, present_days: l.present_days, wo_credit: l.wo_credit })),
+      )
+    }
+  }
+
+  // ── GET /structures ─────────────────────────────────────────────────────────
+  fastify.get('/wo-credit/structures', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('wo_credit_structure')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('name', { ascending: true })
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const structs = (data ?? []) as any[]
+    const ladders = await loadLadders(structs.map(s => s.id))
+    return reply.send({ data: structs.map(s => ({ ...s, ladder: ladders.get(s.id) ?? [] })) })
+  })
+
+  // ── POST /structures ──────────────────────────────────────────────────────
+  fastify.post('/wo-credit/structures', hrAdminAuth, async (req: any, reply) => {
+    const parsed = structureSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { ladder, ...fields } = parsed.data
+
+    const { data, error } = await fastify.supabase
+      .from('wo_credit_structure')
+      .insert({ ...fields, tenant_id: req.tenantId })
+      .select('*')
+      .single()
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE_NAME', message: 'A structure with this name already exists' })
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    }
+    if (ladder) await replaceLadder((data as any).id, ladder)
+    return reply.code(201).send({ data: { ...data, ladder: ladder ?? [] } })
+  })
+
+  // ── PUT /structures/:id ────────────────────────────────────────────────────
+  fastify.put('/wo-credit/structures/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const parsed = structureSchema.partial().safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    const { ladder, ...fields } = parsed.data
+
+    if (Object.keys(fields).length) {
+      const { error } = await fastify.supabase
+        .from('wo_credit_structure')
+        .update({ ...fields, updated_at: new Date().toISOString() })
+        .eq('id', id).eq('tenant_id', req.tenantId)
+      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    }
+    if (ladder) await replaceLadder(id, ladder)
+
+    const { data } = await fastify.supabase
+      .from('wo_credit_structure').select('*').eq('id', id).eq('tenant_id', req.tenantId).single()
+    const ladders = await loadLadders([id])
+    return reply.send({ data: { ...data, ladder: ladders.get(id) ?? [] } })
+  })
+
+  // ── DELETE /structures/:id ─────────────────────────────────────────────────
+  fastify.delete('/wo-credit/structures/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { error } = await fastify.supabase
+      .from('wo_credit_structure').delete().eq('id', id).eq('tenant_id', req.tenantId)
+    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    return reply.code(204).send()
+  })
+
+  // ── GET /review?year&month ─────────────────────────────────────────────────
+  fastify.get('/wo-credit/review', auth, async (req: any, reply) => {
+    const now = new Date()
+    const year  = parseInt((req.query as any).year  ?? String(now.getUTCFullYear()), 10)
+    const month = parseInt((req.query as any).month ?? String(now.getUTCMonth() + 1), 10)
+
+    const { data, error } = await fastify.supabase
+      .from('wo_credit_monthly')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .eq('year', year)
+      .eq('month', month)
+    if (error) return reply.send({ data: [], year, month })
+
+    // Enrich with employee names
+    const rows = (data ?? []) as any[]
+    const empIds = [...new Set(rows.map(r => r.employee_id))]
+    const nameMap = new Map<string, string>()
+    if (empIds.length) {
+      const { data: emps } = await fastify.supabase
+        .from('employees').select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', req.tenantId).in('id', empIds)
+      for (const e of (emps ?? []) as any[]) {
+        nameMap.set(e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.employee_code)
+      }
+    }
+    return reply.send({
+      data: rows.map(r => ({ ...r, employee_name: nameMap.get(r.employee_id) ?? r.employee_id })),
+      year, month,
+    })
+  })
+
+  // ── POST /reconcile ────────────────────────────────────────────────────────
+  fastify.post('/wo-credit/reconcile', hrAdminAuth, async (req: any, reply) => {
+    const now = new Date()
+    const body = (req.body ?? {}) as { year?: number; month?: number }
+    const year  = body.year  ?? now.getUTCFullYear()
+    const month = body.month ?? now.getUTCMonth() + 1
+    try {
+      const results = await reconcileTenantMonth(fastify.supabase, req.tenantId, year, month)
+      const summary = {
+        employees: results.length,
+        applied:   results.reduce((s, r) => s + r.auto_applied, 0),
+        pending:   results.reduce((s, r) => s + r.pending_absent_days, 0),
+        carried:   results.reduce((s, r) => s + r.carried_out, 0),
+      }
+      return reply.send({ data: summary })
+    } catch (err: unknown) {
+      fastify.log.error({ err }, 'wo-credit/reconcile error')
+      return reply.code(500).send({ error: 'RECONCILE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+    }
+  })
+}

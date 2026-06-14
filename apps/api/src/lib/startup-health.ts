@@ -48,6 +48,7 @@ const OPTIONAL_MODULES = [
   'sla-scanner',
   'intelligence-scanner',
   'digest-scheduler',
+  'wo-credit-reconciler',
   'durable-queue',
   'webhook-service',
   'onboarding',

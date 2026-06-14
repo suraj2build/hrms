@@ -20,6 +20,7 @@ import { registerEventBusAutomation }    from './lib/event-bus-automation.js'
 import { registerSlaScanner }            from './lib/sla-scanner.js'
 import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
 import { registerDigestScheduler }       from './lib/digest-scheduler.js'
+import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
@@ -113,6 +114,7 @@ import attendanceCorrectionsRoute     from './routes/attendance/corrections.js'
 import approvalWorkflowsRoute         from './routes/approvals/workflows.js'
 import leavePolicyResolveRoute        from './routes/attendance/leave-policy-resolve.js'
 import compOffRoute                   from './routes/attendance/comp-off.js'
+import woCreditRoutes                 from './routes/attendance/wo-credit.js'
 import overtimeRoutes                 from './routes/attendance/overtime.js'
 import leaveCollisionRoutes               from './routes/attendance/leave-collision.js'
 import attendanceQueueActionsRoute        from './routes/attendance/queue-actions.js'
@@ -432,6 +434,11 @@ async function start() {
     registerDigestScheduler(fastify.supabase)
   }, fastify.log)
 
+  // WO-credit reconciler — retail floating weekly-off accounting (per-tenant, idempotent)
+  await safeRegisterModule('wo-credit-reconciler', async () => {
+    registerWoCreditScheduler(fastify.supabase)
+  }, fastify.log)
+
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.
   // Must start AFTER supabase plugin is registered (needs the client).
   await safeRegisterModule('durable-queue', async () => {
@@ -581,6 +588,7 @@ async function start() {
   await fastify.register(approvalWorkflowsRoute)         // /approvals/workflows/*
   await fastify.register(leavePolicyResolveRoute)        // GET /leave/policy/resolve/*
   await fastify.register(compOffRoute)                   // /attendance/comp-off/*
+  await fastify.register(woCreditRoutes)                 // /attendance/wo-credit/* (retail floating weekly-off)
   await fastify.register(overtimeRoutes)                 // /overtime/*
   await fastify.register(leaveCollisionRoutes)           // /leave/collision/* + /leave/optional-holidays/*
   await fastify.register(attendanceContextRoutes)        // GET /attendance/active-now|missing-punches/today|ot-spike-employees
