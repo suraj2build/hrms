@@ -304,46 +304,51 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     // ── Credit balance via leave_accrual_ledger ──────────────────────────
     if ((co as any).leave_type_id) {
-      const { error: ledgerErr } = await fastify.supabase
+      const creditYear = new Date((co as any).worked_date + 'T12:00:00Z').getFullYear()
+
+      // Idempotent credit: source_request_id uniquely identifies this CO grant
+      // (uidx_accrual_ledger_co_request, migration 264). accrued_on uses the
+      // worked_date — a stable key — not the approval timestamp. .select() tells
+      // us whether a NEW row was written, so the cache is credited exactly once
+      // even if this approval is retried.
+      const { data: inserted, error: ledgerErr } = await fastify.supabase
         .from('leave_accrual_ledger')
         .upsert(
           {
-            tenant_id:     req.tenantId,
-            employee_id:   (co as any).employee_id,
-            leave_type_id: (co as any).leave_type_id,
-            accrual_type:  'co_grant',
-            days:          Number((co as any).days_to_credit),
-            year:          new Date((co as any).worked_date + 'T12:00:00Z').getFullYear(),
-            accrued_on:    now.slice(0, 10),   // was: run_date (wrong column name)
-            expires_on:    expiresOnStr,
-            is_expired:    false,
-            notes:         `CO for work on ${(co as any).worked_date}`,  // was: note
+            tenant_id:         req.tenantId,
+            employee_id:       (co as any).employee_id,
+            leave_type_id:     (co as any).leave_type_id,
+            accrual_type:      'co_grant',
+            days:              Number((co as any).days_to_credit),
+            year:              creditYear,
+            accrued_on:        (co as any).worked_date,
+            expires_on:        expiresOnStr,
+            is_expired:        false,
+            notes:             `CO for work on ${(co as any).worked_date}`,
+            source_request_id: (co as any).id,
           },
           {
-            // co_grant is NOT covered by the partial unique index so this is a
-            // plain insert semantically; ignoreDuplicates is a safety net only.
-            onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
+            onConflict:       'tenant_id,source_request_id',
             ignoreDuplicates: true,
           },
         )
+        .select('id')
 
       if (ledgerErr) {
         req.log.error({ err: ledgerErr }, 'comp-off ledger insert failed')
         return reply.code(500).send({ error: 'LEDGER_FAILED', message: 'Failed to credit leave balance' })
       }
 
-      // Also upsert employee_leave_balance so balance is immediately visible
-      const creditYear = new Date((co as any).worked_date + 'T12:00:00Z').getFullYear()
-      try {
-        await fastify.supabase.rpc('credit_leave_balance', {
+      // Mirror into the cached balance only when a new ledger row was written.
+      if ((inserted?.length ?? 0) > 0) {
+        const { error: cacheErr } = await fastify.supabase.rpc('credit_leave_balance', {
           p_tenant_id:     req.tenantId,
           p_employee_id:   (co as any).employee_id,
           p_leave_type_id: (co as any).leave_type_id,
           p_days:          Number((co as any).days_to_credit),
           p_year:          creditYear,
         })
-      } catch {
-        // non-fatal if RPC not yet created
+        if (cacheErr) req.log.error({ err: cacheErr }, 'comp-off: credit_leave_balance RPC failed')
       }
     }
 

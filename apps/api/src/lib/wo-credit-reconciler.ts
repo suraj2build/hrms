@@ -350,7 +350,11 @@ export async function finalizeEmployeeMonth(
     const monthEnd  = iso(year, month, daysInMonth(year, month))
     const expiresOn = new Date(new Date(`${monthEnd}T12:00:00Z`).getTime() + emp.structure.rollover_expiry_days * 86_400_000)
       .toISOString().slice(0, 10)
-    const { error: ledgerErr } = await supabase
+    // wo_credit is now covered by uidx_accrual_ledger_idempotency (migration
+    // 264); the (…,year,wo_credit,monthEnd) key makes the carry-over idempotent
+    // at the DB. .select() reveals whether a NEW row was written so the cached
+    // balance is credited exactly once even across re-runs.
+    const { data: woInserted, error: ledgerErr } = await supabase
       .from('leave_accrual_ledger')
       .upsert({
         tenant_id:     tenantId,
@@ -364,14 +368,16 @@ export async function finalizeEmployeeMonth(
         is_expired:    false,
         notes:         `WO credit carry-over for ${year}-${String(month).padStart(2, '0')}`,
       }, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+      .select('id')
     if (!ledgerErr) {
       credited = true
-      try {
-        await supabase.rpc('credit_leave_balance', {
+      if ((woInserted?.length ?? 0) > 0) {
+        const { error: cacheErr } = await supabase.rpc('credit_leave_balance', {
           p_tenant_id: tenantId, p_employee_id: emp.employeeId,
           p_leave_type_id: emp.structure.wo_leave_type_id, p_days: carriedOut, p_year: year,
         })
-      } catch { /* non-fatal if RPC absent */ }
+        if (cacheErr) console.error('[wo-credit] credit_leave_balance RPC failed:', cacheErr.message)
+      }
     }
   }
 
