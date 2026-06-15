@@ -143,6 +143,10 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     if (fetchErr || !advance) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Advance not found' })
 
     const adv = advance as any
+    // F7 — only a pending advance may be approved.
+    if (adv.status !== 'pending') {
+      return reply.code(409).send({ error: 'INVALID_STATE', message: `Advance is already ${adv.status}` })
+    }
     const now = new Date().toISOString()
 
     const { error: updateErr } = await fastify.supabase
@@ -156,6 +160,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
 
     if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
 
@@ -218,7 +223,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { error } = await fastify.supabase
+    const { data: rejected, error } = await fastify.supabase
       .from('advance_salary_requests')
       .update({
         status: 'rejected',
@@ -227,8 +232,12 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')   // F7 — only a pending advance may be rejected
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in a pending state' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -256,7 +265,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { error } = await fastify.supabase
+    const { data: disbursed, error } = await fastify.supabase
       .from('advance_salary_requests')
       .update({
         status: 'disbursed',
@@ -267,8 +276,12 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')   // F7 — only an approved advance may be disbursed
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!disbursed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in an approved state' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
