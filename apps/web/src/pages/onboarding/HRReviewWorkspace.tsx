@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { SubTabs } from '@/components/ui/SubTabs'
 import { Input } from '@/components/ui/input'
@@ -26,12 +26,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-// ── Supabase Storage ──────────────────────────────────────────────────────────
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL as string,
-  import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-)
+// ── Supabase Storage (uses the shared client — no duplicate auth client) ──
 
 async function uploadOnboardingFile(
   tenantId: string,

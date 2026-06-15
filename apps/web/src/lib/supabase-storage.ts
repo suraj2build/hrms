@@ -9,13 +9,11 @@
  *
  * This keeps URLs short-lived and prevents public exposure of private files.
  */
-import { createClient } from '@supabase/supabase-js'
-
-// Re-use the same Supabase URL/key the auth flow uses.
-const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL  as string
-const supabaseKey  = import.meta.env.VITE_SUPABASE_ANON_KEY as string
-
-const storageClient = createClient(supabaseUrl, supabaseKey)
+// Re-use the single shared Supabase client so we don't spin up a second
+// GoTrueClient that fights over the auth-refresh Web Lock — the cause of
+// "Lock sb-…-auth-token was released because another request stole it".
+// Storage calls run with the same authenticated session as the rest of the app.
+import { supabase as storageClient } from './supabase/client'
 
 const BUCKET = 'employee-files'
 
