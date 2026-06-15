@@ -1053,11 +1053,16 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       approved_by:   req.userId,
       approved_at:   now,
     }))
-    const { error: appErr } = await fastify.supabase.from('leave_applications').insert(appRows)
+    const { data: insertedApps, error: appErr } = await fastify.supabase
+      .from('leave_applications').insert(appRows).select('id, employee_id')
     if (appErr) {
       req.log.error({ err: appErr }, 'bulk-assign leave applications insert failed')
       return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave applications' })
     }
+    // employee → application id, for keying idempotent consumption ledger rows.
+    const appIdByEmp = new Map<string, string>(
+      ((insertedApps ?? []) as Array<{ id: string; employee_id: string }>).map(a => [a.employee_id, a.id]),
+    )
 
     // Build attendance_daily rows PER EMPLOYEE on their roster WORKING dates only
     // (holidays/weekly-offs inside the span stay paid rest days — never converted to
@@ -1072,6 +1077,19 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         workingDates = (wd.counted_dates && wd.counted_dates.length > 0) ? wd.counted_dates : dates
         if (lt.is_paid && wd.computed_days > 0) {
           const year = new Date(from_date).getFullYear()
+          // C6 — signed consumption row to the ledger (idempotent per application).
+          const appId = appIdByEmp.get(emp_id)
+          if (appId) {
+            const { error: ledgerErr } = await fastify.supabase
+              .from('leave_accrual_ledger')
+              .upsert({
+                tenant_id: req.tenantId, employee_id: emp_id, leave_type_id, year,
+                accrual_type: 'consumption', days: -Math.abs(wd.computed_days),
+                accrued_on: from_date, is_expired: false,
+                notes: `Leave consumed ${from_date}…${to_date} (bulk)`, source_request_id: appId,
+              }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
+            if (ledgerErr) req.log.warn({ err: ledgerErr, emp_id }, 'bulk-assign consumption ledger write failed — leave committed')
+          }
           try {
             await fastify.supabase.rpc('deduct_leave_balance', {
               p_tenant_id: req.tenantId, p_employee_id: emp_id, p_leave_type_id: leave_type_id,
@@ -1197,6 +1215,63 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       total:  count ?? 0,
       limit,
       offset,
+    })
+  })
+
+  // ── GET /attendance/leave/ledger-reconciliation ──────────────────────────────
+  // C6 verification tool. Read-only comparison of the cached employee_leave_balance
+  // against the authoritative ledger sum (Σ non-expired days) per
+  // (employee, leave_type, year). Surfaces any drift so the ledger read-cutover
+  // can be made with confidence. Scoped to one year (default: current).
+  fastify.get('/attendance/leave/ledger-reconciliation', hrAdminAuth, async (req: any, reply) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear()
+
+    const [{ data: balances }, { data: ledger }] = await Promise.all([
+      fastify.supabase
+        .from('employee_leave_balance')
+        .select('employee_id, leave_type_id, balance')
+        .eq('tenant_id', req.tenantId)
+        .eq('year', year),
+      fastify.supabase
+        .from('leave_accrual_ledger')
+        .select('employee_id, leave_type_id, days')
+        .eq('tenant_id', req.tenantId)
+        .eq('year', year)
+        .eq('is_expired', false),
+    ])
+
+    // Σ ledger days per (employee, leave_type).
+    const ledgerSum = new Map<string, number>()
+    for (const r of (ledger ?? []) as Array<{ employee_id: string; leave_type_id: string; days: number }>) {
+      const k = `${r.employee_id}:${r.leave_type_id}`
+      ledgerSum.set(k, (ledgerSum.get(k) ?? 0) + Number(r.days))
+    }
+
+    const seen = new Set<string>()
+    const discrepancies: Array<Record<string, unknown>> = []
+    for (const b of (balances ?? []) as Array<{ employee_id: string; leave_type_id: string; balance: number }>) {
+      const k = `${b.employee_id}:${b.leave_type_id}`
+      seen.add(k)
+      const led = ledgerSum.get(k) ?? 0
+      const cache = Number(b.balance)
+      if (Math.abs(led - cache) > 0.01) {
+        discrepancies.push({ employee_id: b.employee_id, leave_type_id: b.leave_type_id, cache_balance: cache, ledger_balance: led, delta: Math.round((led - cache) * 100) / 100 })
+      }
+    }
+    // Ledger keys with no cache row (ledger says non-zero, cache missing).
+    for (const [k, led] of ledgerSum) {
+      if (!seen.has(k) && Math.abs(led) > 0.01) {
+        const [employee_id, leave_type_id] = k.split(':')
+        discrepancies.push({ employee_id, leave_type_id, cache_balance: null, ledger_balance: led, delta: Math.round(led * 100) / 100 })
+      }
+    }
+
+    return reply.send({
+      year,
+      checked:       (balances ?? []).length,
+      discrepancies: discrepancies.length,
+      in_sync:       discrepancies.length === 0,
+      rows:          discrepancies,
     })
   })
 }
