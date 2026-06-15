@@ -25,6 +25,7 @@ import { logAction, logBulkAction } from '../../lib/audit-service.js'
 import { emitEvent } from '../../lib/event-emitter.js'
 import { eventBus }  from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
+import { isLeaveLedgerShadowEnabled, recordShadowDrift } from '../../lib/leave-ledger-shadow.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -911,6 +912,19 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       // annual_entitlement: total credited this year; null when ledger is empty (pre-accrual)
       annual_entitlement: accrualByType[b.leave_type_id] ?? null,
     }))
+
+    // C6 Phase 1: passive shadow comparison — record any cache↔ledger drift
+    // without altering the served (cache) response. Gated behind LEAVE_LEDGER_SHADOW.
+    if (isLeaveLedgerShadowEnabled()) {
+      void recordShadowDrift(
+        fastify.supabase,
+        req.tenantId as string,
+        employeeId,
+        year,
+        (data ?? []).map((b: any) => ({ leave_type_id: b.leave_type_id, balance: Number(b.balance) })),
+        req.log,
+      )
+    }
 
     return reply.send({ data: enriched })
   })
