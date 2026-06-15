@@ -358,6 +358,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'leave-approvals',  label: 'Leave Approvals',   route: '/admin/leave/approvals',         icon: CheckSquare,   keywords: ['approve leave', 'leave requests', 'pending leave', 'leave approval', 'review leave'] },
           { id: 'leave-balances',   label: 'Leave Balances',    route: '/admin/leave/balances',          icon: BarChart2,     keywords: ['leave quota', 'remaining leave', 'leave credit', 'PL balance', 'CL balance', 'SL balance', 'EL balance'] },
+          { id: 'opening-balances', label: 'Opening Balances',  route: '/admin/leave/opening-balances',  icon: FileUp,        keywords: ['opening balance', 'opening leave balance', 'migrate balances', 'upload balances', 'bulk balance', 'initial balance', 'seed leave', 'import leave balance'] },
           { id: 'leave-txns',       label: 'Transactions',      route: '/admin/leave/transactions',      icon: ListChecks,    keywords: ['leave history', 'leave log', 'leave record', 'leave entries', 'leave taken'] },
           { id: 'comp-off',         label: 'Comp Off',          route: '/admin/comp-off',                icon: RefreshCw,     keywords: ['compensatory off', 'compensatory leave', 'CTO', 'comp leave', 'time off in lieu', 'worked extra'] },
           { id: 'overtime',         label: 'Overtime',          route: '/admin/overtime',                icon: Timer,         keywords: ['OT', 'extra hours', 'overtime pay', 'overtime request', 'late sitting'] },

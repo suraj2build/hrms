@@ -1219,6 +1219,98 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
+  // ── POST /attendance/leave/opening-balance ───────────────────────────────────
+  // HR-admin: set ONE employee's opening balance for ONE leave type + year.
+  // Writes cache + ledger consistently via the set_opening_balance RPC.
+  fastify.post('/attendance/leave/opening-balance', hrAdminAuth, async (req, reply) => {
+    const schema = z.object({
+      employee_id:   z.string().uuid(),
+      leave_type_id: z.string().uuid(),
+      days:          z.number().min(0).max(365),
+      year:          z.number().int().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const year = parsed.data.year ?? new Date().getFullYear()
+    const { error } = await fastify.supabase.rpc('set_opening_balance', {
+      p_tenant_id:     req.tenantId,
+      p_employee_id:   parsed.data.employee_id,
+      p_leave_type_id: parsed.data.leave_type_id,
+      p_days:          parsed.data.days,
+      p_year:          year,
+    })
+    if (error) {
+      req.log.error({ err: error }, 'set_opening_balance failed')
+      return reply.code(500).send({ error: 'OPENING_BALANCE_FAILED', message: 'Failed to set opening balance' })
+    }
+    return reply.send({ data: { ...parsed.data, year } })
+  })
+
+  // ── POST /attendance/leave/opening-balance/bulk ──────────────────────────────
+  // HR-admin: bulk opening-balance upload for migration/onboarding.
+  // Rows reference employees by employee_code (or id) and leave types by name
+  // (or id); both are resolved within the caller's tenant. A per-row result list
+  // is returned so the UI can show which rows succeeded / failed.
+  fastify.post('/attendance/leave/opening-balance/bulk', hrAdminAuth, async (req, reply) => {
+    const rowSchema = z.object({
+      employee_code: z.string().trim().min(1).optional(),
+      employee_id:   z.string().uuid().optional(),
+      leave_type:    z.string().trim().min(1).optional(),
+      leave_type_id: z.string().uuid().optional(),
+      days:          z.number().min(0).max(365),
+    })
+      .refine(r => r.employee_code || r.employee_id, { message: 'employee_code or employee_id required' })
+      .refine(r => r.leave_type || r.leave_type_id, { message: 'leave_type or leave_type_id required' })
+    const schema = z.object({
+      year: z.number().int().optional(),
+      rows: z.array(rowSchema).min(1).max(5000),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const year = parsed.data.year ?? new Date().getFullYear()
+
+    // Resolve codes/names → ids once for the tenant.
+    const [empRes, ltRes] = await Promise.all([
+      fastify.supabase.from('employees').select('id, employee_code').eq('tenant_id', req.tenantId),
+      fastify.supabase.from('leave_types').select('id, name').eq('tenant_id', req.tenantId),
+    ])
+    if (empRes.error || ltRes.error) {
+      req.log.error({ empErr: empRes.error, ltErr: ltRes.error }, 'opening-balance bulk: lookup failed')
+      return reply.code(500).send({ error: 'LOOKUP_FAILED', message: 'Failed to load employees / leave types' })
+    }
+    const empByCode = new Map((empRes.data ?? []).map((e: any) => [String(e.employee_code).toLowerCase(), e.id as string]))
+    const empIds    = new Set((empRes.data ?? []).map((e: any) => e.id as string))
+    const ltByName  = new Map((ltRes.data ?? []).map((l: any) => [String(l.name).toLowerCase(), l.id as string]))
+    const ltIds     = new Set((ltRes.data ?? []).map((l: any) => l.id as string))
+
+    const results: Array<{ row: number; ok: boolean; message?: string }> = []
+    let succeeded = 0
+    for (let i = 0; i < parsed.data.rows.length; i++) {
+      const r = parsed.data.rows[i]
+      const empId = (r.employee_id && empIds.has(r.employee_id))
+        ? r.employee_id
+        : (r.employee_code ? empByCode.get(r.employee_code.toLowerCase()) : undefined)
+      const ltId = (r.leave_type_id && ltIds.has(r.leave_type_id))
+        ? r.leave_type_id
+        : (r.leave_type ? ltByName.get(r.leave_type.toLowerCase()) : undefined)
+      if (!empId) { results.push({ row: i + 1, ok: false, message: `Unknown employee "${r.employee_code ?? r.employee_id}"` }); continue }
+      if (!ltId)  { results.push({ row: i + 1, ok: false, message: `Unknown leave type "${r.leave_type ?? r.leave_type_id}"` }); continue }
+      const { error } = await fastify.supabase.rpc('set_opening_balance', {
+        p_tenant_id: req.tenantId, p_employee_id: empId, p_leave_type_id: ltId, p_days: r.days, p_year: year,
+      })
+      if (error) { results.push({ row: i + 1, ok: false, message: error.message }); continue }
+      succeeded++
+      results.push({ row: i + 1, ok: true })
+    }
+    return reply.send({
+      data: { total: parsed.data.rows.length, succeeded, failed: parsed.data.rows.length - succeeded, year, results },
+    })
+  })
+
   // ── POST /attendance/leave/bulk-assign ───────────────────────────────────────
   // Admin-only: auto-approve leave for multiple employees at once.
   fastify.post('/attendance/leave/bulk-assign', hrAdminAuth, async (req, reply) => {

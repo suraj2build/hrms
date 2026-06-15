@@ -107,6 +107,7 @@ const WeeklyOffCredit     = lazy(() => import('@/pages/attendance/WeeklyOffCredi
 const OvertimeManagement  = lazy(() => import('@/pages/attendance/OvertimeManagement').then(m => ({ default: m.OvertimeManagement })))
 const PayrollReadiness    = lazy(() => import('@/pages/attendance/PayrollReadiness').then(m => ({ default: m.PayrollReadiness })))
 const LeaveAccrualAdmin   = lazy(() => import('@/pages/attendance/LeaveAccrualAdmin').then(m => ({ default: m.LeaveAccrualAdmin })))
+const OpeningBalances     = lazy(() => import('@/pages/attendance/OpeningBalances').then(m => ({ default: m.OpeningBalances })))
 const TeamLeaveBalances   = lazy(() => import('@/pages/manager/TeamLeaveBalances').then(m => ({ default: m.TeamLeaveBalances })))
 const ManagerCompensation         = lazy(() => import('@/pages/manager/ManagerCompensation').then(m => ({ default: m.ManagerCompensation })))
 const ManagerTeamLifecycle        = lazy(() => import('@/pages/manager/ManagerTeamLifecycle').then(m => ({ default: m.ManagerTeamLifecycle })))
@@ -654,6 +655,7 @@ export default function App() {
                 <Route path="/admin/leave/accrual"           element={<LeaveAccrualAdmin />} />
                 <Route path="/admin/leave/approvals"         element={<ApprovalInbox />} />
                 <Route path="/admin/leave/balances"          element={<LeaveAccrualAdmin />} />
+                <Route path="/admin/leave/opening-balances"  element={<OpeningBalances />} />
                 <Route path="/admin/leave/transactions"      element={<LeaveAccrualLedger />} />
                 <Route path="/admin/leave/collision-log"     element={<CollisionLog />} />
                 <Route path="/admin/leave/optional-holidays" element={<OptionalHolidayPool />} />
