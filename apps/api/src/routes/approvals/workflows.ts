@@ -176,7 +176,10 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     )
 
     if (!result.ok) {
-      const code = result.error.type === 'NOT_FOUND' ? 404 : result.error.type === 'CONFLICT' ? 409 : 500
+      const code = result.error.type === 'NOT_FOUND' ? 404
+        : result.error.type === 'CONFLICT'  ? 409
+        : result.error.type === 'FORBIDDEN' ? 403
+        : 500
       return reply.code(code).send({ error: result.error.type, message: result.error.message })
     }
 
