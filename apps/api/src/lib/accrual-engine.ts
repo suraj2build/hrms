@@ -387,7 +387,7 @@ export async function processEncashment(
       is_expired:        false,
       notes:             `Leave encashment approved — ${req.days} days`,
       source_request_id: encashmentId,
-    }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
+    }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
 
   // Update request status
   await supabase.from('leave_encashment_requests').update({

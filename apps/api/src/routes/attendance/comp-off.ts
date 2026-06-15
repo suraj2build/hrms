@@ -337,7 +337,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
             source_request_id: (co as any).id,
           },
           {
-            onConflict:       'tenant_id,source_request_id',
+            onConflict:       'tenant_id,accrual_type,source_request_id',
             ignoreDuplicates: true,
           },
         )
