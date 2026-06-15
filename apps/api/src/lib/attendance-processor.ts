@@ -33,6 +33,8 @@ import {
   getLocalDate,
   type EmployeeOrgContext,
 } from './org-context.js'
+import { resolveShiftBatch, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
+import { isShiftAttributionEnabled } from './attendance-flags.js'
 
 // ── Shift defaults (no shift master yet) ──────────────────────────────────────
 const SHIFT_START_HOUR   = 9   // 09:00
@@ -99,6 +101,16 @@ interface DailyRow {
   worked_on_holiday:    boolean   // true when employee punched in on a holiday
   is_payable:           boolean   // payroll eligibility flag
   day_fraction:         number    // 0.0 | 0.5 | 1.0 — direct payroll input
+  // Shift attribution snapshot (migration 260) — written at compute time for audit integrity
+  expected_shift_id?:        string | null
+  shift_start_time?:         string | null
+  shift_end_time?:           string | null
+  shift_grace_minutes?:      number | null
+  shift_is_night_shift?:     boolean | null
+  shift_duration_minutes?:   number | null
+  resolution_source?:        string | null
+  rotation_policy_id?:       string | null
+  rotation_condition_type?:  string | null
 }
 
 // ── Step 2: Improved pairing algorithm ───────────────────────────────────────
@@ -276,7 +288,7 @@ function computeDaily(
 // Stores per-employee inputs, result, and derivation reason for each
 // computeDaily() invocation.  Fire-and-forget — never throws.
 
-async function writeComputeLogs(
+export async function writeComputeLogs(
   supabase:  SupabaseClient,
   tenantId:  string,
   rows: Array<{
@@ -383,21 +395,19 @@ export async function writeAuditLogs(
  * Never throws — all errors are caught and logged.
  */
 async function generateAttendanceIntelligence(
-  supabase:         SupabaseClient,
-  tenantId:         string,
-  dailyRows:        DailyRow[],
-  byEmployee:       Map<string, RawLog[]>,
-  shiftDetailMap:   Map<string, ShiftMeta>,
-  rosterShiftMap:   Map<string, string>,
-  standingShiftMap: Map<string, string>,
-  log?:             FastifyBaseLogger,
+  supabase:          SupabaseClient,
+  tenantId:          string,
+  dailyRows:         DailyRow[],
+  byEmployee:        Map<string, RawLog[]>,
+  resolvedShiftMap:  Map<string, ResolvedShift>,
+  log?:              FastifyBaseLogger,
 ): Promise<void> {
   const exceptions: Record<string, unknown>[] = []
   const confidenceUpdates: Array<{ employee_id: string; date: string; confidence_score: number; confidence_level: string; confidence_factors: Record<string, number> }> = []
 
   for (const daily of dailyRows) {
     const sessions   = byEmployee.get(daily.employee_id) ?? []
-    const hasShift   = rosterShiftMap.has(daily.employee_id) || standingShiftMap.has(daily.employee_id)
+    const hasShift   = resolvedShiftMap.has(daily.employee_id)
     const incomplete = sessions.filter((s: any) => !s.is_complete || s.check_out === null)
 
     // ── Confidence scoring ──────────────────────────────────────────────────
@@ -619,120 +629,38 @@ export async function processAttendanceForDate(
   }
 
   // ── 3.6. Batch-resolve shifts for every matched employee ─────────────────────
-  // Priority: shift_roster (date-specific override) › employee_shifts (standing)
-  // All three queries are batched — no per-employee DB calls.
+  // Single call to the unified shift-resolution-engine — full priority chain:
+  //   shift_roster › rotation_policy › employee_shifts (temporal) › site_default
+  // Returns full attribution (shift_id, source, rotation_policy_id, etc.)
 
-  // Declare matchedEmpIds here (before step 6) so Query A can reference it.
   const matchedEmpIds = [...byEmployee.keys()]
 
-  // Query A: roster overrides for this date
-  const { data: rosterRows } = await supabase
-    .from('shift_roster')
-    .select('employee_id, shift_id')
-    .eq('tenant_id', tenantId)
-    .eq('date', date)
-    .in('employee_id', matchedEmpIds)
+  const resolvedShiftMap = await resolveShiftBatch(supabase, tenantId, matchedEmpIds, date)
 
-  const rosterShiftMap = new Map<string, string>(
-    (rosterRows ?? [] as { employee_id: string; shift_id: string }[])
-      .map((r: { employee_id: string; shift_id: string }) => [r.employee_id, r.shift_id])
-  )
-
-  // Query B: standing (current) shifts for employees not covered by roster
-  const unrosteredIds = matchedEmpIds.filter((id) => !rosterShiftMap.has(id))
-  const standingShiftMap = new Map<string, string>()
-
-  if (unrosteredIds.length > 0) {
-    const { data: standingRows } = await supabase
-      .from('employee_shifts')
-      .select('employee_id, shift_id')
-      .eq('tenant_id', tenantId)
-      .eq('is_current', true)
-      .in('employee_id', unrosteredIds)
-
-    for (const row of (standingRows ?? []) as { employee_id: string; shift_id: string }[]) {
-      standingShiftMap.set(row.employee_id, row.shift_id)
-    }
-  }
-
-  // Query C: shift details for all unique resolved shift_ids
-  const allShiftIds = [...new Set([...rosterShiftMap.values(), ...standingShiftMap.values()])]
-  const shiftDetailMap = new Map<string, ShiftMeta>()
-
-  if (allShiftIds.length > 0) {
-    const { data: shiftDetails } = await supabase
-      .from('shifts')
-      .select('id, start_time, end_time, grace_minutes, is_night_shift')
-      .eq('tenant_id', tenantId)
-      .in('id', allShiftIds)
-
-    for (const s of (shiftDetails ?? []) as {
-      id:             string
-      start_time:     string
-      end_time:       string
-      grace_minutes:  number
-      is_night_shift: boolean
-    }[]) {
-      shiftDetailMap.set(s.id, {
-        startTime:    s.start_time,
-        endTime:      s.end_time,
-        graceMinutes: s.grace_minutes,
-        isNightShift: s.is_night_shift,
-      })
-    }
-  }
-
-  // ── 3.7. Resolve org context (site, roster, timezone, location, default_shift) ─
-  // Uses employee_org_assignments history first, falls back to employees fields.
-  // Must happen BEFORE shiftMetaForEmployee is defined so we can use
-  // empOrgCtxMap.get(empId).site_default_shift_id as the 3rd fallback.
+  // ── 3.7. Resolve org context (site, roster, timezone, location) ──────────────
   const empOrgCtxMap = await resolveEmployeeOrgContextBatch(
     supabase, tenantId, matchedEmpIds, date,
   )
 
-  // Collect any site-default shift ids that weren't already in allShiftIds,
-  // load their details, and merge into shiftDetailMap.
-  const siteDefaultShiftIds = [...new Set(
-    matchedEmpIds
-      .map((id) => empOrgCtxMap.get(id)?.site_default_shift_id)
-      .filter((id): id is string => !!id && !shiftDetailMap.has(id)),
-  )]
-
-  if (siteDefaultShiftIds.length > 0) {
-    const { data: siteShiftDetails } = await supabase
-      .from('shifts')
-      .select('id, start_time, end_time, grace_minutes, is_night_shift')
-      .eq('tenant_id', tenantId)
-      .in('id', siteDefaultShiftIds)
-
-    for (const s of (siteShiftDetails ?? []) as {
-      id: string; start_time: string; end_time: string
-      grace_minutes: number; is_night_shift: boolean
-    }[]) {
-      shiftDetailMap.set(s.id, {
-        startTime:    s.start_time,
-        endTime:      s.end_time,
-        graceMinutes: s.grace_minutes,
-        isNightShift: s.is_night_shift,
-      })
-    }
+  function shiftMetaForEmployee(empId: string): ShiftMeta | undefined {
+    const r = resolvedShiftMap.get(empId)
+    return r ? toShiftMeta(r) : undefined
   }
 
-  /**
-   * Returns the resolved ShiftMeta for an employee.
-   * Precedence (highest → lowest):
-   *   1. shift_roster date-specific override
-   *   2. employee_shifts standing assignment
-   *   3. site default_shift_id (from EmployeeOrgContext)
-   */
-  function shiftMetaForEmployee(empId: string): ShiftMeta | undefined {
-    const shiftId =
-      rosterShiftMap.get(empId) ??
-      standingShiftMap.get(empId) ??
-      empOrgCtxMap.get(empId)?.site_default_shift_id ??
-      undefined
-    if (!shiftId) return undefined
-    return shiftDetailMap.get(shiftId)
+  function shiftAttrForEmployee(empId: string): Partial<ResolvedShift> {
+    const r = resolvedShiftMap.get(empId)
+    if (!r) return {}
+    return {
+      shift_id:               r.shift_id,
+      start_time:             r.start_time,
+      end_time:               r.end_time,
+      grace_minutes:          r.grace_minutes,
+      is_night_shift:         r.is_night_shift,
+      duration_minutes:       r.duration_minutes,
+      resolution_source:      r.resolution_source,
+      rotation_policy_id:     r.rotation_policy_id,
+      rotation_condition_type: r.rotation_condition_type,
+    }
   }
 
   // ── 4 & 5. Pair punches + compute daily per employee ─────────────────────
@@ -749,13 +677,19 @@ export async function processAttendanceForDate(
   }
   const computeLogRows: ComputeLogEntry[] = []
 
+  // AHI-1 rollout flag — when off, the shift-attribution snapshot is not
+  // persisted (columns left null) and is omitted from the compute log. Shift
+  // resolution above is unaffected; this only gates the new write behaviour.
+  const attributionEnabled = isShiftAttributionEnabled()
+
   for (const [empId, logs] of byEmployee) {
     const sorted   = [...logs].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     )
-    const sessions  = pairPunches(sorted, empId, tenantId)
-    const shiftMeta = shiftMetaForEmployee(empId)
-    const empCtx    = empOrgCtxMap.get(empId) ?? {
+    const sessions   = pairPunches(sorted, empId, tenantId)
+    const shiftMeta  = shiftMetaForEmployee(empId)
+    const shiftAttr  = shiftAttrForEmployee(empId)
+    const empCtx     = empOrgCtxMap.get(empId) ?? {
       site_id: null, roster_id: null, work_location_id: null,
       site_timezone: 'Asia/Kolkata',
       emp_roster_weekly_off: [], site_default_roster_weekly_off: [],
@@ -801,6 +735,20 @@ export async function processAttendanceForDate(
     incompleteSessions += sessions.filter((s) => !s.is_complete).length
 
     allLogRows.push(...sessions)
+
+    // Inject shift attribution snapshot into the daily row before persisting
+    if (attributionEnabled && shiftAttr.shift_id) {
+      daily.expected_shift_id       = shiftAttr.shift_id
+      daily.shift_start_time        = shiftAttr.start_time ?? null
+      daily.shift_end_time          = shiftAttr.end_time ?? null
+      daily.shift_grace_minutes     = shiftAttr.grace_minutes ?? null
+      daily.shift_is_night_shift    = shiftAttr.is_night_shift ?? null
+      daily.shift_duration_minutes  = shiftAttr.duration_minutes ?? null
+      daily.resolution_source       = shiftAttr.resolution_source ?? null
+      daily.rotation_policy_id      = shiftAttr.rotation_policy_id ?? null
+      daily.rotation_condition_type = shiftAttr.rotation_condition_type ?? null
+    }
+
     allDailyRows.push(daily)
 
     // Accumulate compute log entry
@@ -811,10 +759,13 @@ export async function processAttendanceForDate(
         sessions_count:    sessions.length,
         complete_sessions: sessions.filter((s) => s.is_complete).length,
         shift_meta:        shiftMeta ? {
-          start_time:     shiftMeta.startTime,
-          end_time:       shiftMeta.endTime,
-          grace_minutes:  shiftMeta.graceMinutes,
-          is_night_shift: shiftMeta.isNightShift,
+          shift_id:            attributionEnabled ? (shiftAttr.shift_id ?? null) : null,
+          start_time:          shiftMeta.startTime,
+          end_time:            shiftMeta.endTime,
+          grace_minutes:       shiftMeta.graceMinutes,
+          is_night_shift:      shiftMeta.isNightShift,
+          resolution_source:   attributionEnabled ? (shiftAttr.resolution_source ?? null) : null,
+          rotation_policy_id:  attributionEnabled ? (shiftAttr.rotation_policy_id ?? null) : null,
         } : null,
         day_of_week: dayOfWeek,
         is_holiday:       orgIsHoliday(holidays, empCtx),
@@ -886,7 +837,7 @@ export async function processAttendanceForDate(
     // ── Intelligence generation (fire-and-forget, non-fatal) ─────────────────
     // Generates exceptions, computes confidence scores, and detects policy conflicts
     // for each processed daily row. Failures are non-fatal.
-    void generateAttendanceIntelligence(supabase, tenantId, allDailyRows, byEmployee, shiftDetailMap, rosterShiftMap, standingShiftMap, log).catch(
+    void generateAttendanceIntelligence(supabase, tenantId, allDailyRows, byEmployee, resolvedShiftMap, log).catch(
       (err) => log?.warn({ err }, 'attendance intelligence generation failed — non-fatal')
     )
 

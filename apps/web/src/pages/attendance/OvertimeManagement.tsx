@@ -30,7 +30,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
-import { api }             from '@/lib/api/client'
+import { api, ApiError }   from '@/lib/api/client'
 import { useAuthStore }    from '@/stores/authStore'
 import { cn }              from '@/lib/utils'
 import { toast }           from 'sonner'
@@ -343,7 +343,11 @@ function RequestsTab() {
     },
     onError: (e: Error) => {
       setActionRowId(null)
-      toast.error('Approval failed', { description: e.message })
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'Overtime approval is blocked — the attendance period has been finalized for payroll.' })
+      } else {
+        toast.error('Approval failed', { description: e.message })
+      }
     },
   })
 
@@ -356,7 +360,11 @@ function RequestsTab() {
     },
     onError: (e: Error) => {
       setActionRowId(null)
-      toast.error('Rejection failed', { description: e.message })
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'Overtime rejection is blocked — the attendance period has been finalized for payroll.' })
+      } else {
+        toast.error('Rejection failed', { description: e.message })
+      }
     },
   })
 

@@ -237,6 +237,8 @@ export const DOMAINS: Domain[] = [
       '/admin/recruitment',
       '/admin/workforce/center',
       '/admin/workforce/certifications',
+      '/admin/workforce/expiry-management',
+      '/admin/benefits',
       '/admin/documents',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
@@ -704,6 +706,8 @@ export const DOMAINS: Domain[] = [
       '/admin/shift-master',
       '/admin/attendance/policy',
       '/admin/attendance/groups',
+      '/admin/attendance/wo-credit',          // Weekly-Off Credit config → Setup › Workforce Rules
+      '/admin/attendance/regularisation-policy',
       // Leave config overrides (longer than /admin/leave)
       '/admin/leave-types',
       '/admin/leave-policy',
@@ -761,6 +765,7 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'shifts',            label: 'Shifts',            route: '/admin/shift-master',              icon: AlarmClock,    keywords: ['shift master', 'shift timing', 'working hours', 'shift schedule', 'time slots', 'shift setup'] },
           { id: 'rosters',           label: 'Roster Policies',   route: '/admin/masters/rosters',           icon: CalendarClock, keywords: ['roster policy', 'roster setup', 'shift roster policy', 'roster configuration'] },
+          { id: 'wo-credit',         label: 'Weekly-Off Credit', route: '/admin/attendance/wo-credit',     icon: CalendarClock, keywords: ['weekly off credit', 'WO credit', 'retail roster', 'earned off', 'floating weekly off', 'present days work off', 'retail leave'] },
           { id: 'rotation-policies', label: 'Rotation Policies', route: '/admin/masters/rotation-policies', icon: CalendarClock, keywords: ['rotation', 'rotating shift', 'shift rotation', 'cycle schedule'] },
           { id: 'holidays',          label: 'Holiday Calendar',  route: '/admin/holidays',                  icon: CalendarDays,  keywords: ['public holiday', 'gazetted holiday', 'national holiday', 'holiday list', 'bank holiday', 'weekly off'] },
           { id: 'att-policy',        label: 'Attendance Policy', route: '/admin/attendance/policy',         icon: ShieldCheck,   keywords: ['attendance rules', 'late mark rules', 'half day rules', 'grace period', 'OT policy', 'attendance configuration'] },
@@ -1041,4 +1046,44 @@ export function getSearchableNavItems(role: UserRole | undefined): SearchableNav
     }
   }
   return out
+}
+
+// ── Dev-only nav integrity check ──────────────────────────────────────────────
+// Runs once when this module loads. Logs a warning for any nav item whose route
+// is not covered by its domain's matchPrefixes — the exact class of bug that
+// caused Expiry Management and Benefits to show a blank sidebar.
+//
+// Zero runtime cost in production (import.meta.env.DEV is false-branched away
+// by Vite's tree-shaker). No throw — warnings only so the app still runs.
+if (import.meta.env.DEV) {
+  const allDomains = [...DOMAINS, ...EXECUTIVE_DOMAINS]
+  const issues: string[] = []
+
+  for (const domain of allDomains) {
+    for (const group of domain.groups) {
+      for (const item of group.items) {
+        const covered = domain.matchPrefixes.some(
+          prefix =>
+            item.route === prefix ||
+            item.route.startsWith(prefix + '/') ||
+            item.route.startsWith(prefix),
+        )
+        if (!covered) {
+          issues.push(
+            `[nav] "${item.label}" (${item.route}) is in domain "${domain.label}" ` +
+            `but its route is NOT covered by matchPrefixes → sidebar will be blank.\n` +
+            `  Fix: add '${item.route.split('/').slice(0, 3).join('/')}' to ${domain.label}.matchPrefixes`,
+          )
+        }
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    console.warn(
+      `%c⚠ Nav integrity check — ${issues.length} issue(s) found:\n\n` +
+      issues.join('\n\n'),
+      'color: orange; font-weight: bold',
+    )
+  }
 }

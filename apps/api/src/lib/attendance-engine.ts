@@ -48,12 +48,14 @@
  *   Otherwise the unclosed session contributes 0 minutes.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { writeAuditLogs }                    from './attendance-processor.js'
+import { writeAuditLogs, writeComputeLogs }  from './attendance-processor.js'
 import { eventService }                      from './event-service.js'
 import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-service.js'
 import { resolveEmployeeOrgContext, getWeeklyOffDays } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
+import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
+import { isShiftAttributionEnabled } from './attendance-flags.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
 import { resolveLeaveDayFraction }                      from './leave-engine.js'
 
@@ -86,7 +88,7 @@ export type AttendanceStatus =
  * The engine MUST NOT overwrite rows with source 'leave_approval' or 'manual'.
  * See recomputeRange for the enforcement filter.
  */
-export type AttendanceComputedSource = 'engine' | 'leave_approval' | 'regularization' | 'manual'
+export type AttendanceComputedSource = 'engine' | 'leave_approval' | 'regularization' | 'manual' | 'wo_credit'
 
 /** DB-shaped row — exactly what is written to attendance_daily. */
 export interface AttendanceDailyRecord {
@@ -103,6 +105,18 @@ export interface AttendanceDailyRecord {
   worked_on_holiday:    boolean
   /** Ownership: identifies the subsystem that last wrote this row. Default 'engine'. */
   computed_source:      AttendanceComputedSource
+
+  // ── Shift attribution snapshot (migration 260) ─────────────────────────────
+  // Persisted at compute time so the exact shift used is always traceable.
+  expected_shift_id?:        string | null
+  shift_start_time?:         string | null
+  shift_end_time?:           string | null
+  shift_grace_minutes?:      number | null
+  shift_is_night_shift?:     boolean | null
+  shift_duration_minutes?:   number | null
+  resolution_source?:        string | null  // 'shift_roster'|'rotation_policy'|'standing_shift'|'site_default'
+  rotation_policy_id?:       string | null
+  rotation_condition_type?:  string | null
 }
 
 /**
@@ -590,77 +604,6 @@ async function fetchTenantTz(supabase: SupabaseClient, tenantId: string): Promis
   return (data as { timezone?: string } | null)?.timezone ?? 'UTC'
 }
 
-async function resolveShift(
-  supabase:   SupabaseClient,
-  tenantId:   string,
-  employeeId: string,
-  date:       string,
-): Promise<ShiftMeta | null> {
-  // 1. Roster override for the specific local date
-  const { data: rosterRow } = await supabase
-    .from('shift_roster')
-    .select('shift_id')
-    .eq('tenant_id', tenantId)
-    .eq('employee_id', employeeId)
-    .eq('date', date)
-    .maybeSingle()
-
-  let shiftId: string | null = (rosterRow as { shift_id: string } | null)?.shift_id ?? null
-
-  // 2. Rotation Policy — employee override → site default → condition from date
-  if (!shiftId) {
-    const rotMeta = await resolveViaRotationPolicy(supabase, tenantId, employeeId, date)
-    if (rotMeta) {
-      return {
-        startTime:    rotMeta.startTime,
-        endTime:      rotMeta.endTime,
-        graceMinutes: rotMeta.graceMinutes,
-        isNightShift: rotMeta.isNightShift,
-        durationMin:  rotMeta.durationMin,
-      }
-    }
-  }
-
-  // 3. Fall back to standing assignment
-  if (!shiftId) {
-    const { data: standing } = await supabase
-      .from('employee_shifts')
-      .select('shift_id')
-      .eq('tenant_id', tenantId)
-      .eq('employee_id', employeeId)
-      .eq('is_current', true)
-      .maybeSingle()
-    shiftId = (standing as { shift_id: string } | null)?.shift_id ?? null
-  }
-
-  if (!shiftId) return null
-
-  // 4. Fetch shift details
-  const { data: shift } = await supabase
-    .from('shifts')
-    .select('id, start_time, end_time, grace_minutes, is_night_shift')
-    .eq('id', shiftId)
-    .maybeSingle()
-
-  if (!shift) return null
-
-  const s = shift as {
-    start_time:     string
-    end_time:       string
-    grace_minutes:  number
-    is_night_shift: boolean
-  }
-
-  return {
-    startTime:    s.start_time,
-    endTime:      s.end_time,
-    graceMinutes: s.grace_minutes ?? DEFAULT_POLICY.grace_minutes,
-    isNightShift: s.is_night_shift ?? false,
-    // weeklyOffDays removed — shifts carry timing rules only; use roster for weekly-off
-    durationMin:  shiftDurationMinutes(s.start_time, s.end_time, s.is_night_shift ?? false),
-  }
-}
-
 /**
  * Fetch punch logs for a given employee on a given tenant-local date.
  *
@@ -828,12 +771,28 @@ export async function computeDay(
 
   // ── 1. Resolve shift + tenant timezone + policy + org context in parallel ───
   //    All are prerequisites for computation; resolve concurrently.
-  const [shift, resolvedTz, policy, orgCtx] = await Promise.all([
-    resolveShift(supabase, tenant_id, employee_id, date),
+  const [resolvedShiftAttr, resolvedTz, policy, orgCtx] = await Promise.all([
+    resolveShiftWithAttribution(supabase, tenant_id, employee_id, date),
     opts.tenantTz ? Promise.resolve(opts.tenantTz) : fetchTenantTz(supabase, tenant_id),
     opts.policy   ? Promise.resolve(opts.policy)   : policyService.getPolicy(supabase, tenant_id, employee_id),
     resolveEmployeeOrgContext(supabase, tenant_id, employee_id, date),
   ])
+  const shift = resolvedShiftAttr ? toShiftMeta(resolvedShiftAttr) : null
+
+  // Attribution snapshot — spread into every return to persist alongside the row.
+  // Gated by the AHI-1 rollout flag: when disabled the columns are left null,
+  // but shift resolution itself is unchanged (the flag only gates persistence).
+  const shiftAttribution = (resolvedShiftAttr && isShiftAttributionEnabled()) ? {
+    expected_shift_id:       resolvedShiftAttr.shift_id,
+    shift_start_time:        resolvedShiftAttr.start_time,
+    shift_end_time:          resolvedShiftAttr.end_time,
+    shift_grace_minutes:     resolvedShiftAttr.grace_minutes,
+    shift_is_night_shift:    resolvedShiftAttr.is_night_shift,
+    shift_duration_minutes:  resolvedShiftAttr.duration_minutes,
+    resolution_source:       resolvedShiftAttr.resolution_source,
+    rotation_policy_id:      resolvedShiftAttr.rotation_policy_id,
+    rotation_condition_type: resolvedShiftAttr.rotation_condition_type,
+  } : {}
 
   const tz = resolvedTz
 
@@ -881,6 +840,7 @@ export async function computeDay(
       worked_on_weekly_off: false,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
+      ...shiftAttribution,
       reason:               `Holiday: ${holiday.name}`,
       meta:                 { punchesCount: 0, hasUnpunchedOut: false },
     }
@@ -917,6 +877,7 @@ export async function computeDay(
       worked_on_weekly_off: false,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
+      ...shiftAttribution,
       reason:               'Weekly off — no punches',
       meta:                 { punchesCount: 0, hasUnpunchedOut: false },
     }
@@ -947,6 +908,7 @@ export async function computeDay(
       worked_on_weekly_off: false,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
+      ...shiftAttribution,
       reason:               half_day ? `Approved half-day leave on ${date}` : `Approved leave on ${date}`,
       meta:                 { punchesCount: punches.length, hasUnpunchedOut: false },
     }
@@ -1040,6 +1002,7 @@ export async function computeDay(
       worked_on_weekly_off: true,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
+      ...shiftAttribution,
       reason:               `Worked on weekly off — ${workHours}h`,
       meta:                 { ...punchMeta, workedFraction },
     }
@@ -1058,6 +1021,7 @@ export async function computeDay(
       worked_on_weekly_off: false,
       worked_on_holiday:    true,
       computed_source:      'engine' as const,
+      ...shiftAttribution,
       reason:               `Worked on holiday (${holiday!.name}) — ${workHours}h`,
       meta:                 { ...punchMeta, workedFraction },
     }
@@ -1077,6 +1041,7 @@ export async function computeDay(
     // simultaneously — a contradictory state that could spuriously credit comp-off.
     worked_on_holiday:    isPayable && workedOnHoliday,
     computed_source:      'engine' as const,
+    ...shiftAttribution,
     reason,
     meta:                 punchMeta,
   }
@@ -1220,20 +1185,27 @@ export async function recomputeRange(
   )
 
   // Batch-fetch existing {status, day_fraction, computed_source} for delta detection
-  // and recompute-protection filtering.
+  // and recompute-protection filtering. Also pull the prior shift attribution so a
+  // shift change across a recompute can be recorded (AHI-3 / migration 261).
   const { data: existing } = await supabase
     .from('attendance_daily')
-    .select('employee_id, date, status, day_fraction, computed_source')
+    .select('employee_id, date, status, day_fraction, computed_source, expected_shift_id, shift_start_time, resolution_source')
     .eq('tenant_id', tenant_id)
     .eq('employee_id', employee_id)
     .in('date', dates)
 
-  const beforeMap = new Map<string, { status: string; day_fraction: number; computed_source: string }>(
-    ((existing ?? []) as Array<{ employee_id: string; date: string; status: string; day_fraction: number; computed_source: string }>)
+  const beforeMap = new Map<string, {
+    status: string; day_fraction: number; computed_source: string
+    expected_shift_id: string | null; shift_start_time: string | null; resolution_source: string | null
+  }>(
+    ((existing ?? []) as Array<any>)
       .map((r) => [`${r.employee_id}:${r.date}`, {
-        status:          r.status,
-        day_fraction:    r.day_fraction,
-        computed_source: r.computed_source ?? 'engine',
+        status:            r.status,
+        day_fraction:      r.day_fraction,
+        computed_source:   r.computed_source ?? 'engine',
+        expected_shift_id: r.expected_shift_id ?? null,
+        shift_start_time:  r.shift_start_time ?? null,
+        resolution_source: r.resolution_source ?? null,
       }]),
   )
 
@@ -1247,7 +1219,9 @@ export async function recomputeRange(
   // 'regularization' rows ARE re-evaluated: an HR regularisation submission
   // means the HR admin wants the engine to re-derive attendance from corrected
   // punch data.
-  const PROTECTED_SOURCES = new Set(['leave_approval', 'manual'])
+  // 'wo_credit' rows are weekly-offs the WO-credit reconciler applied to off-days;
+  // the engine must not undo them (the reconciler is their sole owner).
+  const PROTECTED_SOURCES = new Set(['leave_approval', 'manual', 'wo_credit'])
 
   const datesToSkip = new Set<string>()
   for (const [key, before] of beforeMap) {
@@ -1281,6 +1255,75 @@ export async function recomputeRange(
 
     if (error) {
       throw new Error(`attendance_daily batch upsert failed: ${error.message}`)
+    }
+
+    // ── Compute-log parity (AHI-1) ───────────────────────────────────────────
+    // The batch processor records a compute-log entry per computed day with the
+    // shift attribution used. The single-day recompute path must do the same so
+    // the audit trail is identical regardless of which path produced the row.
+    // Fire-and-forget — writeComputeLogs never throws.
+    const attributionEnabled = isShiftAttributionEnabled()
+    await writeComputeLogs(
+      supabase,
+      tenant_id,
+      safeComputed.map((r) => ({
+        employee_id: r.employee_id,
+        date:        r.date,
+        inputs: {
+          shift_meta: r.expected_shift_id ? {
+            shift_id:           attributionEnabled ? (r.expected_shift_id ?? null) : null,
+            start_time:         r.shift_start_time ?? null,
+            end_time:           r.shift_end_time ?? null,
+            grace_minutes:      r.shift_grace_minutes ?? null,
+            is_night_shift:     r.shift_is_night_shift ?? null,
+            resolution_source:  attributionEnabled ? (r.resolution_source ?? null) : null,
+            rotation_policy_id: attributionEnabled ? (r.rotation_policy_id ?? null) : null,
+          } : null,
+        },
+        result: {
+          status:               r.status,
+          work_hours:           r.work_hours,
+          late_minutes:         r.late_minutes,
+          overtime_minutes:     r.overtime_minutes,
+          is_payable:           r.is_payable,
+          day_fraction:         r.day_fraction,
+          worked_on_holiday:    r.worked_on_holiday,
+          worked_on_weekly_off: r.worked_on_weekly_off,
+        },
+        reason: r.reason,
+        source: 'recompute' as const,
+      })),
+    )
+
+    // ── Shift-change audit (AHI-3 / migration 261) ───────────────────────────
+    // When a recompute resolves a DIFFERENT shift than the one previously
+    // persisted, record it so HR can answer "did a config change alter this
+    // employee's historical attendance?". Only meaningful with attribution on.
+    if (attributionEnabled) {
+      const shiftChanges = safeComputed
+        .filter((r) => {
+          const before = beforeMap.get(`${r.employee_id}:${r.date}`)
+          return before?.expected_shift_id != null
+            && before.expected_shift_id !== (r.expected_shift_id ?? null)
+        })
+        .map((r) => {
+          const before = beforeMap.get(`${r.employee_id}:${r.date}`)!
+          return {
+            tenant_id, employee_id: r.employee_id, date: r.date,
+            old_shift_id:          before.expected_shift_id,
+            old_shift_start_time:  before.shift_start_time,
+            old_resolution_source: before.resolution_source,
+            new_shift_id:          r.expected_shift_id ?? null,
+            new_shift_start_time:  r.shift_start_time ?? null,
+            new_resolution_source: r.resolution_source ?? null,
+            change_reason:         'recompute',
+            changed_by:            changed_by ?? null,
+          }
+        })
+      if (shiftChanges.length > 0) {
+        const { error: auditErr } = await supabase.from('attendance_shift_audit_log').insert(shiftChanges)
+        if (auditErr) console.warn('[recomputeRange] shift audit log write failed:', auditErr.message)
+      }
     }
 
     // Auto-generate pending comp-off for any worked-on-weekly-off / worked-on-holiday

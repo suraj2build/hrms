@@ -28,6 +28,9 @@ import {
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 }                               from '../../lib/manager-scope.js'
+import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
+import { isSelfApproval } from '../../lib/approval-guards.js'
+import { logAction } from '../../lib/audit-service.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -70,6 +73,36 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
     if (!myEmpId || !(await isDirectReport(fastify.supabase, req.tenantId, myEmpId, (ot as any).employee_id))) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only action overtime for your direct reports' })
+      return false
+    }
+    return true
+  }
+
+  // Period protection — block OT actions whose attendance day sits in a locked
+  // month. Returns false (and sends 409) when locked.
+  async function assertOtPeriodOpen(req: any, reply: any, otRequestId: string): Promise<boolean> {
+    const { data: ot } = await fastify.supabase
+      .from('overtime_requests')
+      .select('attendance_date, employee_id')
+      .eq('id', otRequestId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    // Segregation of duties — a user may not approve/reject their own OT (F3).
+    if (await isSelfApproval(fastify.supabase, req.tenantId, req.userId, (ot as any)?.employee_id)) {
+      reply.code(403).send({
+        error:   'SELF_APPROVAL_FORBIDDEN',
+        message: 'You cannot action your own overtime request.',
+      })
+      return false
+    }
+
+    const date = (ot as any)?.attendance_date as string | undefined
+    if (date && await isMonthLocked(fastify.supabase, req.tenantId, monthOf(date))) {
+      reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${monthOf(date)} is locked for payroll — no changes allowed.`,
+      })
       return false
     }
     return true
@@ -387,6 +420,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!requireManagerOrAdmin(req, reply)) return
     const { id } = req.params as { id: string }
     if (!await authorizeOtTarget(req, reply, id)) return
+    if (!await assertOtPeriodOpen(req, reply, id)) return
     const schema = z.object({
       approved_minutes: z.number().int().min(0).optional(),
     })
@@ -407,6 +441,16 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'APPROVAL_FAILED', message: result.error })
     }
 
+    // Audit (F5) — OT approvals affect pay and were previously unlogged.
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'overtime_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'approved', approved_minutes: parsed.data.approved_minutes ?? null },
+    })
+
     return reply.send({ data: result.data })
   })
 
@@ -415,6 +459,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!requireManagerOrAdmin(req, reply)) return
     const { id } = req.params as { id: string }
     if (!await authorizeOtTarget(req, reply, id)) return
+    if (!await assertOtPeriodOpen(req, reply, id)) return
     const schema = z.object({
       rejection_reason: z.string().max(500).optional(),
     })
@@ -434,6 +479,16 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!result.ok) {
       return reply.code(400).send({ error: 'REJECTION_FAILED', message: result.error })
     }
+
+    // Audit (F5).
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'overtime_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'rejected', rejection_reason: parsed.data.rejection_reason ?? null },
+    })
 
     return reply.send({ data: result.data })
   })

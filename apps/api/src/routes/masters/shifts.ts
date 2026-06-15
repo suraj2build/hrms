@@ -59,12 +59,43 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
   })
 
   fastify.delete('/:id', hrAdminAuth, async (req: any, reply) => {
+    const id = req.params.id as string
+
+    // Usage guard (mirrors grades/sites/etc.). employee_shifts and shift_roster
+    // FK shifts with ON DELETE RESTRICT (a raw delete would surface as a 500);
+    // job_history FKs with ON DELETE SET NULL (a delete would silently orphan
+    // historical shift attribution). Block the delete when referenced and offer
+    // soft-deactivation instead.
+    const [emp, roster, hist] = await Promise.all([
+      fastify.supabase.from('employee_shifts').select('id', { count: 'exact', head: true })
+        .eq('shift_id', id).eq('tenant_id', req.tenantId),
+      fastify.supabase.from('shift_roster').select('id', { count: 'exact', head: true })
+        .eq('shift_id', id).eq('tenant_id', req.tenantId),
+      fastify.supabase.from('job_history').select('id', { count: 'exact', head: true })
+        .eq('shift_id', id).eq('tenant_id', req.tenantId),
+    ])
+    const usageCount = (emp.count ?? 0) + (roster.count ?? 0) + (hist.count ?? 0)
+    if (usageCount > 0) {
+      return reply.code(409).send({
+        error:      'IN_USE',
+        usageCount,
+        message:    `Shift is referenced by ${usageCount} record${usageCount !== 1 ? 's' : ''} ` +
+                    `(assignments, rosters, or history). Deactivate it (set is_active=false) instead of deleting.`,
+      })
+    }
+
     const { error } = await fastify.supabase
       .from('shifts')
       .delete()
-      .eq('id', req.params.id)
+      .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) {
+      // 23503 = FK violation (a reference created between the check and the delete).
+      if ((error as any).code === '23503') {
+        return reply.code(409).send({ error: 'IN_USE', message: 'Shift is in use and cannot be deleted. Deactivate it instead.' })
+      }
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
     return reply.code(204).send()
   })
 }

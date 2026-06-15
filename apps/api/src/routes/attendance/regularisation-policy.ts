@@ -67,6 +67,8 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
 
   // ── PUT /attendance/regularisation/policy ─────────────────────────────────────
   // Upserts the tenant regularisation policy (HR admin only).
+  // Resilient to migration 251 not yet applied: strips new columns and retries
+  // with just the original fields so saves always work on older DBs.
   fastify.put('/attendance/regularisation/policy', hrAdminAuth, async (req: any, reply) => {
     const parsed = policySchema.safeParse(req.body)
     if (!parsed.success) {
@@ -76,14 +78,25 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
       })
     }
 
-    const { data, error } = await fastify.supabase
+    const fullPayload = { tenant_id: req.tenantId, ...parsed.data }
+
+    let { data, error } = await fastify.supabase
       .from('regularisation_policy')
-      .upsert(
-        { tenant_id: req.tenantId, ...parsed.data },
-        { onConflict: 'tenant_id' },
-      )
+      .upsert(fullPayload, { onConflict: 'tenant_id' })
       .select('*')
       .single()
+
+    // If new columns don't exist yet (migration 251 pending), retry with base fields only.
+    if (error) {
+      const { limit_period: _lp, exclude_rejected: _er, per_type_limits: _ptl, ...basePayload } = fullPayload
+      const retry = await fastify.supabase
+        .from('regularisation_policy')
+        .upsert(basePayload, { onConflict: 'tenant_id' })
+        .select('*')
+        .single()
+      data  = retry.data
+      error = retry.error
+    }
 
     if (error) {
       return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to save policy' })

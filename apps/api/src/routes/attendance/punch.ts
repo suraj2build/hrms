@@ -26,6 +26,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { recomputeRange } from '../../lib/attendance-engine.js'
+import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 
 const HR_ADMIN_ROLES = ['super_admin', 'hr_admin']
 
@@ -87,6 +88,19 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
         })
       }
       employeeId = profile.employee_id
+    }
+
+    // Period protection (F4) — a punch (especially a backdated manual one) must
+    // not land in a month that is locked/finalized for payroll, since it triggers
+    // a recompute that would rewrite sealed attendance. Block it cleanly here;
+    // the engine's recomputeRange is invoked directly below, bypassing the
+    // route-level period guards, so this is the only gate on this path.
+    const punchMonth = monthOf(new Date(punchedAt).toISOString().slice(0, 10))
+    if (await isMonthLocked(fastify.supabase, req.tenantId, punchMonth)) {
+      return reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${punchMonth} is locked for payroll — punches cannot be recorded for it.`,
+      })
     }
 
     // Upsert the punch log.

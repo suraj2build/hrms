@@ -23,6 +23,7 @@ import type { FastifyInstance } from 'fastify'
 import type { SupabaseClient }  from '@supabase/supabase-js'
 import { z } from 'zod'
 import { processAttendanceForDate, writeFailedAuditRun } from '../../lib/attendance-processor.js'
+import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 
 const bodySchema = z.object({
   date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD').optional(),
@@ -166,6 +167,16 @@ export default async function processRoute(fastify: FastifyInstance) {
       const force    = parsed.data.force ?? false
       const tenantId = req.tenantId
       const userId   = req.userId
+
+      // ── Period protection ─────────────────────────────────────────────────────
+      // A locked/finalized month must not be re-processed — that would overwrite
+      // the attendance the payroll run was built on.
+      if (await isMonthLocked(fastify.supabase, tenantId, monthOf(date))) {
+        return reply.code(409).send({
+          error:   'PERIOD_LOCKED',
+          message: `Attendance period ${monthOf(date)} is locked for payroll — no changes allowed.`,
+        })
+      }
 
       // ── Step 2: Date-level guard ──────────────────────────────────────────────
       // Block accidental repeated runs for the same date unless force=true.

@@ -146,6 +146,7 @@ import {
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { logAction } from '../../lib/audit-service.js'
 import { buildCompensationCoverageAudit } from '../../lib/payroll-compensation-coverage.js'
+import { isPayrollDualControlEnabled } from '../../lib/payroll-flags.js'
 import {
   buildPayrollRunSnapshot,
   replayPayrollRun,
@@ -536,6 +537,24 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         return reply.code(423).send({
           error:   'PAYROLL_FROZEN',
           message: freeze.reason ?? `Payroll for ${month} is frozen`,
+        })
+      }
+
+      // PI-1 finalization lockdown — never silently overwrite a finalized run.
+      // The re-run upsert below would reset the run to 'processing', delete all
+      // slips, and recompute. Refuse cleanly; the DB trigger (migration 263) is
+      // the backstop if anything reaches the upsert anyway. Roll back first to
+      // legitimately reprocess a finalized month.
+      const { data: existingRun } = await fastify.supabase
+        .from('payroll_runs')
+        .select('status')
+        .eq('tenant_id', tenantId)
+        .eq('month', month)
+        .maybeSingle()
+      if ((existingRun as any)?.status === 'finalized') {
+        return reply.code(409).send({
+          error:   'RUN_FINALIZED',
+          message: `Payroll for ${month} is finalized and cannot be re-run. Roll it back (super_admin) before reprocessing.`,
         })
       }
     }
@@ -1305,6 +1324,77 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         error: 'PAYROLL_FROZEN',
         message: freeze.reason ?? `Payroll for ${run.month} is frozen`,
       })
+    }
+
+    // ── PI-1 force_finalize hardening (finding P5) ─────────────────────────────
+    // Forcing past the safety gates must always carry a reason; when dual control
+    // is enabled it also requires elevated privilege (segregation of duties).
+    if (force_finalize) {
+      if (!override_reason || !override_reason.trim()) {
+        return reply.code(400).send({
+          error:   'OVERRIDE_REASON_REQUIRED',
+          message: 'force_finalize requires a non-empty override_reason.',
+        })
+      }
+      if (isPayrollDualControlEnabled() && req.userRole !== 'super_admin') {
+        return reply.code(403).send({
+          error:   'FORBIDDEN',
+          message: 'force_finalize requires super_admin when dual control is enabled.',
+        })
+      }
+    }
+
+    // ── PI-1 maker-checker / four-eyes finalize (finding C2) ───────────────────
+    // The maker_checker_log was previously never written for finalize — the
+    // "four-eyes" control was decorative. We now always record it. When dual
+    // control is enabled, a DISTINCT checker must approve before the run seals.
+    {
+      const dualControl = isPayrollDualControlEnabled()
+      const { data: pending } = await fastify.supabase
+        .from('maker_checker_log')
+        .select('id, maker_id')
+        .eq('tenant_id', tenantId)
+        .eq('entity_type', 'payroll_run')
+        .eq('entity_id', id)
+        .eq('action', 'finalize')
+        .eq('status', 'pending')
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (dualControl) {
+        if (!pending) {
+          // Maker step — record the proposal and stop. A different user approves.
+          await fastify.supabase.from('maker_checker_log').insert({
+            tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
+            action: 'finalize', maker_id: req.userId, status: 'pending',
+            maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
+          })
+          return reply.code(202).send({
+            status:  'PENDING_CHECKER',
+            message: 'Finalize submitted for four-eyes approval. A different authorised user must approve to seal this run.',
+          })
+        }
+        if ((pending as any).maker_id === req.userId) {
+          return reply.code(409).send({
+            error:   'AWAITING_DIFFERENT_CHECKER',
+            message: 'You proposed this finalize; a different authorised user must approve it.',
+          })
+        }
+        // Checker step — approve the pending proposal, then proceed to finalize.
+        await fastify.supabase.from('maker_checker_log')
+          .update({ checker_id: req.userId, status: 'approved', reviewed_at: new Date().toISOString() })
+          .eq('id', (pending as any).id)
+      } else {
+        // Dual control off — record an auto-approved entry (real audit trail) and
+        // proceed exactly as before: single operator, immediate finalize.
+        await fastify.supabase.from('maker_checker_log').insert({
+          tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
+          action: 'finalize', maker_id: req.userId, checker_id: req.userId,
+          status: 'auto_approved', reviewed_at: new Date().toISOString(),
+          maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
+        })
+      }
     }
 
     // Attendance-closure gate: payroll may RUN on open attendance, but may only be
@@ -2868,10 +2958,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may rollback a finalized run' })
     }
 
-    // Delete existing slips for this run (draft state = no slips)
-    await fastify.supabase.from('payroll_slips').delete().eq('run_id', id).eq('tenant_id', tenantId)
-
-    // Reset run to draft
+    // Reset run to draft FIRST. The PI-1 immutability trigger (migration 263)
+    // protects slips belonging to a finalized run, so we must lift the run out
+    // of 'finalized' before deleting its slips below. finalized → draft is the
+    // sanctioned break-glass transition the trigger permits.
     const { error: updateErr } = await fastify.supabase
       .from('payroll_runs')
       .update({ status: 'draft', finalized_at: null, error_message: null, failure_summary: null })
@@ -2879,6 +2969,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if (updateErr) return reply.code(500).send({ error: 'DB_ERROR', message: updateErr.message })
+
+    // Now delete the slips (parent run is 'draft' → trigger permits deletion).
+    const { error: slipDelErr } = await fastify.supabase
+      .from('payroll_slips').delete().eq('run_id', id).eq('tenant_id', tenantId)
+    if (slipDelErr) return reply.code(500).send({ error: 'DB_ERROR', message: `Run reset to draft but slip deletion failed: ${slipDelErr.message}` })
 
     // If the month was frozen, also lift the freeze so the period is actually
     // runnable again — otherwise the freeze guard blocks the re-run and the

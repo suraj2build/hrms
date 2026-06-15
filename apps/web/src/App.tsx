@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster, toast } from 'sonner'
@@ -103,6 +103,7 @@ const LeaveAccrualLedger  = lazy(() => import('@/pages/attendance/LeaveAccrualLe
 const AttendancePolicy    = lazy(() => import('@/pages/attendance/AttendancePolicy').then(m => ({ default: m.AttendancePolicy })))
 const RegularisationPolicySettings = lazy(() => import('@/pages/admin/attendance/RegularisationPolicySettings').then(m => ({ default: m.RegularisationPolicySettings })))
 const CompOff             = lazy(() => import('@/pages/attendance/CompOff').then(m => ({ default: m.CompOff })))
+const WeeklyOffCredit     = lazy(() => import('@/pages/attendance/WeeklyOffCredit').then(m => ({ default: m.WeeklyOffCredit })))
 const OvertimeManagement  = lazy(() => import('@/pages/attendance/OvertimeManagement').then(m => ({ default: m.OvertimeManagement })))
 const PayrollReadiness    = lazy(() => import('@/pages/attendance/PayrollReadiness').then(m => ({ default: m.PayrollReadiness })))
 const LeaveAccrualAdmin   = lazy(() => import('@/pages/attendance/LeaveAccrualAdmin').then(m => ({ default: m.LeaveAccrualAdmin })))
@@ -520,6 +521,14 @@ function RoleRedirect() {
   return <Navigate to="/admin/dashboard" replace />
 }
 
+// ── Route-aware error boundary ────────────────────────────────────────────────
+// Resets on every navigation so a crash on one page (or a stale lazy-chunk load
+// failure after a deploy) never blanks every page the user clicks afterwards.
+function RouteErrorBoundary({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  return <ErrorBoundary resetKey={location.pathname}>{children}</ErrorBoundary>
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -527,7 +536,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_relativeSplatPath: true }}>
         <AuthProvider>
-          <ErrorBoundary>
+          <RouteErrorBoundary>
           <Suspense fallback={<PageLoader />}>
             <Routes>
 
@@ -619,6 +628,7 @@ export default function App() {
                 <Route path="/admin/attendance/periods"           element={<AttendancePeriods />} />
                 <Route path="/admin/attendance/policy"            element={<AttendancePolicy />} />
                 <Route path="/admin/attendance/regularisation-policy" element={<RegularisationPolicySettings />} />
+                <Route path="/admin/attendance/wo-credit"         element={<WeeklyOffCredit />} />
                 <Route path="/admin/attendance/forensics"         element={<AttendanceTimeline />} />
                 <Route path="/admin/attendance/who-is-in"        element={<WhoIsIn />} />
                 <Route path="/admin/shift-master"                 element={<ShiftMaster />} />
@@ -942,7 +952,7 @@ export default function App() {
 
             </Routes>
           </Suspense>
-          </ErrorBoundary>
+          </RouteErrorBoundary>
           <Toaster richColors position="top-right" />
         </AuthProvider>
       </BrowserRouter>

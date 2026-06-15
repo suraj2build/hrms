@@ -115,11 +115,12 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')   // F7 — only a pending loan may be approved
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Loan not found' })
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
 
     return reply.send({ data })
   })
@@ -137,7 +138,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { error } = await fastify.supabase
+    const { data: rejected, error } = await fastify.supabase
       .from('employee_loans')
       .update({
         status: 'rejected',
@@ -146,8 +147,12 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')   // F7 — only a pending loan may be rejected
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
     return reply.send({ message: 'Loan rejected' })
   })
 
@@ -175,6 +180,12 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .single()
 
     if (fetchErr || !loan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Loan not found' })
+
+    // F7 — only an approved loan may be disbursed (no skipping the approval stage,
+    // no double-disbursing an already-active/closed loan).
+    if ((loan as any).status !== 'approved') {
+      return reply.code(409).send({ error: 'INVALID_STATE', message: `Loan must be approved before disbursal (current: ${(loan as any).status})` })
+    }
 
     const loanData = loan as any
     const now = new Date().toISOString()

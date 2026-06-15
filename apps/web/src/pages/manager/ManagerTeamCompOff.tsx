@@ -13,7 +13,7 @@ import { toast }                                 from 'sonner'
 import {
   CalendarPlus, Check, X, RefreshCw, Loader2, ChevronDown, ChevronUp,
 } from 'lucide-react'
-import { api }           from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
@@ -115,7 +115,13 @@ export function ManagerTeamCompOff() {
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/comp-off/${id}/approve`, {}),
     onSuccess:  () => { toast.success('Comp-off approved'); qc.invalidateQueries({ queryKey: ['manager-team-compoff'] }) },
-    onError:    () => toast.error('Failed to approve'),
+    onError:    (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'This request belongs to a locked attendance period and can no longer be modified.' })
+      } else {
+        toast.error('Failed to approve')
+      }
+    },
   })
 
   const rejectMut = useMutation({

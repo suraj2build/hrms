@@ -46,7 +46,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
 
-import { api }          from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
 import { ensureArray }  from '@/lib/array-utils'
@@ -719,7 +719,14 @@ export function Attendance() {
       queryClient.invalidateQueries({ queryKey: ['attendance-pipeline-stats'] })
       toast.success('Recompute complete', { description: `${res.employees_processed} employees · ${res.rows_upserted} rows updated` })
     },
-    onError: (e: Error) => toast.error('Recompute failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        // Surface the locked month and state in the inline error panel too
+        toast.error('Period locked', { description: e.message })
+      } else {
+        toast.error('Recompute failed', { description: e.message })
+      }
+    },
   })
 
   // ── Derived data ─────────────────────────────────────────────────────────────
@@ -2187,7 +2194,16 @@ export function Attendance() {
             </Button>
 
             {recomputeMutation.isError && (
-              <p className="text-xs text-destructive">{recomputeMutation.error?.message}</p>
+              recomputeMutation.error instanceof ApiError && recomputeMutation.error.error === 'PERIOD_LOCKED' ? (
+                <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                  <span>
+                    Attendance cannot be recomputed because this period is locked for payroll.
+                    Reopen the period before making attendance changes.
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-destructive">{recomputeMutation.error?.message}</p>
+              )
             )}
 
             {recomputeResult && (

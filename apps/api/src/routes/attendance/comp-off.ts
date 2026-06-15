@@ -33,9 +33,12 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { generateCompOffRequests } from '../../lib/comp-off-service.js'
+import { resolveWoEmployees } from '../../lib/wo-credit-reconciler.js'
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
+import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
+import { isSelfApproval } from '../../lib/approval-guards.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -101,6 +104,16 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     const { employee_id, from_date, to_date, leave_type_id } = parsed.data
 
+    // Period protection — don't mint comp-off for a month locked for payroll.
+    try {
+      await assertRangeOpen(fastify.supabase, req.tenantId, from_date, to_date)
+    } catch (err) {
+      if (err instanceof PeriodLockedError) {
+        return reply.code(409).send({ error: 'PERIOD_LOCKED', message: err.message })
+      }
+      throw err
+    }
+
     // Fetch qualifying attendance_daily rows
     let query = fastify.supabase
       .from('attendance_daily')
@@ -114,12 +127,17 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       query = query.eq('employee_id', employee_id)
     }
 
-    const { data: qualifying, error: fetchErr } = await query
+    const { data: qualifyingRaw, error: fetchErr } = await query
     if (fetchErr) {
       return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
     }
 
-    if (!qualifying?.length) {
+    // Mutual exclusivity: employees on a WO-credit roster do NOT earn comp-off —
+    // their off accounting is owned entirely by the WO-credit reconciler.
+    const woEmpIds = new Set((await resolveWoEmployees(fastify.supabase, req.tenantId)).map(e => e.employeeId))
+    const qualifying = (qualifyingRaw ?? []).filter((r: any) => !woEmpIds.has(r.employee_id))
+
+    if (!qualifying.length) {
       return reply.send({ data: { created: 0, skipped: 0, message: 'No qualifying attendance records found' } })
     }
 
@@ -239,6 +257,23 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       })
     }
 
+    // Segregation of duties — a user may not approve their own comp-off (F3).
+    if (await isSelfApproval(fastify.supabase, req.tenantId, req.userId, (co as any).employee_id)) {
+      return reply.code(403).send({
+        error:   'SELF_APPROVAL_FORBIDDEN',
+        message: 'You cannot approve your own comp-off request.',
+      })
+    }
+
+    // Period protection — the worked day that earns this credit must not sit in
+    // a locked/finalized month.
+    if (await isMonthLocked(fastify.supabase, req.tenantId, monthOf((co as any).worked_date))) {
+      return reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${monthOf((co as any).worked_date)} is locked for payroll — no changes allowed.`,
+      })
+    }
+
     const now = new Date().toISOString()
 
     // ── Determine expiry date ────────────────────────────────────────────
@@ -278,46 +313,51 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     // ── Credit balance via leave_accrual_ledger ──────────────────────────
     if ((co as any).leave_type_id) {
-      const { error: ledgerErr } = await fastify.supabase
+      const creditYear = new Date((co as any).worked_date + 'T12:00:00Z').getFullYear()
+
+      // Idempotent credit: source_request_id uniquely identifies this CO grant
+      // (uidx_accrual_ledger_co_request, migration 264). accrued_on uses the
+      // worked_date — a stable key — not the approval timestamp. .select() tells
+      // us whether a NEW row was written, so the cache is credited exactly once
+      // even if this approval is retried.
+      const { data: inserted, error: ledgerErr } = await fastify.supabase
         .from('leave_accrual_ledger')
         .upsert(
           {
-            tenant_id:     req.tenantId,
-            employee_id:   (co as any).employee_id,
-            leave_type_id: (co as any).leave_type_id,
-            accrual_type:  'co_grant',
-            days:          Number((co as any).days_to_credit),
-            year:          new Date((co as any).worked_date + 'T12:00:00Z').getFullYear(),
-            accrued_on:    now.slice(0, 10),   // was: run_date (wrong column name)
-            expires_on:    expiresOnStr,
-            is_expired:    false,
-            notes:         `CO for work on ${(co as any).worked_date}`,  // was: note
+            tenant_id:         req.tenantId,
+            employee_id:       (co as any).employee_id,
+            leave_type_id:     (co as any).leave_type_id,
+            accrual_type:      'co_grant',
+            days:              Number((co as any).days_to_credit),
+            year:              creditYear,
+            accrued_on:        (co as any).worked_date,
+            expires_on:        expiresOnStr,
+            is_expired:        false,
+            notes:             `CO for work on ${(co as any).worked_date}`,
+            source_request_id: (co as any).id,
           },
           {
-            // co_grant is NOT covered by the partial unique index so this is a
-            // plain insert semantically; ignoreDuplicates is a safety net only.
-            onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
+            onConflict:       'tenant_id,source_request_id',
             ignoreDuplicates: true,
           },
         )
+        .select('id')
 
       if (ledgerErr) {
         req.log.error({ err: ledgerErr }, 'comp-off ledger insert failed')
         return reply.code(500).send({ error: 'LEDGER_FAILED', message: 'Failed to credit leave balance' })
       }
 
-      // Also upsert employee_leave_balance so balance is immediately visible
-      const creditYear = new Date((co as any).worked_date + 'T12:00:00Z').getFullYear()
-      try {
-        await fastify.supabase.rpc('credit_leave_balance', {
+      // Mirror into the cached balance only when a new ledger row was written.
+      if ((inserted?.length ?? 0) > 0) {
+        const { error: cacheErr } = await fastify.supabase.rpc('credit_leave_balance', {
           p_tenant_id:     req.tenantId,
           p_employee_id:   (co as any).employee_id,
           p_leave_type_id: (co as any).leave_type_id,
           p_days:          Number((co as any).days_to_credit),
           p_year:          creditYear,
         })
-      } catch {
-        // non-fatal if RPC not yet created
+        if (cacheErr) req.log.error({ err: cacheErr }, 'comp-off: credit_leave_balance RPC failed')
       }
     }
 

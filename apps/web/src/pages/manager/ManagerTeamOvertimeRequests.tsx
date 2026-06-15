@@ -13,7 +13,7 @@ import { toast }                                 from 'sonner'
 import {
   Clock, Check, X, RefreshCw, Loader2, ChevronDown, ChevronUp,
 } from 'lucide-react'
-import { api }            from '@/lib/api/client'
+import { api, ApiError }  from '@/lib/api/client'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
@@ -131,13 +131,25 @@ export function ManagerTeamOvertimeRequests() {
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/overtime/requests/${id}/approve`, {}),
     onSuccess:  () => { toast.success('OT request approved'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }) },
-    onError:    () => toast.error('Failed to approve'),
+    onError:    (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'Overtime approval is blocked — the attendance period has been finalized for payroll.' })
+      } else {
+        toast.error('Failed to approve')
+      }
+    },
   })
 
   const rejectMut = useMutation({
     mutationFn: (id: string) => api.post(`/overtime/requests/${id}/reject`, {}),
     onSuccess:  () => { toast.success('OT request rejected'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }) },
-    onError:    () => toast.error('Failed to reject'),
+    onError:    (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'Overtime rejection is blocked — the attendance period has been finalized for payroll.' })
+      } else {
+        toast.error('Failed to reject')
+      }
+    },
   })
 
   function onAction(id: string, action: 'approve' | 'reject') {

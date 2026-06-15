@@ -123,7 +123,7 @@ export async function processWorkflowAction(
   // Fetch instance
   const { data: inst, error: fetchErr } = await supabase
     .from('approval_instances')
-    .select('id, current_level, total_levels, final_approved, tenant_id')
+    .select('id, current_level, total_levels, final_approved, tenant_id, submitted_by')
     .eq('id', instanceId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
@@ -132,10 +132,31 @@ export async function processWorkflowAction(
     return { ok: false, error: { type: 'NOT_FOUND', message: 'Approval instance not found' } }
   }
 
-  const i = inst as { id: string; current_level: number; total_levels: number; final_approved: boolean | null; tenant_id: string }
+  const i = inst as { id: string; current_level: number; total_levels: number; final_approved: boolean | null; tenant_id: string; submitted_by: string | null }
 
   if (i.final_approved !== null) {
     return { ok: false, error: { type: 'CONFLICT', message: 'Approval instance is already closed' } }
+  }
+
+  // ── Actor-authority gate (C3) ──────────────────────────────────────────────
+  // Previously this function recorded ANY actor's decision with no check that
+  // they were entitled to approve. Enforce two invariants that hold regardless
+  // of the (un-persisted) per-level config: the actor must hold an approver role,
+  // and may not approve their own submission (segregation of duties). Per-level
+  // approver_type matching (direct_manager / specific_role) is a follow-up tied
+  // to persisting workflow_type on the instance.
+  if (i.submitted_by && i.submitted_by === actorId) {
+    return { ok: false, error: { type: 'FORBIDDEN', message: 'You cannot action your own request' } }
+  }
+  const { data: actor } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', actorId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  const actorRole = (actor as { role?: string } | null)?.role
+  if (!actorRole || !['manager', 'hr_admin', 'super_admin'].includes(actorRole)) {
+    return { ok: false, error: { type: 'FORBIDDEN', message: 'You are not authorised to approve this request' } }
   }
 
   const isFinalLevel    = i.current_level >= i.total_levels

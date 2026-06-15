@@ -56,8 +56,14 @@ interface RosterPolicy {
     matrix?:         PolicyMatrix
   }
   is_active:    boolean
+  wo_credit_structure_id: string | null
   created_at:   string
   updated_at:   string | null
+}
+
+interface WoStructureOption {
+  id:   string
+  name: string
 }
 
 interface ImpactData {
@@ -483,7 +489,15 @@ export function RosterPolicyEditor() {
   const [cycleDays,   setCycleDays]   = useState<7 | 14 | 28>(7)
   const [matrix,      setMatrix]      = useState<PolicyMatrix>(defaultMatrix)
   const [isActive,    setIsActive]    = useState(true)
+  const [woStructureId, setWoStructureId] = useState<string | null>(null)
   const [isDirty,     setIsDirty]     = useState(false)
+
+  // WO-credit structures available for tagging (retail floating weekly-off)
+  const { data: woStructures = [] } = useQuery<WoStructureOption[]>({
+    queryKey: ['wo-credit', 'structures', 'options'],
+    queryFn:  () => api.get('/attendance/wo-credit/structures').then((r: any) => (r.data ?? []).map((s: any) => ({ id: s.id, name: s.name }))),
+    staleTime: 60_000,
+  })
 
   // ── Load existing policy ──────────────────────────────────────────────────
   const { data: policyData, isLoading: policyLoading } = useQuery<{ data: RosterPolicy }>({
@@ -501,6 +515,7 @@ export function RosterPolicyEditor() {
     setCycleDays(p.cycle_days)
     setMatrix(p.pattern_json.matrix ?? defaultMatrix())
     setIsActive(p.is_active)
+    setWoStructureId(p.wo_credit_structure_id ?? null)
     setIsDirty(false)
   }, [policyData])
 
@@ -531,6 +546,7 @@ export function RosterPolicyEditor() {
         cycle_days:   cycleDays,
         pattern_json: { matrix, weekly_off_days: [] },  // backend re-derives weekly_off_days
         is_active:    isActive,
+        wo_credit_structure_id: woStructureId,
       }
       return isNew
         ? api.post('/masters/rosters', payload)
@@ -753,6 +769,26 @@ export function RosterPolicyEditor() {
                   </p>
                 ))}
               </div>
+            </div>
+
+            {/* WO-credit structure (retail floating weekly-off) */}
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                Weekly-Off Credit
+              </div>
+              <select
+                value={woStructureId ?? ''}
+                onChange={e => { setWoStructureId(e.target.value || null); setIsDirty(true) }}
+                className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="">Fixed weekly-off (normal)</option>
+                {woStructures.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-muted-foreground/70 mt-1 leading-relaxed">
+                Tag a structure to make employees on this roster earn weekly-offs from worked days (retail). They are excluded from Comp-Off.
+              </p>
             </div>
 
             {/* Payroll note */}
