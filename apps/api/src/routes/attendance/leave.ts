@@ -461,6 +461,27 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // Deduct leave balance for paid leave types (use working_days, not calendar days)
     if (lt?.is_paid) {
       const year = new Date(app.from_date as string).getFullYear()
+
+      // C6 — write a signed consumption row to the ledger (the authoritative
+      // record), idempotent per leave application, BEFORE touching the cache.
+      // Keeps ledger and cache in lockstep so the ledger can become the single
+      // source of truth (cutover behind LEAVE_LEDGER_AUTHORITATIVE).
+      const { error: ledgerErr } = await fastify.supabase
+        .from('leave_accrual_ledger')
+        .upsert({
+          tenant_id:         app.tenant_id,
+          employee_id:       app.employee_id,
+          leave_type_id:     app.leave_type_id,
+          year,
+          accrual_type:      'consumption',
+          days:              -Math.abs(workingDays.computed_days),
+          accrued_on:        app.from_date,
+          is_expired:        false,
+          notes:             `Leave consumed ${app.from_date}…${app.to_date}`,
+          source_request_id: app.id,
+        }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
+      if (ledgerErr) req.log.warn({ err: ledgerErr }, 'leave consumption ledger write failed — approval committed')
+
       try {
         await fastify.supabase.rpc('deduct_leave_balance', {
           p_tenant_id:     app.tenant_id,
