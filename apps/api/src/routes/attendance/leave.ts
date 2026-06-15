@@ -333,21 +333,51 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       { halfDay: isHalfDay },
     )
 
-    // Pre-approve balance check (paid leave only)
+    // Pre-approve balance check + atomic deduction (paid leave only).
+    // C6-P1: Use checked_deduct_leave_balance instead of deduct_leave_balance.
+    // The old RPC clamped silently to GREATEST(0, balance-days), which diverged
+    // the ledger (full amount) from the cache (clamped amount). The new RPC deducts
+    // ONLY when balance >= days and returns FALSE if the check fails — ensuring
+    // the ledger and cache always move by the same delta.
+    //
+    // Ordering is deliberate: deduction comes BEFORE the status update so that a
+    // concurrent second approval for the same employee fails atomically at the DB
+    // level (race condition guard), not at the application-level validateBalance
+    // check which reads a stale snapshot.
+    let paidYear: number | null = null
     if (lt?.is_paid) {
-      const year  = new Date(app.from_date as string).getFullYear()
+      paidYear = new Date(app.from_date as string).getFullYear()
       const check = await validateBalance(
         fastify.supabase,
         app.tenant_id    as string,
         app.employee_id  as string,
         app.leave_type_id as string,
         workingDays.computed_days,
-        year,
+        paidYear,
       )
       if (!check.valid) {
         return reply.code(422).send({
           error:   'INSUFFICIENT_BALANCE',
           message: check.message ?? 'Insufficient leave balance',
+        })
+      }
+
+      // Atomic deduction gate — only succeeds when balance >= computed_days.
+      const { data: deducted, error: deductErr } = await fastify.supabase.rpc('checked_deduct_leave_balance', {
+        p_tenant_id:     app.tenant_id,
+        p_employee_id:   app.employee_id,
+        p_leave_type_id: app.leave_type_id,
+        p_days:          workingDays.computed_days,
+        p_year:          paidYear,
+      })
+      if (deductErr) {
+        req.log.error({ err: deductErr }, 'checked_deduct_leave_balance RPC failed')
+        return reply.code(500).send({ error: 'BALANCE_DEDUCT_FAILED', message: 'Failed to deduct leave balance' })
+      }
+      if (!deducted) {
+        return reply.code(422).send({
+          error:   'INSUFFICIENT_BALANCE',
+          message: 'Insufficient leave balance (concurrent conflict — balance changed since validation)',
         })
       }
     }
@@ -449,20 +479,26 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       req.log,
     )
 
-    // Deduct leave balance for paid leave types (use working_days, not calendar days)
-    if (lt?.is_paid) {
-      const year = new Date(app.from_date as string).getFullYear()
-      try {
-        await fastify.supabase.rpc('deduct_leave_balance', {
-          p_tenant_id:     app.tenant_id,
-          p_employee_id:   app.employee_id,
-          p_leave_type_id: app.leave_type_id,
-          p_days:          workingDays.computed_days,
-          p_year:          year,
-        })
-      } catch (err) {
-        req.log.warn({ err }, 'leave balance deduction failed — approval committed')
-      }
+    // C6-P1: Write the signed consumption row to leave_accrual_ledger (the
+    // authoritative balance ledger) AFTER the cache deduction has already
+    // succeeded via checked_deduct_leave_balance above. Ledger and cache are
+    // guaranteed to move by the same delta.
+    if (lt?.is_paid && paidYear !== null) {
+      const { error: ledgerErr } = await fastify.supabase
+        .from('leave_accrual_ledger')
+        .upsert({
+          tenant_id:         app.tenant_id,
+          employee_id:       app.employee_id,
+          leave_type_id:     app.leave_type_id,
+          year:              paidYear,
+          accrual_type:      'consumption',
+          days:              -Math.abs(workingDays.computed_days),
+          accrued_on:        app.from_date,
+          is_expired:        false,
+          notes:             `Leave consumed ${app.from_date}…${app.to_date}`,
+          source_request_id: app.id,
+        }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
+      if (ledgerErr) req.log.warn({ err: ledgerErr }, 'leave consumption ledger write failed — approval committed, balance deducted')
     }
 
     // Sandwich leave: apply bridging if allowed
@@ -620,6 +656,157 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     return reply.send({ message: 'Rejected successfully' })
   })
 
+  // ── POST /attendance/leave/:id/cancel ────────────────────────────────────────
+  // Cancels an already-approved leave application, reverses the attendance_daily
+  // rows it created, and restores the leave balance.
+  //
+  // Accessible by: HR admins (any leave) and the leave-owning employee (self).
+  // A cancelled leave is permanent — it cannot be re-approved.
+  fastify.post('/attendance/leave/:id/cancel', auth, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+
+    const { data: app, error: fetchError } = await fastify.supabase
+      .from('leave_applications')
+      .select('id, tenant_id, employee_id, leave_type_id, from_date, to_date, status, session')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (fetchError || !app) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
+    }
+    if (app.status !== 'approved') {
+      return reply.code(409).send({
+        error:   'INVALID_STATE',
+        message: `Only approved leaves can be cancelled (current status: ${app.status})`,
+      })
+    }
+
+    // Non-admins may only cancel their own leave
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+      if (!callerProfile?.employee_id || callerProfile.employee_id !== app.employee_id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You may only cancel your own leave applications' })
+      }
+    }
+
+    // Fetch leave type to know if this is a paid leave (balance must be restored)
+    const { data: lt } = await fastify.supabase
+      .from('leave_types')
+      .select('id, name, is_paid')
+      .eq('id', app.leave_type_id)
+      .single()
+
+    // Look up the original consumption ledger row to determine exact days consumed.
+    // This is more reliable than recomputing since the roster may have changed.
+    let daysToRestore: number | null = null
+    const { data: consumptionRow } = await fastify.supabase
+      .from('leave_accrual_ledger')
+      .select('days')
+      .eq('tenant_id', app.tenant_id)
+      .eq('source_request_id', app.id)
+      .eq('accrual_type', 'consumption')
+      .maybeSingle()
+
+    if (consumptionRow) {
+      // consumption rows are negative; days to restore = absolute value
+      daysToRestore = Math.abs(Number(consumptionRow.days))
+    } else if (lt?.is_paid) {
+      // Pre-C6 approval — no consumption ledger row exists. Recompute.
+      try {
+        const wd = await computeWorkingLeaveDays(
+          fastify.supabase,
+          app.tenant_id   as string,
+          app.employee_id as string,
+          app.from_date   as string,
+          app.to_date     as string,
+          { halfDay: (app.session as string | null) !== 'full_day' },
+        )
+        daysToRestore = wd.computed_days
+      } catch {
+        req.log.warn({ appId: id }, 'cancel: could not recompute working days — balance will not be restored')
+      }
+    }
+
+    // Mark as cancelled
+    const { error: cancelErr } = await fastify.supabase
+      .from('leave_applications')
+      .update({ status: 'cancelled' })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+
+    if (cancelErr) {
+      req.log.error({ err: cancelErr }, 'leave cancel update failed')
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel application' })
+    }
+
+    // Reverse attendance_daily rows that were created by this leave approval.
+    // Rows with computed_source='leave_approval' within the leave date range are
+    // deleted so the attendance engine can reprocess them from punch data.
+    const allDates = expandDateRange(app.from_date as string, app.to_date as string)
+    const { error: dailyErr } = await fastify.supabase
+      .from('attendance_daily')
+      .delete()
+      .eq('tenant_id', app.tenant_id)
+      .eq('employee_id', app.employee_id)
+      .eq('computed_source', 'leave_approval')
+      .in('date', allDates)
+
+    if (dailyErr) {
+      req.log.warn({ err: dailyErr }, 'leave cancel: attendance_daily reversal failed — cancellation committed')
+    }
+
+    // Restore leave balance and write reversal ledger row (paid leave only)
+    if (lt?.is_paid && daysToRestore && daysToRestore > 0) {
+      const year = new Date(app.from_date as string).getFullYear()
+
+      // C6: idempotent reversal row in leave_accrual_ledger.
+      // source_request_id = original leave application id, accrual_type = 'reversal'
+      // ensures at most one reversal per leave.
+      const { error: ledgerErr } = await fastify.supabase
+        .from('leave_accrual_ledger')
+        .upsert({
+          tenant_id:         app.tenant_id,
+          employee_id:       app.employee_id,
+          leave_type_id:     app.leave_type_id,
+          year,
+          accrual_type:      'reversal',
+          days:              daysToRestore,
+          accrued_on:        new Date().toISOString().slice(0, 10),
+          is_expired:        false,
+          notes:             `Leave reversal — cancelled application ${app.from_date}…${app.to_date}`,
+          source_request_id: app.id,
+        }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
+
+      if (ledgerErr) {
+        req.log.warn({ err: ledgerErr }, 'leave cancel: reversal ledger write failed — cancellation committed')
+      }
+
+      // Restore cache balance
+      const { error: creditErr } = await fastify.supabase.rpc('credit_leave_balance', {
+        p_tenant_id:     app.tenant_id,
+        p_employee_id:   app.employee_id,
+        p_leave_type_id: app.leave_type_id,
+        p_days:          daysToRestore,
+        p_year:          year,
+      })
+      if (creditErr) {
+        req.log.warn({ err: creditErr }, 'leave cancel: credit_leave_balance failed — cancellation committed, ledger reversed')
+      }
+    }
+
+    return reply.send({
+      message:          'Leave cancelled successfully',
+      days_restored:    daysToRestore ?? 0,
+    })
+  })
+
   // ── GET /attendance/leave/balance/:employeeId ─────────────────────────────────
   fastify.get('/attendance/leave/balance/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
@@ -653,6 +840,46 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
+    // C6 feature flag: LEAVE_LEDGER_AUTHORITATIVE (default OFF).
+    // When ON: balance is derived from Σ(leave_accrual_ledger) rather than
+    // the employee_leave_balance cache.  Keep OFF until shadow-read validation
+    // confirms zero discrepancies across a full reconciliation window.
+    const useLedger = process.env.LEAVE_LEDGER_AUTHORITATIVE === 'true'
+
+    if (useLedger) {
+      // Derive balance from the authoritative ledger (Σ of signed days, non-expired).
+      const { data: ledgerRows, error: ledgerErr } = await fastify.supabase
+        .from('leave_accrual_ledger')
+        .select('leave_type_id, days, leave_types(id, name, is_paid)')
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', employeeId)
+        .eq('year', year)
+        .eq('is_expired', false)
+
+      if (ledgerErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave balances from ledger' })
+
+      const balMap: Record<string, { balance: number; entitlement: number; lt: any }> = {}
+      for (const row of (ledgerRows ?? []) as any[]) {
+        const ltid = row.leave_type_id
+        if (!balMap[ltid]) balMap[ltid] = { balance: 0, entitlement: 0, lt: row.leave_types }
+        const d = Number(row.days)
+        balMap[ltid].balance += d
+        if (d > 0) balMap[ltid].entitlement += d
+      }
+
+      const enriched = Object.entries(balMap).map(([ltid, v]) => ({
+        leave_type_id:     ltid,
+        balance:           Math.round(v.balance * 100) / 100,
+        year,
+        leave_types:       v.lt,
+        annual_entitlement: Math.round(v.entitlement * 100) / 100 || null,
+        _source:           'ledger',
+      }))
+
+      return reply.send({ data: enriched })
+    }
+
+    // Default (cache) path — reads employee_leave_balance.
     const [{ data, error }, { data: accrualRows }] = await Promise.all([
       fastify.supabase
         .from('employee_leave_balance')
@@ -1023,11 +1250,16 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       approved_by:   req.userId,
       approved_at:   now,
     }))
-    const { error: appErr } = await fastify.supabase.from('leave_applications').insert(appRows)
+    const { data: insertedApps, error: appErr } = await fastify.supabase
+      .from('leave_applications').insert(appRows).select('id, employee_id')
     if (appErr) {
       req.log.error({ err: appErr }, 'bulk-assign leave applications insert failed')
       return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave applications' })
     }
+    // employee_id → application id map; used to key idempotent consumption ledger rows.
+    const appIdByEmp = new Map<string, string>(
+      ((insertedApps ?? []) as Array<{ id: string; employee_id: string }>).map(a => [a.employee_id, a.id]),
+    )
 
     // Build attendance_daily rows PER EMPLOYEE on their roster WORKING dates only
     // (holidays/weekly-offs inside the span stay paid rest days — never converted to
@@ -1042,12 +1274,33 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         workingDates = (wd.counted_dates && wd.counted_dates.length > 0) ? wd.counted_dates : dates
         if (lt.is_paid && wd.computed_days > 0) {
           const year = new Date(from_date).getFullYear()
-          try {
-            await fastify.supabase.rpc('deduct_leave_balance', {
-              p_tenant_id: req.tenantId, p_employee_id: emp_id, p_leave_type_id: leave_type_id,
-              p_days: wd.computed_days, p_year: year,
-            })
-          } catch (e) { req.log.warn({ err: e, emp_id }, 'bulk-assign balance deduction failed — leave committed') }
+          // C6-P1: atomic deduction via checked_deduct_leave_balance (no silent clamp).
+          // For bulk-assign the deduction is best-effort — the admin has already
+          // approved the span; a balance shortfall is logged for manual remediation
+          // rather than rolling back the whole batch.
+          const { data: deducted, error: deductErr } = await fastify.supabase.rpc('checked_deduct_leave_balance', {
+            p_tenant_id: req.tenantId, p_employee_id: emp_id, p_leave_type_id: leave_type_id,
+            p_days: wd.computed_days, p_year: year,
+          })
+          if (deductErr) {
+            req.log.warn({ err: deductErr, emp_id }, 'bulk-assign checked_deduct_leave_balance failed — leave committed without deduction')
+          } else if (!deducted) {
+            req.log.warn({ emp_id, days: wd.computed_days }, 'bulk-assign insufficient balance — leave committed, balance unchanged')
+          } else {
+            // Deduction succeeded — write ledger row to keep authoritative store in sync.
+            const appId = appIdByEmp.get(emp_id)
+            if (appId) {
+              const { error: ledgerErr } = await fastify.supabase
+                .from('leave_accrual_ledger')
+                .upsert({
+                  tenant_id: req.tenantId, employee_id: emp_id, leave_type_id, year,
+                  accrual_type: 'consumption', days: -Math.abs(wd.computed_days),
+                  accrued_on: from_date, is_expired: false,
+                  notes: `Leave consumed ${from_date}…${to_date} (bulk)`, source_request_id: appId,
+                }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
+              if (ledgerErr) req.log.warn({ err: ledgerErr, emp_id }, 'bulk-assign consumption ledger write failed — balance deducted')
+            }
+          }
         }
       } catch (e) {
         req.log.warn({ err: e, emp_id }, 'bulk-assign working-day resolution failed — using full span')

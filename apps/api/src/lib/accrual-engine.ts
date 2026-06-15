@@ -146,7 +146,8 @@ export async function runMonthlyAccrual(
             { onConflict: 'tenant_id,employee_id,leave_type_id,year' },
           )
 
-        // Write ledger entry
+        // Write explainability ledger entry (leave_balance_ledger — audit trail with
+        // running balance snapshots).
         await supabase.from('leave_balance_ledger').insert({
           tenant_id:     tenantId,
           employee_id:   emp.id,
@@ -157,6 +158,25 @@ export async function runMonthlyAccrual(
           balance_after: newBalance,
           notes:         `Monthly accrual — ${runPeriod}`,
         })
+
+        // C6 dual-write: also record the credit in leave_accrual_ledger (the
+        // authoritative balance ledger). accrued_on = last day of the period so
+        // the existing (tenant,employee,leave_type,year,accrual_type,accrued_on)
+        // unique index treats each month as a distinct row.
+        const periodLastDay = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
+        await supabase
+          .from('leave_accrual_ledger')
+          .upsert({
+            tenant_id:     tenantId,
+            employee_id:   emp.id,
+            leave_type_id: rule.leave_type_id,
+            year:          periodYear,
+            accrual_type:  'monthly',
+            days,
+            accrued_on:    periodLastDay,
+            is_expired:    false,
+            notes:         `Monthly accrual — ${runPeriod}`,
+          }, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
 
         employeesCredited++
         totalDays = parseFloat((totalDays + days).toFixed(2))
@@ -259,6 +279,23 @@ export async function processCarryForward(
         notes:         `Carry-forward from ${fromYear}${expiryDate ? ` · expires ${expiryDate}` : ''}`,
       })
 
+      // C6 dual-write: credit in leave_accrual_ledger (authoritative balance ledger).
+      // accrued_on = Jan 1 of toYear; idempotent via the annual-types unique index.
+      const carryAcruedOn = `${toYear}-01-01`
+      await supabase
+        .from('leave_accrual_ledger')
+        .upsert({
+          tenant_id:     tenantId,
+          employee_id:   bal.employee_id,
+          leave_type_id: rule.leave_type_id,
+          year:          toYear,
+          accrual_type:  'carry_forward',
+          days:          carryDays,
+          accrued_on:    carryAcruedOn,
+          is_expired:    false,
+          notes:         `Carry-forward from ${fromYear}${expiryDate ? ` · expires ${expiryDate}` : ''}`,
+        }, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+
       employeesProcessed++
       totalCarried = parseFloat((totalCarried + carryDays).toFixed(2))
     }
@@ -321,7 +358,7 @@ export async function processEncashment(
     { onConflict: 'tenant_id,employee_id,leave_type_id,year' },
   )
 
-  // Write ledger entry
+  // Write explainability ledger entry (leave_balance_ledger — audit trail).
   await supabase.from('leave_balance_ledger').insert({
     tenant_id:       tenantId,
     employee_id:     req.employee_id,
@@ -334,6 +371,23 @@ export async function processEncashment(
     notes:           `Leave encashment approved — ${req.days} days`,
     created_by:      approverId,
   })
+
+  // C6 dual-write: signed encashment debit in leave_accrual_ledger (authoritative
+  // balance ledger). source_request_id = encashmentId for idempotency.
+  await supabase
+    .from('leave_accrual_ledger')
+    .upsert({
+      tenant_id:         tenantId,
+      employee_id:       req.employee_id,
+      leave_type_id:     req.leave_type_id,
+      year:              req.year,
+      accrual_type:      'encashment',
+      days:              -Math.abs(req.days),
+      accrued_on:        new Date().toISOString().slice(0, 10),
+      is_expired:        false,
+      notes:             `Leave encashment approved — ${req.days} days`,
+      source_request_id: encashmentId,
+    }, { onConflict: 'tenant_id,source_request_id', ignoreDuplicates: true })
 
   // Update request status
   await supabase.from('leave_encashment_requests').update({
