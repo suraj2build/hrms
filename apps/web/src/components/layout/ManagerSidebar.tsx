@@ -35,6 +35,7 @@ import {
   CheckSquare,
   TrendingUp,
   HelpCircle,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   UserCircle2,
@@ -57,6 +58,7 @@ import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { useUIStore } from '@/stores/uiStore'
 import { api }        from '@/lib/api/client'
 import { Button }     from '@/components/ui/button'
+import { useNavGroupCollapse } from '@/hooks/useNavGroupCollapse'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -255,6 +257,22 @@ export function ManagerSidebar() {
     [pendingCount],
   )
 
+  // Collapsible nav — groups/sections collapsed by default; whichever holds the
+  // active route stays open, and manual toggles persist for the session.
+  const activeGroup = useMemo(() => {
+    for (const s of SECTIONS) {
+      const g = s.groups?.find(g => g.items.some(i => isActive(i, location.pathname)))
+      if (g) return g.label
+    }
+    return undefined
+  }, [SECTIONS, location.pathname])
+  const activeFlatSection = useMemo(
+    () => SECTIONS.find(s => s.items?.some(i => isActive(i, location.pathname)))?.label,
+    [SECTIONS, location.pathname],
+  )
+  const { expanded, toggle } = useNavGroupCollapse('manager')
+  const isOpen = (label: string, activeLabel?: string) => expanded.has(label) || label === activeLabel
+
   return (
    <>
     {mobileNavOpen && (
@@ -298,23 +316,32 @@ export function ManagerSidebar() {
             )}
 
             {!sidebarCollapsed && (
-              <div className={cn(
-                'flex items-center gap-1.5 px-2.5 pb-1',
-              )}>
-                {section.type === 'employee' ? (
+              section.items ? (
+                /* Flat section (Manager) — header toggles the whole list */
+                <button
+                  type="button"
+                  onClick={() => toggle(section.label)}
+                  className="flex items-center justify-between w-full px-2.5 pb-1"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-3 w-3 text-amber-500/80" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80 select-none">
+                      {section.label}
+                    </span>
+                  </span>
+                  {isOpen(section.label, activeFlatSection)
+                    ? <ChevronDown className="h-3 w-3 opacity-50" />
+                    : <ChevronRight className="h-3 w-3 opacity-50" />}
+                </button>
+              ) : (
+                /* Grouped section (Employee) — static header; sub-groups are the toggles */
+                <div className="flex items-center gap-1.5 px-2.5 pb-1">
                   <UserCircle2 className="h-3 w-3 text-primary/70" />
-                ) : (
-                  <ShieldCheck className="h-3 w-3 text-amber-500/80" />
-                )}
-                <p className={cn(
-                  'text-[9px] font-bold uppercase tracking-widest select-none',
-                  section.type === 'employee'
-                    ? 'text-primary/70'
-                    : 'text-amber-500/80',
-                )}>
-                  {section.label}
-                </p>
-              </div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-primary/70 select-none">
+                    {section.label}
+                  </p>
+                </div>
+              )
             )}
 
             {/* Items — grouped (employee section) or flat (manager section) */}
@@ -322,16 +349,25 @@ export function ManagerSidebar() {
               ? section.groups.map((group, gi) => (
                   <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
                     {!sidebarCollapsed && group.label && (
-                      <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 select-none">
-                        {group.label}
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() => toggle(group.label)}
+                        className="flex items-center justify-between w-full px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 hover:text-sidebar-foreground/70 select-none"
+                      >
+                        <span>{group.label}</span>
+                        {isOpen(group.label, activeGroup)
+                          ? <ChevronDown className="h-3 w-3 opacity-60" />
+                          : <ChevronRight className="h-3 w-3 opacity-60" />}
+                      </button>
                     )}
-                    <div className="space-y-0.5">
-                      {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
-                    </div>
+                    {(sidebarCollapsed || isOpen(group.label, activeGroup)) && (
+                      <div className="space-y-0.5">
+                        {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
+                      </div>
+                    )}
                   </div>
                 ))
-              : (
+              : (sidebarCollapsed || isOpen(section.label, activeFlatSection)) && (
                 <div className="space-y-0.5">
                   {(section.items ?? []).map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
                 </div>

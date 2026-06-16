@@ -22,6 +22,7 @@ import {
   HelpCircle,
   LifeBuoy,
   BookMarked,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   HeadphonesIcon,
@@ -40,6 +41,7 @@ import { useUIStore }    from '@/stores/uiStore'
 import { useAuthStore }  from '@/stores/authStore'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
+import { useNavGroupCollapse } from '@/hooks/useNavGroupCollapse'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -227,6 +229,15 @@ export function EmployeeSidebar() {
     [pendingCount, isManager, hasOnboarding]
   )
 
+  // Collapsible groups — collapsed by default; the group holding the active
+  // route stays open, and manual toggles persist for the session.
+  const activeGroup = useMemo(
+    () => GROUPS.find(g => g.items.some(i => isActive(i, location.pathname)))?.label,
+    [GROUPS, location.pathname],
+  )
+  const { expanded, toggle } = useNavGroupCollapse('ess')
+  const isGroupOpen = (label: string) => expanded.has(label) || label === activeGroup
+
   return (
    <>
     {mobileNavOpen && (
@@ -261,15 +272,22 @@ export function EmployeeSidebar() {
         {GROUPS.map((group, gi) => (
           <div key={group.label} className={gi > 0 ? 'mt-4' : ''}>
 
-            {/* Group label — only when expanded */}
+            {/* Group label — click to expand/collapse */}
             {!sidebarCollapsed && (
-              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/55 select-none">
-                {group.label}
-              </p>
+              <button
+                type="button"
+                onClick={() => toggle(group.label)}
+                className="flex items-center justify-between w-full px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/55 hover:text-sidebar-foreground/85 select-none"
+              >
+                <span>{group.label}</span>
+                {isGroupOpen(group.label)
+                  ? <ChevronDown className="h-3 w-3 opacity-60" />
+                  : <ChevronRight className="h-3 w-3 opacity-60" />}
+              </button>
             )}
 
-            {/* Items */}
-            {group.items.map(item => {
+            {/* Items — hidden when collapsed (always shown in icon-rail mode) */}
+            {(sidebarCollapsed || isGroupOpen(group.label)) && group.items.map(item => {
               const active = isActive(item, location.pathname)
               return (
                 <Link
