@@ -427,6 +427,18 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
               return
             }
 
+            // supabase-js fires SIGNED_IN again on every tab refocus / silent
+            // token rotation. If we are already bootstrapped for THIS user, just
+            // keep the refreshed token and return — re-running the /me bootstrap
+            // with setLoading(true) remounts the app and wipes in-progress UI
+            // state (active tab, in-flight upload, unsaved form input).
+            const already = useAuthStore.getState()
+            if (already.profile && already.profile.id === session.user.id) {
+              setBootstrapping(false)
+              setLoading(false)
+              return
+            }
+
             setLoading(true)
             try {
               const data = await api.get<{ profile: Profile; tenant: Tenant }>('/me')
