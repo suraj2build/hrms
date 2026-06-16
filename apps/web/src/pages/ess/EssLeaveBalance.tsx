@@ -678,20 +678,6 @@ export function EssLeaveBalance() {
         value={tab}
         onChange={setTab}
         className="-mb-2"
-        rightSlot={
-          <button
-            onClick={() => setTab('apply')}
-            className={cn(
-              'flex items-center gap-1.5 border-b-2 -mb-px px-3.5 py-2 text-[13px] font-medium transition-colors',
-              tab === 'apply'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-primary/70 hover:text-primary hover:border-primary/40',
-            )}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Apply Leave
-          </button>
-        }
       />
 
       {/* ── Tab content ─────────────────────────────────────────────────────── */}

@@ -631,7 +631,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
   // ── Derived — single-day lock ─────────────────────────────────────────────────
   const isSingleDayOnly = startSession === 'hourly'
   const isMultiDay      = !isSingleDayOnly && !!fromDate && !!toDate && fromDate !== toDate
-  const effectiveToDate = isSingleDayOnly ? fromDate : toDate
+  const effectiveToDate = isSingleDayOnly ? fromDate : (toDate || fromDate)
 
   // ── Queries — Collision preview (full_day only) ───────────────────────────────
   const collisionEnabled = startSession === 'full_day' && !!employeeId && !!leaveTypeId && !!fromDate && !!toDate && fromDate <= toDate
@@ -846,7 +846,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
     const errs: Record<string, string> = {}
     if (!leaveTypeId)        errs.leaveTypeId = 'Select a leave type'
     if (!fromDate)           errs.fromDate    = 'Select start date'
-    if (!isSingleDayOnly && !toDate) errs.toDate = 'Select end date'
+    // To Date is optional — an empty To Date means a single-day leave (to = from).
 
     if (fromDate) {
       const todayRef = today()
