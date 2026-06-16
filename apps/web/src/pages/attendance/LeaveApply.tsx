@@ -842,7 +842,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
 
   // ── Validation ────────────────────────────────────────────────────────────────
 
-  function validate(): boolean {
+  function validate(): Record<string, string> {
     const errs: Record<string, string> = {}
     if (!leaveTypeId)        errs.leaveTypeId = 'Select a leave type'
     if (!fromDate)           errs.fromDate    = 'Select start date'
@@ -910,7 +910,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
     }
 
     setFieldErrors(errs)
-    return Object.keys(errs).length === 0
+    return errs
   }
 
   // ── Submit mutation ───────────────────────────────────────────────────────────
@@ -949,7 +949,13 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!validate()) return
+    const errs = validate()
+    if (Object.keys(errs).length > 0) {
+      // Surface a top-level reason so the user is never left guessing why the
+      // form won't submit — the inline field errors are small and easy to miss.
+      toast.error('Cannot submit leave request', { description: Object.values(errs)[0] })
+      return
+    }
     submitLeave()
   }
 
