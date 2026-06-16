@@ -362,7 +362,11 @@ export async function fetchFullProfile(
   // LWF/TDS), so fpDeduct is ~0 and gross−deduct would wrongly equal gross. Source
   // the real employee deductions from the latest finalized payslip (full rate =
   // total_deductions − LOP, since LOP is a paid-day reduction, not a standing
-  // deduction). Falls back to the (usually empty) structure deductions if no slip.
+  // deduction). Falls back to the structure deductions when there is no slip — OR
+  // when the slip's figure is IMPLAUSIBLE (exceeds gross, e.g. a one-off recovery,
+  // arrears clawback or a heavy-LOP month), which would otherwise show a NEGATIVE
+  // take-home. Net is also clamped to ≥ 0 as a final guard.
+  const grossMonthlyVal = r2fp(fpGross / 12)
   let empDeductMonthly = r2fp(fpDeduct / 12)
   let netSource: 'payslip' | 'structure' = 'structure'
   {
@@ -376,12 +380,16 @@ export async function fetchFullProfile(
       .limit(1)
       .maybeSingle()
     if (latestSlip) {
-      empDeductMonthly = r2fp(Math.max(0, (Number((latestSlip as any).total_deductions) || 0) - (Number((latestSlip as any).lop_amount) || 0)))
-      netSource = 'payslip'
+      const slipDeduct = r2fp(Math.max(0, (Number((latestSlip as any).total_deductions) || 0) - (Number((latestSlip as any).lop_amount) || 0)))
+      // Only trust the payslip when it reads like a standing monthly deduction
+      // (≤ gross). Otherwise keep the structure-based figure.
+      if (slipDeduct <= grossMonthlyVal) {
+        empDeductMonthly = slipDeduct
+        netSource = 'payslip'
+      }
     }
   }
-  const grossMonthlyVal = r2fp(fpGross / 12)
-  const netMonthlyVal   = r2fp(grossMonthlyVal - empDeductMonthly)
+  const netMonthlyVal   = r2fp(Math.max(0, grossMonthlyVal - empDeductMonthly))
 
   const compensationTotals = {
     gross_annual:                   fpGross,
