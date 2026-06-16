@@ -44,6 +44,20 @@ function parseWeeklyOffDays(input: unknown): number[] {
   return [...out].sort((a, b) => a - b)
 }
 
+/**
+ * Slugify a master name → url-safe slug, matching the departments CRUD route
+ * (apps/api/src/routes/departments/index.ts). Used to satisfy the NOT-NULL
+ * `slug` column that the importer previously omitted.
+ */
+function slugifyName(input: unknown): string {
+  return String(input ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+}
+
 const TABLE_MAP: Record<string, TableConfig> = {
   employees: {
     table: 'employees',
@@ -99,6 +113,9 @@ const TABLE_MAP: Record<string, TableConfig> = {
       tenant_id:  tenantId,
       code:       norm.code,
       name:       norm.name,
+      // departments.slug is NOT NULL — generate it like the CRUD route does
+      // (slugified name, falling back to code) so imports don't violate it.
+      slug:       slugifyName(norm.name) || slugifyName(norm.code) || String(norm.code ?? '').toLowerCase(),
       parent_id:  norm.parent_id ?? null,  // resolved from parent_code by validator
     }),
   },
