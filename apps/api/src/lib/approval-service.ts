@@ -32,6 +32,7 @@ import { logAction }                            from './audit-service.js'
 import { eventService }                         from './event-service.js'
 import { getLeaveRequest }                      from './leave-request-service.js'
 import { recomputeRange }                       from './attendance-engine.js'
+import { isSelfApproval }                       from './approval-guards.js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
@@ -416,6 +417,17 @@ export async function approveRegularisation(
     return {
       ok:    false,
       error: { type: 'CONFLICT', message: `Request is already ${regRow.status}` },
+    }
+  }
+
+  // Segregation of duties (F3): a user may not approve their OWN regularisation —
+  // matches the self-approval guard already enforced on leave / overtime /
+  // corrections. Closes the audit gap where a manager could approve a backdated
+  // attendance correction for themselves.
+  if (await isSelfApproval(supabase, tenantId, ctx.approverId, regRow.employee_id)) {
+    return {
+      ok:    false,
+      error: { type: 'FORBIDDEN', message: 'You cannot approve your own regularisation request.' },
     }
   }
 
