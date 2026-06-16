@@ -8,20 +8,22 @@
  * happy path of a first-time finalize.
  *
  * Dual control (distinct maker/checker on finalize, and super_admin-only
- * force_finalize) is a workflow change that requires two operators, so it is
- * gated here and DEFAULT OFF. While off:
- *   • finalize still records a maker_checker_log row (status='auto_approved'),
- *     so the audit trail is real immediately — the previously-decorative table
- *     is now actually written.
- *   • finalize behaves exactly as before (single hr_admin, immediate).
- * Set PAYROLL_FINALIZE_DUAL_CONTROL=on|true|1 to enforce four-eyes finalize.
+ * force_finalize) is a workflow change that requires two operators.
+ *
+ * DEFAULT ON (four-eyes enforced). The person who runs a payroll month cannot
+ * finalize it — a different admin must. To temporarily disable (e.g. an
+ * emergency single-admin finalize) set PAYROLL_FINALIZE_DUAL_CONTROL to one of
+ * the OFF values below. Any other value (or unset) keeps four-eyes enforced.
+ *
+ * While disabled, finalize still records a maker_checker_log row
+ * (status='auto_approved'), so the audit trail is always real.
  */
 
-const ON_VALUES = new Set(['on', 'true', '1', 'enabled', 'yes'])
+const OFF_VALUES = new Set(['off', 'false', '0', 'disabled', 'no'])
 
 /** Whether four-eyes (maker≠checker) finalize + super_admin force is enforced. */
 export function isPayrollDualControlEnabled(): boolean {
   const raw = process.env['PAYROLL_FINALIZE_DUAL_CONTROL']
-  if (raw == null) return false           // default off — opt-in tightening
-  return ON_VALUES.has(raw.trim().toLowerCase())
+  if (raw == null) return true            // default ON — opt-OUT tightening
+  return !OFF_VALUES.has(raw.trim().toLowerCase())
 }
