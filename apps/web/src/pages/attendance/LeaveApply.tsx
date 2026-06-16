@@ -1869,7 +1869,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
               <Button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isPending || periodLocked}
+                disabled={isPending || (!!fromDate && periodLocked)}
                 className="flex-1 bg-gradient-to-r from-primary to-violet-600 text-primary-foreground font-semibold gap-2"
               >
                 {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
@@ -1929,7 +1929,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
             <Button
               type="button"
               onClick={handleSubmit}
-              disabled={isPending || periodLocked}
+              disabled={isPending || (!!fromDate && periodLocked)}
               className="bg-gradient-to-r from-primary to-violet-600 text-primary-foreground font-semibold gap-2"
             >
               {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
