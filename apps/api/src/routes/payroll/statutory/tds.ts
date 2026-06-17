@@ -80,7 +80,7 @@ async function writeAuditLog(
 
 // ── ESS-03: Declaration window check ─────────────────────────────────────────
 // Returns null (window open / no window configured) or an error object to send.
-async function checkDeclarationWindow(
+export async function checkDeclarationWindow(
   fastify: FastifyInstance,
   tenantId: string,
 ): Promise<{ code: number; body: object } | null> {

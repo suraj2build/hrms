@@ -21,6 +21,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
+import { checkDeclarationWindow } from './tds.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -627,6 +628,11 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     if (!employeeId) {
       return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
     }
+
+    // Enforce the declaration window — submitting a plan IS the active declaration,
+    // so it must respect the same open/close dates as direct declarations.
+    const windowErr = await checkDeclarationWindow(fastify, req.tenantId)
+    if (windowErr) return reply.code(windowErr.code).send(windowErr.body)
 
     const { planId } = req.params as { planId: string }
 
