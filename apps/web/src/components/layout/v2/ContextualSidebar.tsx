@@ -82,12 +82,21 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center justify-between w-full px-3 py-2 mt-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground/80 hover:text-foreground hover:bg-muted/60 rounded-md transition-colors select-none"
+          className={cn(
+            'flex items-center justify-between w-full gap-2 px-3 py-2 mt-1 rounded-md border transition-colors select-none',
+            'text-xs font-bold uppercase tracking-wide',
+            expanded
+              ? 'bg-primary/10 border-primary/20 text-primary'
+              : 'bg-muted/70 border-border text-foreground hover:bg-muted',
+          )}
         >
-          {group.label}
+          <span className="flex items-center gap-2 min-w-0">
+            <span className={cn('h-3.5 w-1 rounded-full shrink-0', expanded ? 'bg-primary' : 'bg-muted-foreground/40')} />
+            <span className="truncate">{group.label}</span>
+          </span>
           {expanded
-            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            ? <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
+            : <ChevronRight className="h-4 w-4 shrink-0 text-foreground/70" />
           }
         </button>
       )}
