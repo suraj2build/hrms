@@ -56,7 +56,56 @@ const schema = z.object({
    * Accepted on write for backward compat only.
    */
   default_shift_id:            z.string().uuid().optional().nullable(),
+
+  // ── migration 275 — Site master expansion ──────────────────────────────────
+  // Grouping FKs: state_id = statutory axis, cluster_id = operational axis.
+  state_id:                    z.string().uuid().optional().nullable(),
+  cluster_id:                  z.string().uuid().optional().nullable(),
+  cost_center_id:              z.string().uuid().optional().nullable(),
+  parent_site_id:              z.string().uuid().optional().nullable(),
+  // Identity & lifecycle
+  short_name:                  z.string().max(80).optional().nullable(),
+  status:                      z.enum(['active', 'inactive']).optional(),
+  opening_date:                z.string().optional().nullable(),
+  // Structured address & geo
+  address_line1:               z.string().max(255).optional().nullable(),
+  address_line2:               z.string().max(255).optional().nullable(),
+  district:                    z.string().max(120).optional().nullable(),
+  pincode:                     z.string().max(12).optional().nullable(),
+  country:                     z.string().max(80).optional().nullable(),
+  latitude:                    z.number().min(-90).max(90).optional().nullable(),
+  longitude:                   z.number().min(-180).max(180).optional().nullable(),
+  geofence_radius_m:           z.number().int().nonnegative().optional().nullable(),
+  // India statutory registration IDs
+  gstin:                       z.string().max(20).optional().nullable(),
+  pf_registration_no:          z.string().max(40).optional().nullable(),
+  esi_registration_no:         z.string().max(40).optional().nullable(),
+  pt_registration_no:          z.string().max(40).optional().nullable(),
+  lwf_registration_no:         z.string().max(40).optional().nullable(),
+  shops_estab_reg_no:          z.string().max(60).optional().nullable(),
+  factory_license_no:          z.string().max(60).optional().nullable(),
+  // Operations
+  contact_person:              z.string().max(120).optional().nullable(),
+  contact_phone:               z.string().max(30).optional().nullable(),
+  contact_email:               z.string().email().max(160).optional().nullable(),
+  sanctioned_headcount:        z.number().int().nonnegative().optional().nullable(),
 })
+
+/**
+ * Migration-275 columns. Like the legacy 166/217/248 fields, these are stripped
+ * from the write payload when null/undefined so an insert/update never references
+ * a column that a not-yet-migrated environment lacks. Values are re-added below
+ * only when provided.
+ */
+const EXPANSION_KEYS = [
+  'state_id', 'cluster_id', 'cost_center_id', 'parent_site_id',
+  'short_name', 'status', 'opening_date',
+  'address_line1', 'address_line2', 'district', 'pincode', 'country',
+  'latitude', 'longitude', 'geofence_radius_m',
+  'gstin', 'pf_registration_no', 'esi_registration_no', 'pt_registration_no',
+  'lwf_registration_no', 'shops_estab_reg_no', 'factory_license_no',
+  'contact_person', 'contact_phone', 'contact_email', 'sanctioned_headcount',
+] as const
 
 export default async function sitesRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -72,6 +121,37 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
         }
       },
     ],
+  }
+
+  /**
+   * Validate that each provided migration-275 grouping FK belongs to this tenant.
+   * Returns an error descriptor on the first failure, or null when all are valid.
+   */
+  async function validateExpansionFks(
+    data: Record<string, any>,
+    tenantId: string,
+    selfId?: string,
+  ): Promise<{ field: string; message: string } | null> {
+    const checks: Array<[string, string, string]> = [
+      ['state_id',       'states',       'State'],
+      ['cluster_id',     'clusters',     'Cluster'],
+      ['cost_center_id', 'cost_centers', 'Cost center'],
+      ['parent_site_id', 'sites',        'Parent site'],
+    ]
+    for (const [field, table, label] of checks) {
+      const id = data[field]
+      if (!id) continue
+      if (field === 'parent_site_id' && id === selfId)
+        return { field, message: 'A site cannot be its own parent' }
+      const { data: row } = await fastify.supabase
+        .from(table)
+        .select('id')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (!row) return { field, message: `${label} not found in your organisation` }
+    }
+    return null
   }
 
   // ── GET /masters/sites ────────────────────────────────────────────────────
@@ -174,10 +254,16 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Validate the new grouping FKs (migration 275) belong to this tenant.
+    const fkErr = await validateExpansionFks(parsed.data, req.tenantId)
+    if (fkErr) return reply.code(400).send({ error: 'VALIDATION', message: fkErr.message, field: fkErr.field })
+
     // Strip migration-dependent optional columns when null/undefined so the
     // insert never references a column that may not exist in older deployments
-    // (migration 166 → state_code, 217 → holiday_group_id, 248 → site dimensions).
-    const { state_code, holiday_group_id, site_type, city, region, zone, ...coreInsert } = parsed.data
+    // (166 → state_code, 217 → holiday_group_id, 248 → site dimensions, 275 → expansion).
+    const { state_code, holiday_group_id, site_type, city, region, zone, ...rest } = parsed.data
+    const coreInsert: Record<string, unknown> = { ...rest }
+    for (const k of EXPANSION_KEYS) delete coreInsert[k]
     const insertPayload: Record<string, unknown> = { ...coreInsert, tenant_id: req.tenantId }
     if (state_code       != null) insertPayload.state_code       = state_code
     if (holiday_group_id != null) insertPayload.holiday_group_id = holiday_group_id
@@ -185,6 +271,10 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     if (city             != null) insertPayload.city             = city
     if (region           != null) insertPayload.region           = region
     if (zone             != null) insertPayload.zone             = zone
+    for (const k of EXPANSION_KEYS) {
+      const v = (parsed.data as any)[k]
+      if (v != null) insertPayload[k] = v
+    }
 
     const { data, error } = await fastify.supabase
       .from('sites')
@@ -283,9 +373,15 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Validate the new grouping FKs (migration 275) belong to this tenant.
+    const fkErr = await validateExpansionFks(parsed.data, req.tenantId, (req.params as any).id)
+    if (fkErr) return reply.code(400).send({ error: 'VALIDATION', message: fkErr.message, field: fkErr.field })
+
     // Strip migration-dependent optional columns when null/undefined (same
-    // resilience pattern as INSERT above — migration 166/217/248 may be absent).
-    const { state_code, holiday_group_id, site_type, city, region, zone, ...coreUpdate } = parsed.data
+    // resilience pattern as INSERT above — migration 166/217/248/275 may be absent).
+    const { state_code, holiday_group_id, site_type, city, region, zone, ...rest } = parsed.data
+    const coreUpdate: Record<string, unknown> = { ...rest }
+    for (const k of EXPANSION_KEYS) delete coreUpdate[k]
     const updatePayload: Record<string, unknown> = { ...coreUpdate }
     if (state_code       != null) updatePayload.state_code       = state_code
     if (holiday_group_id != null) updatePayload.holiday_group_id = holiday_group_id
@@ -293,6 +389,10 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     if (city             != null) updatePayload.city             = city
     if (region           != null) updatePayload.region           = region
     if (zone             != null) updatePayload.zone             = zone
+    for (const k of EXPANSION_KEYS) {
+      const v = (parsed.data as any)[k]
+      if (v != null) updatePayload[k] = v
+    }
 
     const { data, error } = await fastify.supabase
       .from('sites')

@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import sitesRoutes                  from './sites.js'
+import statesRoutes                 from './states.js'
+import clustersRoutes               from './clusters.js'
 import rostersRoutes                from './rosters.js'
 import workLocationsRoutes          from './work-locations.js'
 import costCentersRoutes            from './cost-centers.js'
@@ -35,6 +37,9 @@ import importantDateTypesRoutes     from './important-date-types.js'
 
 export default async function mastersRoutes(fastify: FastifyInstance) {
   fastify.register(sitesRoutes,             { prefix: '/sites' })
+  // ── Org-geography masters (India-only): statutory (State) + operational (Cluster) ─
+  fastify.register(statesRoutes,            { prefix: '/states' })
+  fastify.register(clustersRoutes,          { prefix: '/clusters' })
   fastify.register(rostersRoutes,           { prefix: '/rosters' })
   fastify.register(workLocationsRoutes,     { prefix: '/work-locations' })
   fastify.register(costCentersRoutes,       { prefix: '/cost-centers' })

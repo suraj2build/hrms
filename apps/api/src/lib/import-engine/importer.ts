@@ -141,6 +141,47 @@ const TABLE_MAP: Record<string, TableConfig> = {
       name:      norm.name,
       location:  norm.location  ?? null,
       timezone:  (norm.timezone as string) || 'Asia/Kolkata',
+      // state_id / cluster_id resolved from state_code / cluster_code by the validator.
+      state_id:            norm.state_id            ?? null,
+      cluster_id:          norm.cluster_id          ?? null,
+      // state_code is also kept as the legacy free-text column for back-compat.
+      state_code:          norm.state_code          ?? null,
+      site_type:           norm.site_type           ?? null,
+      city:                norm.city                ?? null,
+      pincode:             norm.pincode             ?? null,
+      gstin:               norm.gstin               ?? null,
+      pf_registration_no:  norm.pf_registration_no  ?? null,
+      esi_registration_no: norm.esi_registration_no ?? null,
+    }),
+  },
+
+  states: {
+    table: 'states',
+    uniqueColumn: 'code',
+    mapRow: (tenantId, norm) => ({
+      tenant_id:      tenantId,
+      code:           norm.code,
+      name:           norm.name,
+      region:         norm.region         ?? null,
+      pt_applicable:  norm.pt_applicable   ?? false,
+      lwf_applicable: norm.lwf_applicable  ?? false,
+      lwf_frequency:  norm.lwf_frequency   ?? null,
+    }),
+  },
+
+  clusters: {
+    table: 'clusters',
+    uniqueColumn: 'code',
+    mapRow: (tenantId, norm) => ({
+      tenant_id:          tenantId,
+      code:               norm.code,
+      name:               norm.name,
+      region:             norm.region             ?? null,
+      // parent_cluster_id / cluster_manager_id resolved from parent_code /
+      // manager_code by the validator cross-reference step.
+      parent_cluster_id:  norm.parent_cluster_id  ?? null,
+      cluster_manager_id: norm.cluster_manager_id ?? null,
+      description:        norm.description         ?? null,
     }),
   },
 

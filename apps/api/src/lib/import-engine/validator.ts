@@ -1145,6 +1145,8 @@ export async function validateImportRows(
     const uniqueKey = masterType === 'leave_types' ? 'name' : 'code'
     const tableMap: Record<string, string> = {
       sites:                 'sites',
+      states:                'states',
+      clusters:              'clusters',
       shifts:                'shifts',
       rosters:               'rosters',
       departments:           'departments',
@@ -1248,6 +1250,66 @@ export async function validateImportRows(
               })
             }
           }
+        }
+      }
+    }
+
+    // Sites: resolve state_code → state_id (states.code) and cluster_code → cluster_id
+    if (masterType === 'sites') {
+      const pick = (field: string) => [
+        ...new Set(
+          validatedRows
+            .filter((r) => r.isValid && r.normalizedData[field])
+            .map((r) => (r.normalizedData[field] as string).toUpperCase()),
+        ),
+      ]
+      const [stateIdMap, clusterIdMap] = await Promise.all([
+        resolveCodeToId(supabase, tenantId, 'states',   'code', pick('state_code')),
+        resolveCodeToId(supabase, tenantId, 'clusters', 'code', pick('cluster_code')),
+      ])
+      for (const vr of validatedRows) {
+        if (!vr.isValid) continue
+        const stateCode = vr.normalizedData.state_code as string | undefined
+        if (stateCode) {
+          const stateId = stateIdMap.get(stateCode.toUpperCase())
+          if (stateId) vr.normalizedData.state_id = stateId
+          else vr.warnings.push({ field: 'state_code', message: `State "${stateCode}" not found — statutory state link will be left blank`, severity: 'warning' })
+        }
+        const clusterCode = vr.normalizedData.cluster_code as string | undefined
+        if (clusterCode) {
+          const clusterId = clusterIdMap.get(clusterCode.toUpperCase())
+          if (clusterId) vr.normalizedData.cluster_id = clusterId
+          else vr.warnings.push({ field: 'cluster_code', message: `Cluster "${clusterCode}" not found — cluster link will be left blank`, severity: 'warning' })
+        }
+      }
+    }
+
+    // Clusters: resolve parent_code → parent_cluster_id (self-ref) and manager_code → cluster_manager_id (employee)
+    if (masterType === 'clusters') {
+      const pick = (field: string) => [
+        ...new Set(
+          validatedRows
+            .filter((r) => r.isValid && r.normalizedData[field])
+            .map((r) => (r.normalizedData[field] as string).toUpperCase()),
+        ),
+      ]
+      const [parentIdMap, managerIdMap] = await Promise.all([
+        resolveCodeToId(supabase, tenantId, 'clusters', 'code', pick('parent_code')),
+        resolveEmployeeCodes(supabase, tenantId, pick('manager_code')),
+      ])
+      for (const vr of validatedRows) {
+        if (!vr.isValid) continue
+        const parentCode = vr.normalizedData.parent_code as string | undefined
+        if (parentCode) {
+          const parentId = parentIdMap.get(parentCode.toUpperCase())
+          if (parentId) vr.normalizedData.parent_cluster_id = parentId
+          else vr.warnings.push({ field: 'parent_code', message: `Parent cluster "${parentCode}" not found — parent will be ignored`, severity: 'warning' })
+        }
+        const managerCode = vr.normalizedData.manager_code as string | undefined
+        if (managerCode) {
+          const managerId = managerIdMap.get(managerCode.toUpperCase())
+          if (managerId) vr.normalizedData.cluster_manager_id = managerId
+          else vr.warnings.push({ field: 'manager_code', message: `Manager "${managerCode}" not found — cluster manager will be left blank`, severity: 'warning' })
         }
       }
     }
