@@ -246,19 +246,29 @@ export const DOMAINS: Domain[] = [
     defaultRoute: '/admin/employees',
     groups: [
       {
-        label: 'Employees',
+        label: 'People',
         items: [
           { id: 'employees',             label: 'Employee Directory',   route: '/admin/employees',             exact: true, icon: Users,        keywords: ['staff', 'people', 'employees list', 'headcount', 'employee database'] },
           { id: 'org-chart',             label: 'Org Chart',            route: '/admin/employees/org-chart',                  icon: Network,      keywords: ['org chart', 'organization chart', 'reporting structure', 'hierarchy', 'reporting manager', 'reassign manager', 'reporting line', 'who reports to whom'] },
           { id: 'workforce-ops',         label: 'Workforce Operations', route: '/admin/workforce/center',                     icon: Activity,     keywords: ['ops center', 'workforce operations', 'employee ops', 'manpower center', 'people ops'] },
-          { id: 'admin-documents',       label: 'Documents',            route: '/admin/documents',                            icon: FileText,     keywords: ['employee documents', 'files', 'document management', 'document vault', 'upload document'] },
+        ],
+      },
+      {
+        label: 'Lifecycle',
+        items: [
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
           { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
-          { id: 'assets',                label: 'Assets',               route: '/admin/assets',                               icon: Package,      keywords: ['asset management', 'equipment', 'laptop', 'device', 'asset assignment', 'asset allocation', 'inventory'] },
+        ],
+      },
+      {
+        label: 'Records & Assets',
+        items: [
+          { id: 'admin-documents',       label: 'Documents',            route: '/admin/documents',                            icon: FileText,     keywords: ['employee documents', 'files', 'document management', 'document vault', 'upload document'] },
           { id: 'letters',               label: 'Letters',              route: '/admin/letters',                              icon: ScrollText,   keywords: ['offer letter', 'appointment letter', 'salary letter', 'experience letter', 'generate letter'] },
+          { id: 'assets',                label: 'Assets',               route: '/admin/assets',                               icon: Package,      keywords: ['asset management', 'equipment', 'laptop', 'device', 'asset assignment', 'asset allocation', 'inventory'] },
           { id: 'benefits',              label: 'Benefits',             route: '/admin/benefits',                             icon: ShieldCheck,  keywords: ['benefits', 'enrolment', 'enrollment', 'insurance', 'group health', 'mediclaim', 'term life', 'accident cover', 'wellness', 'dependents', 'employee benefits'] },
         ],
       },
@@ -362,9 +372,14 @@ export const DOMAINS: Domain[] = [
           { id: 'leave-txns',       label: 'Transactions',      route: '/admin/leave/transactions',      icon: ListChecks,    keywords: ['leave history', 'leave log', 'leave record', 'leave entries', 'leave taken'] },
           { id: 'comp-off',         label: 'Comp Off',          route: '/admin/comp-off',                icon: RefreshCw,     keywords: ['compensatory off', 'compensatory leave', 'CTO', 'comp leave', 'time off in lieu', 'worked extra'] },
           { id: 'overtime',         label: 'Overtime',          route: '/admin/overtime',                icon: Timer,         keywords: ['OT', 'extra hours', 'overtime pay', 'overtime request', 'late sitting'] },
-          { id: 'leave-jobs',       label: 'Scheduler Status',  route: '/admin/leave-jobs',              icon: Activity,      keywords: ['accrual scheduler', 'leave automation', 'background jobs', 'cron', 'scheduled tasks'] },
+        ],
+      },
+      {
+        label: 'Accruals & Config',
+        items: [
           { id: 'leave-ledger',     label: 'Accrual History',   route: '/admin/leave/ledger',            icon: BookOpen,      keywords: ['leave credits', 'accrual log', 'credit history', 'leave accrued', 'leave earned'] },
           { id: 'leave-accrual',    label: 'Accrual Runs',      route: '/admin/leave/accrual',           icon: RefreshCw,     keywords: ['accrue leave', 'leave accrual run', 'monthly accrual', 'leave credit run'] },
+          { id: 'leave-jobs',       label: 'Scheduler Status',  route: '/admin/leave-jobs',              icon: Activity,      keywords: ['accrual scheduler', 'leave automation', 'background jobs', 'cron', 'scheduled tasks'] },
           { id: 'collision-log',    label: 'Leave Conflicts',   route: '/admin/leave/collision-log',     icon: AlertTriangle, keywords: ['leave overlap', 'leave clash', 'conflicting leaves', 'team leave conflict'] },
           { id: 'optional-hols',    label: 'Optional Holidays', route: '/admin/leave/optional-holidays', icon: CalendarDays,  keywords: ['optional holiday', 'OH', 'festival holiday', 'floating holiday'] },
         ],
@@ -627,19 +642,29 @@ export const DOMAINS: Domain[] = [
         ],
       },
       {
-        label: 'Advanced Analytics',
+        label: 'Workforce Intelligence',
         items: [
-          { id: 'session-intelligence',  label: 'Attendance Sessions',  route: '/admin/attendance/intelligence-center', icon: Activity,   keywords: ['session data', 'biometric sessions', 'punch sessions', 'attendance sessions'] },
-          { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap,        keywords: ['attendance health', 'health score', 'data quality', 'attendance quality'] },
           { id: 'workforce-signals',     label: 'Workforce Signals',     route: '/admin/intelligence/workforce-command', icon: Activity,   keywords: ['workforce signals', 'workforce command', 'attention', 'people signals', 'onboarding stalled', 'separations', 'assets at risk', 'probation due', 'manpower'] },
           { id: 'org-health',            label: 'Org Health',             route: '/admin/intelligence/org-health',        icon: TrendingUp, keywords: ['org pulse', 'organization health', 'company health', 'org score'] },
           { id: 'action-center',         label: 'Action Center',          route: '/admin/intelligence/action-center',     icon: Activity,   keywords: ['actions', 'pending actions', 'to-do', 'tasks', 'exceptions', 'action items'] },
           { id: 'workforce-digest',      label: 'Daily Digest',           route: '/admin/intelligence/digest',            icon: FileText,   keywords: ['AI summary', 'daily summary', 'briefing', 'workforce briefing', 'morning digest'] },
-          { id: 'workforce-search',      label: 'People Search',          route: '/admin/intelligence/search',            icon: Search,     keywords: ['find employee', 'search employee', 'directory search', 'people finder', 'advanced search'] },
-          { id: 'uat-certification',     label: 'UAT Testing',            route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'], keywords: ['UAT', 'user acceptance testing', 'certification', 'QA testing'] },
           { id: 'narratives',            label: 'Narratives',             route: '/admin/intelligence/narratives',        icon: FileText,   keywords: ['AI narratives', 'story', 'written insights', 'AI summary', 'narrative report'] },
           { id: 'workforce-intel',       label: 'Analytics',              route: '/admin/intelligence',  exact: true,    icon: Brain,      keywords: ['workforce intelligence', 'advanced analytics', 'AI analytics', 'intelligence'] },
+        ],
+      },
+      {
+        label: 'Attendance Intelligence',
+        items: [
+          { id: 'session-intelligence',  label: 'Attendance Sessions',  route: '/admin/attendance/intelligence-center', icon: Activity,   keywords: ['session data', 'biometric sessions', 'punch sessions', 'attendance sessions'] },
+          { id: 'health-index',          label: 'Health Index',           route: '/admin/attendance/health-index',        icon: Zap,        keywords: ['attendance health', 'health score', 'data quality', 'attendance quality'] },
           { id: 'operational-health',    label: 'Operational Health',     route: '/admin/operational-health',             icon: Activity,   keywords: ['ops health', 'operations status', 'platform health', 'system status'] },
+        ],
+      },
+      {
+        label: 'Tools',
+        items: [
+          { id: 'workforce-search',      label: 'People Search',          route: '/admin/intelligence/search',            icon: Search,     keywords: ['find employee', 'search employee', 'directory search', 'people finder', 'advanced search'] },
+          { id: 'uat-certification',     label: 'UAT Testing',            route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'], keywords: ['UAT', 'user acceptance testing', 'certification', 'QA testing'] },
         ],
       },
       {
@@ -743,14 +768,24 @@ export const DOMAINS: Domain[] = [
 
       // ── Organization ────────────────────────────────────────────────────────
       {
-        label: 'Organization',
+        label: 'Org Structure',
         items: [
           { id: 'departments',  label: 'Departments & Roles', route: '/admin/organization',                  icon: GitBranch,  keywords: ['org chart', 'org structure', 'department structure', 'hierarchy', 'reporting structure', 'org setup', 'team structure'] },
           { id: 'positions',    label: 'Positions',           route: '/admin/positions',                     icon: Briefcase,  keywords: ['position', 'sanctioned', 'sanctioned strength', 'vacancy', 'headcount budget', 'manpower', 'fill rate', 'open positions', 'position master', 'slot', 'establishment'] },
+        ],
+      },
+      {
+        label: 'Locations',
+        items: [
           { id: 'sites',        label: 'Sites',               route: '/admin/masters/sites',                 icon: Building2,  keywords: ['office', 'branch', 'site master', 'office address', 'branch list'] },
           { id: 'states',       label: 'States',              route: '/admin/masters/states',                icon: Globe,      keywords: ['state', 'state master', 'gst state code', 'jurisdiction', 'pt state', 'lwf state', 'professional tax state'] },
           { id: 'clusters',     label: 'Clusters',            route: '/admin/masters/clusters',              icon: Network,    keywords: ['cluster', 'region cluster', 'site cluster', 'area', 'zone cluster', 'cluster manager', 'operational grouping'] },
           { id: 'locations',    label: 'Work Locations',      route: '/admin/masters/work-locations',        icon: MapPin,     keywords: ['office location', 'remote location', 'work site', 'branch location', 'location master'] },
+        ],
+      },
+      {
+        label: 'Job & Pay Masters',
+        items: [
           { id: 'cost-centers', label: 'Cost Centers',        route: '/admin/masters/cost-centers',          icon: Scale,      keywords: ['cost centre', 'accounting code', 'GL mapping', 'finance code', 'cost code'] },
           { id: 'grades',       label: 'Grades & Pay Bands',  route: '/admin/masters/grades',                icon: TrendingUp, keywords: ['grade', 'pay band', 'salary band', 'pay grade', 'grade structure', 'CTC band', 'compensation band', 'salary range', 'band', 'level'] },
           { id: 'emp-types',    label: 'Employment Types',    route: '/admin/masters/employment-categories', icon: Users,      keywords: ['employment category', 'employee type', 'contract type', 'full time', 'part time', 'probation', 'permanent', 'contractual', 'consultant'] },

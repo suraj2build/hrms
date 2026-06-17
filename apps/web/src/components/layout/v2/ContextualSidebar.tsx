@@ -82,12 +82,12 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center justify-between w-full px-3 pt-2 pb-1 text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground/55 hover:text-muted-foreground transition-colors select-none"
+          className="flex items-center justify-between w-full px-3 py-2 mt-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground/80 hover:text-foreground hover:bg-muted/60 rounded-md transition-colors select-none"
         >
           {group.label}
           {expanded
-            ? <ChevronDown className="h-3 w-3 opacity-60" />
-            : <ChevronRight className="h-3 w-3 opacity-60" />
+            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           }
         </button>
       )}
