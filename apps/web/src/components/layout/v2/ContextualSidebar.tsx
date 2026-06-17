@@ -260,7 +260,7 @@ export function ContextualSidebar() {
       )}
 
       {/* ── Nav groups ──────────────────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto py-2 space-y-3">
+      <nav className="flex-1 overflow-y-auto pt-4 pb-3 space-y-2.5">
         {domain.groups.map(group => (
           <NavGroupItem
             key={group.label}
