@@ -635,252 +635,249 @@ export function Sites() {
 
       {/* Create / Edit dialog */}
       <Dialog open={dlgOpen} onOpenChange={setDlgOpen}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editSite ? 'Edit Site' : 'New Site'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            {/* Basic fields */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Name *</label>
-              <Input
-                value={form.name}
-                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                placeholder="Head Office"
-                className="h-8 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Location</label>
-              <Input value={form.location} onChange={e => setForm(p => ({ ...p, location: e.target.value }))} placeholder="Mumbai, Maharashtra" className="h-8 text-sm" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  State
-                  <span className="text-muted-foreground/50">(PT/LWF jurisdiction)</span>
-                </label>
-                <select
-                  value={form.state_id}
-                  onChange={e => {
-                    const id = e.target.value
-                    const st = statesList.find(s => s.id === id)
-                    setForm(p => ({ ...p, state_id: id, state_code: st?.code ?? '' }))
-                  }}
-                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  <option value="">— Not set —</option>
-                  {statesList.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                  ))}
-                </select>
-                {statesList.length === 0 && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    No states found. Add them in{' '}
-                    <a href="/admin/masters/states" className="text-primary underline">States</a>.
-                  </p>
-                )}
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  Cluster
-                  <span className="text-muted-foreground/50">(operational grouping)</span>
-                </label>
-                <select
-                  value={form.cluster_id}
-                  onChange={e => setForm(p => ({ ...p, cluster_id: e.target.value }))}
-                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  <option value="">— Not set —</option>
-                  {clustersList.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            {/* Retail / geography dimensions (R5) — power site-disaggregated headcount KPIs */}
-            <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Workforce Geography</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Site Type</label>
-                  <select
-                    value={form.site_type}
-                    onChange={e => setForm(p => ({ ...p, site_type: e.target.value }))}
-                    className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                  >
-                    <option value="">— Not set —</option>
-                    {['store', 'warehouse', 'office', 'plant', 'distribution_center', 'kiosk'].map(t => (
-                      <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-                    ))}
-                  </select>
+            {/* Basics */}
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2.5">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Basics</p>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">Name *</label>
+                  <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Head Office" className="h-8 text-sm" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">City</label>
-                  <Input value={form.city} onChange={e => setForm(p => ({ ...p, city: e.target.value }))} placeholder="Mumbai" className="h-8 text-sm" />
+                  <label className="text-xs font-medium text-muted-foreground">Short Name</label>
+                  <Input value={form.short_name} onChange={e => setForm(p => ({ ...p, short_name: e.target.value }))} placeholder="HO" className="h-8 text-sm" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Region</label>
-                  <Input value={form.region} onChange={e => setForm(p => ({ ...p, region: e.target.value }))} placeholder="West" className="h-8 text-sm" />
+                  <label className="text-xs font-medium text-muted-foreground">Timezone (IANA)</label>
+                  <Input value={form.timezone} onChange={e => setForm(p => ({ ...p, timezone: e.target.value }))} placeholder="Asia/Kolkata" className="h-8 text-sm font-mono" />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Zone</label>
-                  <Input value={form.zone} onChange={e => setForm(p => ({ ...p, zone: e.target.value }))} placeholder="Mumbai Metro" className="h-8 text-sm" />
-                </div>
-              </div>
-            </div>
-            {/* Address & contact */}
-            <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Address</p>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Short Name</label>
-                <Input value={form.short_name} onChange={e => setForm(p => ({ ...p, short_name: e.target.value }))} placeholder="HO" className="h-8 text-sm" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Address Line 1</label>
-                <Input value={form.address_line1} onChange={e => setForm(p => ({ ...p, address_line1: e.target.value }))} placeholder="Plot 12, Tech Park" className="h-8 text-sm" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Address Line 2</label>
-                <Input value={form.address_line2} onChange={e => setForm(p => ({ ...p, address_line2: e.target.value }))} placeholder="Whitefield" className="h-8 text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">District</label>
-                  <Input value={form.district} onChange={e => setForm(p => ({ ...p, district: e.target.value }))} placeholder="Bengaluru Urban" className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Pincode</label>
-                  <Input value={form.pincode} onChange={e => setForm(p => ({ ...p, pincode: e.target.value }))} placeholder="560066" className="h-8 text-sm" />
+                <div className="space-y-1 sm:col-span-4">
+                  <label className="text-xs font-medium text-muted-foreground">Location</label>
+                  <Input value={form.location} onChange={e => setForm(p => ({ ...p, location: e.target.value }))} placeholder="Mumbai, Maharashtra" className="h-8 text-sm" />
                 </div>
               </div>
             </div>
 
-            {/* India statutory registrations */}
-            <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Statutory Registrations</p>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">GSTIN</label>
-                <Input value={form.gstin} onChange={e => setForm(p => ({ ...p, gstin: e.target.value }))} placeholder="29ABCDE1234F1Z5" className="h-8 text-sm font-mono" />
+            {/* Two-column grid of detail sections */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Classification */}
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2.5">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Classification</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">State</label>
+                    <select
+                      value={form.state_id}
+                      onChange={e => {
+                        const id = e.target.value
+                        const st = statesList.find(s => s.id === id)
+                        setForm(p => ({ ...p, state_id: id, state_code: st?.code ?? '' }))
+                      }}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— Not set —</option>
+                      {statesList.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                      ))}
+                    </select>
+                    {statesList.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Add states in <a href="/admin/masters/states" className="text-primary underline">States</a>.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Cluster</label>
+                    <select
+                      value={form.cluster_id}
+                      onChange={e => setForm(p => ({ ...p, cluster_id: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— Not set —</option>
+                      {clustersList.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Site Type</label>
+                    <select
+                      value={form.site_type}
+                      onChange={e => setForm(p => ({ ...p, site_type: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— Not set —</option>
+                      {['store', 'warehouse', 'office', 'plant', 'distribution_center', 'kiosk'].map(t => (
+                        <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">City</label>
+                    <Input value={form.city} onChange={e => setForm(p => ({ ...p, city: e.target.value }))} placeholder="Mumbai" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Region</label>
+                    <Input value={form.region} onChange={e => setForm(p => ({ ...p, region: e.target.value }))} placeholder="West" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Zone</label>
+                    <Input value={form.zone} onChange={e => setForm(p => ({ ...p, zone: e.target.value }))} placeholder="Mumbai Metro" className="h-8 text-sm" />
+                  </div>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">PF Reg. No.</label>
-                  <Input value={form.pf_registration_no} onChange={e => setForm(p => ({ ...p, pf_registration_no: e.target.value }))} placeholder="KN/BNG/0012345" className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">ESI Reg. No.</label>
-                  <Input value={form.esi_registration_no} onChange={e => setForm(p => ({ ...p, esi_registration_no: e.target.value }))} placeholder="53000123450000999" className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">PT Reg. No.</label>
-                  <Input value={form.pt_registration_no} onChange={e => setForm(p => ({ ...p, pt_registration_no: e.target.value }))} placeholder="PT-..." className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">LWF Reg. No.</label>
-                  <Input value={form.lwf_registration_no} onChange={e => setForm(p => ({ ...p, lwf_registration_no: e.target.value }))} placeholder="LWF-..." className="h-8 text-sm" />
-                </div>
-              </div>
-            </div>
 
-            {/* Operations */}
-            <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Operations</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Contact Person</label>
-                  <Input value={form.contact_person} onChange={e => setForm(p => ({ ...p, contact_person: e.target.value }))} placeholder="Site Admin" className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Contact Phone</label>
-                  <Input value={form.contact_phone} onChange={e => setForm(p => ({ ...p, contact_phone: e.target.value }))} placeholder="+91 98765 43210" className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Contact Email</label>
-                  <Input value={form.contact_email} onChange={e => setForm(p => ({ ...p, contact_email: e.target.value }))} placeholder="site@company.com" className="h-8 text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Sanctioned Headcount</label>
-                  <Input type="number" min={0} value={form.sanctioned_headcount} onChange={e => setForm(p => ({ ...p, sanctioned_headcount: e.target.value }))} placeholder="150" className="h-8 text-sm" />
+              {/* Address */}
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2.5">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Address</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-xs font-medium text-muted-foreground">Address Line 1</label>
+                    <Input value={form.address_line1} onChange={e => setForm(p => ({ ...p, address_line1: e.target.value }))} placeholder="Plot 12, Tech Park" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-xs font-medium text-muted-foreground">Address Line 2</label>
+                    <Input value={form.address_line2} onChange={e => setForm(p => ({ ...p, address_line2: e.target.value }))} placeholder="Whitefield" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">District</label>
+                    <Input value={form.district} onChange={e => setForm(p => ({ ...p, district: e.target.value }))} placeholder="Bengaluru Urban" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Pincode</label>
+                    <Input value={form.pincode} onChange={e => setForm(p => ({ ...p, pincode: e.target.value }))} placeholder="560066" className="h-8 text-sm" />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Timezone (IANA)</label>
-              <Input value={form.timezone} onChange={e => setForm(p => ({ ...p, timezone: e.target.value }))} placeholder="Asia/Kolkata" className="h-8 text-sm font-mono" />
-            </div>
+              {/* Statutory registrations */}
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2.5">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Statutory Registrations</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-xs font-medium text-muted-foreground">GSTIN</label>
+                    <Input value={form.gstin} onChange={e => setForm(p => ({ ...p, gstin: e.target.value }))} placeholder="29ABCDE1234F1Z5" className="h-8 text-sm font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">PF Reg. No.</label>
+                    <Input value={form.pf_registration_no} onChange={e => setForm(p => ({ ...p, pf_registration_no: e.target.value }))} placeholder="KN/BNG/0012345" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">ESI Reg. No.</label>
+                    <Input value={form.esi_registration_no} onChange={e => setForm(p => ({ ...p, esi_registration_no: e.target.value }))} placeholder="53000123450000999" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">PT Reg. No.</label>
+                    <Input value={form.pt_registration_no} onChange={e => setForm(p => ({ ...p, pt_registration_no: e.target.value }))} placeholder="PT-..." className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">LWF Reg. No.</label>
+                    <Input value={form.lwf_registration_no} onChange={e => setForm(p => ({ ...p, lwf_registration_no: e.target.value }))} placeholder="LWF-..." className="h-8 text-sm" />
+                  </div>
+                </div>
+              </div>
 
-            {/* Workforce Governance section */}
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-                Workforce Governance Defaults
+              {/* Operations */}
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2.5">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Operations</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Contact Person</label>
+                    <Input value={form.contact_person} onChange={e => setForm(p => ({ ...p, contact_person: e.target.value }))} placeholder="Site Admin" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Contact Phone</label>
+                    <Input value={form.contact_phone} onChange={e => setForm(p => ({ ...p, contact_phone: e.target.value }))} placeholder="+91 98765 43210" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-xs font-medium text-muted-foreground">Contact Email</label>
+                    <Input value={form.contact_email} onChange={e => setForm(p => ({ ...p, contact_email: e.target.value }))} placeholder="site@company.com" className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Sanctioned Headcount</label>
+                    <Input type="number" min={0} value={form.sanctioned_headcount} onChange={e => setForm(p => ({ ...p, sanctioned_headcount: e.target.value }))} placeholder="150" className="h-8 text-sm" />
+                  </div>
+                </div>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                All employees at this site inherit these policies unless they have individual overrides.
-              </p>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  <CalendarDays className="h-3 w-3" />
-                  Roster Policy
-                  <span className="text-muted-foreground/50">(weekly-off pattern)</span>
-                </label>
-                <select
-                  value={form.default_roster_id}
-                  onChange={e => setForm(p => ({ ...p, default_roster_id: e.target.value }))}
-                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  <option value="">— None (employees inherit nothing) —</option>
-                  {rosters.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  <CalendarClock className="h-3 w-3" />
-                  Rotation Policy
-                  <span className="text-muted-foreground/50">(shift per working condition)</span>
-                </label>
-                <select
-                  value={form.default_rotation_policy_id}
-                  onChange={e => setForm(p => ({ ...p, default_rotation_policy_id: e.target.value }))}
-                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  <option value="">— None (fall back to Shift Override if set) —</option>
-                  {rotationPolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  <CalendarDays className="h-3 w-3" />
-                  Leave Policy
-                  <span className="text-muted-foreground/50">(default leave entitlements)</span>
-                </label>
-                <select
-                  value={form.default_leave_policy_id}
-                  onChange={e => setForm(p => ({ ...p, default_leave_policy_id: e.target.value }))}
-                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  <option value="">— None (use tenant default) —</option>
-                  {leavePolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  <CalendarDays className="h-3 w-3" />
-                  Holiday Group
-                  <span className="text-muted-foreground/50">(regional holiday calendar)</span>
-                </label>
-                <select
-                  value={form.holiday_group_id}
-                  onChange={e => setForm(p => ({ ...p, holiday_group_id: e.target.value }))}
-                  className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                >
-                  <option value="">— All-India holidays only —</option>
-                  {holidayGroups.map(g => (
-                    <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
-                  ))}
-                </select>
+
+              {/* Workforce Governance — spans both columns */}
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2.5 sm:col-span-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                  <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                  Workforce Governance Defaults
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  All employees at this site inherit these policies unless they have individual overrides.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                      <CalendarDays className="h-3 w-3" />
+                      Roster Policy
+                      <span className="text-muted-foreground/50">(weekly-off pattern)</span>
+                    </label>
+                    <select
+                      value={form.default_roster_id}
+                      onChange={e => setForm(p => ({ ...p, default_roster_id: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— None (employees inherit nothing) —</option>
+                      {rosters.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                      <CalendarClock className="h-3 w-3" />
+                      Rotation Policy
+                      <span className="text-muted-foreground/50">(shift per working condition)</span>
+                    </label>
+                    <select
+                      value={form.default_rotation_policy_id}
+                      onChange={e => setForm(p => ({ ...p, default_rotation_policy_id: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— None (fall back to Shift Override if set) —</option>
+                      {rotationPolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                      <CalendarDays className="h-3 w-3" />
+                      Leave Policy
+                      <span className="text-muted-foreground/50">(default leave entitlements)</span>
+                    </label>
+                    <select
+                      value={form.default_leave_policy_id}
+                      onChange={e => setForm(p => ({ ...p, default_leave_policy_id: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— None (use tenant default) —</option>
+                      {leavePolicies.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                      <CalendarDays className="h-3 w-3" />
+                      Holiday Group
+                      <span className="text-muted-foreground/50">(regional holiday calendar)</span>
+                    </label>
+                    <select
+                      value={form.holiday_group_id}
+                      onChange={e => setForm(p => ({ ...p, holiday_group_id: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">— All-India holidays only —</option>
+                      {holidayGroups.map(g => (
+                        <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
 
