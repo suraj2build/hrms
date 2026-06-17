@@ -67,6 +67,23 @@ export const HELP_CONTENT: HelpEntry[] = [
 
   // ── People / Employees ────────────────────────────────────────────────────
   {
+    match:    '/admin/employees/new',
+    title:    'Add an employee (manually)',
+    summary:  'Create an employee in three steps — basic identity, initial job placement, then review & onboard.',
+    why:      'For hires you enter directly (not via the candidate onboarding portal). Statutory & bank details are completed afterwards on the profile.',
+    category: 'People & Workforce',
+    actions: [
+      { label: 'Add Employee', to: '/admin/employees/new' },
+    ],
+    steps: [
+      { title: 'Basic information', detail: 'Enter **First/Last Name**, **Work Email**, optional phone, and the **Joining Date**, then **Continue**.', to: '/admin/employees/new', cta: 'Add Employee' },
+      { title: 'Initial job placement', detail: 'Set **Employment Type** (required) and, optionally, Department, Designation, Grade, **Reporting Manager**, Site, **Roster**, Work Location and Cost Center, then **Continue**.' },
+      { title: 'Review & onboard', detail: 'Check the summary and click **Create Employee** — it creates the record plus the first job-history entry and opens the profile.' },
+      { title: 'Complete statutory & pay', detail: 'On the profile, add **PAN/UAN/ESI** and **bank** details and assign a **salary structure** — payroll needs these or it raises a held slip.' },
+    ],
+    tips: ['Job details (manager, department, site) can all be changed later from the profile.'],
+  },
+  {
     match:   '/admin/employees',
     title:   'People Operations',
     summary: 'Your live employee directory — search, filter, and open any employee’s full profile.',
@@ -93,15 +110,19 @@ export const HELP_CONTENT: HelpEntry[] = [
   // ── Onboarding ────────────────────────────────────────────────────────────
   {
     match:   '/admin/onboarding',
-    title:   'Onboarding',
-    summary: 'Invite candidates, collect documents, run AI review, and convert them to employees — in one flow.',
-    steps: [
-      { title: 'Invite a candidate', detail: 'Click **Invite Candidate / New Onboarding** and send the pre-join link. They submit their details and documents online.' },
-      { title: 'Track the pipeline', detail: 'The stat cards show Total / Pending / Submitted / Approved. Work the pending items left to right.' },
-      { title: 'Run AI Review', detail: 'On the **AI Review** tab, the system extracts and validates document data (Aadhaar, PAN, etc.). Resolve any flagged extraction errors.' },
-      { title: 'Approve → create employee', detail: 'Approving a session creates the employee record automatically, so you don’t re-key data.' },
+    title:   'Onboard a new joiner (invite → approve)',
+    summary: 'Invite a candidate to a pre-join portal, let them submit details + documents, run AI review, then approve to auto-create the employee.',
+    why:     'Self-service onboarding removes manual data entry and the errors that come with it — approval creates the employee with no re-keying.',
+    actions: [
+      { label: 'Open Onboarding', to: '/admin/onboarding' },
     ],
-    why: 'Self-service onboarding removes manual data entry and the errors that come with it.',
+    steps: [
+      { title: 'Invite the candidate', detail: 'On the **Invites** tab click **+ Invite Candidate**; enter name, email, phone, designation/department and **Joining Date**, then **Send Invite**. Copy the pre-join link and share it.', to: '/admin/onboarding', cta: 'Open Onboarding' },
+      { title: 'Candidate submits online', detail: 'They open the link and fill personal, address, bank and compliance (PAN/Aadhaar/UAN) details, upload documents, accept the declaration and **Submit**. Status moves Pending → Submitted.' },
+      { title: 'Run AI Review', detail: 'On the **AI Review** tab open a submitted candidate. The system extracts document data with confidence scores and flags issues (bad PAN format, mismatches). Fix any extraction errors inline.' },
+      { title: 'Handle re-hire matches', detail: 'If the candidate matches an existing person (email/phone/PAN/Aadhaar), choose **Rehire** (reuse the record) or **Create as New Employee**.' },
+      { title: 'Approve → employee created', detail: 'Click **Approve** — the employee record is created automatically from the submitted data. Open their profile to set department, manager and site if needed.' },
+    ],
   },
 
   // ── Attendance ────────────────────────────────────────────────────────────
@@ -118,24 +139,36 @@ export const HELP_CONTENT: HelpEntry[] = [
   },
   {
     match:   '/admin/attendance',
-    title:   'Attendance',
-    summary: 'Process daily attendance, review the muster, and manage corrections, shifts and overtime.',
-    steps: [
-      { title: 'Process attendance', detail: 'Run processing so raw punches become present/absent/LOP days. Do this before payroll.' },
-      { title: 'Check the Muster Roll', detail: 'The month grid shows each employee’s daily status — spot gaps and absences at a glance.' },
-      { title: 'Handle corrections', detail: 'Approve or reject regularisation/correction requests so the final attendance is clean.' },
+    title:   'Process daily attendance',
+    summary: 'Turn raw punches into present / late / LOP days, review the muster, clear corrections, then finalize for payroll.',
+    why:     'Payroll’s loss-of-pay depends on this — always process and finalize the full month before running payroll.',
+    actions: [
+      { label: 'Open Attendance', to: '/admin/attendance' },
     ],
-    tips: ['Always process attendance for the full month before finalizing payroll, or LOP days may be wrong.'],
+    steps: [
+      { title: 'Process the day/month', detail: 'On **Attendance Operations**, pick a date and click **Process Attendance** — raw logs become daily present/late/LOP records. The run dialog shows counts and any errors.', to: '/admin/attendance', cta: 'Open Attendance' },
+      { title: 'Or upload punches (CSV)', detail: 'Expand **Bulk Upload**, drop a CSV (employee_code, date, in_time, out_time), review the preview, then **Upload & Process**.' },
+      { title: 'Review the Muster Roll', detail: 'Open the **Muster Roll** to see each employee’s daily status, work hours and late minutes. Click a row for punch-level detail.', to: '/admin/attendance/muster', cta: 'Open Muster' },
+      { title: 'Clear corrections', detail: 'On **Regularisation**, approve or reject correction requests (missing punch, status change) so the final attendance is clean.' },
+      { title: 'Finalize for payroll', detail: 'Once corrections are done, **finalize** the month — it locks the muster so payroll can compute LOP accurately.' },
+    ],
+    tips: ['Re-processing a date that’s already done warns you — only force re-process if the prior run failed.'],
   },
 
   // ── Leave ─────────────────────────────────────────────────────────────────
   {
     match:   '/admin/leave',
-    title:   'Leave',
-    summary: 'Approvals, balances and the leave register for your team.',
+    title:   'Leave: set up, then approve',
+    summary: 'Define leave types and policy (accrual, eligibility, windows), then run day-to-day approvals and balances.',
+    why:     'Leave types and a configured policy must exist before employees can apply — after that, the daily job is just approvals.',
+    actions: [
+      { label: 'Open Approvals', to: '/admin/leave/approvals' },
+    ],
     steps: [
-      { title: 'Action pending requests', detail: 'Approve or reject leave from the approvals queue; rejections capture a reason.' },
-      { title: 'Check balances', detail: 'Open balances to confirm an employee has enough leave before approving.' },
+      { title: 'Define leave types', detail: 'In **Leave Types**, add each type (e.g. Casual Leave) and mark it paid / active.', to: '/admin/leave-types', cta: 'Open Leave Types' },
+      { title: 'Configure the policy', detail: 'In **Leave Policy**, pick a type and set **Accrual** (monthly / quarterly / yearly / upfront), days per year, carry-forward, eligibility and application windows, then **Save Policy**.', to: '/admin/leave-policy', cta: 'Open Leave Policy' },
+      { title: 'Employees apply', detail: 'Staff apply from ESS (type, dates, session, reason); the system checks balance and policy windows.' },
+      { title: 'Approve or reject', detail: 'Work the **Approvals** queue — approving deducts balance per policy timing; rejections capture a reason.', to: '/admin/leave/approvals', cta: 'Open Approvals' },
     ],
   },
 
@@ -176,12 +209,20 @@ export const HELP_CONTENT: HelpEntry[] = [
   },
   {
     match:   '/admin/payroll',
-    title:   'Payroll',
-    summary: 'Run payroll and manage compensation, advances, loans and statutory components.',
-    steps: [
-      { title: 'Pick the task', detail: 'Use the left nav to choose Payroll Center, Loans & Advances, Variable Pay, or a statutory module.' },
-      { title: 'Finalize before filing', detail: 'Statutory figures only populate once the month’s run is finalized.' },
+    title:   'Run monthly payroll',
+    summary: 'Create a run, process salaries (attendance, deductions, statutory), resolve held slips, approve to freeze, then generate payslips, bank file and statutory outputs.',
+    why:     'Statutory figures and payslips only populate once the run is finalized — and payroll needs attendance finalized first.',
+    actions: [
+      { label: 'Open Payroll', to: '/admin/payroll' },
     ],
+    steps: [
+      { title: 'Finish prerequisites', detail: 'Ensure **attendance is finalized**, employees have a **salary structure**, and statutory IDs (PAN/UAN/ESI) + bank details are on file — gaps create held slips.', to: '/admin/attendance', cta: 'Open Attendance' },
+      { title: 'Create the run', detail: 'On **Payroll Runs / Run Console**, click **Create Payroll Run**, pick the **Month**, then **Start Processing** — salaries, LOP, deductions and statutory are computed.', to: '/admin/payroll', cta: 'Open Payroll' },
+      { title: 'Review exceptions', detail: 'Open the run to see totals (gross / deductions / net) and the **Exceptions** drawer of **held** (blocking) and **warning** slips. Fix held slips on the employee’s profile, then re-run.' },
+      { title: 'Approve & freeze', detail: 'When clean, **Approve Payroll** — the run freezes (immutable) and is ready for payout.' },
+      { title: 'Generate outputs', detail: 'From the **Payroll Center**, generate **payslips**, the **bank file**, and statutory outputs (ECR / ESI / 24Q). Employees download payslips from ESS.', to: '/admin/payroll/center', cta: 'Open Payroll Center' },
+    ],
+    tips: ['Once frozen, a run can’t be edited — that preserves the audit trail. Reopen only if absolutely necessary.'],
   },
 
   // ── Reports / Analytics / Explorer ────────────────────────────────────────
@@ -389,13 +430,74 @@ export const HELP_CONTENT: HelpEntry[] = [
     ],
   },
   {
-    match:   '/admin/shift-master',
-    title:   'Shifts',
-    summary: 'Define working-hour patterns that get assigned to employees and rosters.',
-    why:     'Shifts tell the system the expected in/out times, which attendance is measured against.',
+    match:    '/admin/shift-master',
+    title:    'Create a Shift',
+    summary:  'Define a working-hour pattern (start/end time, grace, overnight) that attendance is measured against and that gets assigned via rosters.',
+    why:      'Shifts are the foundation of attendance and scheduling — create them before building rosters or assigning schedules.',
+    category: 'Attendance & Roster',
+    actions: [
+      { label: 'Open Shifts', to: '/admin/shift-master' },
+    ],
     steps: [
-      { title: 'Create a shift', detail: 'Set start/end time and break; mark it active.' },
-      { title: 'Assign via rosters', detail: 'Apply shifts to employees through the shift roster.' },
+      { title: 'Open the Shifts page', detail: 'Go to **Shift Definitions**. Existing shifts are listed in the table below the form.', to: '/admin/shift-master', cta: 'Open Shifts' },
+      { title: 'Click “Add Shift”', detail: 'Use the **Add Shift** button (top-right) to start a new shift.' },
+      { title: 'Enter the timing', detail: 'Fill **Shift Name** (e.g. “Morning”), an optional **Shift Code** (e.g. MRN), and the **Start Time** and **End Time**.' },
+      { title: 'Set grace & overnight', detail: 'Set **Grace Minutes** (the late buffer, default 15). Tick **Night shift** if it spans midnight. Leave **Active** on.' },
+      { title: 'Create it', detail: 'Click **Create Shift** — it appears in the table and becomes selectable in rosters.' },
+    ],
+    tips: ['Shifts define **timing only**. Weekly-off days (Sat/Sun) are set in Roster Templates, not here.'],
+  },
+  {
+    match:    '/admin/masters/rosters',
+    title:    'Build a Roster Template (weekly-off pattern)',
+    summary:  'A reusable weekly-off pattern — which days are off — over a 7 / 14 / 28-day cycle, applied to employees to drive their working days.',
+    why:      'Roster templates let you apply a consistent week pattern to many employees at once. Set them up before building the monthly roster.',
+    category: 'Attendance & Roster',
+    actions: [
+      { label: 'Open Roster Templates', to: '/admin/masters/rosters' },
+    ],
+    steps: [
+      { title: 'Open Roster Templates', detail: 'Existing templates show with their cycle badge (e.g. “7-day”).', to: '/admin/masters/rosters', cta: 'Open Templates' },
+      { title: 'Click “Add Template”', detail: 'Opens the template dialog.' },
+      { title: 'Name it & pick a cycle', detail: 'Enter a **Name** (e.g. “5-Day Standard”), an optional **Code**, and a **Cycle** (7 / 14 / 28-day).' },
+      { title: 'Choose the weekly-offs', detail: 'In the day grid, click the days that are **off** (e.g. Sat + Sun). The **2-week preview** shows work days vs off days.' },
+      { title: 'Save', detail: 'Click **Save**. You can now apply this template to employees from the Shift Roster.' },
+    ],
+    tips: ['No shifts are chosen here — the template only defines off-days. You pick the shift for work-days when you apply the template in the roster.'],
+  },
+  {
+    match:    '/admin/roster',
+    title:    'Schedule shifts on the monthly Roster',
+    summary:  'The calendar grid where you assign shifts to employees — day-by-day, in bulk, or by applying a roster template. This is the main scheduling screen.',
+    why:      'This is where coverage actually gets planned; coverage gaps and fatigue (5+ consecutive work days) are flagged at the top.',
+    category: 'Attendance & Roster',
+    actions: [
+      { label: 'Open Shift Roster', to: '/admin/roster' },
+    ],
+    steps: [
+      { title: 'Set up shifts & templates first', detail: 'You need **Shifts** (and optionally **Roster Templates**) before scheduling.', to: '/admin/shift-master', cta: 'Open Shifts' },
+      { title: 'Open the roster & pick the month', detail: 'Rows are employees, columns are days. Use the month navigator and the **location filter** to focus.', to: '/admin/roster', cta: 'Open Roster' },
+      { title: 'Assign a single day', detail: 'Click any cell and pick a shift from the dropdown. Choose **“✕ Clear”** to remove a day override.' },
+      { title: 'Assign in bulk', detail: 'Click **Bulk Assign**, tick the employees, set a **From/To** date range (or a week preset), choose a **Shift**, then **Assign to N employees**.' },
+      { title: 'Apply a template', detail: 'Click **Apply Template**, pick employees + date range, choose a **Roster Template** and a **Shift for Work Days**, then **Apply** — off-days come from the template, the shift fills the work-days.' },
+      { title: 'Copy last week', detail: 'In Bulk Assign, select employees and a target week, then **Copy Previous Week** to repeat the prior week’s pattern.' },
+    ],
+    tips: ['A **blue pill** is a day-specific override; a **muted pill** is the standing shift; **“Off”** is a weekly-off from the template.', 'If payroll is locked for the period, a lock banner appears and editing is restricted.'],
+  },
+  {
+    match:    '/admin/employee-shifts',
+    title:    'Apply a shift override to an employee',
+    summary:  'Set or change a single employee’s standing shift from a given date — for exceptions, not bulk scheduling.',
+    why:      'Use this for one-off reassignments; for regular scheduling use the monthly Shift Roster instead.',
+    category: 'Attendance & Roster',
+    actions: [
+      { label: 'Open Shift Overrides', to: '/admin/employee-shifts' },
+    ],
+    steps: [
+      { title: 'Open Shift Overrides', detail: 'The left panel lists employees — search by name/code or filter by work location.', to: '/admin/employee-shifts', cta: 'Open Overrides' },
+      { title: 'Pick the employee', detail: 'Click a row to select them; the apply panel opens on the right.' },
+      { title: 'Choose shift & date', detail: 'Select the **Shift** and an **Effective From** date (defaults to today).' },
+      { title: 'Apply', detail: 'Click **Apply Override**. The **Override History** tab shows past assignments; the **✕** removes a current override.' },
     ],
   },
   {
