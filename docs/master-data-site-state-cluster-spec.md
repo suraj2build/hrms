@@ -226,8 +226,8 @@ Phasing suggestion: **P1** State + Site columns (statutory value first) → **P2
 5. **UDF:** still **deferred** — Option A vs B chosen later; `custom_fields jsonb` columns
    ship now so no further master migration is needed when adopted.
 
-### Build phasing (chosen)
-- **P1 — Schema:** migrations 273 (states + per-tenant seed), 274 (clusters), 275 (site expansion).
-- **P2 — API + importer:** masters/states, masters/clusters routes; sites route fields; import templates/validator/mapRow.
-- **P3 — Web UI:** State & Cluster master screens; expanded Site form; nav; import picker entries.
-- **P4 — RBAC:** cluster-manager visibility over cluster sites/employees.
+### Build phasing (chosen) — ✅ all phases implemented
+- **P1 — Schema:** ✅ migrations 273 (states + per-tenant seed + auto-seed trigger), 274 (clusters), 275 (site expansion + legacy state_code→state_id backfill).
+- **P2 — API + importer:** ✅ `masters/states` + `masters/clusters` CRUD routes; sites route accepts all new fields with tenant-scoped FK validation; import templates/validator/mapRow for states, clusters and the expanded sites columns.
+- **P3 — Web UI:** ✅ `States.tsx` + `Clusters.tsx` master screens; Sites form gains a States-master picker (sets `state_id` + `state_code`), a Cluster picker, and Address/Statutory/Operations sections; nav entries + routes + import-picker entries.
+- **P4 — RBAC:** ✅ `ScopeEvaluator` extended with a role-agnostic `cluster` scope — a cluster manager (`clusters.cluster_manager_id`) gains access to employees at sites in their cluster (and direct child clusters) via `evaluate()` and `getAccessibleEmployeeIds()`, which every `authorize()` consumer uses. Sites remain tenant-wide-visible (already universally readable).

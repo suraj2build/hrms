@@ -91,6 +91,7 @@ import {
   // Setup
   GitBranch,
   Network,
+  Globe,
   Building2,
   MapPin,
   TrendingUp,
@@ -747,6 +748,8 @@ export const DOMAINS: Domain[] = [
           { id: 'departments',  label: 'Departments & Roles', route: '/admin/organization',                  icon: GitBranch,  keywords: ['org chart', 'org structure', 'department structure', 'hierarchy', 'reporting structure', 'org setup', 'team structure'] },
           { id: 'positions',    label: 'Positions',           route: '/admin/positions',                     icon: Briefcase,  keywords: ['position', 'sanctioned', 'sanctioned strength', 'vacancy', 'headcount budget', 'manpower', 'fill rate', 'open positions', 'position master', 'slot', 'establishment'] },
           { id: 'sites',        label: 'Sites',               route: '/admin/masters/sites',                 icon: Building2,  keywords: ['office', 'branch', 'site master', 'office address', 'branch list'] },
+          { id: 'states',       label: 'States',              route: '/admin/masters/states',                icon: Globe,      keywords: ['state', 'state master', 'gst state code', 'jurisdiction', 'pt state', 'lwf state', 'professional tax state'] },
+          { id: 'clusters',     label: 'Clusters',            route: '/admin/masters/clusters',              icon: Network,    keywords: ['cluster', 'region cluster', 'site cluster', 'area', 'zone cluster', 'cluster manager', 'operational grouping'] },
           { id: 'locations',    label: 'Work Locations',      route: '/admin/masters/work-locations',        icon: MapPin,     keywords: ['office location', 'remote location', 'work site', 'branch location', 'location master'] },
           { id: 'cost-centers', label: 'Cost Centers',        route: '/admin/masters/cost-centers',          icon: Scale,      keywords: ['cost centre', 'accounting code', 'GL mapping', 'finance code', 'cost code'] },
           { id: 'grades',       label: 'Grades & Pay Bands',  route: '/admin/masters/grades',                icon: TrendingUp, keywords: ['grade', 'pay band', 'salary band', 'pay grade', 'grade structure', 'CTC band', 'compensation band', 'salary range', 'band', 'level'] },

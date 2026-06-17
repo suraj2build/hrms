@@ -71,6 +71,8 @@ import { cn } from '@/lib/utils'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type MasterType =
+  | 'states'
+  | 'clusters'
   | 'sites'
   | 'employees'
   | 'shifts'
@@ -354,12 +356,32 @@ const DEFAULT_ACCENT = { box: 'bg-muted/40 border-border', label: 'text-muted-fo
 const MASTER_CONFIGS: MasterConfig[] = [
   // ── Organization ────────────────────────────────────────────────────────────
   {
-    type: 'sites',
-    label: 'Sites',
-    description: 'Campus and branch locations — import first',
+    type: 'states',
+    label: 'States',
+    description: 'India state/UT master — GST code and PT/LWF flags',
     icon: Globe,
     requiredFields: ['code', 'name'],
-    optionalFields: ['location', 'timezone'],
+    optionalFields: ['region', 'pt_applicable', 'lwf_applicable', 'lwf_frequency'],
+    group: 'organization',
+    groupStep: 0.4,
+  },
+  {
+    type: 'clusters',
+    label: 'Clusters',
+    description: 'Operational site groupings — import before Sites',
+    icon: Layers,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['region', 'parent_code', 'manager_code', 'description'],
+    group: 'organization',
+    groupStep: 0.6,
+  },
+  {
+    type: 'sites',
+    label: 'Sites',
+    description: 'Campus and branch locations — link State via state_code, Cluster via cluster_code',
+    icon: Globe,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['location', 'timezone', 'state_code', 'cluster_code', 'site_type', 'city', 'pincode', 'gstin', 'pf_registration_no', 'esi_registration_no'],
     group: 'organization',
     groupStep: 1,
   },
@@ -1036,6 +1058,8 @@ export function ImportWorkspace() {
         cost_centers:          ['cost-centers'],
         work_locations:        ['work-locations'],
         sites:                 ['sites'],
+        states:                ['states'],
+        clusters:              ['clusters'],
         shifts:                ['shifts'],
         leave_types:           ['leave-types'],
         rosters:               ['rosters'],

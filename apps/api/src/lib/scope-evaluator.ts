@@ -6,6 +6,7 @@
  *   org-wide        — HR admin / super admin can see everything
  *   department      — manager can see employees in their department
  *   location        — manager can see employees at their work location
+ *   cluster         — cluster manager can see employees at sites in their cluster(s)
  *   team            — manager can see their direct reports only
  *   self            — employee can see only their own records
  *
@@ -28,6 +29,7 @@ export type OrgScope =
   | 'org-wide'
   | 'department'
   | 'location'
+  | 'cluster'
   | 'team'
   | 'self'
   | 'none'
@@ -83,8 +85,14 @@ export class ScopeEvaluator {
       return this._evaluateManagerScope(actorId, tenantId, subjectId)
     }
 
-    // 4. Employee trying to access another employee's data
+    // 4. Employee trying to access another employee's data — allowed only if the
+    //    actor is a cluster manager and the subject works at a site in their cluster.
     if (subjectId && actorId !== subjectId) {
+      const actorEmpId = await this._resolveEmployeeId(actorId, tenantId)
+      if (actorEmpId) {
+        const cluster = await this._evaluateClusterScope(actorEmpId, tenantId, subjectId)
+        if (cluster) return cluster
+      }
       return { allowed: false, scope: 'none', reason: 'Employees can only access their own records' }
     }
 
@@ -161,11 +169,122 @@ export class ScopeEvaluator {
       return { allowed: true, scope: 'location', reason: 'Subject is at the same work location as the manager' }
     }
 
+    // d. Cluster check — subject works at a site in a cluster the manager runs
+    const cluster = await this._evaluateClusterScope(actorEmpId, tenantId, subjectId)
+    if (cluster) return cluster
+
     return {
       allowed: false,
       scope:   'none',
-      reason:  'Manager does not have scope over this employee (not a direct report, different department and location)',
+      reason:  'Manager does not have scope over this employee (not a direct report; different department, location and cluster)',
     }
+  }
+
+  /** Resolve a user's (profiles.id) linked employee_id, or null. */
+  private async _resolveEmployeeId(actorId: string, tenantId: string): Promise<string | null> {
+    const { data } = await this.supabase
+      .from('profiles')
+      .select('employee_id')
+      .eq('id', actorId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    return data?.employee_id ?? null
+  }
+
+  /**
+   * Cluster scope — grant access when the subject's current site belongs to a
+   * cluster (or its direct child cluster) managed by the actor employee.
+   * Returns a ScopeResult when granted, or null when it does not apply.
+   */
+  private async _evaluateClusterScope(
+    actorEmpId: string,
+    tenantId:   string,
+    subjectId:  string,
+  ): Promise<ScopeResult | null> {
+    const siteIds = await this._managedClusterSiteIds(actorEmpId, tenantId)
+    if (siteIds.length === 0) return null
+
+    const subjSiteId = await this._employeeSiteId(subjectId, tenantId)
+    if (subjSiteId && siteIds.includes(subjSiteId)) {
+      return { allowed: true, scope: 'cluster', reason: 'Subject works at a site in a cluster the actor manages' }
+    }
+    return null
+  }
+
+  /** Site IDs belonging to clusters (and their direct children) managed by the actor. */
+  private async _managedClusterSiteIds(actorEmpId: string, tenantId: string): Promise<string[]> {
+    const { data: managed } = await this.supabase
+      .from('clusters')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('cluster_manager_id', actorEmpId)
+
+    const clusterIds = (managed ?? []).map((c: { id: string }) => c.id)
+    if (clusterIds.length === 0) return []
+
+    // Include one level of child clusters (parent → child roll-up).
+    const { data: children } = await this.supabase
+      .from('clusters')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .in('parent_cluster_id', clusterIds)
+
+    const allClusterIds = [...new Set([...clusterIds, ...(children ?? []).map((c: { id: string }) => c.id)])]
+
+    const { data: sites } = await this.supabase
+      .from('sites')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .in('cluster_id', allClusterIds)
+
+    return (sites ?? []).map((s: { id: string }) => s.id)
+  }
+
+  /** Resolve an employee's current site via job_history → work_locations.site_id. */
+  private async _employeeSiteId(employeeId: string, tenantId: string): Promise<string | null> {
+    const { data: jh } = await this.supabase
+      .from('job_history')
+      .select('work_location_id')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .eq('is_current', true)
+      .maybeSingle()
+
+    const wlId = jh?.work_location_id
+    if (!wlId) return null
+
+    const { data: wl } = await this.supabase
+      .from('work_locations')
+      .select('site_id')
+      .eq('id', wlId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    return wl?.site_id ?? null
+  }
+
+  /** Employee IDs working at sites in clusters managed by the actor. */
+  private async _clusterScopedEmployeeIds(actorEmpId: string, tenantId: string): Promise<string[]> {
+    const siteIds = await this._managedClusterSiteIds(actorEmpId, tenantId)
+    if (siteIds.length === 0) return []
+
+    const { data: wls } = await this.supabase
+      .from('work_locations')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .in('site_id', siteIds)
+
+    const wlIds = (wls ?? []).map((w: { id: string }) => w.id)
+    if (wlIds.length === 0) return []
+
+    const { data: jh } = await this.supabase
+      .from('job_history')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .in('work_location_id', wlIds)
+      .eq('is_current', true)
+
+    return [...new Set((jh ?? []).map((r: { employee_id: string }) => r.employee_id))]
   }
 
   /**
@@ -194,6 +313,10 @@ export class ScopeEvaluator {
     const empId = profile?.employee_id ?? null
     if (!empId) return []
 
+    // Employees at sites in clusters this actor manages (applies to any non-admin
+    // role — a cluster manager may hold the 'manager' or 'employee' role).
+    const clusterEmpIds = await this._clusterScopedEmployeeIds(empId, tenantId)
+
     if (actorRole === 'manager') {
       // Direct reports
       const { data: reports } = await this.supabase
@@ -204,10 +327,10 @@ export class ScopeEvaluator {
         .eq('is_current', true)
 
       const reportIds = (reports ?? []).map((r: { employee_id: string }) => r.employee_id)
-      return [empId, ...reportIds]  // include self
+      return [...new Set([empId, ...reportIds, ...clusterEmpIds])]  // include self
     }
 
-    // employee — own only
-    return [empId]
+    // employee — own record, plus any cluster they manage
+    return [...new Set([empId, ...clusterEmpIds])]
   }
 }

@@ -291,6 +291,8 @@ const ReadinessDashboard   = lazy(() => import('@/pages/readiness/ReadinessDashb
 const Sites                = lazy(() => import('@/pages/masters/Sites').then(m => ({ default: m.Sites })))
 const WorkLocations        = lazy(() => import('@/pages/masters/WorkLocations').then(m => ({ default: m.WorkLocations })))
 const CostCenters          = lazy(() => import('@/pages/masters/CostCenters').then(m => ({ default: m.CostCenters })))
+const States               = lazy(() => import('@/pages/masters/States').then(m => ({ default: m.States })))
+const Clusters             = lazy(() => import('@/pages/masters/Clusters').then(m => ({ default: m.Clusters })))
 const RosterPolicies       = lazy(() => import('@/pages/masters/RosterPolicies').then(m => ({ default: m.RosterPolicies })))
 const RosterPolicyEditor   = lazy(() => import('@/pages/masters/RosterPolicyEditor').then(m => ({ default: m.RosterPolicyEditor })))
 const RotationPolicies     = lazy(() => import('@/pages/masters/RotationPolicies'))
@@ -782,6 +784,8 @@ export default function App() {
                 <Route path="/admin/attendance/groups"         element={<AttendancePolicy />} />
                 <Route path="/admin/masters/salary-structures" element={<Navigate to="/admin/payroll/compensation" replace />} />
                 <Route path="/admin/masters/sites"                   element={<Sites />} />
+                <Route path="/admin/masters/states"                  element={<States />} />
+                <Route path="/admin/masters/clusters"                element={<Clusters />} />
                 <Route path="/admin/masters/work-locations"          element={<WorkLocations />} />
                 <Route path="/admin/masters/cost-centers"            element={<CostCenters />} />
                 <Route path="/admin/masters/rosters"                        element={<RosterPolicies />} />
