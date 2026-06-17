@@ -715,16 +715,21 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
           section:              comp?.section_code ?? 'other',
           description:          comp?.display_name ?? 'Plan declaration',
           declared_amount:      item.declared_amount,
-          status:               'declared',
+          // 'submitted' (not 'declared') so HR can approve it and payroll — which
+          // reads status='approved' — can ever pick it up.
+          status:               'submitted',
           submitted_at:         now,
           created_at:           now,
           updated_at:           now,
         }
       })
 
+      // onConflict MUST match the real unique constraint on tax_declarations:
+      // (tenant_id, employee_id, financial_year, declaration_category, section).
+      // Omitting declaration_category made Postgres reject the upsert outright.
       const { error: declErr } = await fastify.supabase
         .from('tax_declarations')
-        .upsert(declRecords, { onConflict: 'tenant_id,employee_id,financial_year,section' })
+        .upsert(declRecords, { onConflict: 'tenant_id,employee_id,financial_year,declaration_category,section' })
 
       if (declErr) return reply.code(500).send({ error: 'DECLARATION_UPSERT_FAILED', message: declErr.message })
     }

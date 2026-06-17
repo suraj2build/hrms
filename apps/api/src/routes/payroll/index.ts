@@ -40,12 +40,22 @@ function financialYearOf(month: string): string {
   return `${startY}-${String((startY + 1) % 100).padStart(2, '0')}`
 }
 
+/** Months left in the FY (inclusive of `month`), for spreading the remaining tax. */
+function remainingMonthsFromRun(month: string, fy: string): number {
+  const fyStart = parseInt(fy.split('-')[0], 10)
+  const fyMonths: string[] = []
+  for (let m = 4; m <= 12; m++) fyMonths.push(`${fyStart}-${String(m).padStart(2, '0')}`)
+  for (let m = 1; m <= 3;  m++) fyMonths.push(`${fyStart + 1}-${String(m).padStart(2, '0')}`)
+  return fyMonths.filter(m => m >= month).length || 1
+}
+
 /**
  * Compute this month's TDS for an employee and inject it into the slip — IF TDS
- * is enabled in payroll_statutory_settings. No employee declaration is required
- * (new regime). Annual income is projected as this month's gross × 12; tax is
- * spread flat across the FY (annualTax / 12). Old regime additionally applies
- * approved Chapter-VI-A declarations.
+ * is enabled in payroll_statutory_settings. Uses the employee's ELECTED regime
+ * (falling back to the tenant default), credits TDS already deducted earlier in
+ * the FY, and spreads the remaining tax over the months left (true-up) rather
+ * than re-spreading the full annual tax every month. The old regime additionally
+ * applies approved Chapter-VI-A declarations.
  */
 async function applyTdsForRun(
   supabase: any, tenantId: string, employeeId: string, month: string,
@@ -58,8 +68,17 @@ async function applyTdsForRun(
     .maybeSingle()
   if (!s?.tds_enabled) return slip
 
-  const regime = (s.tds_default_regime ?? 'new') as 'old' | 'new'
   const fy = financialYearOf(month)
+
+  // Per-employee elected regime wins over the tenant default.
+  const { data: election } = await supabase
+    .from('tax_regime_elections')
+    .select('regime')
+    .eq('tenant_id', tenantId).eq('employee_id', employeeId)
+    .eq('financial_year', fy)
+    .maybeSingle()
+  const regime = ((election?.regime ?? s.tds_default_regime) ?? 'new') as 'old' | 'new'
+
   let totalDeductions = 0
   if (regime === 'old') {
     const { data: decls } = await supabase
@@ -70,13 +89,26 @@ async function applyTdsForRun(
     totalDeductions = (decls ?? []).reduce((acc: number, d: any) => acc + (Number(d.approved_amount) || 0), 0)
   }
 
+  // YTD true-up: credit TDS already deducted in earlier months of this FY and
+  // spread the remaining tax over the months left, so an employee taxed
+  // correctly mid-year is not re-charged the full annual tax every month.
+  const fyStart = parseInt(fy.split('-')[0], 10)
+  const { data: prior } = await supabase
+    .from('payroll_slips')
+    .select('tds_deducted')
+    .eq('tenant_id', tenantId).eq('employee_id', employeeId)
+    .gte('month', `${fyStart}-04`)
+    .lt('month', month)
+  const alreadyDeducted = (prior ?? []).reduce((acc: number, r: any) => acc + (Number(r.tds_deducted) || 0), 0)
+  const remainingMonths = remainingMonthsFromRun(month, fy)
+
   const result = computeTDS(
     {
       grossAnnualIncome: round2fn(slip.gross_pay * 12),
       regime,
       totalDeductions,
-      alreadyDeducted: 0,
-      remainingMonths: 12,
+      alreadyDeducted,
+      remainingMonths,
     },
     { financialYear: fy },
   )
