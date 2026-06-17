@@ -39,9 +39,10 @@ const DOMAIN_ICON_COLORS: Record<string, { bg: string; text: string }> = {
   'exec-workforce':    { bg: 'bg-indigo-50',  text: 'text-indigo-600' },
 }
 
-const SESSION_KEY = (domainId: string) => `sidebar-v2-expanded-${domainId}`
+// v3: groups collapsed by default (bumped from v2 so old "expanded" caches are ignored)
+const SESSION_KEY = (domainId: string) => `sidebar-v3-collapsed-${domainId}`
 
-function loadExpanded(domainId: string, groups: DomainNavGroup[]): Set<string> {
+function loadExpanded(domainId: string, _groups: DomainNavGroup[]): Set<string> {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY(domainId))
     if (raw) {
@@ -49,8 +50,8 @@ function loadExpanded(domainId: string, groups: DomainNavGroup[]): Set<string> {
       return new Set(parsed)
     }
   } catch { /* ignore */ }
-  // Default: expand all groups
-  return new Set(groups.map(g => g.label))
+  // Default: all groups collapsed — the user expands what they need.
+  return new Set<string>()
 }
 
 function saveExpanded(domainId: string, expanded: Set<string>) {
