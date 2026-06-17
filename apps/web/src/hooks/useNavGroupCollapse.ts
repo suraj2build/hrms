@@ -10,7 +10,7 @@
  */
 import { useCallback, useState } from 'react'
 
-export function useNavGroupCollapse(scope: string, initialOpen?: string) {
+export function useNavGroupCollapse(scope: string, initialOpen?: string | (string | undefined)[]) {
   const storageKey = `nav-collapse-${scope}`
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -18,8 +18,9 @@ export function useNavGroupCollapse(scope: string, initialOpen?: string) {
       const raw = sessionStorage.getItem(storageKey)
       if (raw) return new Set(JSON.parse(raw) as string[])
     } catch { /* ignore */ }
-    // Default: every group collapsed, except seed the active group open once.
-    return new Set(initialOpen ? [initialOpen] : [])
+    // Default: every group collapsed, except seed the active section/group open.
+    const seed = (Array.isArray(initialOpen) ? initialOpen : [initialOpen]).filter(Boolean) as string[]
+    return new Set(seed)
   })
 
   const toggle = useCallback((label: string) => {

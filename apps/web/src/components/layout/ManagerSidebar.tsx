@@ -261,24 +261,22 @@ export function ManagerSidebar() {
 
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
 
-  // Inject live badge into Approvals (manager section uses flat items; employee section uses groups)
-  const SECTIONS = useMemo((): NavSection[] =>
-    BASE_SECTIONS.map(s => ({
+  // Inject the live pending-approvals badge onto the Approvals item, wherever it
+  // lives (flat items or grouped items).
+  const SECTIONS = useMemo((): NavSection[] => {
+    const withBadge = (item: NavItem): NavItem =>
+      item.href === '/manager/approvals'
+        ? { ...item, badge: pendingCount > 0 ? pendingCount : undefined }
+        : item
+    return BASE_SECTIONS.map(s => ({
       ...s,
-      // Only flat-items sections need badge injection; grouped sections spread unchanged via ...s
-      ...(s.items && {
-        items: s.items.map(item =>
-          item.href === '/manager/approvals'
-            ? { ...item, badge: pendingCount > 0 ? pendingCount : undefined }
-            : item,
-        ),
-      }),
-    })),
-    [pendingCount],
-  )
+      ...(s.items  && { items:  s.items.map(withBadge) }),
+      ...(s.groups && { groups: s.groups.map(g => ({ ...g, items: g.items.map(withBadge) })) }),
+    }))
+  }, [pendingCount])
 
-  // Collapsible nav — groups/sections collapsed by default; whichever holds the
-  // active route stays open, and manual toggles persist for the session.
+  // Collapsible nav — sections & groups collapsed by default; whichever holds the
+  // active route is seeded open, and manual toggles persist for the session.
   const activeGroup = useMemo(() => {
     for (const s of SECTIONS) {
       const g = s.groups?.find(g => g.items.some(i => isActive(i, location.pathname)))
@@ -286,11 +284,15 @@ export function ManagerSidebar() {
     }
     return undefined
   }, [SECTIONS, location.pathname])
-  const activeFlatSection = useMemo(
-    () => SECTIONS.find(s => s.items?.some(i => isActive(i, location.pathname)))?.label,
-    [SECTIONS, location.pathname],
-  )
-  const { expanded, toggle } = useNavGroupCollapse('manager', activeGroup ?? activeFlatSection)
+  const activeSection = useMemo(() => {
+    for (const s of SECTIONS) {
+      const hit = s.groups?.some(g => g.items.some(i => isActive(i, location.pathname)))
+        || s.items?.some(i => isActive(i, location.pathname))
+      if (hit) return s.label
+    }
+    return undefined
+  }, [SECTIONS, location.pathname])
+  const { expanded, toggle } = useNavGroupCollapse('manager', [activeSection, activeGroup])
   // Purely driven by the expanded set so every group/section (incl. the active
   // one) can be collapsed. Groups start collapsed.
   const isOpen = (label: string, _activeLabel?: string) => expanded.has(label)
@@ -337,87 +339,68 @@ export function ManagerSidebar() {
               )} />
             )}
 
-            {!sidebarCollapsed && (
-              section.items ? (
-                /* Flat section (Manager) — header toggles the whole list */
+            {/* Section header — prominent band that toggles the whole section */}
+            {!sidebarCollapsed && (() => {
+              const mgr   = section.type === 'manager'
+              const sOpen = isOpen(section.label)
+              return (
                 <button
                   type="button"
                   onClick={() => toggle(section.label)}
                   className={cn(
                     'flex items-center justify-between w-full gap-2 px-3 py-2 rounded-md border transition-colors select-none',
-                    'text-xs font-bold uppercase tracking-wide text-warning',
-                    isOpen(section.label, activeFlatSection)
-                      ? 'bg-warning/15 border-warning/30 hover:bg-warning/20'
-                      : 'bg-warning/[0.08] border-warning/20 hover:bg-warning/15',
+                    'text-[13px] font-bold uppercase tracking-wide',
+                    mgr ? 'text-warning' : 'text-primary',
+                    sOpen
+                      ? (mgr ? 'bg-warning/15 border-warning/30 hover:bg-warning/20' : 'bg-primary/15 border-primary/25 hover:bg-primary/20')
+                      : (mgr ? 'bg-warning/[0.08] border-warning/20 hover:bg-warning/15' : 'bg-primary/[0.08] border-primary/20 hover:bg-primary/15'),
                   )}
                 >
                   <span className="flex items-center gap-2 min-w-0">
-                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-warning" />
+                    {mgr ? <ShieldCheck className="h-4 w-4 shrink-0" /> : <UserCircle2 className="h-4 w-4 shrink-0" />}
                     <span className="truncate">{section.label}</span>
                   </span>
-                  {isOpen(section.label, activeFlatSection)
-                    ? <ChevronDown className="h-4 w-4 shrink-0 text-warning" />
-                    : <ChevronRight className="h-4 w-4 shrink-0 text-warning/70" />}
+                  {sOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
                 </button>
-              ) : (
-                /* Grouped section — static section label (color by type) */
-                <div className="flex items-center gap-1.5 px-2.5 pb-1">
-                  {section.type === 'manager'
-                    ? <ShieldCheck className="h-3 w-3 text-warning/80" />
-                    : <UserCircle2 className="h-3 w-3 text-primary/70" />}
-                  <p className={cn(
-                    'text-[9px] font-bold uppercase tracking-widest select-none',
-                    section.type === 'manager' ? 'text-warning/80' : 'text-primary/70',
-                  )}>
-                    {section.label}
-                  </p>
-                </div>
               )
-            )}
+            })()}
 
-            {/* Items — grouped (employee + manager sections) or flat (legacy) */}
-            {section.groups
-              ? section.groups.map((group, gi) => {
-                  const mgr = section.type === 'manager'
-                  const open = isOpen(group.label, activeGroup)
+            {/* Sub-groups — nested under the section, shown when it is open */}
+            {(sidebarCollapsed || isOpen(section.label)) && (
+              <div className={cn(!sidebarCollapsed && 'mt-1 ml-3 pl-2 border-l border-border/70 space-y-0.5')}>
+                {(section.groups ?? [{ label: '', items: section.items ?? [] }]).map((group, gi) => {
+                  const mgr   = section.type === 'manager'
+                  const gOpen = isOpen(group.label)
                   return (
-                  <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
-                    {!sidebarCollapsed && group.label && (
-                      <button
-                        type="button"
-                        onClick={() => toggle(group.label)}
-                        className={cn(
-                          'flex items-center justify-between w-full gap-2 px-3 py-2 rounded-md border transition-colors select-none',
-                          'text-xs font-bold uppercase tracking-wide',
-                          mgr ? 'text-warning' : 'text-primary',
-                          open
-                            ? (mgr ? 'bg-warning/15 border-warning/30 hover:bg-warning/20' : 'bg-primary/[0.12] border-primary/25 hover:bg-primary/15')
-                            : (mgr ? 'bg-warning/[0.08] border-warning/20 hover:bg-warning/15' : 'bg-primary/[0.06] border-primary/15 hover:bg-primary/[0.12]'),
-                        )}
-                      >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <span className={cn('h-3.5 w-1 rounded-full shrink-0', open ? (mgr ? 'bg-warning' : 'bg-primary') : (mgr ? 'bg-warning/50' : 'bg-primary/50'))} />
+                    <div key={group.label || 'flat'} className={gi > 0 ? 'mt-1' : ''}>
+                      {!sidebarCollapsed && group.label && (
+                        <button
+                          type="button"
+                          onClick={() => toggle(group.label)}
+                          className={cn(
+                            'flex items-center justify-between w-full gap-2 px-2.5 py-1.5 rounded-md transition-colors select-none',
+                            'text-[10.5px] font-semibold uppercase tracking-wider',
+                            gOpen
+                              ? (mgr ? 'text-warning' : 'text-primary')
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          )}
+                        >
                           <span className="truncate">{group.label}</span>
-                        </span>
-                        {open
-                          ? <ChevronDown className={cn('h-4 w-4 shrink-0', mgr ? 'text-warning' : 'text-primary')} />
-                          : <ChevronRight className={cn('h-4 w-4 shrink-0', mgr ? 'text-warning/70' : 'text-primary/70')} />}
-                      </button>
-                    )}
-                    {(sidebarCollapsed || open) && (
-                      <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
-                        {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
-                      </div>
-                    )}
-                  </div>
+                          {gOpen
+                            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            : <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+                        </button>
+                      )}
+                      {(sidebarCollapsed || !group.label || gOpen) && (
+                        <div className={cn('space-y-0.5', !sidebarCollapsed && group.label && 'mt-0.5')}>
+                          {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
+                        </div>
+                      )}
+                    </div>
                   )
-                })
-              : (sidebarCollapsed || isOpen(section.label, activeFlatSection)) && (
-                <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
-                  {(section.items ?? []).map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
-                </div>
-              )
-            }
+                })}
+              </div>
+            )}
 
           </div>
         ))}
