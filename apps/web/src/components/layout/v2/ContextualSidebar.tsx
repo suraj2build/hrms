@@ -83,20 +83,15 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
           type="button"
           onClick={onToggle}
           className={cn(
-            'flex items-center justify-between w-full gap-2 px-3 py-2 mt-1 rounded-md border transition-colors select-none',
-            'text-xs font-bold uppercase tracking-wide',
-            expanded
-              ? 'bg-primary/10 border-primary/20 text-primary'
-              : 'bg-muted/70 border-border text-foreground hover:bg-muted',
+            'flex items-center justify-between w-full gap-2 px-3 py-1.5 mt-1 rounded-md transition-colors select-none',
+            'text-[10.5px] font-bold uppercase tracking-wider',
+            expanded ? 'text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
           )}
         >
-          <span className="flex items-center gap-2 min-w-0">
-            <span className={cn('h-3.5 w-1 rounded-full shrink-0', expanded ? 'bg-primary' : 'bg-muted-foreground/40')} />
-            <span className="truncate">{group.label}</span>
-          </span>
+          <span className="truncate">{group.label}</span>
           {expanded
-            ? <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
-            : <ChevronRight className="h-4 w-4 shrink-0 text-foreground/70" />
+            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           }
         </button>
       )}
@@ -239,9 +234,9 @@ export function ContextualSidebar() {
     <aside className={shellCls}>
       {/* ── Domain label header ──────────────────────────────────── */}
       {!sidebarCollapsed && (
-        <div className="flex items-center gap-2 h-11 px-4 border-b border-sidebar-border flex-shrink-0">
-          <domain.icon className="h-4 w-4 text-primary flex-shrink-0" />
-          <p className="text-sm font-semibold text-sidebar-foreground truncate">{domain.label}</p>
+        <div className="flex items-center gap-2 h-12 px-4 border-b border-primary/20 bg-primary/5 flex-shrink-0">
+          <domain.icon className="h-[18px] w-[18px] text-primary flex-shrink-0" />
+          <p className="text-[15px] font-bold text-primary truncate tracking-tight">{domain.label}</p>
           {/* Mobile-only close */}
           <button
             type="button"
