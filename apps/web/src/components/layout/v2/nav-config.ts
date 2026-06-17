@@ -211,30 +211,6 @@ export const DOMAINS: Domain[] = [
     ],
   },
 
-  // ── Runbooks ──────────────────────────────────────────────────────────────────
-  //
-  // The single how-to system: step-by-step playbooks with deep-links straight
-  // into each screen (and auto-open of the relevant dialog). Replaces the old
-  // floating Guide drawer; lives as a prime-rail domain so it's always one click
-  // away.
-  //
-  {
-    id:           'runbooks',
-    label:        'Runbooks',
-    shortLabel:   'Books',
-    icon:         BookOpen,
-    matchPrefixes: ['/admin/runbooks'],
-    defaultRoute: '/admin/runbooks',
-    groups: [
-      {
-        label: 'Guides',
-        items: [
-          { id: 'runbooks-home', label: 'All Runbooks', route: '/admin/runbooks', exact: true, icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
-        ],
-      },
-    ],
-  },
-
   // ── 1. Workforce ──────────────────────────────────────────────────────────────
   //
   // OPERATIONAL ONLY: employee directory, onboarding execution, lifecycle actions.
@@ -840,6 +816,29 @@ export const DOMAINS: Domain[] = [
         ],
       },
 
+    ],
+  },
+
+  // ── Runbooks ──────────────────────────────────────────────────────────────────
+  //
+  // The single how-to system: step-by-step playbooks with deep-links straight
+  // into each screen (and auto-open of the relevant dialog). Replaces the old
+  // floating Guide drawer; lives as a prime-rail domain (placed after Setup).
+  //
+  {
+    id:           'runbooks',
+    label:        'Runbooks',
+    shortLabel:   'Books',
+    icon:         BookOpen,
+    matchPrefixes: ['/admin/runbooks'],
+    defaultRoute: '/admin/runbooks',
+    groups: [
+      {
+        label: 'Guides',
+        items: [
+          { id: 'runbooks-home', label: 'All Runbooks', route: '/admin/runbooks', exact: true, icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
+        ],
+      },
     ],
   },
 
