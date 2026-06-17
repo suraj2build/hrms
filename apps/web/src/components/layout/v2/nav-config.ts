@@ -196,7 +196,6 @@ export const DOMAINS: Domain[] = [
           { id: 'control-center',  label: 'Command Center',  route: '/admin/control-center', exact: true, icon: Command,  keywords: ['home', 'dashboard', 'overview', 'control center', 'command center', 'ops', 'operations', 'exceptions', 'kpi', 'health'] },
           { id: 'insights-hub',    label: 'Insights Hub',    route: '/admin/insights',       exact: true, icon: Sparkles, keywords: ['analytics', 'intelligence', 'insights', 'charts', 'workforce data'] },
           { id: 'platform-health', label: 'Platform Health', route: '/admin/readiness',                   icon: Activity, keywords: ['readiness', 'system health', 'uat', 'certification', 'platform status'] },
-          { id: 'runbooks',        label: 'Runbooks',        route: '/admin/runbooks',                    icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
         ],
       },
       {
@@ -207,6 +206,30 @@ export const DOMAINS: Domain[] = [
           { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare, keywords: ['approve', 'reject', 'pending approvals', 'leave approval', 'attendance approval', 'inbox'] },
           { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen,    keywords: ['notifications', 'alerts', 'messages', 'notification center'] },
           { id: 'hr-helpdesk', label: 'HR Helpdesk',      route: '/admin/helpdesk',            icon: LifeBuoy,    keywords: ['helpdesk', 'tickets', 'support', 'employee tickets', 'hr support', 'service desk', 'grievance', 'issues'] },
+        ],
+      },
+    ],
+  },
+
+  // ── Runbooks ──────────────────────────────────────────────────────────────────
+  //
+  // The single how-to system: step-by-step playbooks with deep-links straight
+  // into each screen (and auto-open of the relevant dialog). Replaces the old
+  // floating Guide drawer; lives as a prime-rail domain so it's always one click
+  // away.
+  //
+  {
+    id:           'runbooks',
+    label:        'Runbooks',
+    shortLabel:   'Books',
+    icon:         BookOpen,
+    matchPrefixes: ['/admin/runbooks'],
+    defaultRoute: '/admin/runbooks',
+    groups: [
+      {
+        label: 'Guides',
+        items: [
+          { id: 'runbooks-home', label: 'All Runbooks', route: '/admin/runbooks', exact: true, icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
         ],
       },
     ],
