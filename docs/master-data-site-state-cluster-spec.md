@@ -217,10 +217,17 @@ Phasing suggestion: **P1** State + Site columns (statutory value first) → **P2
 
 ---
 
-## 10. Open questions
-1. **State seed:** per-tenant copy (recommended) vs global reference table?
-2. **`site_type` list** — is the proposed enum complete for your operations?
-3. **Region values** — fixed enum (N/S/E/W/NE/Central) or free text per tenant?
-4. **Cluster ↔ manager scope** — should a cluster manager automatically get visibility
-   over that cluster's sites/employees (RBAC change), or is Cluster reporting-only for now?
-5. **UDF** — pick Option A vs B when ready (everything else ships independently).
+## 10. Resolved decisions (2026-06-17)
+1. **State seed:** ✅ **per-tenant copy** — seeded into each tenant; tenants may edit flags.
+2. **`site_type` list:** ✅ proposed enum accepted as-is.
+3. **Region values:** ✅ **free text** (on both `states.region` and `clusters.region`).
+4. **Cluster ↔ manager scope:** ✅ **required** — a cluster manager gets RBAC visibility
+   over that cluster's sites/employees. Tracked as **Phase 4** (RBAC change).
+5. **UDF:** still **deferred** — Option A vs B chosen later; `custom_fields jsonb` columns
+   ship now so no further master migration is needed when adopted.
+
+### Build phasing (chosen)
+- **P1 — Schema:** migrations 273 (states + per-tenant seed), 274 (clusters), 275 (site expansion).
+- **P2 — API + importer:** masters/states, masters/clusters routes; sites route fields; import templates/validator/mapRow.
+- **P3 — Web UI:** State & Cluster master screens; expanded Site form; nav; import picker entries.
+- **P4 — RBAC:** cluster-manager visibility over cluster sites/employees.
