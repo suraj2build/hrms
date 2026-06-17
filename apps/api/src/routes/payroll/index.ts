@@ -1717,23 +1717,78 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       if (finalizedEmpIds.length > 0) {
         const now = new Date().toISOString()
 
-        // Mark advance recovery schedules as recovered
-        await fastify.supabase
-          .from('advance_recovery_schedules')
-          .update({ status: 'recovered', payroll_run_id: id, recovered_at: now })
+        // Which installments were ACTUALLY recovered this run — read from the
+        // finalized slips' component breakdown. The engine only deducts recoveries
+        // that fit within available net pay; installments that don't fit are
+        // deferred and must be rolled forward, NOT marked paid (otherwise the loan
+        // ledger records money the employee never actually paid).
+        const { data: finalizedSlipRows } = await fastify.supabase
+          .from('payroll_slips')
+          .select('component_breakdown')
           .eq('tenant_id', req.tenantId)
-          .eq('recovery_month', run.month)
-          .eq('status', 'pending')
-          .in('employee_id', finalizedEmpIds)
+          .eq('run_id', id)
+          .eq('status', 'finalized')
 
-        // Mark loan schedules as paid
-        await fastify.supabase
-          .from('loan_schedules')
-          .update({ status: 'paid', payroll_run_id: id, paid_at: now })
-          .eq('tenant_id', req.tenantId)
-          .eq('due_month', run.month)
-          .eq('status', 'pending')
-          .in('employee_id', finalizedEmpIds)
+        const recoveredAdvanceIds = new Set<string>()
+        const recoveredLoanIds    = new Set<string>()
+        for (const s of (finalizedSlipRows ?? []) as any[]) {
+          for (const c of (s.component_breakdown ?? []) as any[]) {
+            if (!c?.salary_component_id) continue
+            if (c.code === 'ADVANCE_RECOVERY') recoveredAdvanceIds.add(c.salary_component_id as string)
+            else if (c.code === 'LOAN_EMI')    recoveredLoanIds.add(c.salary_component_id as string)
+          }
+        }
+
+        // Next cycle (YYYY-MM) for deferred installments.
+        const nextMonth = (() => {
+          const [y, m] = run.month.split('-').map(Number)
+          const d = new Date(Date.UTC(y, m, 1)) // m is 1-based → Date month index m == next month
+          return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+        })()
+
+        // ── Advances: mark recovered, roll the rest forward ──────────────────────
+        if (recoveredAdvanceIds.size > 0) {
+          await fastify.supabase
+            .from('advance_recovery_schedules')
+            .update({ status: 'recovered', payroll_run_id: id, recovered_at: now })
+            .eq('tenant_id', req.tenantId)
+            .eq('recovery_month', run.month)
+            .eq('status', 'pending')
+            .in('id', [...recoveredAdvanceIds])
+        }
+        {
+          let q = fastify.supabase
+            .from('advance_recovery_schedules')
+            .update({ recovery_month: nextMonth })
+            .eq('tenant_id', req.tenantId)
+            .eq('recovery_month', run.month)
+            .eq('status', 'pending')
+            .in('employee_id', finalizedEmpIds)
+          if (recoveredAdvanceIds.size > 0) q = q.not('id', 'in', `(${[...recoveredAdvanceIds].join(',')})`)
+          await q
+        }
+
+        // ── Loans: mark paid, roll the rest forward ──────────────────────────────
+        if (recoveredLoanIds.size > 0) {
+          await fastify.supabase
+            .from('loan_schedules')
+            .update({ status: 'paid', payroll_run_id: id, paid_at: now })
+            .eq('tenant_id', req.tenantId)
+            .eq('due_month', run.month)
+            .eq('status', 'pending')
+            .in('id', [...recoveredLoanIds])
+        }
+        {
+          let q = fastify.supabase
+            .from('loan_schedules')
+            .update({ due_month: nextMonth })
+            .eq('tenant_id', req.tenantId)
+            .eq('due_month', run.month)
+            .eq('status', 'pending')
+            .in('employee_id', finalizedEmpIds)
+          if (recoveredLoanIds.size > 0) q = q.not('id', 'in', `(${[...recoveredLoanIds].join(',')})`)
+          await q
+        }
 
         // Advance status sweep: mark as 'recovering' or 'fully_recovered'
         const { data: recoveredScheds } = await fastify.supabase

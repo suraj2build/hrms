@@ -228,6 +228,39 @@ describe('computePayrollSlip — lop_amount and net_pay', () => {
     expect(result.net_pay).toBe(result.gross_pay)
   })
 
+  it('recovery exceeding available pay is deferred (capped), net never negative', () => {
+    const input = {
+      ...slipInput(0, 22, 15_000, 22),
+      advance_loan_deductions: [
+        { type: 'loan_emi' as const, schedule_id: 'ls-big', amount: 35_000, label: 'Oversized EMI' },
+      ],
+    }
+    const result = computePayrollSlip(input)
+    // 35k recovery on 15k gross cannot fit → fully deferred, slip stays sane
+    expect(result.total_deductions).toBe(0)
+    expect(result.net_pay).toBe(15_000)
+    expect(result.recovered_recovery_ids).toEqual([])
+    expect(result.deferred_recovery_ids).toEqual(['ls-big'])
+    expect(result.total_deductions).toBeLessThanOrEqual(result.gross_pay)
+    expect(result.warning ?? '').toMatch(/deferred/i)
+  })
+
+  it('recovery: installments taken in order until available pay runs out', () => {
+    const input = {
+      ...slipInput(0, 22, 15_000, 22),
+      advance_loan_deductions: [
+        { type: 'advance_recovery' as const, schedule_id: 'a-1', amount: 10_000, label: 'Advance' },
+        { type: 'loan_emi' as const,        schedule_id: 'l-2', amount: 8_000,  label: 'EMI' },
+      ],
+    }
+    const result = computePayrollSlip(input)
+    // 10k fits (15k avail → 5k left); 8k does not → deferred
+    expect(result.recovered_recovery_ids).toEqual(['a-1'])
+    expect(result.deferred_recovery_ids).toEqual(['l-2'])
+    expect(result.total_deductions).toBe(10_000)
+    expect(result.net_pay).toBe(5_000)
+  })
+
   it('lop_amount cannot be negative even with edge-case inputs', () => {
     // Passing a negative lop_days (should never happen but guard must hold)
     const result = computePayrollSlip(slipInput(-1, 23, 60_000, 22))

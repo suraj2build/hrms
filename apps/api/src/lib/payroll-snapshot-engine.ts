@@ -635,6 +635,8 @@ export async function buildPayrollRunSnapshot(
           net_pay:                s.net_pay ?? 0,
           employer_contributions: 0,
           component_breakdown:    [],
+          recovered_recovery_ids: [],
+          deferred_recovery_ids:  [],
         }
         const blob = await buildEmployeePayrollSnapshot(supabase, tenantId, s.employee_id, month, slipResult)
         return { employeeId: s.employee_id, blob }

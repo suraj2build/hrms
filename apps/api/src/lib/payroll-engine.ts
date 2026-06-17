@@ -100,6 +100,10 @@ export interface PayrollSlipResult {
   net_pay:               number
   employer_contributions:number
   component_breakdown:   PayrollComponentSnapshot[]
+  /** advance_recovery_schedules / loan_schedules ids actually recovered this month */
+  recovered_recovery_ids: string[]
+  /** ...ids deferred this month (recovery exceeded available pay) — finalize rolls these forward */
+  deferred_recovery_ids:  string[]
   /** Human-readable warning when compensation is missing */
   warning?:              string
 }
@@ -138,6 +142,8 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       net_pay:               0,
       employer_contributions:0,
       component_breakdown:   [],
+      recovered_recovery_ids: [],
+      deferred_recovery_ids:  [],
       warning: [
         'No active compensation configured for this employee.',
         noAttendanceWarning,
@@ -175,10 +181,28 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       'LOP deduction skipped to avoid wiping salary; verify holiday/roster/working-day setup.'
   }
 
-  // Advance recovery and loan EMI deductions
+  // Advance recovery and loan EMI deductions.
+  //
+  // Cap recovery at the pay available after statutory deductions + LOP, so a
+  // scheduled installment can NEVER exceed what the employee actually earns this
+  // month (which would otherwise make total_deductions exceed gross and force net
+  // to 0). Installments are taken in order, fully or not at all; any that don't
+  // fit are DEFERRED — left off this slip and rolled forward to the next cycle by
+  // the payroll finalize step, so nothing is lost and the loan ledger stays honest.
   const alDeductions = advance_loan_deductions ?? []
-  const al_total = round2(alDeductions.reduce((s, d) => s + d.amount, 0))
-  const al_components: PayrollComponentSnapshot[] = alDeductions.map((d, idx) => ({
+  let availableForRecovery = round2(Math.max(0, gross_pay - deduction_total_base - lop_amount))
+  const recoveredAL: typeof alDeductions = []
+  const deferredAL:  typeof alDeductions = []
+  for (const d of alDeductions) {
+    if (d.amount <= availableForRecovery + 0.005) {
+      recoveredAL.push(d)
+      availableForRecovery = round2(availableForRecovery - d.amount)
+    } else {
+      deferredAL.push(d)
+    }
+  }
+  const al_total = round2(recoveredAL.reduce((s, d) => s + d.amount, 0))
+  const al_components: PayrollComponentSnapshot[] = recoveredAL.map((d, idx) => ({
     salary_component_id: d.schedule_id,
     name:                d.label,
     code:                d.type === 'advance_recovery' ? 'ADVANCE_RECOVERY' : 'LOAN_EMI',
@@ -189,6 +213,12 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     annual_amount:       0,
     sequence:            900 + idx,
   }))
+
+  const deferralWarning = deferredAL.length > 0
+    ? `${deferredAL.length} advance/loan recovery installment(s) totalling ` +
+      `${round2(deferredAL.reduce((s, d) => s + d.amount, 0))} deferred to next cycle ` +
+      '(exceeded available net pay for the month).'
+    : undefined
 
   const total_deductions = round2(deduction_total_base + lop_amount + al_total)
   const net_pay          = round2(Math.max(0, gross_pay - total_deductions))
@@ -207,8 +237,10 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     net_pay,
     employer_contributions,
     component_breakdown: [...components, ...al_components],
-    // Propagate no-attendance + zero-working-days warnings so the run surfaces them.
-    warning: [noAttendanceWarning, zeroDenomWarning].filter(Boolean).join(' ') || undefined,
+    recovered_recovery_ids: recoveredAL.map(d => d.schedule_id),
+    deferred_recovery_ids:  deferredAL.map(d => d.schedule_id),
+    // Propagate no-attendance + zero-working-days + recovery-deferral warnings.
+    warning: [noAttendanceWarning, zeroDenomWarning, deferralWarning].filter(Boolean).join(' ') || undefined,
   }
 }
 
