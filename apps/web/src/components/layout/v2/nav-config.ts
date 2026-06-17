@@ -196,6 +196,7 @@ export const DOMAINS: Domain[] = [
           { id: 'control-center',  label: 'Command Center',  route: '/admin/control-center', exact: true, icon: Command,  keywords: ['home', 'dashboard', 'overview', 'control center', 'command center', 'ops', 'operations', 'exceptions', 'kpi', 'health'] },
           { id: 'insights-hub',    label: 'Insights Hub',    route: '/admin/insights',       exact: true, icon: Sparkles, keywords: ['analytics', 'intelligence', 'insights', 'charts', 'workforce data'] },
           { id: 'platform-health', label: 'Platform Health', route: '/admin/readiness',                   icon: Activity, keywords: ['readiness', 'system health', 'uat', 'certification', 'platform status'] },
+          { id: 'runbooks',        label: 'Runbooks',        route: '/admin/runbooks',                    icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
         ],
       },
       {

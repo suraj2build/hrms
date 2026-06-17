@@ -22,6 +22,7 @@ import {
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 import { MergeDeleteDialog }                      from '@/components/ui/merge-delete-dialog'
+import { useOpenOnParam }                         from '@/lib/runbooks/useOpenOnParam'
 
 interface State {
   id:             string
@@ -70,6 +71,9 @@ export function States() {
     setErr('')
     setDlgOpen(true)
   }
+
+  // Auto-open the create dialog when arriving from a runbook deep-link (?new=1)
+  useOpenOnParam('new', openCreate)
 
   function openEdit(s: State) {
     setEditItem(s)

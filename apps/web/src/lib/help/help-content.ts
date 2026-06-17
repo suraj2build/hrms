@@ -10,6 +10,19 @@
 export interface HelpStep {
   title:  string
   detail: string
+  /** Optional deep-link: jump to this route for the step */
+  to?:     string
+  /** Optional action to perform on arrival (e.g. open the create dialog) */
+  action?: 'new'
+  /** Button label for the deep-link (defaults to "Take me there") */
+  cta?:    string
+}
+
+/** A prominent call-to-action shown at the top of a runbook. */
+export interface HelpAction {
+  label:   string
+  to:      string
+  action?: 'new'
 }
 
 export interface HelpEntry {
@@ -21,6 +34,10 @@ export interface HelpEntry {
   tips?:   string[]
   /** One-line "why this matters" */
   why?:    string
+  /** Runbook category override (otherwise derived from the route) */
+  category?: string
+  /** Quick-action deep-links shown as buttons at the top of the runbook */
+  actions?:  HelpAction[]
 }
 
 export const HELP_CONTENT: HelpEntry[] = [
@@ -266,6 +283,66 @@ export const HELP_CONTENT: HelpEntry[] = [
     steps: [
       { title: 'Add a location', detail: 'Name, code and **state** — the state determines statutory rules that apply.' },
       { title: 'Assign employees', detail: 'Map people to a location via job history; payroll & compliance use it automatically.' },
+    ],
+  },
+  {
+    match:   '/admin/masters/states',
+    title:   'Set up States',
+    summary: 'The India state/UT master — the statutory axis for every site (GST code, Professional Tax and Labour Welfare Fund applicability).',
+    why:     'States drive PT/LWF rules for all employees at a site. They are seeded for you; you usually just review the flags.',
+    actions: [
+      { label: 'Open States', to: '/admin/masters/states' },
+      { label: 'Add a State', to: '/admin/masters/states', action: 'new' },
+    ],
+    steps: [
+      { title: 'Open the States master', detail: 'States are pre-seeded for India with GST codes and default PT/LWF flags.', to: '/admin/masters/states', cta: 'Open States' },
+      { title: 'Review PT / LWF flags', detail: 'Confirm **Professional Tax** and **Labour Welfare Fund** applicability per state; set the LWF frequency where it applies.' },
+      { title: 'Add a missing state', detail: 'Rarely needed, but you can add a state with its GST code and name.', to: '/admin/masters/states', action: 'new', cta: 'Add State' },
+    ],
+  },
+  {
+    match:   '/admin/masters/clusters',
+    title:   'Create a Cluster',
+    summary: 'Clusters are the operational grouping of sites (Region → Cluster → Site) and carry a cluster manager.',
+    why:     'A cluster manager automatically gains visibility over the employees working at that cluster’s sites — set this up before assigning sites.',
+    actions: [
+      { label: 'Open Clusters', to: '/admin/masters/clusters' },
+      { label: 'New Cluster', to: '/admin/masters/clusters', action: 'new' },
+    ],
+    steps: [
+      { title: 'Open the Clusters master', detail: 'Go to the Clusters page under Organization.', to: '/admin/masters/clusters', cta: 'Open Clusters' },
+      { title: 'Create a cluster', detail: 'Enter a name and code, optionally a region and parent cluster for multi-level roll-ups.', to: '/admin/masters/clusters', action: 'new', cta: 'New Cluster' },
+      { title: 'Assign a cluster manager', detail: 'Pick the employee who manages the cluster — they gain RBAC visibility over employees at the cluster’s sites.' },
+    ],
+  },
+  {
+    match:   '/admin/masters/sites',
+    title:   'Create & configure a Site',
+    summary: 'Sites are your campuses/branches. Each links to a State (statutory) and a Cluster (operational), plus address, statutory IDs and governance defaults.',
+    why:     'Sites anchor where people work — they drive statutory jurisdiction, holiday calendars and roster/leave defaults that employees inherit.',
+    actions: [
+      { label: 'Open Sites', to: '/admin/masters/sites' },
+      { label: 'New Site', to: '/admin/masters/sites', action: 'new' },
+    ],
+    steps: [
+      { title: 'Set up States & Clusters first', detail: 'Sites reference both — seed your **States** and create your **Clusters** before adding sites.', to: '/admin/masters/clusters', cta: 'Open Clusters' },
+      { title: 'Create the site', detail: 'Click **New Site**, then fill Basics (name, short name, timezone) and pick the **State** and **Cluster**.', to: '/admin/masters/sites', action: 'new', cta: 'New Site' },
+      { title: 'Complete address & statutory', detail: 'Add the address, GSTIN and PF/ESI/PT/LWF registration numbers in the Statutory section.' },
+      { title: 'Set governance defaults', detail: 'Choose the default Roster, Rotation, Leave policy and Holiday group — employees at this site inherit these.' },
+    ],
+  },
+  {
+    match:   '/admin/import',
+    title:   'Import master data (CSV)',
+    summary: 'Bulk-load masters and records from CSV — download a template, fill it, upload and validate.',
+    why:     'Importing in the right order (States → Clusters → Sites → Work Locations → Employees) keeps references intact.',
+    actions: [
+      { label: 'Open Import', to: '/admin/import' },
+    ],
+    steps: [
+      { title: 'Open the Import workspace', detail: 'Pick the master you want to load.', to: '/admin/import', cta: 'Open Import' },
+      { title: 'Download the template', detail: 'Each master has a CSV template with the required and optional columns.' },
+      { title: 'Upload & validate', detail: 'Upload your filled CSV; fix any rows the validator flags, then confirm the import. Import **States and Clusters before Sites**.' },
     ],
   },
   {

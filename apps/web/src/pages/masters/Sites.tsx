@@ -36,6 +36,7 @@ import { MergeDeleteDialog } from '@/components/ui/merge-delete-dialog'
 import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
 import { cn }               from '@/lib/utils'
+import { useOpenOnParam }   from '@/lib/runbooks/useOpenOnParam'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -429,6 +430,10 @@ export function Sites() {
     setErr('')
     setDlgOpen(true)
   }
+
+  // Auto-open the create dialog when arriving from a runbook deep-link (?new=1)
+  useOpenOnParam('new', openCreate)
+
   function openEdit(s: Site) {
     setEditSite(s)
     setForm({
