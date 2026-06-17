@@ -103,7 +103,7 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
 
       {/* Items */}
       {(expanded || collapsed) && (
-        <div className={cn('space-y-0.5', !collapsed && 'px-2')}>
+        <div className={cn('space-y-0.5', !collapsed && 'px-2 mt-1.5')}>
           {group.items.map(item => {
             // Support routes with query params (e.g. "/admin/masters?tab=work-locations")
             const isActive = (() => {
