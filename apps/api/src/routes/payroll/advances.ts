@@ -143,8 +143,11 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     if (fetchErr || !advance) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Advance not found' })
 
     const adv = advance as any
-    // F7 — only a pending advance may be approved.
-    if (adv.status !== 'pending') {
+    // Approvable from a direct pending request OR an ESS request a manager has
+    // already approved (pending_hr). The recovery schedule is created on
+    // DISBURSE — never here — so an approved-but-undisbursed advance never
+    // surfaces as a deduction.
+    if (adv.status !== 'pending' && adv.status !== 'pending_hr') {
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Advance is already ${adv.status}` })
     }
     const now = new Date().toISOString()
@@ -160,42 +163,9 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
+      .in('status', ['pending', 'pending_hr'])
 
     if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
-
-    // Generate recovery schedules: for each month 1..recovery_months from next month
-    const recoveryMonths = adv.recovery_months ?? 1
-    const scheduledAmount = Math.round((parsed.data.approved_amount / recoveryMonths) * 100) / 100
-
-    const schedules: any[] = []
-    const startDate = new Date()
-    startDate.setDate(1) // first of month
-    startDate.setMonth(startDate.getMonth() + 1) // next month
-
-    for (let i = 0; i < recoveryMonths; i++) {
-      const d = new Date(startDate)
-      d.setMonth(d.getMonth() + i)
-      const recoveryMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      schedules.push({
-        tenant_id: req.tenantId,
-        advance_id: id,
-        employee_id: adv.employee_id,
-        recovery_month: recoveryMonth,
-        scheduled_amount: scheduledAmount,
-        status: 'pending',
-      })
-    }
-
-    if (schedules.length > 0) {
-      const { error: schedErr } = await fastify.supabase
-        .from('advance_recovery_schedules')
-        .insert(schedules)
-
-      if (schedErr) {
-        req.log.warn({ err: schedErr }, 'Failed to create recovery schedules')
-      }
-    }
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -207,7 +177,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       newData:     { status: 'approved', approved_amount: parsed.data.approved_amount },
     })
 
-    return reply.send({ message: 'Advance approved', advance_id: id, schedules_created: schedules.length })
+    return reply.send({ message: 'Advance approved', advance_id: id })
   })
 
   // ── POST /payroll/advances/:id/reject ────────────────────────────────────────
@@ -277,11 +247,40 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .eq('status', 'approved')   // F7 — only an approved advance may be disbursed
-      .select('id')
+      .select('id, employee_id, recovery_months')
       .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     if (!disbursed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in an approved state' })
+
+    // Generate the recovery schedule now, on disbursement — never at approval —
+    // so deductions only ever exist for money that has actually been paid out.
+    // Idempotent: the .eq('status','approved') guard above prevents re-disburse.
+    const d0 = disbursed as any
+    const recoveryMonths  = d0.recovery_months ?? 1
+    const scheduledAmount = Math.round((parsed.data.disbursed_amount / recoveryMonths) * 100) / 100
+    const schedules: any[] = []
+    const startDate = new Date()
+    startDate.setDate(1)                          // first of month
+    startDate.setMonth(startDate.getMonth() + 1)  // recovery starts next month
+    for (let i = 0; i < recoveryMonths; i++) {
+      const dt = new Date(startDate)
+      dt.setMonth(dt.getMonth() + i)
+      schedules.push({
+        tenant_id:       req.tenantId,
+        advance_id:      id,
+        employee_id:     d0.employee_id,
+        recovery_month:  `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`,
+        scheduled_amount: scheduledAmount,
+        status:          'pending',
+      })
+    }
+    if (schedules.length > 0) {
+      const { error: schedErr } = await fastify.supabase
+        .from('advance_recovery_schedules')
+        .insert(schedules)
+      if (schedErr) req.log.warn({ err: schedErr }, 'Failed to create recovery schedules')
+    }
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -292,7 +291,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       newData:     { status: 'disbursed', disbursed_amount: parsed.data.disbursed_amount, disbursed_date: parsed.data.disbursed_date },
     })
 
-    return reply.send({ message: 'Advance disbursed' })
+    return reply.send({ message: 'Advance disbursed', schedules_created: schedules.length })
   })
 
   // ── GET /payroll/advances/:id/schedule ───────────────────────────────────────

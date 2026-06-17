@@ -115,12 +115,14 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')   // F7 — only a pending loan may be approved
+      // Approvable from a direct pending request OR an ESS request a manager has
+      // already approved (pending_hr). Loan schedule is still created on DISBURSE.
+      .in('status', ['pending', 'pending_hr'])
       .select()
       .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending/pending_hr state' })
 
     return reply.send({ data })
   })
