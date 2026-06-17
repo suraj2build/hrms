@@ -321,17 +321,21 @@ export function ManagerSidebar() {
                 <button
                   type="button"
                   onClick={() => toggle(section.label)}
-                  className="flex items-center justify-between w-full px-2.5 pb-1"
+                  className={cn(
+                    'flex items-center justify-between w-full gap-2 px-3 py-2 rounded-md border transition-colors select-none',
+                    'text-xs font-bold uppercase tracking-wide text-warning',
+                    isOpen(section.label, activeFlatSection)
+                      ? 'bg-warning/15 border-warning/30 hover:bg-warning/20'
+                      : 'bg-warning/[0.08] border-warning/20 hover:bg-warning/15',
+                  )}
                 >
-                  <span className="flex items-center gap-1.5">
-                    <ShieldCheck className="h-3 w-3 text-amber-500/80" />
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80 select-none">
-                      {section.label}
-                    </span>
+                  <span className="flex items-center gap-2 min-w-0">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-warning" />
+                    <span className="truncate">{section.label}</span>
                   </span>
                   {isOpen(section.label, activeFlatSection)
-                    ? <ChevronDown className="h-3 w-3 opacity-50" />
-                    : <ChevronRight className="h-3 w-3 opacity-50" />}
+                    ? <ChevronDown className="h-4 w-4 shrink-0 text-warning" />
+                    : <ChevronRight className="h-4 w-4 shrink-0 text-warning/70" />}
                 </button>
               ) : (
                 /* Grouped section (Employee) — static header; sub-groups are the toggles */
@@ -352,23 +356,32 @@ export function ManagerSidebar() {
                       <button
                         type="button"
                         onClick={() => toggle(group.label)}
-                        className="flex items-center justify-between w-full px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 hover:text-sidebar-foreground/70 select-none"
+                        className={cn(
+                          'flex items-center justify-between w-full gap-2 px-3 py-2 rounded-md border transition-colors select-none',
+                          'text-xs font-bold uppercase tracking-wide text-primary',
+                          isOpen(group.label, activeGroup)
+                            ? 'bg-primary/[0.12] border-primary/25 hover:bg-primary/15'
+                            : 'bg-primary/[0.06] border-primary/15 hover:bg-primary/[0.12]',
+                        )}
                       >
-                        <span>{group.label}</span>
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className={cn('h-3.5 w-1 rounded-full shrink-0', isOpen(group.label, activeGroup) ? 'bg-primary' : 'bg-primary/50')} />
+                          <span className="truncate">{group.label}</span>
+                        </span>
                         {isOpen(group.label, activeGroup)
-                          ? <ChevronDown className="h-3 w-3 opacity-60" />
-                          : <ChevronRight className="h-3 w-3 opacity-60" />}
+                          ? <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
+                          : <ChevronRight className="h-4 w-4 shrink-0 text-primary/70" />}
                       </button>
                     )}
                     {(sidebarCollapsed || isOpen(group.label, activeGroup)) && (
-                      <div className="space-y-0.5">
+                      <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
                         {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
                       </div>
                     )}
                   </div>
                 ))
               : (sidebarCollapsed || isOpen(section.label, activeFlatSection)) && (
-                <div className="space-y-0.5">
+                <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
                   {(section.items ?? []).map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
                 </div>
               )

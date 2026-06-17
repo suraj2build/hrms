@@ -277,17 +277,28 @@ export function EmployeeSidebar() {
               <button
                 type="button"
                 onClick={() => toggle(group.label)}
-                className="flex items-center justify-between w-full px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/55 hover:text-sidebar-foreground/85 select-none"
+                className={cn(
+                  'flex items-center justify-between w-full gap-2 px-3 py-2 rounded-md border transition-colors select-none',
+                  'text-xs font-bold uppercase tracking-wide text-primary',
+                  isGroupOpen(group.label)
+                    ? 'bg-primary/[0.12] border-primary/25 hover:bg-primary/15'
+                    : 'bg-primary/[0.06] border-primary/15 hover:bg-primary/[0.12]',
+                )}
               >
-                <span>{group.label}</span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className={cn('h-3.5 w-1 rounded-full shrink-0', isGroupOpen(group.label) ? 'bg-primary' : 'bg-primary/50')} />
+                  <span className="truncate">{group.label}</span>
+                </span>
                 {isGroupOpen(group.label)
-                  ? <ChevronDown className="h-3 w-3 opacity-60" />
-                  : <ChevronRight className="h-3 w-3 opacity-60" />}
+                  ? <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
+                  : <ChevronRight className="h-4 w-4 shrink-0 text-primary/70" />}
               </button>
             )}
 
             {/* Items — hidden when collapsed (always shown in icon-rail mode) */}
-            {(sidebarCollapsed || isGroupOpen(group.label)) && group.items.map(item => {
+            {(sidebarCollapsed || isGroupOpen(group.label)) && (
+            <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
+            {group.items.map(item => {
               const active = isActive(item, location.pathname)
               return (
                 <Link
@@ -322,6 +333,8 @@ export function EmployeeSidebar() {
                 </Link>
               )
             })}
+            </div>
+            )}
 
           </div>
         ))}

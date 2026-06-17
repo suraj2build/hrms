@@ -34,7 +34,6 @@ import { ContextualHint } from '@/components/operational/ContextualHint'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
-import { GuidanceHeaderActions } from '@/lib/guidance'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { FormField } from '@/components/forms/FormField'
 
@@ -805,7 +804,6 @@ export function Attendance() {
         subtitle={`Live command center · ${(() => { const _n = new Date(); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; const _DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; return `${_DOW[_n.getDay()]}, ${String(_n.getDate()).padStart(2,'0')}-${_M[_n.getMonth()]}-${_n.getFullYear()}` })()}`}
         actions={
           <>
-            <GuidanceHeaderActions module="attendance" pageKey="attendance" />
             <Button size="sm" variant="ghost" onClick={handleRefreshAll}>
               <RefreshCw className="h-4 w-4" />
             </Button>
