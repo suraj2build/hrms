@@ -235,8 +235,10 @@ export function EmployeeSidebar() {
     () => GROUPS.find(g => g.items.some(i => isActive(i, location.pathname)))?.label,
     [GROUPS, location.pathname],
   )
-  const { expanded, toggle } = useNavGroupCollapse('ess')
-  const isGroupOpen = (label: string) => expanded.has(label) || label === activeGroup
+  const { expanded, toggle } = useNavGroupCollapse('ess', activeGroup)
+  // Purely driven by the expanded set so every group (incl. the active one) can
+  // be collapsed. Groups start collapsed; activeGroup seeds the initial open set.
+  const isGroupOpen = (label: string) => expanded.has(label)
 
   return (
    <>

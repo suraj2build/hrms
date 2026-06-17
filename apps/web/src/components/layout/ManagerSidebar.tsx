@@ -145,22 +145,42 @@ const BASE_SECTIONS: NavSection[] = [
   {
     type:  'manager',
     label: 'Manager',
-    items: [
-      { label: 'Team Dashboard',    icon: LayoutDashboard, href: '/manager/dashboard',             exact: true },
-      { label: 'Who Is In',         icon: Radio,           href: '/manager/team/who-is-in'                    },
-      { label: 'Team Attendance',   icon: CalendarDays,    href: '/manager/team/attendance'                   },
-      { label: 'OT Requests',       icon: Clock,           href: '/manager/team/overtime'                     },
-      { label: 'Comp-Off',          icon: CalendarPlus,    href: '/manager/team/comp-off'                     },
-      { label: 'Regularisation',    icon: ClipboardList,   href: '/manager/team/regularisation'               },
-      { label: 'Approvals',         icon: CheckSquare,     href: '/manager/approvals'                         },
-      { label: 'Loan Approvals',    icon: Wallet,          href: '/manager/loans-approvals'                   },
-      { label: 'Team Compensation', icon: IndianRupee,     href: '/manager/team/compensation'                 },
-      { label: 'Team Lifecycle',    icon: UserCog,         href: '/manager/team/lifecycle'                    },
-      { label: 'Team Assets',       icon: Package,         href: '/manager/team/assets'                       },
-      { label: 'Team Helpdesk',     icon: LifeBuoy,        href: '/manager/team/helpdesk'                     },
-      { label: 'Leave Balances',    icon: Scale,           href: '/manager/team/leave-balances'               },
-      { label: 'Payroll Cost',      icon: Coins,           href: '/manager/team/payroll-cost'                 },
-      { label: 'Performance',       icon: TrendingUp,      href: '/manager/team/performance'                  },
+    groups: [
+      {
+        label: 'Team Overview',
+        items: [
+          { label: 'Team Dashboard',  icon: LayoutDashboard, href: '/manager/dashboard',      exact: true },
+          { label: 'Who Is In',       icon: Radio,           href: '/manager/team/who-is-in'              },
+          { label: 'Team Attendance', icon: CalendarDays,    href: '/manager/team/attendance'             },
+        ],
+      },
+      {
+        label: 'Approvals',
+        items: [
+          { label: 'Approvals',      icon: CheckSquare,   href: '/manager/approvals'           },
+          { label: 'Regularisation', icon: ClipboardList, href: '/manager/team/regularisation' },
+          { label: 'OT Requests',    icon: Clock,         href: '/manager/team/overtime'       },
+          { label: 'Comp-Off',       icon: CalendarPlus,  href: '/manager/team/comp-off'       },
+          { label: 'Loan Approvals', icon: Wallet,        href: '/manager/loans-approvals'     },
+        ],
+      },
+      {
+        label: 'Team Management',
+        items: [
+          { label: 'Team Lifecycle', icon: UserCog,  href: '/manager/team/lifecycle'      },
+          { label: 'Leave Balances', icon: Scale,    href: '/manager/team/leave-balances' },
+          { label: 'Team Assets',    icon: Package,  href: '/manager/team/assets'         },
+          { label: 'Team Helpdesk',  icon: LifeBuoy, href: '/manager/team/helpdesk'       },
+        ],
+      },
+      {
+        label: 'Cost & Insights',
+        items: [
+          { label: 'Team Compensation', icon: IndianRupee, href: '/manager/team/compensation' },
+          { label: 'Payroll Cost',      icon: Coins,       href: '/manager/team/payroll-cost' },
+          { label: 'Performance',       icon: TrendingUp,  href: '/manager/team/performance'  },
+        ],
+      },
     ],
   },
 ]
@@ -270,8 +290,10 @@ export function ManagerSidebar() {
     () => SECTIONS.find(s => s.items?.some(i => isActive(i, location.pathname)))?.label,
     [SECTIONS, location.pathname],
   )
-  const { expanded, toggle } = useNavGroupCollapse('manager')
-  const isOpen = (label: string, activeLabel?: string) => expanded.has(label) || label === activeLabel
+  const { expanded, toggle } = useNavGroupCollapse('manager', activeGroup ?? activeFlatSection)
+  // Purely driven by the expanded set so every group/section (incl. the active
+  // one) can be collapsed. Groups start collapsed.
+  const isOpen = (label: string, _activeLabel?: string) => expanded.has(label)
 
   return (
    <>
@@ -338,19 +360,27 @@ export function ManagerSidebar() {
                     : <ChevronRight className="h-4 w-4 shrink-0 text-warning/70" />}
                 </button>
               ) : (
-                /* Grouped section (Employee) — static header; sub-groups are the toggles */
+                /* Grouped section — static section label (color by type) */
                 <div className="flex items-center gap-1.5 px-2.5 pb-1">
-                  <UserCircle2 className="h-3 w-3 text-primary/70" />
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-primary/70 select-none">
+                  {section.type === 'manager'
+                    ? <ShieldCheck className="h-3 w-3 text-warning/80" />
+                    : <UserCircle2 className="h-3 w-3 text-primary/70" />}
+                  <p className={cn(
+                    'text-[9px] font-bold uppercase tracking-widest select-none',
+                    section.type === 'manager' ? 'text-warning/80' : 'text-primary/70',
+                  )}>
                     {section.label}
                   </p>
                 </div>
               )
             )}
 
-            {/* Items — grouped (employee section) or flat (manager section) */}
+            {/* Items — grouped (employee + manager sections) or flat (legacy) */}
             {section.groups
-              ? section.groups.map((group, gi) => (
+              ? section.groups.map((group, gi) => {
+                  const mgr = section.type === 'manager'
+                  const open = isOpen(group.label, activeGroup)
+                  return (
                   <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
                     {!sidebarCollapsed && group.label && (
                       <button
@@ -358,28 +388,30 @@ export function ManagerSidebar() {
                         onClick={() => toggle(group.label)}
                         className={cn(
                           'flex items-center justify-between w-full gap-2 px-3 py-2 rounded-md border transition-colors select-none',
-                          'text-xs font-bold uppercase tracking-wide text-primary',
-                          isOpen(group.label, activeGroup)
-                            ? 'bg-primary/[0.12] border-primary/25 hover:bg-primary/15'
-                            : 'bg-primary/[0.06] border-primary/15 hover:bg-primary/[0.12]',
+                          'text-xs font-bold uppercase tracking-wide',
+                          mgr ? 'text-warning' : 'text-primary',
+                          open
+                            ? (mgr ? 'bg-warning/15 border-warning/30 hover:bg-warning/20' : 'bg-primary/[0.12] border-primary/25 hover:bg-primary/15')
+                            : (mgr ? 'bg-warning/[0.08] border-warning/20 hover:bg-warning/15' : 'bg-primary/[0.06] border-primary/15 hover:bg-primary/[0.12]'),
                         )}
                       >
                         <span className="flex items-center gap-2 min-w-0">
-                          <span className={cn('h-3.5 w-1 rounded-full shrink-0', isOpen(group.label, activeGroup) ? 'bg-primary' : 'bg-primary/50')} />
+                          <span className={cn('h-3.5 w-1 rounded-full shrink-0', open ? (mgr ? 'bg-warning' : 'bg-primary') : (mgr ? 'bg-warning/50' : 'bg-primary/50'))} />
                           <span className="truncate">{group.label}</span>
                         </span>
-                        {isOpen(group.label, activeGroup)
-                          ? <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
-                          : <ChevronRight className="h-4 w-4 shrink-0 text-primary/70" />}
+                        {open
+                          ? <ChevronDown className={cn('h-4 w-4 shrink-0', mgr ? 'text-warning' : 'text-primary')} />
+                          : <ChevronRight className={cn('h-4 w-4 shrink-0', mgr ? 'text-warning/70' : 'text-primary/70')} />}
                       </button>
                     )}
-                    {(sidebarCollapsed || isOpen(group.label, activeGroup)) && (
+                    {(sidebarCollapsed || open) && (
                       <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
                         {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
                       </div>
                     )}
                   </div>
-                ))
+                  )
+                })
               : (sidebarCollapsed || isOpen(section.label, activeFlatSection)) && (
                 <div className={cn('space-y-0.5', !sidebarCollapsed && 'mt-1.5')}>
                   {(section.items ?? []).map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
