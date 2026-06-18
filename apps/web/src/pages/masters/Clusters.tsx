@@ -22,6 +22,8 @@ import {
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 import { MergeDeleteDialog }                      from '@/components/ui/merge-delete-dialog'
+import { EmployeeSelector }                       from '@/components/filters/EmployeeSelector'
+import { EmployeeLabel }                          from '@/components/employee/EmployeeLabel'
 import { useOpenOnParam }                         from '@/lib/runbooks/useOpenOnParam'
 
 interface Cluster {
@@ -34,13 +36,6 @@ interface Cluster {
   description:        string | null
   is_active:          boolean
   created_at:         string
-}
-
-interface EmployeeLite {
-  id:            string
-  employee_code: string | null
-  first_name:    string | null
-  last_name:     string | null
 }
 
 const EMPTY_FORM = {
@@ -71,23 +66,6 @@ export function Clusters() {
   const clusters = clData?.data ?? []
 
   // Employees for the cluster-manager dropdown (admins only manage clusters).
-  const { data: empData } = useQuery<{ data: EmployeeLite[] }>({
-    queryKey: ['employees', 'lite'],
-    queryFn:  () => api.get('/employees?limit=500&status=active'),
-    staleTime: 60_000,
-    enabled:   isAdmin,
-  })
-  const employees = empData?.data ?? []
-
-  function empLabel(e: EmployeeLite): string {
-    const name = [e.first_name, e.last_name].filter(Boolean).join(' ').trim()
-    return e.employee_code ? `${name || 'Unnamed'} (${e.employee_code})` : (name || e.id)
-  }
-  function managerName(id: string | null): string {
-    if (!id) return '—'
-    const e = employees.find(x => x.id === id)
-    return e ? empLabel(e) : '—'
-  }
   function clusterName(id: string | null): string {
     if (!id) return '—'
     return clusters.find(c => c.id === id)?.name ?? '—'
@@ -198,7 +176,7 @@ export function Clusters() {
                     <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{c.code}</td>
                     <td className="px-3 py-2.5 font-medium">{c.name}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{c.region ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{managerName(c.cluster_manager_id)}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground"><EmployeeLabel id={c.cluster_manager_id} empty="—" /></td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{clusterName(c.parent_cluster_id)}</td>
                     <td className="px-3 py-2.5">
                       <Badge variant={c.is_active ? 'success' : 'outline'} className="rounded-full text-xs">
@@ -270,16 +248,12 @@ export function Clusters() {
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Cluster Manager</label>
-              <select
+              <EmployeeSelector
                 value={form.cluster_manager_id}
-                onChange={e => setForm(p => ({ ...p, cluster_manager_id: e.target.value }))}
-                className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-              >
-                <option value="">— Not set —</option>
-                {employees.map(e => (
-                  <option key={e.id} value={e.id}>{empLabel(e)}</option>
-                ))}
-              </select>
+                onChange={v => setForm(p => ({ ...p, cluster_manager_id: typeof v === 'string' ? v : (v[0] ?? '') }))}
+                placeholder="Search manager by name or code…"
+                className="w-full"
+              />
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 The manager gains visibility over employees at this cluster's sites.
               </p>
