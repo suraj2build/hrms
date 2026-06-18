@@ -58,11 +58,25 @@ async function buildITStatement(
   tenantId: string,
   employeeId: string,
   financialYear: string,
+  finalizedOnly: boolean = true,
 ): Promise<any> {
   const fyStart  = parseInt(financialYear.split('-')[0], 10)
   const fyEnd    = fyStart + 1
   const fromPeriod = `${fyStart}-04`
   const toPeriod   = `${fyEnd}-03`
+
+  // An IT statement reflects *finalized* pay/TDS only. Without this filter, slips
+  // from an in-progress re-run (recomputed but not re-finalized) leak into the
+  // employee-facing tax statement. Always true for ESS; admins may opt out.
+  let slipsQuery = fastify.supabase
+    .from('payroll_slips')
+    .select('month, gross_pay, tds_deducted, net_pay, component_breakdown')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .gte('month', fromPeriod)
+    .lte('month', toPeriod)
+    .order('month', { ascending: true })
+  if (finalizedOnly) slipsQuery = slipsQuery.eq('status', 'finalized')
 
   // ── Parallel data fetch ────────────────────────────────────────────────────
   const [
@@ -82,19 +96,11 @@ async function buildITStatement(
       .eq('tenant_id', tenantId)
       .maybeSingle(),
 
-    // Payroll slips for the FY
-    fastify.supabase
-      .from('payroll_slips')
-      // payroll_slips columns are month / gross_pay / tds_deducted (NOT
-      // period_month / gross_earnings — those never existed, so this query used to
-      // error and the IT statement never populated). HRA is derived from the
-      // stored component_breakdown.
-      .select('month, gross_pay, tds_deducted, net_pay, component_breakdown')
-      .eq('tenant_id', tenantId)
-      .eq('employee_id', employeeId)
-      .gte('month', fromPeriod)
-      .lte('month', toPeriod)
-      .order('month', { ascending: true }),
+    // Payroll slips for the FY (finalized-only unless an admin opts in).
+    // payroll_slips columns are month / gross_pay / tds_deducted (NOT
+    // period_month / gross_earnings — those never existed). HRA is derived from
+    // the stored component_breakdown.
+    slipsQuery,
 
     // Approved tax declarations
     fastify.supabase
@@ -357,11 +363,17 @@ export default async function itStatementRoute(fastify: FastifyInstance) {
   fastify.get('/it-statement/:employeeId', adminAuth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
-    const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
+    const qs = z.object({
+      financial_year:      z.string().optional(),
+      // Admins may opt into draft slips to preview before finalization. Default
+      // false → finalized-only, matching what the employee sees.
+      include_unfinalized: z.coerce.boolean().optional(),
+    }).safeParse(req.query)
     const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const finalizedOnly = !(qs.data?.include_unfinalized ?? false)
 
     try {
-      const statement = await buildITStatement(fastify, req.tenantId, employeeId, fy)
+      const statement = await buildITStatement(fastify, req.tenantId, employeeId, fy, finalizedOnly)
       return reply.send(statement)
     } catch (err: any) {
       if (err.message === 'Employee not found') {

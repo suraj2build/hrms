@@ -56,11 +56,33 @@ async function buildYTDStatement(
   tenantId: string,
   employeeId: string,
   financialYear: string,
+  finalizedOnly: boolean = true,
 ): Promise<any> {
   const fyStart  = parseInt(financialYear.split('-')[0], 10)
   const fyEnd    = fyStart + 1
   const fromPeriod = `${fyStart}-04`
   const toPeriod   = `${fyEnd}-03`
+
+  // A YTD statement reflects *finalized* pay. payroll_slips carries its own
+  // status ('draft' | 'finalized' | 'held'); the finalize step stamps slips
+  // 'finalized'. Without this filter, slips from an in-progress re-run (run
+  // rolled back to draft, recomputed but not yet re-finalized) leak into the
+  // employee-facing statement — showing numbers that were never finalized.
+  // finalizedOnly is always true for ESS; admins may opt out to preview drafts.
+  let slipsQuery = fastify.supabase
+    .from('payroll_slips')
+    // payroll_slips stores month / gross_pay / net_pay / tds_deducted +
+    // component_breakdown (JSON). The per-component figures (basic, hra, pf,
+    // esi, ptax, employer shares) are derived from the breakdown below — the
+    // old flat columns (period_month, gross_earnings, provident_fund, …) never
+    // existed, so this query used to error and YTD never populated.
+    .select('month, gross_pay, net_pay, tds_deducted, total_working_days, payable_days, component_breakdown')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .gte('month', fromPeriod)
+    .lte('month', toPeriod)
+    .order('month', { ascending: true })
+  if (finalizedOnly) slipsQuery = slipsQuery.eq('status', 'finalized')
 
   // ── Parallel fetch ─────────────────────────────────────────────────────────
   const [empResult, slipsResult] = await Promise.all([
@@ -71,19 +93,7 @@ async function buildYTDStatement(
       .eq('tenant_id', tenantId)
       .maybeSingle(),
 
-    fastify.supabase
-      .from('payroll_slips')
-      // payroll_slips stores month / gross_pay / net_pay / tds_deducted +
-      // component_breakdown (JSON). The per-component figures (basic, hra, pf,
-      // esi, ptax, employer shares) are derived from the breakdown below — the
-      // old flat columns (period_month, gross_earnings, provident_fund, …) never
-      // existed, so this query used to error and YTD never populated.
-      .select('month, gross_pay, net_pay, tds_deducted, total_working_days, payable_days, component_breakdown')
-      .eq('tenant_id', tenantId)
-      .eq('employee_id', employeeId)
-      .gte('month', fromPeriod)
-      .lte('month', toPeriod)
-      .order('month', { ascending: true }),
+    slipsQuery,
   ])
 
   const employee = empResult.data as any
@@ -257,11 +267,18 @@ export default async function ytdStatementRoute(fastify: FastifyInstance) {
   fastify.get('/ytd/:employeeId', adminAuth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
-    const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
+    const qs = z.object({
+      financial_year:      z.string().optional(),
+      // Admins may opt into in-progress (draft) slips to preview a run before
+      // finalization. Default false → the statement shows finalized pay only,
+      // matching exactly what the employee sees.
+      include_unfinalized: z.coerce.boolean().optional(),
+    }).safeParse(req.query)
     const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const finalizedOnly = !(qs.data?.include_unfinalized ?? false)
 
     try {
-      const statement = await buildYTDStatement(fastify, req.tenantId, employeeId, fy)
+      const statement = await buildYTDStatement(fastify, req.tenantId, employeeId, fy, finalizedOnly)
       return reply.send(statement)
     } catch (err: any) {
       if (err.message === 'Employee not found') {
