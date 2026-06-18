@@ -68,7 +68,7 @@ const titleCase = (s: string) =>
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export function ManagerLoanApprovals() {
+export function ManagerLoanApprovals({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient()
   const [rejectId, setRejectId] = useState<string | null>(null)
   const [reason, setReason]     = useState('')
@@ -150,13 +150,8 @@ export function ManagerLoanApprovals() {
     )
   }
 
-  return (
-    <PageContainer>
-      <PageHeader
-        title="Loan & Advance Approvals"
-        subtitle="Review your team's salary-advance and loan requests — approve to forward to HR"
-      />
-
+  const body = (
+    <>
       {isLoading ? (
         <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading queue…</span>
@@ -253,6 +248,18 @@ export function ManagerLoanApprovals() {
           )}
         </div>
       )}
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Loan & Advance Approvals"
+        subtitle="Review your team's salary-advance and loan requests — approve to forward to HR"
+      />
+      {body}
     </PageContainer>
   )
 }

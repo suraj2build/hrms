@@ -46,9 +46,6 @@ import {
   Wallet,
   IndianRupee,
   UserCog,
-  Clock,
-  CalendarPlus,
-  ClipboardList,
   Package,
   LifeBuoy,
   Coins,
@@ -152,16 +149,10 @@ const BASE_SECTIONS: NavSection[] = [
           { label: 'Team Dashboard',  icon: LayoutDashboard, href: '/manager/dashboard',      exact: true },
           { label: 'Who Is In',       icon: Radio,           href: '/manager/team/who-is-in'              },
           { label: 'Team Attendance', icon: CalendarDays,    href: '/manager/team/attendance'             },
-        ],
-      },
-      {
-        label: 'Approvals',
-        items: [
-          { label: 'Approvals',      icon: CheckSquare,   href: '/manager/approvals'           },
-          { label: 'Regularisation', icon: ClipboardList, href: '/manager/team/regularisation' },
-          { label: 'OT Requests',    icon: Clock,         href: '/manager/team/overtime'       },
-          { label: 'Comp-Off',       icon: CalendarPlus,  href: '/manager/team/comp-off'       },
-          { label: 'Loan Approvals', icon: Wallet,        href: '/manager/loans-approvals'     },
+          // Single Approvals entry — Leave, Regularisation, Overtime, Comp-Off and
+          // Loans are now sub-tabs inside the Approval Inbox (routes still exist
+          // for deep-links).
+          { label: 'Approvals',       icon: CheckSquare,     href: '/manager/approvals'                   },
         ],
       },
       {

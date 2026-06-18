@@ -35,6 +35,9 @@ import {
   IntelligenceLoadingSkeleton,
   IntelligenceEmptyState,
 } from '@/components/ui/intelligence/index.js'
+import { ManagerTeamOvertimeRequests } from '@/pages/manager/ManagerTeamOvertimeRequests'
+import { ManagerTeamCompOff }          from '@/pages/manager/ManagerTeamCompOff'
+import { ManagerLoanApprovals }        from '@/pages/manager/ManagerLoanApprovals'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,7 +79,7 @@ interface PendingResponse {
   pagination:      PendingPagination
 }
 
-type FilterTab = 'all' | 'leave' | 'regularisation'
+type FilterTab = 'all' | 'leave' | 'regularisation' | 'overtime' | 'comp-off' | 'loans'
 
 const PAGE_LIMIT = 20
 
@@ -162,6 +165,9 @@ function EmptyState({ filter }: { filter: FilterTab }) {
     all:            'No pending approvals',
     leave:          'No pending leave requests',
     regularisation: 'No pending regularisation requests',
+    overtime:       'No pending overtime requests',
+    'comp-off':     'No pending comp-off requests',
+    loans:          'No pending loan or advance requests',
   }
   return (
     <IntelligenceEmptyState
@@ -805,7 +811,15 @@ export function ApprovalInbox() {
     { key: 'all',            label: 'All',            count: totalPending },
     { key: 'leave',          label: 'Leave',          count: leaveTotal },
     { key: 'regularisation', label: 'Regularisation', count: regTotal },
+    { key: 'overtime',       label: 'Overtime',       count: 0 },
+    { key: 'comp-off',       label: 'Comp-Off',       count: 0 },
+    { key: 'loans',          label: 'Loans',          count: 0 },
   ]
+
+  // The three new tabs embed the dedicated manager approval pages; the
+  // leave/regularisation lists, SLA sort and pagination apply only to the
+  // built-in approval types below.
+  const isEmbeddedTab = activeTab === 'overtime' || activeTab === 'comp-off' || activeTab === 'loans'
 
   return (
     <PageContainer>
@@ -816,7 +830,7 @@ export function ApprovalInbox() {
           { label: 'Approval Inbox' },
         ]}
         title="Approval Inbox"
-        subtitle="Review and action pending leave and regularisation requests from your team"
+        subtitle="Review and action pending approvals from your team"
       />
 
       {/* Filter tabs + Q3 sort-by-age toggle */}
@@ -849,7 +863,9 @@ export function ApprovalInbox() {
           ))}
         </div>
 
-        {/* Q3 — sort-by-age button; active state lights up in primary */}
+        {/* Q3 — sort-by-age button; active state lights up in primary.
+            Only applies to the built-in leave/regularisation lists. */}
+        {!isEmbeddedTab && (
         <button
           onClick={cycleSortOrder}
           title={
@@ -869,17 +885,23 @@ export function ApprovalInbox() {
                                   <ArrowUpDown className="h-3.5 w-3.5" />}
           {sortOrder === 'asc' ? 'Oldest first' : sortOrder === 'desc' ? 'Newest first' : 'Age'}
         </button>
+        )}
       </div>
 
+      {/* Embedded manager approval pages — overtime / comp-off / loans */}
+      {activeTab === 'overtime' && <ManagerTeamOvertimeRequests embedded />}
+      {activeTab === 'comp-off' && <ManagerTeamCompOff embedded />}
+      {activeTab === 'loans'    && <ManagerLoanApprovals embedded />}
+
       {/* Loading */}
-      {isLoading && (
+      {!isEmbeddedTab && isLoading && (
         <SectionCard>
           <LoadingState />
         </SectionCard>
       )}
 
       {/* Error */}
-      {isError && !isLoading && (
+      {!isEmbeddedTab && isError && !isLoading && (
         <SectionCard>
           <div className="flex flex-col items-center gap-2 py-16">
             <p className="text-sm text-destructive">Failed to load pending approvals</p>
@@ -889,14 +911,14 @@ export function ApprovalInbox() {
       )}
 
       {/* Empty state */}
-      {!isLoading && !isError && filteredTotal === 0 && (
+      {!isEmbeddedTab && !isLoading && !isError && filteredTotal === 0 && (
         <SectionCard>
           <EmptyState filter={activeTab} />
         </SectionCard>
       )}
 
       {/* Leave Requests section */}
-      {!isLoading && !isError && showLeave && filteredLeave.length > 0 && (
+      {!isEmbeddedTab && !isLoading && !isError && showLeave && filteredLeave.length > 0 && (
         <SectionCard
           title={`Leave Requests (${leaveTotal})`}
           icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />}
