@@ -15,7 +15,7 @@ import {
   FileText, Plus, Search, Eye, CheckCircle2, XCircle,
   Send, RefreshCw, ChevronRight,
   BookOpen, Wand2, ClipboardList, Star, Inbox,
-  AlertTriangle, Clock, Check, BadgeCheck, MoreHorizontal, Download,
+  AlertTriangle, Clock, BadgeCheck, MoreHorizontal, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -34,6 +34,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Label }    from '@/components/ui/label'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { sanitizeHtml } from '@/lib/sanitize'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -76,13 +77,6 @@ interface EssRequest {
   rejection_reason: string | null
   template: { name: string; letter_type: string }
   employee: { full_name: string; employee_code: string; designation: string; departments?: { name: string } }
-}
-
-interface Employee {
-  id: string
-  full_name: string
-  employee_code: string
-  designation: string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -367,7 +361,6 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
   const [employeeId, setEmployeeId]   = useState('')
   const [extraVars, setExtraVars]     = useState<Record<string,string>>({})
   const [generated, setGenerated]     = useState<GeneratedLetter | null>(null)
-  const [empSearch, setEmpSearch]     = useState('')
   const [generating, setGenerating]   = useState(false)
   const [submitting, setSubmitting]   = useState(false)
 
@@ -377,14 +370,6 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
   })
   const templates = tmplData?.data ?? []
   const selectedTemplate = templates.find(t => t.id === templateId)
-
-  const { data: empData } = useQuery({
-    queryKey: ['employees-options-letter'],
-    queryFn: () => api.get<{ data: Employee[] }>('/employees/options'),
-  })
-  const employees = (empData?.data ?? []).filter(e =>
-    !empSearch || e.full_name.toLowerCase().includes(empSearch.toLowerCase()) || e.employee_code.includes(empSearch)
-  )
 
   const { data: varData } = useQuery({
     queryKey: ['letter-vars', employeeId],
@@ -476,36 +461,12 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
 
             <div className="space-y-1">
               <Label className="text-xs">Employee *</Label>
-              <Input
-                placeholder="Search by name or code…"
-                value={empSearch}
-                onChange={e => setEmpSearch(e.target.value)}
-                className="mb-1 h-8 text-xs"
+              <EmployeeSelector
+                value={employeeId}
+                onChange={(v) => setEmployeeId(typeof v === 'string' ? v : (v[0] ?? ''))}
+                placeholder="Search employee by name or code…"
+                className="w-full"
               />
-              <div className="border rounded-md max-h-48 overflow-y-auto divide-y divide-border/40">
-                {employees.slice(0, 20).map(e => (
-                  <div
-                    key={e.id}
-                    onClick={() => setEmployeeId(e.id)}
-                    className={cn(
-                      'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-sidebar-accent text-xs',
-                      employeeId === e.id && 'bg-primary/10 text-primary font-medium'
-                    )}
-                  >
-                    <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-[10px] font-bold text-primary">
-                      {e.full_name[0]}
-                    </div>
-                    <div>
-                      <div className="font-medium">{e.full_name}</div>
-                      <div className="text-muted-foreground">{e.employee_code} · {e.designation}</div>
-                    </div>
-                    {employeeId === e.id && <Check className="h-3.5 w-3.5 ml-auto text-primary" />}
-                  </div>
-                ))}
-                {employees.length === 0 && (
-                  <div className="py-6 text-center text-xs text-muted-foreground">No employees found</div>
-                )}
-              </div>
             </div>
           </div>
         )}
