@@ -14,7 +14,7 @@ import {
   Lock, Unlock, CheckCircle2, XCircle, AlertTriangle, Download,
   DollarSign, Users, TrendingDown, FileText,
   ShieldAlert, ChevronDown, ChevronRight, ArrowLeft,
-  RotateCcw, Banknote, BadgeCheck, Scale,
+  RotateCcw, Banknote, BadgeCheck, Scale, Trash2,
   AlertCircle, Loader2,
 } from 'lucide-react'
 
@@ -24,6 +24,9 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
@@ -166,6 +169,7 @@ export function PayrollFinalizationCenter() {
 
   const [finalizeOpen,  setFinalizeOpen]  = useState(false)
   const [rollbackOpen,  setRollbackOpen]  = useState(false)
+  const [deleteRunOpen, setDeleteRunOpen] = useState(false)
   const [freezeOpen,    setFreezeOpen]    = useState(false)
   const [unfreezeOpen,  setUnfreezeOpen]  = useState(false)
   const [rollbackReason, setRollbackReason] = useState('')
@@ -174,14 +178,20 @@ export function PayrollFinalizationCenter() {
   const [forceFinalize,  setForceFinalize]  = useState(false)
   const [forceReason,    setForceReason]    = useState('')
   const [expandedVariance, setExpandedVariance] = useState(false)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
-  // Latest run
+  // Recent runs — the centre can target ANY of them, not just the newest, so a
+  // finalized prior month (e.g. an earlier month awaiting reprocessing) can be
+  // rolled back without first being the latest run.
   const { data: runsRaw, isLoading: runsLoading } = useQuery<{ data: PayrollRun[] }>({
     queryKey: ['payroll-runs-finalize'],
-    queryFn:  () => api.get('/payroll/runs?limit=1'),
+    queryFn:  () => api.get('/payroll/runs?limit=24'),
     staleTime: 30_000,
   })
-  const run = runsRaw?.data?.[0] ?? null
+  const runs = runsRaw?.data ?? []
+  // Selected run, defaulting to the most recent. Falls back to the latest if the
+  // chosen id is no longer present (e.g. after a refetch).
+  const run = (selectedRunId ? runs.find(r => r.id === selectedRunId) : null) ?? runs[0] ?? null
 
   // Blockers for current run
   const { data: blockersRaw } = useQuery<{ data: Blocker[] }>({
@@ -315,6 +325,9 @@ export function PayrollFinalizationCenter() {
   const hardBlockers  = checklist.filter(c => !c.pass && c.blocker)
   const canFinalize   = run && run.status !== 'finalized' && run.status !== 'failed' && run.status !== 'processing'
   const canRollback   = run && (run.status === 'draft' || run.status === 'partial_failed' || (run.status === 'finalized' && isSuperAdmin))
+  // Non-finalized, non-processing runs can be hard-deleted (e.g. a stray
+  // future-month draft). Finalized runs must be rolled back first.
+  const canDeleteRun  = run && run.status !== 'finalized' && run.status !== 'processing'
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const finalizeMutation = useMutation({
@@ -341,6 +354,18 @@ export function PayrollFinalizationCenter() {
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
     onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Rollback failed'),
+  })
+
+  const deleteRunMutation = useMutation({
+    mutationFn: () => api.delete(`/payroll/runs/${run!.id}`),
+    onSuccess: () => {
+      toast.success('Payroll run deleted')
+      setDeleteRunOpen(false)
+      setSelectedRunId(null)   // fall back to the latest remaining run
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs-finalize'] })
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+    },
+    onError: (e: any) => toast.error(e?.response?.data?.message ?? e?.message ?? 'Delete failed'),
   })
 
   const freezeMutation = useMutation({
@@ -419,6 +444,20 @@ export function PayrollFinalizationCenter() {
         subtitle={`${fmtMonth(run.month)} · Finalize, freeze, and export payroll`}
         actions={
           <div className="flex items-center gap-2">
+            {runs.length > 0 && (
+              <Select value={run.id} onValueChange={setSelectedRunId}>
+                <SelectTrigger className="h-8 w-[185px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runs.map(r => (
+                    <SelectItem key={r.id} value={r.id} className="text-xs">
+                      {fmtMonth(r.month)} · {r.status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Button size="sm" variant="outline" onClick={() => navigate('/admin/payroll')}>
               <ArrowLeft className="h-3.5 w-3.5 mr-1" />Runs
             </Button>
@@ -438,6 +477,11 @@ export function PayrollFinalizationCenter() {
             {canRollback && (
               <Button size="sm" variant="outline" className="text-destructive border-destructive/50" onClick={() => setRollbackOpen(true)}>
                 <RotateCcw className="h-3.5 w-3.5 mr-1" />Rollback
+              </Button>
+            )}
+            {canDeleteRun && (
+              <Button size="sm" variant="outline" className="text-destructive border-destructive/50" onClick={() => setDeleteRunOpen(true)}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" />Delete Run
               </Button>
             )}
             {canFinalize && run.status !== 'finalized' && (
@@ -791,6 +835,27 @@ export function PayrollFinalizationCenter() {
                 {rollbackMutation.isPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Rolling back…</> : 'Confirm Rollback'}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Run Dialog ──────────────────────────────────────────────────── */}
+      <Dialog open={deleteRunOpen} onOpenChange={setDeleteRunOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Delete Payroll Run</DialogTitle>
+            <DialogDescription>
+              Permanently delete the <span className="font-medium">{fmtMonth(run.month)}</span> run
+              ({run.status}) and all its computed slips. This cannot be undone. Finalized runs
+              cannot be deleted — roll them back first.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteRunOpen(false)}>Cancel</Button>
+            <Button variant="destructive" size="sm" disabled={deleteRunMutation.isPending}
+              onClick={() => deleteRunMutation.mutate()}>
+              {deleteRunMutation.isPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Deleting…</> : 'Delete Run'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -6,6 +6,8 @@
  * GET    /payroll/runs/blockers         — pre-run readiness: employees missing comp or attendance (Phase 10)
  * GET    /payroll/runs/:id              — get a single run with aggregated totals
  * POST   /payroll/runs/:id/finalize     — finalize a draft run (locks slips)
+ * POST   /payroll/runs/:id/rollback     — roll a finalized/draft run back to draft (super_admin for finalized)
+ * DELETE /payroll/runs/:id              — hard-delete a non-finalized run (e.g. a stray future-month draft)
  * GET    /payroll/runs/:id/slips        — list all employee slips for a run
  * GET    /payroll/runs/:id/export       — CSV export of all slips
  * GET    /payroll/runs/:id/variance     — month-over-month variance vs previous run (Phase 10)
@@ -3117,6 +3119,48 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
 
     return reply.send({ message: unfrozen ? 'Period reopened (unfrozen) and reset to draft' : 'Run rolled back to draft', run_id: id, unfrozen })
+  })
+
+  // ── DELETE /payroll/runs/:id ──────────────────────────────────────────────────
+  // Hard-delete a NON-finalized run and its children (slips, blockers,
+  // run-employees cascade via their ON DELETE CASCADE FKs; events/snapshots are
+  // SET NULL). Use case: removing a stray/erroneous draft — e.g. a future-month
+  // run created before the future-month guard existed. Finalized runs are
+  // immutable: roll them back first. hr_admin or super_admin.
+  fastify.delete('/payroll/runs/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const tenantId = req.tenantId as string
+
+    const { data: run, error: runErr } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (runErr || !run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (run.status === 'finalized') {
+      return reply.code(409).send({
+        error:   'RUN_FINALIZED',
+        message: 'Finalized runs cannot be deleted. Roll the run back to draft first (super_admin).',
+      })
+    }
+    if (run.status === 'processing') {
+      return reply.code(409).send({ error: 'PROCESSING', message: 'Cannot delete a run that is currently processing' })
+    }
+
+    // Audit BEFORE deletion — the event FK is ON DELETE SET NULL, so the row
+    // survives (with run_id nulled) once the run is gone.
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id: tenantId, run_id: id, event_type: 'run_deleted',
+      month: run.month, payload: { deleted_by: req.userId, prior_status: run.status },
+    })
+
+    const { error: delErr } = await fastify.supabase
+      .from('payroll_runs').delete().eq('id', id).eq('tenant_id', tenantId)
+    if (delErr) return reply.code(500).send({ error: 'DB_ERROR', message: delErr.message })
+
+    return reply.send({ message: `Run for ${run.month} deleted`, run_id: id })
   })
 
   // ── GET /payroll/forensics ────────────────────────────────────────────────────
