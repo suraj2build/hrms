@@ -49,6 +49,20 @@ export function EmployeeSelector({
   const [options, setOptions] = useState<EmployeeOption[]>([])
   const [loading, setLoading] = useState(false)
   const [focusIndex, setFocusIndex] = useState(-1)
+  // Accumulated id → label cache so the trigger/selected chips can always show
+  // a name + code (never a raw UUID), even for a preselected value not present
+  // in the current search results.
+  const [labelCache, setLabelCache] = useState<Record<string, EmployeeOption>>({})
+  const labelCacheRef = useRef(labelCache)
+  labelCacheRef.current = labelCache
+  const mergeLabels = useCallback((rows: EmployeeOption[]) => {
+    if (rows.length === 0) return
+    setLabelCache((prev) => {
+      const next = { ...prev }
+      for (const r of rows) next[r.id] = r
+      return next
+    })
+  }, [])
 
   const ref = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -76,17 +90,29 @@ export function EmployeeSelector({
   }, [open])
 
   // ── Fetch employees ───────────────────────────────────────────────────────
+  // Uses /employees/options — open to ANY authenticated role (managers, ESS,
+  // not just hr_admin) and searches name + employee_code + email. This lets the
+  // same searchable picker be reused everywhere rather than each page rolling a
+  // plain, unsearchable <Select>.
   useEffect(() => {
     let cancelled = false
     async function fetch() {
       setLoading(true)
       try {
-        const params = new URLSearchParams({ q: debouncedQuery })
+        const params = new URLSearchParams({ search: debouncedQuery, limit: '50' })
         if (tenantId) params.set('tenantId', tenantId)
-        const res = await api.get<{ data: EmployeeOption[] }>(
-          `/employees/search?${params.toString()}`,
-        )
-        if (!cancelled) setOptions(res.data)
+        const res = await api.get<{
+          data: Array<{ id: string; first_name: string; last_name: string; employee_code?: string }>
+        }>(`/employees/options?${params.toString()}`)
+        if (!cancelled) {
+          const mapped = (res.data ?? []).map((e) => ({
+            id:            e.id,
+            full_name:     `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
+            employee_code: e.employee_code,
+          }))
+          setOptions(mapped)
+          mergeLabels(mapped)
+        }
       } catch {
         if (!cancelled) setOptions([])
       } finally {
@@ -95,7 +121,32 @@ export function EmployeeSelector({
     }
     if (open) fetch()
     return () => { cancelled = true }
-  }, [debouncedQuery, open, tenantId])
+  }, [debouncedQuery, open, tenantId, mergeLabels])
+
+  // ── Resolve labels for preselected ids (so the trigger never shows a UUID) ──
+  const selectedKey = (Array.isArray(value) ? value : value ? [value] : []).join(',')
+  useEffect(() => {
+    const ids = selectedKey ? selectedKey.split(',') : []
+    const missing = ids.filter((id) => id && !labelCacheRef.current[id])
+    if (missing.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await api.get<{
+          data: Array<{ id: string; first_name: string; last_name: string; employee_code?: string }>
+        }>(`/employees/options?ids=${encodeURIComponent(missing.join(','))}`)
+        if (cancelled) return
+        mergeLabels(
+          (res.data ?? []).map((e) => ({
+            id:            e.id,
+            full_name:     `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
+            employee_code: e.employee_code,
+          })),
+        )
+      } catch { /* leave unresolved — falls back to id */ }
+    })()
+    return () => { cancelled = true }
+  }, [selectedKey, mergeLabels])
 
   // ── Selection helpers ─────────────────────────────────────────────────────
   const selectedIds: string[] = useMemo(
@@ -167,18 +218,23 @@ export function EmployeeSelector({
   }, [focusIndex])
 
   // ── Trigger label ─────────────────────────────────────────────────────────
+  // Resolve via the label cache first (covers preselected values not in the
+  // current search list), then the loaded options. Show "Name · CODE" so the
+  // human employee code is always visible — never a raw UUID.
+  const resolveLabel = useCallback((id: string): string => {
+    const opt = labelCache[id] ?? options.find((o) => o.id === id)
+    if (!opt) return id
+    return opt.employee_code ? `${opt.full_name} · ${opt.employee_code}` : opt.full_name
+  }, [labelCache, options])
+
   const triggerLabel = useMemo(() => {
     if (selectedIds.length === 0) return placeholder
     if (multiple) {
-      if (selectedIds.length === 1) {
-        const opt = options.find((o) => o.id === selectedIds[0])
-        return opt?.full_name ?? `1 selected`
-      }
+      if (selectedIds.length === 1) return resolveLabel(selectedIds[0])
       return `${selectedIds.length} selected`
     }
-    const opt = options.find((o) => o.id === selectedIds[0])
-    return opt?.full_name ?? selectedIds[0]
-  }, [selectedIds, multiple, options, placeholder])
+    return resolveLabel(selectedIds[0])
+  }, [selectedIds, multiple, placeholder, resolveLabel])
 
   const hasValue = selectedIds.length > 0
 
