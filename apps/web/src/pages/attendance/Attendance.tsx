@@ -40,6 +40,7 @@ import { FormField } from '@/components/forms/FormField'
 import { Badge }   from '@/components/ui/badge'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { DateInput } from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -2162,12 +2163,12 @@ export function Attendance() {
                   min={recomputeFrom}
                 />
               </FormField>
-              <FormField label="Employee ID (optional)" htmlFor="rc-emp">
-                <Input
-                  id="rc-emp"
+              <FormField label="Employee (optional)" htmlFor="rc-emp">
+                <EmployeeSelector
                   value={recomputeEmpId}
-                  onChange={(e) => setRecomputeEmpId(e.target.value)}
-                  placeholder="UUID — leave blank for all"
+                  onChange={(v) => setRecomputeEmpId(typeof v === 'string' ? v : (v[0] ?? ''))}
+                  placeholder="All employees"
+                  className="w-full"
                 />
               </FormField>
             </div>
@@ -2257,12 +2258,12 @@ export function Attendance() {
                 onChange={setLogTo}
               />
             </FormField>
-            <FormField label="Employee ID" htmlFor="log-emp-id">
-              <Input
-                id="log-emp-id"
-                placeholder="UUID (optional)"
+            <FormField label="Employee" htmlFor="log-emp-id">
+              <EmployeeSelector
                 value={logEmpId}
-                onChange={(e) => setLogEmpId(e.target.value)}
+                onChange={(v) => setLogEmpId(typeof v === 'string' ? v : (v[0] ?? ''))}
+                placeholder="All employees"
+                className="w-full"
               />
             </FormField>
             <FormField label="Source" htmlFor="log-source">

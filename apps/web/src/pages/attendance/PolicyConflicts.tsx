@@ -11,6 +11,7 @@
 import { useState }      from 'react'
 import { useQuery }      from '@tanstack/react-query'
 import { EmployeeLabel } from '@/components/employee/EmployeeLabel'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   ShieldAlert, GitMerge, Search,
   ChevronLeft, ChevronRight, AlertTriangle,
@@ -280,12 +281,12 @@ export function PolicyConflicts() {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Employee ID</label>
-            <Input
-              placeholder="UUID…"
+            <label className="text-xs font-medium text-muted-foreground">Employee</label>
+            <EmployeeSelector
+              placeholder="All employees"
               value={filters.employee_id}
-              onChange={e => setFilters(p => ({ ...p, employee_id: e.target.value }))}
-              className="h-8 text-xs w-44"
+              onChange={v => setFilters(p => ({ ...p, employee_id: typeof v === 'string' ? v : (v[0] ?? '') }))}
+              className="w-56"
             />
           </div>
           <div className="space-y-1">

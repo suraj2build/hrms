@@ -22,6 +22,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { DateInput }      from '@/components/ui/date-input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
@@ -198,12 +199,12 @@ export function CollisionLog() {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Employee ID</label>
-            <Input
-              placeholder="UUID…"
+            <label className="text-xs font-medium text-muted-foreground">Employee</label>
+            <EmployeeSelector
+              placeholder="All employees"
               value={filters.employee_id}
-              onChange={e => setFilters(p => ({ ...p, employee_id: e.target.value }))}
-              className="h-8 text-xs w-48"
+              onChange={v => setFilters(p => ({ ...p, employee_id: typeof v === 'string' ? v : (v[0] ?? '') }))}
+              className="w-56"
             />
           </div>
           <Button size="sm" className="h-8 text-xs" onClick={applyFilters}>

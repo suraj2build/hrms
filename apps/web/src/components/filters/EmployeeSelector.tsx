@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Check, ChevronDown, Loader2, User } from 'lucide-react'
+import { Check, ChevronDown, Loader2, User, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api/client'
 
@@ -268,6 +268,17 @@ export function EmployeeSelector({
       >
         <User className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         <span className="flex-1 text-left truncate">{triggerLabel}</span>
+        {hasValue && !disabled && (
+          // Clear the selection (e.g. an optional filter back to "all").
+          <span
+            role="button"
+            aria-label="Clear selection"
+            onClick={(e) => { e.stopPropagation(); onChange(multiple ? [] : '') }}
+            className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+          >
+            <X className="w-3.5 h-3.5" />
+          </span>
+        )}
         <ChevronDown
           className={cn('w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
         />
