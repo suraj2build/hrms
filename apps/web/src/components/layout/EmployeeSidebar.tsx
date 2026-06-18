@@ -109,6 +109,7 @@ const BASE_GROUPS: NavGroup[] = [
       { label: 'Resignation & Exit', icon: LogOut,   href: '/ess/separation'  },
       { label: 'My Team',      icon: Users,          href: '/ess/team'        }, // manager-only
       { label: 'Policies',     icon: BookMarked,     href: '/ess/policies'    },
+      { label: 'How-To Guides', icon: HelpCircle,    href: '/ess/runbooks'    },
       { label: 'HR Support',   icon: HeadphonesIcon, href: '/ess/hr-support'  },
       { label: 'Helpdesk',     icon: LifeBuoy,       href: '/ess/issues'      },
     ],

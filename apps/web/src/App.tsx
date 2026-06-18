@@ -40,6 +40,7 @@ import { MyAttendance }    from '@/pages/attendance/MyAttendance'
 import { MyLeaveRequests } from '@/pages/attendance/MyLeaveRequests'
 import { LeaveApply }      from '@/pages/attendance/LeaveApply'
 import { EssHelpdesk }         from '@/pages/ess/EssHelpdesk'
+import { EssRunbooks }         from '@/pages/ess/EssRunbooks'
 // EssCorrections retired — replaced by EssRegularization (/ess/attendance/regularization)
 import { EssSchedule }         from '@/pages/ess/EssSchedule'
 // EssCompOff merged into EssLeaveBalance (/ess/leave/balance → Comp-Off tab)
@@ -942,6 +943,7 @@ export default function App() {
                 <Route path="/ess/team"                   element={<EssTeam />} />
                 <Route path="/ess/whos-off"               element={<EssTeamOff />} />
                 <Route path="/ess/policies"               element={<EssPolicies />} />
+                <Route path="/ess/runbooks"               element={<EssRunbooks />} />
                 <Route path="/ess/hr-support"             element={<EssHRSupport />} />
                 {/* Attendance Calendar retired — redirect to unified My Attendance workspace */}
                 <Route path="/ess/attendance/calendar"    element={<Navigate to="/ess/attendance" replace />} />
