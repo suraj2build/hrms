@@ -9,6 +9,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { checkDeclarationWindow } from './tds.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -169,6 +170,9 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const windowErr = await checkDeclarationWindow(fastify, req.tenantId)
+    if (windowErr) return reply.code(windowErr.code).send(windowErr.body)
+
     const employeeId = await resolveCallerEmployeeId(fastify, req)
     if (!employeeId) {
       return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'No employee record linked to this account' })
@@ -207,6 +211,9 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
+
+    const windowErr = await checkDeclarationWindow(fastify, req.tenantId)
+    if (windowErr) return reply.code(windowErr.code).send(windowErr.body)
 
     const employeeId = await resolveCallerEmployeeId(fastify, req)
     if (!employeeId) {

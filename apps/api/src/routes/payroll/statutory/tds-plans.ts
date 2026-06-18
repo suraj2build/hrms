@@ -469,6 +469,9 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
     }
 
+    const windowErr = await checkDeclarationWindow(fastify, req.tenantId)
+    if (windowErr) return reply.code(windowErr.code).send(windowErr.body)
+
     const { planId } = req.params as { planId: string }
 
     const { data: plan } = await fastify.supabase
