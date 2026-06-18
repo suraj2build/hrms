@@ -1,0 +1,329 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1560" viewBox="0 0 1320 1560" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <!-- 12 · Prussian Blue -->
+    <linearGradient id="g12" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1C3461"/><stop offset="0.5" stop-color="#122349"/><stop offset="1" stop-color="#09152C"/>
+    </linearGradient>
+    <!-- 13 · Dark Rust / Terracotta -->
+    <linearGradient id="g13" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#622618"/><stop offset="0.5" stop-color="#4A1B10"/><stop offset="1" stop-color="#2E1008"/>
+    </linearGradient>
+    <!-- 14 · Midnight Olive -->
+    <linearGradient id="g14" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2E3018"/><stop offset="0.5" stop-color="#20220F"/><stop offset="1" stop-color="#121307"/>
+    </linearGradient>
+    <!-- 15 · Carbon Blue (near-black) -->
+    <linearGradient id="g15" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1424"/><stop offset="0.5" stop-color="#080E1A"/><stop offset="1" stop-color="#04080E"/>
+    </linearGradient>
+    <!-- 16 · Dark Mauve / Dusty Plum -->
+    <linearGradient id="g16" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3C1F32"/><stop offset="0.5" stop-color="#2A1524"/><stop offset="1" stop-color="#180C15"/>
+    </linearGradient>
+    <!-- 17 · Hunter Green + Silver -->
+    <linearGradient id="g17" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1A3C28"/><stop offset="0.5" stop-color="#10281A"/><stop offset="1" stop-color="#07160E"/>
+    </linearGradient>
+    <!-- 18 · Dark Copper / Bronze -->
+    <linearGradient id="g18" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4A2E18"/><stop offset="0.5" stop-color="#362010"/><stop offset="1" stop-color="#201208"/>
+    </linearGradient>
+    <!-- 19 · Stormy Slate -->
+    <linearGradient id="g19" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#283440"/><stop offset="0.5" stop-color="#1C2530"/><stop offset="1" stop-color="#10161C"/>
+    </linearGradient>
+    <!-- 20 · Midnight Teal-Black -->
+    <linearGradient id="g20" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A2828"/><stop offset="0.5" stop-color="#061A1A"/><stop offset="1" stop-color="#030D0D"/>
+    </linearGradient>
+
+    <linearGradient id="sh3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="dropshadow3" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="7" flood-color="#181818" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1320" height="1560" fill="#F2F3F5"/>
+
+  <!-- Title -->
+  <text x="40" y="50" font-size="24" font-weight="700" fill="#1B1D20">Dark Themes · Round 3 (12–20)</text>
+  <text x="40" y="74" font-size="13" fill="#6B7177">Prussian blue, rust, olive, carbon, mauve, hunter green, bronze, stormy slate, midnight teal — 9 more options.</text>
+
+  <!-- ══ MACRO — reuse this group shape for every card ══ -->
+  <!-- Each card: 600×300, mini app inside g transform="translate(24,70)" -->
+
+  <!-- ────────────────────── 12 · Prussian Blue ────────────────────── -->
+  <g transform="translate(40,100)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">12 · Prussian Blue</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Historical deep blue · silver-white accent</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#F8F9FB" stroke="#E4E8EF"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g12)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#0C1B3A">Cognix<tspan fill="#B0C0DC">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#1C3461" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#7A8699">Payroll</text><text x="336" y="22" font-size="10.5" fill="#7A8699">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#F8F9FB" stroke="#E4E8EF"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#DDE4F0"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#1C3461"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#1C3461">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#364260">Employees</text><text x="18" y="126" font-size="10.5" fill="#364260">Payroll</text><text x="18" y="152" font-size="10.5" fill="#364260">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g12)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#A8B8D0">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#B0C8E8">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#E4E8EF"/>
+      <text x="360" y="70" font-size="10" fill="#7A8699">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#0C1B3A">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#1C3461"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#B0C0DC" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#3A5080" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E5F3EC"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#1C3461"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#263F72"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#B0C0DC"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#D8E4F4"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#1C3461 · #263F72 · silver-blue</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 13 · Dark Rust ────────────────────── -->
+  <g transform="translate(680,100)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">13 · Dark Rust / Terracotta</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Deep fired-earth · ivory cream accent</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#FAF8F6" stroke="#EDE8E2"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g13)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#201008">Cognix<tspan fill="#C9A060">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#622618" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#8A7268">Payroll</text><text x="336" y="22" font-size="10.5" fill="#8A7268">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#FAF8F6" stroke="#EDE8E2"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#F2E4DC"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#622618"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#622618">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#4A2E24">Employees</text><text x="18" y="126" font-size="10.5" fill="#4A2E24">Payroll</text><text x="18" y="152" font-size="10.5" fill="#4A2E24">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g13)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#C8A898">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#E8D090">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#EDE8E2"/>
+      <text x="360" y="70" font-size="10" fill="#8A7268">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#201008">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#622618"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#C9A060" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#7A5820" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E7F2EB"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#622618"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#7A3222"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#C9A060"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#E8C890"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#622618 · #7A3222 · ivory</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 14 · Midnight Olive ────────────────────── -->
+  <g transform="translate(40,420)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">14 · Midnight Olive</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Dark olive-khaki · gold accent #C8A840</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#F9F9F6" stroke="#EAEAE0"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g14)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#1A1C0C">Cognix<tspan fill="#B8A030">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#2E3018" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#7A7A68">Payroll</text><text x="336" y="22" font-size="10.5" fill="#7A7A68">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#F9F9F6" stroke="#EAEAE0"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#E4E4D0"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#2E3018"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#2E3018">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#3C3E28">Employees</text><text x="18" y="126" font-size="10.5" fill="#3C3E28">Payroll</text><text x="18" y="152" font-size="10.5" fill="#3C3E28">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g14)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#AAAAA0">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#D8C870">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#EAEAE0"/>
+      <text x="360" y="70" font-size="10" fill="#7A7A68">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#1A1C0C">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#2E3018"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#C8A840" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#7A6818" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E7F2EB"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#2E3018"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#404228"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#C8A840"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#E0C860"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#2E3018 · #404228 · olive-gold</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 15 · Carbon Blue ────────────────────── -->
+  <g transform="translate(680,420)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">15 · Carbon Blue</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Near-black blue · electric azure accent #3A8FD0</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#F7F8FB" stroke="#E4E6EC"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g15)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#08111F">Cognix<tspan fill="#3A8FD0">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#1A2438" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#6A7488">Payroll</text><text x="336" y="22" font-size="10.5" fill="#6A7488">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#F7F8FB" stroke="#E4E6EC"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#DDE2EE"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#1A2438"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#0D1424">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#283040">Employees</text><text x="18" y="126" font-size="10.5" fill="#283040">Payroll</text><text x="18" y="152" font-size="10.5" fill="#283040">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g15)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#A0AABC">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#7AC0E8">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#E4E6EC"/>
+      <text x="360" y="70" font-size="10" fill="#6A7488">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#08111F">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#0D1424"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#3A8FD0" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#1A5A88" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E5F3EC"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#0D1424"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#1C2A40"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#3A8FD0"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#78BCE8"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#0D1424 · #1C2A40 · electric azure</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 16 · Dark Mauve ────────────────────── -->
+  <g transform="translate(40,740)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">16 · Dark Mauve</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Dusty deep rose-plum · blush-gold accent</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#FAF7F9" stroke="#EEE4EC"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g16)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#1C0E18">Cognix<tspan fill="#C89088">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#3C1F32" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#8A7480">Payroll</text><text x="336" y="22" font-size="10.5" fill="#8A7480">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#FAF7F9" stroke="#EEE4EC"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#EEE0EC"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#3C1F32"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#3C1F32">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#4A2E40">Employees</text><text x="18" y="126" font-size="10.5" fill="#4A2E40">Payroll</text><text x="18" y="152" font-size="10.5" fill="#4A2E40">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g16)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#C0A8B8">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#E0B8B0">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#EEE4EC"/>
+      <text x="360" y="70" font-size="10" fill="#8A7480">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#1C0E18">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#3C1F32"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#C89088" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#885060" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E7F2EB"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#3C1F32"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#502B44"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#C89088"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#E0B0A8"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#3C1F32 · #502B44 · blush-gold</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 17 · Hunter Green + Silver ────────────────────── -->
+  <g transform="translate(680,740)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">17 · Hunter Green + Silver</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Classic hunter green · platinum silver accent</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#F7FAF8" stroke="#E2EBE6"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g17)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#0E1F16">Cognix<tspan fill="#9EB8A4">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#1A3C28" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#6A8278">Payroll</text><text x="336" y="22" font-size="10.5" fill="#6A8278">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#F7FAF8" stroke="#E2EBE6"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#D8E8E0"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#1A3C28"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#1A3C28">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#2A4438">Employees</text><text x="18" y="126" font-size="10.5" fill="#2A4438">Payroll</text><text x="18" y="152" font-size="10.5" fill="#2A4438">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g17)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#A8C0B0">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#C8DCD0">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#E2EBE6"/>
+      <text x="360" y="70" font-size="10" fill="#6A8278">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#0E1F16">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#1A3C28"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#9EB8A4" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#2A5840" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E2F0E8"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#1A3C28"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#244E34"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#9EB8A4"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#C4D8C8"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#1A3C28 · #244E34 · platinum</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 18 · Dark Copper / Bronze ────────────────────── -->
+  <g transform="translate(40,1060)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">18 · Dark Copper / Bronze</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Burnished bronze-dark · bright copper accent</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#FAF8F5" stroke="#EDE6DC"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g18)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#1E1208">Cognix<tspan fill="#C87840">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#4A2E18" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#8A7868">Payroll</text><text x="336" y="22" font-size="10.5" fill="#8A7868">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#FAF8F5" stroke="#EDE6DC"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#EEE0D0"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#4A2E18"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#4A2E18">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#543A24">Employees</text><text x="18" y="126" font-size="10.5" fill="#543A24">Payroll</text><text x="18" y="152" font-size="10.5" fill="#543A24">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g18)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#C0A890">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#E8B878">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#EDE6DC"/>
+      <text x="360" y="70" font-size="10" fill="#8A7868">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#1E1208">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#4A2E18"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#C87840" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#7A4818" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E7F2EB"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#4A2E18"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#623C20"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#C87840"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#E0A060"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#4A2E18 · #623C20 · copper</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 19 · Stormy Slate ────────────────────── -->
+  <g transform="translate(680,1060)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">19 · Stormy Slate</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Deep storm-grey · ice-blue accent #7ABCE0</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#F8F9FA" stroke="#E4E8EC"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g19)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#141C22">Cognix<tspan fill="#7ABCE0">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#283440" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#788290">Payroll</text><text x="336" y="22" font-size="10.5" fill="#788290">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#F8F9FA" stroke="#E4E8EC"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#DDE2E8"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#283440"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#1C2830">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#304048">Employees</text><text x="18" y="126" font-size="10.5" fill="#304048">Payroll</text><text x="18" y="152" font-size="10.5" fill="#304048">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g19)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#A8B4BC">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#98D0EC">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#E4E8EC"/>
+      <text x="360" y="70" font-size="10" fill="#788290">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#141C22">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#283440"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#7ABCE0" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#2A6898" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E5F3EC"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#283440"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#384858"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#7ABCE0"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#A8D8F0"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#283440 · #384858 · ice-blue</text>
+    </g>
+  </g>
+
+  <!-- ────────────────────── 20 · Midnight Teal-Black ────────────────────── -->
+  <g transform="translate(360,1380)">
+    <rect width="600" height="300" rx="16" fill="#FFFFFF" filter="url(#dropshadow3)"/>
+    <text x="24" y="34" font-size="15" font-weight="700" fill="#1B1D20">20 · Midnight Teal-Black</text>
+    <text x="24" y="54" font-size="11.5" fill="#8A9099">Near-black teal · bright jade accent #3ABFA0</text>
+    <g transform="translate(24,70)">
+      <rect width="552" height="34" rx="8" fill="#F6FAFA" stroke="#E0EBEA"/>
+      <rect x="10" y="9" width="16" height="16" rx="5" fill="url(#g20)"/>
+      <text x="36" y="22" font-size="11.5" font-weight="700" fill="#041410">Cognix<tspan fill="#3ABFA0">HR</tspan></text>
+      <text x="196" y="22" font-size="10.5" fill="#0A2828" font-weight="600">Operations</text><text x="278" y="22" font-size="10.5" fill="#648880">Payroll</text><text x="336" y="22" font-size="10.5" fill="#648880">Reports</text>
+      <rect x="0" y="44" width="120" height="170" rx="8" fill="#F6FAFA" stroke="#E0EBEA"/>
+      <rect x="8" y="54" width="104" height="26" rx="6" fill="#D0E8E4"/><rect x="8" y="54" width="3" height="26" rx="2" fill="#0A2828"/>
+      <text x="18" y="71" font-size="10.5" font-weight="700" fill="#0A2828">Dashboard</text>
+      <text x="18" y="100" font-size="10.5" fill="#1A3430">Employees</text><text x="18" y="126" font-size="10.5" fill="#1A3430">Payroll</text><text x="18" y="152" font-size="10.5" fill="#1A3430">Reports</text>
+      <rect x="132" y="44" width="200" height="80" rx="11" fill="url(#g20)"/>
+      <rect x="132" y="44" width="200" height="38" rx="11" fill="url(#sh3)"/>
+      <text x="148" y="70" font-size="10" fill="#90B8B0">Total CTC</text>
+      <text x="148" y="98" font-size="22" font-weight="700" fill="#fff">₹2.46 Cr</text>
+      <text x="148" y="115" font-size="9.5" fill="#68DBC0">▲ 8.2%</text>
+      <rect x="344" y="44" width="208" height="80" rx="11" fill="#fff" stroke="#E0EBEA"/>
+      <text x="360" y="70" font-size="10" fill="#648880">Headcount</text><text x="360" y="98" font-size="22" font-weight="700" fill="#041410">1,284</text><text x="360" y="115" font-size="9.5" fill="#2E7D52">▲ 24 joiners</text>
+      <rect x="132" y="136" width="104" height="30" rx="8" fill="#0A2828"/><text x="184" y="156" font-size="11" font-weight="650" fill="#fff" text-anchor="middle">Run Payroll</text>
+      <rect x="246" y="138" width="86" height="26" rx="8" fill="#fff" stroke="#3ABFA0" stroke-width="1.3"/><text x="289" y="156" font-size="11" font-weight="600" fill="#0A7858" text-anchor="middle">Export</text>
+      <rect x="344" y="139" width="60" height="24" rx="12" fill="#E2F0EC"/><text x="374" y="155" font-size="10" fill="#1F7C52" text-anchor="middle">Active</text>
+      <rect x="412" y="139" width="68" height="24" rx="12" fill="#FBE3E4"/><text x="446" y="155" font-size="10" fill="#C42B32" text-anchor="middle">Overdue</text>
+      <rect x="132" y="178" width="46" height="22" rx="5" fill="#0A2828"/><rect x="184" y="178" width="46" height="22" rx="5" fill="#103434"/><rect x="236" y="178" width="46" height="22" rx="5" fill="#3ABFA0"/><rect x="288" y="178" width="46" height="22" rx="5" fill="#70D8C0"/>
+      <text x="344" y="193" font-size="9.5" fill="#8A9099">#0A2828 · #103434 · bright jade</text>
+    </g>
+  </g>
+</svg>
