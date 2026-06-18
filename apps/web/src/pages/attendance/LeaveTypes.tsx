@@ -24,6 +24,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { FormField, FormActions } from '@/components/forms/FormField'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Badge }         from '@/components/ui/badge'
 import { toast }         from 'sonner'
 import { api }           from '@/lib/api/client'
@@ -536,12 +537,11 @@ export function LeaveTypes() {
           icon={<BookOpen className="h-4 w-4 text-muted-foreground" />}
         >
           <div className="flex gap-2 mb-4">
-            <Input
-              placeholder="Employee UUID"
+            <EmployeeSelector
+              placeholder="Search employee by name or code…"
               value={balanceEmpId}
-              onChange={e => setBalanceEmpId(e.target.value)}
-              className="h-8 text-xs flex-1"
-              onKeyDown={e => { if (e.key === 'Enter') setAppliedEmpId(balanceEmpId) }}
+              onChange={v => { const val = typeof v === 'string' ? v : (v[0] ?? ''); setBalanceEmpId(val); setAppliedEmpId(val) }}
+              className="flex-1"
             />
             <Button className="h-8 text-xs" onClick={() => setAppliedEmpId(balanceEmpId)}>
               Load

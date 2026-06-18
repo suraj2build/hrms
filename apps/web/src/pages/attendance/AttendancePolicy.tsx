@@ -29,6 +29,7 @@ import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Badge }          from '@/components/ui/badge'
 import { FormField }      from '@/components/forms/FormField'
 import { api }            from '@/lib/api/client'
@@ -501,11 +502,11 @@ export function AttendancePolicy() {
             <p className="text-xs text-muted-foreground mb-4">Override the default policy for specific employees</p>
             {/* Add assignment */}
             <div className="flex gap-2 mb-4">
-              <Input
-                placeholder="Employee UUID"
+              <EmployeeSelector
+                placeholder="Search employee by name or code…"
                 value={assignEmpId}
-                onChange={e => setAssignEmpId(e.target.value)}
-                className="h-8 text-xs flex-1"
+                onChange={v => setAssignEmpId(typeof v === 'string' ? v : (v[0] ?? ''))}
+                className="flex-1"
               />
               <select
                 value={assignPolId}

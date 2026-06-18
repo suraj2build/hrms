@@ -27,7 +27,7 @@ import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
-import { Input }          from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
@@ -389,21 +389,17 @@ export function LeaveAccrualLedger() {
           icon={<Search className="h-4 w-4 text-muted-foreground" />}
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative flex items-center flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-              <Input
-                placeholder="Paste employee ID (UUID)…"
-                value={empIdInput}
-                onChange={e => setEmpIdInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && empIdInput.trim()) {
-                    setAppliedEmpId(empIdInput.trim())
-                    setOffset(0)
-                  }
-                }}
-                className="h-8 text-xs pl-8 font-mono"
-              />
-            </div>
+            <EmployeeSelector
+              className="flex-1 max-w-sm"
+              placeholder="Search employee by name or code…"
+              value={empIdInput}
+              onChange={v => {
+                const val = typeof v === 'string' ? v : (v[0] ?? '')
+                setEmpIdInput(val)
+                setAppliedEmpId(val || null)
+                setOffset(0)
+              }}
+            />
             <Button
               size="sm"
               className="h-8 text-xs gap-1.5"

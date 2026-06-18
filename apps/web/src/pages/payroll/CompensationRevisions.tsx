@@ -22,6 +22,7 @@ import { SectionCard }      from '@/components/layout/SectionCard'
 import { Button }           from '@/components/ui/button'
 import { Badge }            from '@/components/ui/badge'
 import { Input }            from '@/components/ui/input'
+import { EmployeeSelector }  from '@/components/filters/EmployeeSelector'
 import { DateInput }        from '@/components/ui/date-input'
 import {
   Dialog,
@@ -149,9 +150,9 @@ function SubmitRevisionForm({ onSuccess, onCancel }: SubmitFormProps) {
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className={labelCls}>Employee UUID *</label>
-          <Input className={inputCls} placeholder="Employee ID"
-            value={form.employee_id} onChange={e => setForm(p => ({ ...p, employee_id: e.target.value }))} />
+          <label className={labelCls}>Employee *</label>
+          <EmployeeSelector className="w-full" placeholder="Search employee by name or code…"
+            value={form.employee_id} onChange={v => setForm(p => ({ ...p, employee_id: typeof v === 'string' ? v : (v[0] ?? '') }))} />
         </div>
         <div>
           <label className={labelCls}>Revision Type *</label>

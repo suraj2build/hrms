@@ -24,6 +24,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   Dialog,
   DialogContent,
@@ -344,11 +345,11 @@ function EligibilityChecker() {
     >
       <div className="space-y-3">
         <div className="flex gap-2">
-          <Input
-            placeholder="Enter Employee ID…"
+          <EmployeeSelector
+            placeholder="Search employee by name or code…"
             value={employeeId}
-            onChange={e => { setEmployeeId(e.target.value); setChecked(false) }}
-            className="h-8 text-xs flex-1"
+            onChange={v => { setEmployeeId(typeof v === 'string' ? v : (v[0] ?? '')); setChecked(false) }}
+            className="flex-1"
           />
           <Button
             size="sm"

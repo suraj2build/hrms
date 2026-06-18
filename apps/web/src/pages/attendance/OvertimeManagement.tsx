@@ -24,6 +24,7 @@ import { SectionCard }     from '@/components/layout/SectionCard'
 import { Badge }           from '@/components/ui/badge'
 import { Button }          from '@/components/ui/button'
 import { Input }           from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from '@/components/ui/tabs'
@@ -689,11 +690,11 @@ function AssignmentsTab() {
         icon={<Users className="h-4 w-4 text-muted-foreground" />}
       >
         <div className="flex gap-2 mb-4">
-          <Input
-            placeholder="Employee UUID"
+          <EmployeeSelector
+            placeholder="Search employee by name or code…"
             value={empId}
-            onChange={e => setEmpId(e.target.value)}
-            className="h-8 text-xs flex-1"
+            onChange={v => setEmpId(typeof v === 'string' ? v : (v[0] ?? ''))}
+            className="flex-1"
           />
           <Button className="h-8 text-xs" onClick={() => { setApplied(empId); setMsg('') }}>Load</Button>
         </div>

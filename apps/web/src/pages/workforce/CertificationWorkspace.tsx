@@ -20,6 +20,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Label }         from '@/components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -313,12 +314,12 @@ export function CertificationWorkspace() {
           <div className="space-y-3 py-2">
             {!editTarget && (
               <div>
-                <Label>Employee ID *</Label>
-                <Input
-                  className="mt-1"
-                  placeholder="Employee UUID"
+                <Label>Employee *</Label>
+                <EmployeeSelector
+                  className="mt-1 w-full"
+                  placeholder="Search employee by name or code…"
                   value={form.employee_id}
-                  onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
+                  onChange={v => setForm(f => ({ ...f, employee_id: typeof v === 'string' ? v : (v[0] ?? '') }))}
                 />
               </div>
             )}
