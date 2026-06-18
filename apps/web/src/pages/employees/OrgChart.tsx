@@ -13,7 +13,7 @@
  *   • Print / Save as PDF (browser print)
  */
 
-import { useMemo, useState, useRef, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tree, TreeNode } from 'react-organizational-chart'
 import {
@@ -29,6 +29,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
@@ -79,50 +82,6 @@ function collectDepartments(roots: OrgNode[]): string[] {
   return Array.from(set).sort()
 }
 
-// ── Node action popover ───────────────────────────────────────────────────────
-
-function NodePopover({
-  node,
-  onClose,
-  onChangeManager,
-}: {
-  node: OrgNode
-  onClose: () => void
-  onChangeManager: (node: OrgNode) => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
-
-  return (
-    <div
-      ref={ref}
-      className="absolute z-50 left-1/2 -translate-x-1/2 top-full mt-2 w-52 bg-card border border-border rounded-xl shadow-lg p-3"
-      onClick={e => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-foreground truncate">{node.name}</p>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <p className="text-[10px] text-muted-foreground mb-3">{node.designation ?? node.employee_code}</p>
-      <button
-        onClick={() => { onChangeManager(node); onClose() }}
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-primary/5 hover:bg-primary/10 text-primary transition-colors"
-      >
-        <UserCog className="h-3.5 w-3.5 flex-shrink-0" />
-        Change Reporting Manager
-      </button>
-    </div>
-  )
-}
-
 // ── Node card ─────────────────────────────────────────────────────────────────
 
 function NodeCard({
@@ -136,54 +95,66 @@ function NodeCard({
   isAdmin: boolean
   onSelect: (node: OrgNode) => void
 }) {
-  const [popoverOpen, setPopoverOpen] = useState(false)
   const hasChildren = node.children.length > 0
 
-  return (
-    <div className="relative inline-block">
-      <div
-        className={cn(
-          'inline-flex flex-col items-center rounded-xl border bg-card px-4 py-3 shadow-sm transition-all min-w-[180px]',
-          highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border',
-          dimmed && 'opacity-40',
-          isAdmin && 'cursor-pointer hover:border-primary/50 hover:shadow-md',
-        )}
-        onClick={() => isAdmin && setPopoverOpen(v => !v)}
-      >
-        <Avatar className="h-12 w-12 mb-2">
-          {node.profile_photo ? <AvatarImage src={node.profile_photo} alt={node.name} /> : null}
-          <AvatarFallback className="bg-primary/10 text-primary text-sm">{initials(node.name)}</AvatarFallback>
-        </Avatar>
-        <p className="text-sm font-semibold text-foreground text-center leading-tight">{node.name}</p>
-        {node.designation && (
-          <p className="text-[11px] text-muted-foreground text-center mt-0.5">{node.designation}</p>
-        )}
-        {node.department && (
-          <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Building2 className="h-3 w-3" />{node.department}
-          </span>
-        )}
-        <span className="text-[10px] text-muted-foreground/70 mt-0.5 font-mono">{node.employee_code}</span>
-
-        {hasChildren && (
-          <button
-            onClick={e => { e.stopPropagation(); onToggle() }}
-            className="mt-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
-          >
-            {collapsed
-              ? <><ChevronDown className="h-3 w-3" />{node.children.length} report{node.children.length > 1 ? 's' : ''}</>
-              : <><ChevronUp className="h-3 w-3" />Collapse</>}
-          </button>
-        )}
-      </div>
-
-      {popoverOpen && isAdmin && (
-        <NodePopover
-          node={node}
-          onClose={() => setPopoverOpen(false)}
-          onChangeManager={onSelect}
-        />
+  const card = (
+    <div
+      className={cn(
+        'inline-flex flex-col items-center rounded-xl border bg-card px-4 py-3 shadow-sm transition-all min-w-[180px]',
+        highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border',
+        dimmed && 'opacity-40',
+        isAdmin && 'cursor-pointer hover:border-primary/50 hover:shadow-md',
       )}
+    >
+      <Avatar className="h-12 w-12 mb-2">
+        {node.profile_photo ? <AvatarImage src={node.profile_photo} alt={node.name} /> : null}
+        <AvatarFallback className="bg-primary/10 text-primary text-sm">{initials(node.name)}</AvatarFallback>
+      </Avatar>
+      <p className="text-sm font-semibold text-foreground text-center leading-tight">{node.name}</p>
+      {node.designation && (
+        <p className="text-[11px] text-muted-foreground text-center mt-0.5">{node.designation}</p>
+      )}
+      {node.department && (
+        <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Building2 className="h-3 w-3" />{node.department}
+        </span>
+      )}
+      <span className="text-[10px] text-muted-foreground/70 mt-0.5 font-mono">{node.employee_code}</span>
+
+      {hasChildren && (
+        <button
+          onClick={e => { e.stopPropagation(); onToggle() }}
+          className="mt-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
+        >
+          {collapsed
+            ? <><ChevronDown className="h-3 w-3" />{node.children.length} report{node.children.length > 1 ? 's' : ''}</>
+            : <><ChevronUp className="h-3 w-3" />Collapse</>}
+        </button>
+      )}
+    </div>
+  )
+
+  // Non-admins just see the card. For admins, the card is a dropdown trigger.
+  // The menu renders in a portal (via Radix) so it is never clipped by the
+  // chart's overflow-auto container — fixing the popover overlap/cut-off.
+  if (!isAdmin) return <div className="inline-block">{card}</div>
+
+  return (
+    <div className="inline-block">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>{card}</DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-56">
+          <DropdownMenuLabel className="truncate text-xs">
+            {node.name}
+            <span className="block font-normal text-muted-foreground">
+              {node.designation ?? node.employee_code}
+            </span>
+          </DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => onSelect(node)} className="text-xs">
+            <UserCog className="h-3.5 w-3.5 mr-2" /> Change Reporting Manager
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
