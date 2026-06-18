@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   Plus, GitBranch, ChevronRight, ChevronDown, Loader2, Pencil, Briefcase,
-  Layers, Trash2, Users, FileText,
+  Trash2, Users, FileText,
 } from 'lucide-react'
 import { OrgGovernancePanel }  from '@/components/org/OrgGovernancePanel'
 import { ReadinessGuidance }   from '@/components/readiness/ReadinessGuidance'
@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { MergeDeleteDialog } from '@/components/ui/merge-delete-dialog'
-import type { Department, Designation, Grade } from '@/types'
+import type { Department, Designation } from '@/types'
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const deptSchema = z.object({
@@ -33,15 +33,8 @@ const desigSchema = z.object({
   name: z.string().min(1, 'Required'),
 })
 
-const gradeSchema = z.object({
-  name: z.string().min(1, 'Required'),
-  min_salary: z.coerce.number().optional(),
-  max_salary: z.coerce.number().optional(),
-})
-
 type DeptForm = z.infer<typeof deptSchema>
 type DesigForm = z.infer<typeof desigSchema>
-type GradeForm = z.infer<typeof gradeSchema>
 
 // ── Employment Type definitions ──────────────────────────────────────────────
 const EMPLOYMENT_TYPES = [
@@ -138,11 +131,9 @@ export function Organization() {
   const [editingDept, setEditingDept] = useState<Department | null>(null)
   const [desigAddOpen, setDesigAddOpen] = useState(false)
   const [editingDesig, setEditingDesig] = useState<Designation | null>(null)
-  const [gradeAddOpen, setGradeAddOpen] = useState(false)
-  const [editingGrade, setEditingGrade] = useState<Grade | null>(null)
 
   // Delete / merge-delete state
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'desig' | 'grade'; id: string; name: string } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'desig'; id: string; name: string } | null>(null)
 
   // Queries
   const { data: deptData, isLoading: deptLoading } = useQuery<{ data: Department[] }>({
@@ -153,18 +144,12 @@ export function Organization() {
     queryKey: ['designations'],
     queryFn: () => api.get('/designations'),
   })
-  const { data: gradeData } = useQuery<{ data: Grade[] }>({
-    queryKey: ['grades'],
-    queryFn: () => api.get('/grades'),
-  })
 
   // Forms
   const deptAddForm = useForm<DeptForm>({ resolver: zodResolver(deptSchema) })
   const deptEditForm = useForm<DeptForm>({ resolver: zodResolver(deptSchema) })
   const desigAddForm = useForm<DesigForm>({ resolver: zodResolver(desigSchema) })
   const desigEditForm = useForm<DesigForm>({ resolver: zodResolver(desigSchema) })
-  const gradeAddForm = useForm<GradeForm>({ resolver: zodResolver(gradeSchema) })
-  const gradeEditForm = useForm<GradeForm>({ resolver: zodResolver(gradeSchema) })
 
   // Watched value for controlled select in edit dept form
   const deptEditW = deptEditForm.watch()
@@ -176,10 +161,6 @@ export function Organization() {
   function openEditDesig(d: Designation) {
     desigEditForm.reset({ name: d.name })
     setEditingDesig(d)
-  }
-  function openEditGrade(g: Grade) {
-    gradeEditForm.reset({ name: g.name, min_salary: g.min_salary, max_salary: g.max_salary })
-    setEditingGrade(g)
   }
 
   // Strip empty-string optional fields before sending — empty string fails UUID validation on parent_id
@@ -245,34 +226,6 @@ export function Organization() {
     onError: (e: Error) => toast.error('Cannot delete designation', { description: e.message }),
   })
 
-  // ── Grade mutations ──
-  const createGrade = useMutation({
-    mutationFn: (data: GradeForm) => api.post('/grades', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['grades'] })
-      toast.success('Grade created')
-      setGradeAddOpen(false)
-      gradeAddForm.reset()
-    },
-    onError: (e: Error) => toast.error('Failed to create grade', { description: e.message }),
-  })
-  const updateGrade = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: GradeForm }) => api.put(`/grades/${id}`, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['grades'] }); toast.success('Grade updated'); setEditingGrade(null) },
-    onError: (e: Error) => toast.error('Failed to update grade', { description: e.message }),
-  })
-  const deleteGrade = useMutation({
-    mutationFn: ({ id, mergeTo }: { id: string; mergeTo?: string }) =>
-      api.delete(`/grades/${id}`, mergeTo ? { merge_to: mergeTo } : undefined),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['grades'] })
-      queryClient.invalidateQueries({ queryKey: ['usage'] })
-      toast.success('Grade deleted')
-      setDeleteTarget(null)
-    },
-    onError: (e: Error) => toast.error('Cannot delete grade', { description: e.message }),
-  })
-
   // Build tree from flat list
   function buildTree(depts: Department[]): Department[] {
     const map = new Map<string, Department>()
@@ -326,34 +279,12 @@ export function Organization() {
     )
   }
 
-  function GradeAddFields() {
-    return (
-      <>
-        <div className="space-y-1.5">
-          <Label>Grade Name *</Label>
-          <Input placeholder="e.g. L5" {...gradeAddForm.register('name')} />
-          {gradeAddForm.formState.errors.name && <p className="text-xs text-destructive">{gradeAddForm.formState.errors.name.message}</p>}
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Min CTC (₹)</Label>
-            <Input type="number" placeholder="500000" {...gradeAddForm.register('min_salary')} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Max CTC (₹)</Label>
-            <Input type="number" placeholder="1000000" {...gradeAddForm.register('max_salary')} />
-          </div>
-        </div>
-      </>
-    )
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">Organization</h1>
-          <p className="text-sm text-muted-foreground">Manage departments, designations, grades, and master data</p>
+          <p className="text-sm text-muted-foreground">Manage departments, designations, and organisation master data. Pay grades are managed under Masters → Grades &amp; Pay Bands.</p>
         </div>
         {/* Org hierarchy summary — links to Sites / Work Locations / Cost Centers */}
         <OrgGovernancePanel className="shrink-0 w-56" />
@@ -366,7 +297,6 @@ export function Organization() {
         <TabsList className="bg-card border border-border">
           <TabsTrigger value="departments">Departments</TabsTrigger>
           <TabsTrigger value="designations">Designations</TabsTrigger>
-          <TabsTrigger value="grades">Grades</TabsTrigger>
           <TabsTrigger value="employment-types">Employment Types</TabsTrigger>
           <TabsTrigger value="document-types">Document Types</TabsTrigger>
         </TabsList>
@@ -443,65 +373,6 @@ export function Organization() {
                             <Button
                               variant="ghost" size="icon" className="h-7 w-7"
                               onClick={() => setDeleteTarget({ type: 'desig', id: d.id, name: d.name })}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ── GRADES ── */}
-        <TabsContent value="grades" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Layers className="h-4 w-4 text-muted-foreground" />
-                Pay Grades ({gradeData?.data?.length ?? 0})
-              </CardTitle>
-              <Button size="sm" onClick={() => setGradeAddOpen(true)} className="h-8">
-                <Plus className="h-4 w-4 mr-1" /> Add Grade
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              {(gradeData?.data ?? []).length === 0 ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">No grades yet.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Grade</th>
-                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Code</th>
-                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Min CTC</th>
-                      <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-semibold uppercase">Max CTC</th>
-                      <th className="px-4 py-2.5 w-20" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {gradeData?.data?.map((g) => (
-                      <tr key={g.id} className="border-b border-border hover:bg-muted/30 group">
-                        <td className="px-4 py-2.5 font-medium">{g.name}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{g.code ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">
-                          {g.min_salary ? `₹${g.min_salary.toLocaleString('en-IN')}` : '—'}
-                        </td>
-                        <td className="px-4 py-2.5 text-muted-foreground">
-                          {g.max_salary ? `₹${g.max_salary.toLocaleString('en-IN')}` : '—'}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditGrade(g)}>
-                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                            </Button>
-                            <Button
-                              variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => setDeleteTarget({ type: 'grade', id: g.id, name: g.name })}
                             >
                               <Trash2 className="h-3.5 w-3.5 text-destructive" />
                             </Button>
@@ -670,68 +541,18 @@ export function Organization() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Add Grade Dialog ── */}
-      <Dialog open={gradeAddOpen} onOpenChange={setGradeAddOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Add Pay Grade</DialogTitle></DialogHeader>
-          <form onSubmit={gradeAddForm.handleSubmit((d) => createGrade.mutate(d))} className="space-y-4">
-            <GradeAddFields />
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setGradeAddOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={createGrade.isPending}>
-                {createGrade.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Create
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Edit Grade Dialog ── */}
-      <Dialog open={!!editingGrade} onOpenChange={(o) => !o && setEditingGrade(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Edit Pay Grade</DialogTitle></DialogHeader>
-          <form onSubmit={gradeEditForm.handleSubmit((d) => updateGrade.mutate({ id: editingGrade!.id, data: d }))} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Grade Name *</Label>
-              <Input placeholder="e.g. L5" {...gradeEditForm.register('name')} />
-              {gradeEditForm.formState.errors.name && <p className="text-xs text-destructive">{gradeEditForm.formState.errors.name.message}</p>}
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Min CTC (₹)</Label>
-                <Input type="number" placeholder="500000" {...gradeEditForm.register('min_salary')} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Max CTC (₹)</Label>
-                <Input type="number" placeholder="1000000" {...gradeEditForm.register('max_salary')} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditingGrade(null)}>Cancel</Button>
-              <Button type="submit" disabled={updateGrade.isPending}>
-                {updateGrade.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save Changes
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
       {/* ── Merge-Delete Dialog ── */}
       {deleteTarget && (
         <MergeDeleteDialog
           open={!!deleteTarget}
           onOpenChange={(o) => !o && setDeleteTarget(null)}
-          entityType={
-            deleteTarget.type === 'dept' ? 'Department'
-            : deleteTarget.type === 'desig' ? 'Designation'
-            : 'Grade'
-          }
+          entityType={deleteTarget.type === 'dept' ? 'Department' : 'Designation'}
           entityName={deleteTarget.name}
           id={deleteTarget.id}
           usageUrl={
-            deleteTarget.type === 'dept'  ? `/departments/${deleteTarget.id}/usage`
-            : deleteTarget.type === 'desig' ? `/designations/${deleteTarget.id}/usage`
-            : `/grades/${deleteTarget.id}/usage`
+            deleteTarget.type === 'dept'
+              ? `/departments/${deleteTarget.id}/usage`
+              : `/designations/${deleteTarget.id}/usage`
           }
           usageLabel={
             deleteTarget.type === 'dept'
@@ -741,16 +562,13 @@ export function Organization() {
           mergeOptions={
             deleteTarget.type === 'dept'
               ? (deptData?.data ?? []).filter(d => d.id !== deleteTarget.id).map(d => ({ id: d.id, name: d.name }))
-              : deleteTarget.type === 'desig'
-                ? (desigData?.data ?? []).filter(d => d.id !== deleteTarget.id).map(d => ({ id: d.id, name: d.name }))
-                : (gradeData?.data ?? []).filter(g => g.id !== deleteTarget.id).map(g => ({ id: g.id, name: g.name }))
+              : (desigData?.data ?? []).filter(d => d.id !== deleteTarget.id).map(d => ({ id: d.id, name: d.name }))
           }
           onConfirm={(mergeTo) => {
             if (deleteTarget.type === 'dept')  deleteDept.mutate({ id: deleteTarget.id, mergeTo })
             if (deleteTarget.type === 'desig') deleteDesig.mutate({ id: deleteTarget.id, mergeTo })
-            if (deleteTarget.type === 'grade') deleteGrade.mutate({ id: deleteTarget.id, mergeTo })
           }}
-          isPending={deleteDept.isPending || deleteDesig.isPending || deleteGrade.isPending}
+          isPending={deleteDept.isPending || deleteDesig.isPending}
         />
       )}
     </div>
