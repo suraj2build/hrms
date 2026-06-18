@@ -17,6 +17,7 @@ import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
 }                                                 from '@/components/ui/select'
+import { EmployeeSelector }                       from '@/components/filters/EmployeeSelector'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 
@@ -39,7 +40,6 @@ interface Asset {
 }
 
 interface Category { id: string; name: string; is_active: boolean }
-interface EmpOption { id: string; first_name: string; last_name: string; employee_code: string }
 
 const STATUS_VARIANT: Record<string, any> = {
   available: 'success',
@@ -97,13 +97,6 @@ export function AssetMaster() {
   })
   const cats = (catsData?.data ?? []).filter(c => c.is_active)
 
-  const { data: empData } = useQuery<{ data: EmpOption[] }>({
-    queryKey: ['employee-options'],
-    queryFn:  () => api.get('/employees/options?limit=200'),
-    enabled:  !!assignFor,
-    staleTime: 60_000,
-  })
-  const emps = empData?.data ?? []
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -356,14 +349,12 @@ export function AssetMaster() {
           <div className="space-y-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Employee *</label>
-              <Select value={assignEmp} onValueChange={setAssignEmp}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select employee" /></SelectTrigger>
-                <SelectContent>
-                  {emps.map(e => (
-                    <SelectItem key={e.id} value={e.id}>{e.first_name} {e.last_name} · {e.employee_code}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EmployeeSelector
+                value={assignEmp}
+                onChange={(v) => setAssignEmp(typeof v === 'string' ? v : (v[0] ?? ''))}
+                placeholder="Search employee by name or code…"
+                className="w-full"
+              />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Notes</label>
