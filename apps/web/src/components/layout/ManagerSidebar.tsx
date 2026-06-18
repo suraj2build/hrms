@@ -130,6 +130,7 @@ const BASE_SECTIONS: NavSection[] = [
         items: [
           { label: 'My Documents', icon: FileText,       href: '/manager/self/documents'   },
           { label: 'Policies',     icon: BookMarked,     href: '/manager/self/policies'    },
+          { label: 'How-To Guides', icon: HelpCircle,    href: '/manager/self/runbooks'    },
           { label: 'HR Support',   icon: HeadphonesIcon, href: '/manager/self/hr-support'  },
         ],
       },

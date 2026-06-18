@@ -882,6 +882,7 @@ export default function App() {
                 <Route path="/manager/self/documents"                    element={<EssDocuments />} />
                 <Route path="/manager/self/letters"                      element={<EssLetters />} />
                 <Route path="/manager/self/policies"                     element={<EssPolicies />} />
+                <Route path="/manager/self/runbooks"                     element={<EssRunbooks />} />
                 <Route path="/manager/self/hr-support"                   element={<EssHRSupport />} />
                 {/* Tax tools — rendered inside ManagerShell so sidebar stays amber */}
                 <Route path="/manager/self/salary/tax-planner"        element={<TaxPlanner />} />
