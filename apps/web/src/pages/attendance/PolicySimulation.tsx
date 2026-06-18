@@ -12,6 +12,7 @@
 
 import { useState }      from 'react'
 import { useMutation }   from '@tanstack/react-query'
+import { EmployeeLabel } from '@/components/employee/EmployeeLabel'
 import {
   ShieldAlert, Play, Trash2, Plus,
   Loader2, AlertTriangle, Info,
@@ -623,8 +624,8 @@ export function PolicySimulation() {
                       const lateChanged   = rec.before.late_minutes !== rec.after.late_minutes
                       return (
                         <tr key={i} className="border-b border-border/40 hover:bg-muted/20">
-                          <td className="px-3 py-2 font-mono text-[10px] text-muted-foreground">
-                            {rec.employee_id.slice(0, 8)}…
+                          <td className="px-3 py-2 text-[10px] text-muted-foreground">
+                            <EmployeeLabel id={rec.employee_id} />
                           </td>
                           <td className="px-3 py-2 text-muted-foreground whitespace-nowrap tabular-nums">
                             {fmtDate(rec.date)}

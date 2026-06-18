@@ -11,6 +11,7 @@
 import { useState }        from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast }            from 'sonner'
+import { EmployeeLabel }    from '@/components/employee/EmployeeLabel'
 import {
   ShieldAlert, AlertTriangle, RefreshCw,
   Loader2, TrendingUp, Users, Activity,
@@ -355,7 +356,7 @@ export function AttendanceRisk() {
                           <p className="text-[10px] text-muted-foreground">#{p.employees.employee_code}</p>
                         </>
                       ) : (
-                        <span className="text-muted-foreground font-mono text-[10px]">{p.employee_id.slice(0, 8)}…</span>
+                        <EmployeeLabel id={p.employee_id} className="text-muted-foreground text-[10px]" />
                       )}
                     </td>
                     <td className="px-3 py-2.5 min-w-[130px]">

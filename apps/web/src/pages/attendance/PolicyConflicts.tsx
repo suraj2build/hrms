@@ -10,6 +10,7 @@
 
 import { useState }      from 'react'
 import { useQuery }      from '@tanstack/react-query'
+import { EmployeeLabel } from '@/components/employee/EmployeeLabel'
 import {
   ShieldAlert, GitMerge, Search,
   ChevronLeft, ChevronRight, AlertTriangle,
@@ -364,9 +365,7 @@ export function PolicyConflicts() {
                             </p>
                           </>
                         ) : (
-                          <span className="font-mono text-[10px] text-muted-foreground">
-                            {c.employee_id.slice(0, 8)}…
-                          </span>
+                          <EmployeeLabel id={c.employee_id} className="text-[10px] text-muted-foreground" />
                         )}
                       </td>
                       {/* Date */}

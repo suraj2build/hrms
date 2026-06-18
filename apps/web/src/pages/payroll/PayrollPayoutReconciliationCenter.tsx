@@ -21,6 +21,7 @@ import {
   RotateCcw, Lock, Filter,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { EmployeeLabel } from '@/components/employee/EmployeeLabel'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -109,7 +110,7 @@ function PayoutRow({
         {/* Employee & bank info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-mono text-muted-foreground">{rec.employee_id.slice(0, 8)}…</span>
+            <EmployeeLabel id={rec.employee_id} className="text-xs text-muted-foreground" />
             {rec.bank_account_masked && (
               <span className="text-[10px] text-muted-foreground">Acct: ****{rec.bank_account_masked.slice(-4)}</span>
             )}

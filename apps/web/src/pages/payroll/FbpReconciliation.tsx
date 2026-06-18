@@ -10,6 +10,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { EmployeeLabel } from '@/components/employee/EmployeeLabel'
 import {
   Landmark, Loader2, ShieldAlert, Check, X, Lock, RefreshCw, Receipt, Paperclip,
 } from 'lucide-react'
@@ -227,7 +228,7 @@ export function FbpReconciliation() {
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={`${r.employee_id}-${r.component_code}-${i}`} className="border-b border-border/50">
-                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{r.employee_id.slice(0, 8)}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground"><EmployeeLabel id={r.employee_id} /></td>
                     <td className="px-3 py-2">{r.component_name}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{inr(r.paid_amount)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{inr(r.proof_amount)}</td>
