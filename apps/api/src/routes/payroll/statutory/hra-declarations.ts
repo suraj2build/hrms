@@ -358,7 +358,9 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
         city:             r.city            ?? null,
         is_metro:         r.is_metro        ?? false,
         status:           r.status          as string,
-        rejection_reason: r.rejection_reason ?? null,
+        // hra_declarations has no rejection_reason column — the reviewer's reason
+        // is captured in verification_notes; surface it only for rejected rows.
+        rejection_reason: r.status === 'rejected' ? (r.verification_notes ?? null) : null,
         created_at:       r.created_at,
       }))
 
