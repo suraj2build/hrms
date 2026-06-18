@@ -40,6 +40,8 @@ import { cn }              from '@/lib/utils'
 interface WorkSession {
   id: string
   employee_id: string
+  employee_name?: string | null
+  employee_code?: string | null
   attendance_date: string
   session_start: string
   session_end: string | null
@@ -60,6 +62,8 @@ interface WorkSession {
 interface SessionAnomaly {
   id: string
   employee_id: string
+  employee_name?: string | null
+  employee_code?: string | null
   attendance_date: string
   anomaly_type: string
   severity: 'info' | 'warning' | 'critical'
@@ -635,8 +639,10 @@ function TabCrossMidnight({
                 {sessions.map(s => (
                   <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                     <td className="px-3 py-2">
-                      <span className="font-mono text-muted-foreground text-[11px]">
-                        {s.employee_id.slice(0, 8)}…
+                      <span className="text-[11px] text-muted-foreground">
+                        {s.employee_code
+                          ? <>{s.employee_name} <span className="font-mono">· {s.employee_code}</span></>
+                          : <span className="font-mono">{s.employee_id.slice(0, 8)}…</span>}
                       </span>
                     </td>
                     <td className="px-3 py-2">
@@ -778,7 +784,9 @@ function TabAnomalies({
                     )}
                   </div>
                   <div className="flex items-center gap-3 text-[11px] opacity-80">
-                    <span>Employee: <span className="font-mono">{a.employee_id.slice(0, 8)}…</span></span>
+                    <span>Employee: {a.employee_code
+                      ? <span className="font-medium">{a.employee_name} <span className="font-mono text-muted-foreground">· {a.employee_code}</span></span>
+                      : <span className="font-mono">{a.employee_id.slice(0, 8)}…</span>}</span>
                     <span>Date: {a.attendance_date}</span>
                     {a.session_id && <span>Session: <span className="font-mono">{a.session_id.slice(0, 8)}…</span></span>}
                   </div>
@@ -1145,8 +1153,10 @@ function TabLocks({
               <tbody>
                 {locks.map(s => (
                   <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                    <td className="px-3 py-2 font-mono text-muted-foreground text-[11px]">
-                      {s.employee_id.slice(0, 8)}…
+                    <td className="px-3 py-2 text-muted-foreground text-[11px]">
+                      {s.employee_code
+                        ? <>{s.employee_name} <span className="font-mono">· {s.employee_code}</span></>
+                        : <span className="font-mono">{s.employee_id.slice(0, 8)}…</span>}
                     </td>
                     <td className="px-3 py-2 font-mono text-muted-foreground">{s.attendance_date}</td>
                     <td className="px-3 py-2">

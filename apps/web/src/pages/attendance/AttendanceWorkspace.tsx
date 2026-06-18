@@ -89,6 +89,8 @@ interface OtSummaryRow {
 interface SessionAnomaly {
   id:              string
   employee_id:     string
+  employee_name?:  string | null
+  employee_code?:  string | null
   attendance_date: string
   anomaly_type:    string
   severity:        'info' | 'warning' | 'critical'
@@ -796,7 +798,9 @@ function TabAnomalies() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 text-[11px] opacity-80">
-                    <span>Emp: <span className="font-mono">{a.employee_id.slice(0, 8)}…</span></span>
+                    <span>Emp: {a.employee_code
+                      ? <span className="font-medium">{a.employee_name} <span className="font-mono text-muted-foreground">· {a.employee_code}</span></span>
+                      : <span className="font-mono">{a.employee_id.slice(0, 8)}…</span>}</span>
                     <span>Date: {a.attendance_date}</span>
                   </div>
                   {Object.keys(a.detail ?? {}).length > 0 && (

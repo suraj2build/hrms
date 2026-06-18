@@ -33,6 +33,35 @@ function monthRange(month: string): { start: string; end: string } {
   return { start, end }
 }
 
+/**
+ * Attach employee_name + employee_code to rows keyed by employee_id, so the UI
+ * shows a human identifier (name · CODE) instead of a raw UUID. work_sessions /
+ * work_session_anomalies do not store these, so resolve them from employees.
+ */
+async function attachEmployeeLabels(
+  supabase: any,
+  tenantId: string,
+  rows: Array<Record<string, any>> | null,
+): Promise<Array<Record<string, any>>> {
+  const list = rows ?? []
+  if (list.length === 0) return list
+  const empIds = [...new Set(list.map((r) => r.employee_id as string).filter(Boolean))]
+  if (empIds.length === 0) return list
+  const { data: empRows } = await supabase
+    .from('employees')
+    .select('id, first_name, last_name, employee_code')
+    .in('id', empIds)
+    .eq('tenant_id', tenantId)
+  const map = new Map<string, { name: string; code: string | null }>()
+  for (const e of (empRows ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string | null }>) {
+    map.set(e.id, { name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(), code: e.employee_code ?? null })
+  }
+  return list.map((r) => {
+    const emp = map.get(r.employee_id as string)
+    return { ...r, employee_name: emp?.name ?? null, employee_code: emp?.code ?? null }
+  })
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default async function workSessionRoutes(fastify: FastifyInstance) {
@@ -155,7 +184,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
       .order('session_start', { ascending: true })
 
     if (error) return reply.code(500).send({ error: error.message })
-    return reply.send({ data })
+    return reply.send({ data: await attachEmployeeLabels(supabase, tenantId, data) })
   })
 
   // ── GET /attendance/sessions/locks ────────────────────────────────────────
@@ -180,7 +209,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
       .order('attendance_date', { ascending: true })
 
     if (error) return reply.code(500).send({ error: error.message })
-    return reply.send({ data })
+    return reply.send({ data: await attachEmployeeLabels(supabase, tenantId, data) })
   })
 
   // ── GET /attendance/sessions/ot-heatmap ───────────────────────────────────
@@ -494,31 +523,37 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
 
-    // For search mode, enrich with employee name so the UniversalSearch label field
-    // has a human-readable string. For browse mode the caller handles enrichment
-    // client-side or via the full employee API.
-    if (isSearch && (data ?? []).length > 0) {
-      const empIds = [...new Set((data as Array<{ employee_id: string }>).map((r) => r.employee_id))]
+    // Always enrich with employee name + code so the UI shows a human identifier
+    // (name · CODE) rather than a raw UUID. work_session_anomalies does not store
+    // these, so resolve them from employees. `date` aliases attendance_date for
+    // back-compat with existing callers.
+    const rows = (data ?? []) as Array<Record<string, unknown>>
+    if (rows.length > 0) {
+      const empIds = [...new Set(rows.map((r) => r.employee_id as string).filter(Boolean))]
       const { data: empRows } = await supabase
         .from('employees')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, employee_code')
         .in('id', empIds)
         .eq('tenant_id', tenantId)
 
-      const nameMap = new Map<string, string>()
-      for (const e of (empRows ?? []) as Array<{ id: string; first_name: string; last_name: string }>) {
-        nameMap.set(e.id, `${e.first_name} ${e.last_name}`)
+      const empMap = new Map<string, { name: string; code: string | null }>()
+      for (const e of (empRows ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string | null }>) {
+        empMap.set(e.id, { name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(), code: e.employee_code ?? null })
       }
 
-      const enriched = (data as Array<Record<string, unknown>>).map((r) => ({
-        ...r,
-        employee_name: nameMap.get(r.employee_id as string) ?? null,
-        date:          r.attendance_date,
-      }))
+      const enriched = rows.map((r) => {
+        const emp = empMap.get(r.employee_id as string)
+        return {
+          ...r,
+          employee_name: emp?.name ?? null,
+          employee_code: emp?.code ?? null,
+          date:          r.attendance_date,
+        }
+      })
       return reply.send({ data: enriched })
     }
 
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: rows })
   })
 
   // ── POST /work-session-anomalies/:id/resolve ──────────────────────────────
