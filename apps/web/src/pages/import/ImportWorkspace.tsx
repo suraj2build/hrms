@@ -75,6 +75,7 @@ type MasterType =
   | 'clusters'
   | 'sites'
   | 'employees'
+  | 'positions'
   | 'shifts'
   | 'rosters'
   | 'departments'
@@ -456,6 +457,18 @@ const MASTER_CONFIGS: MasterConfig[] = [
     icon: CalendarDays,
     requiredFields: ['code', 'name'],
     optionalFields: ['description', 'cycle_days', 'weekly_off_days', 'is_active'],
+    group: 'people',
+  },
+  {
+    type: 'positions',
+    label: 'Positions',
+    description: 'Sanctioned org slots (headcount budget) — title + grade/dept/site by code',
+    icon: Briefcase,
+    requiredFields: ['code', 'title'],
+    optionalFields: [
+      'department_code', 'designation_code', 'grade_code', 'site_code', 'work_location_code', 'cost_center_code',
+      'sanctioned_count', 'status', 'effective_date', 'notes',
+    ],
     group: 'people',
   },
   // ── Payroll & Leave ──────────────────────────────────────────────────────────
@@ -1077,6 +1090,7 @@ export function ImportWorkspace() {
         salary_structures:     ['salary-structures'],
         holiday_calendar:      ['holiday-calendar'],
         employee_bank_details: ['employees'],
+        positions:             ['positions'],
       }
       const keysToInvalidate = selectedMaster ? (MASTER_QUERY_KEYS[selectedMaster] ?? []) : []
       for (const k of keysToInvalidate) {

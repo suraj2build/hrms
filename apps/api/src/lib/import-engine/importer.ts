@@ -344,6 +344,35 @@ const TABLE_MAP: Record<string, TableConfig> = {
     }),
   },
 
+  // ── Workforce planning ──────────────────────────────────────────────────────
+
+  positions: {
+    table: 'positions',
+    uniqueColumn: 'code',
+    mapRow: (tenantId, norm) => {
+      const row: Record<string, unknown> = {
+        tenant_id: tenantId,
+        code:      norm.code,
+        title:     norm.title,
+        // FK links resolved from *_code by the validator (left null when unresolved).
+        department_id:    norm.department_id    ?? null,
+        designation_id:   norm.designation_id   ?? null,
+        grade_id:         norm.grade_id         ?? null,
+        site_id:          norm.site_id          ?? null,
+        work_location_id: norm.work_location_id ?? null,
+        cost_center_id:   norm.cost_center_id   ?? null,
+        notes:            norm.notes            ?? null,
+      }
+      // NOT-NULL columns that carry DB defaults (sanctioned_count=1, status=active,
+      // effective_date=today) — written only when the cell has a value so a blank
+      // never violates NOT NULL / CHECK and the default is allowed to apply.
+      if (norm.sanctioned_count !== undefined && norm.sanctioned_count !== '') row.sanctioned_count = norm.sanctioned_count
+      if (norm.status           !== undefined && norm.status           !== '') row.status           = norm.status
+      if (norm.effective_date   !== undefined && norm.effective_date   !== '') row.effective_date   = norm.effective_date
+      return row
+    },
+  },
+
   // ── Payroll masters ───────────────────────────────────────────────────────────
 
   salary_structures: {

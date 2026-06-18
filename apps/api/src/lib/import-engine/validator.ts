@@ -1164,6 +1164,8 @@ export async function validateImportRows(
       asset_categories:      'asset_categories',
       // Payroll masters
       salary_structures:     'salary_structures',
+      // Workforce planning
+      positions:             'positions',
       // Reference data
       document_types:        'document_types',
       identity_types:        'identity_types',
@@ -1331,6 +1333,47 @@ export async function validateImportRows(
           if (managerId) vr.normalizedData.cluster_manager_id = managerId
           else vr.warnings.push({ field: 'manager_code', message: `Manager "${managerCode}" not found — cluster manager will be left blank`, severity: 'warning' })
         }
+      }
+    }
+
+    // Positions: resolve org-taxonomy codes → ids (all optional links).
+    if (masterType === 'positions') {
+      const pick = (field: string) => [
+        ...new Set(
+          validatedRows
+            .filter((r) => r.isValid && r.normalizedData[field])
+            .map((r) => (r.normalizedData[field] as string).toUpperCase()),
+        ),
+      ]
+      const [deptMap, desigMap, gradeMap, siteMap, locMap, ccMap] = await Promise.all([
+        resolveCodeToId(supabase, tenantId, 'departments',    'code', pick('department_code')),
+        resolveCodeToId(supabase, tenantId, 'designations',   'code', pick('designation_code')),
+        resolveCodeToId(supabase, tenantId, 'grades',         'code', pick('grade_code')),
+        resolveCodeToId(supabase, tenantId, 'sites',          'code', pick('site_code')),
+        resolveCodeToId(supabase, tenantId, 'work_locations', 'code', pick('work_location_code')),
+        resolveCodeToId(supabase, tenantId, 'cost_centers',   'code', pick('cost_center_code')),
+      ])
+      const linkCode = (
+        vr: ValidatedRow,
+        codeField: string,
+        idField: string,
+        map: Map<string, string>,
+        label: string,
+      ) => {
+        const code = vr.normalizedData[codeField] as string | undefined
+        if (!code) return
+        const id = map.get(code.toUpperCase())
+        if (id) vr.normalizedData[idField] = id
+        else vr.warnings.push({ field: codeField, message: `${label} "${code}" not found — link will be left blank`, severity: 'warning' })
+      }
+      for (const vr of validatedRows) {
+        if (!vr.isValid) continue
+        linkCode(vr, 'department_code',    'department_id',    deptMap,  'Department')
+        linkCode(vr, 'designation_code',   'designation_id',   desigMap, 'Designation')
+        linkCode(vr, 'grade_code',         'grade_id',         gradeMap, 'Grade')
+        linkCode(vr, 'site_code',          'site_id',          siteMap,  'Site')
+        linkCode(vr, 'work_location_code', 'work_location_id', locMap,   'Work location')
+        linkCode(vr, 'cost_center_code',   'cost_center_id',   ccMap,    'Cost center')
       }
     }
   }

@@ -1438,6 +1438,30 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
     ],
   },
 
+  // ── Workforce Planning ────────────────────────────────────────────────────────
+
+  positions: {
+    label: 'Positions (Sanctioned Strength)',
+    columns: [
+      { key: 'code',               label: 'Code',                    required: true,  type: 'string', example: 'ENG-SR-001',     description: 'Unique position code — the sanctioned slot identifier (used as the upload key).' },
+      { key: 'title',              label: 'Title',                   required: true,  type: 'string', example: 'Senior Engineer', description: 'Position title (may differ from the designation label).' },
+      { key: 'department_code',    label: 'Department Code',         required: false, type: 'string', example: 'DEPT-ENG',        description: 'Code of an existing department this slot sits in (optional).' },
+      { key: 'designation_code',   label: 'Designation Code',        required: false, type: 'string', example: 'DESIG-SDE',       description: 'Code of an existing designation (optional).' },
+      { key: 'grade_code',         label: 'Grade Code',              required: false, type: 'string', example: 'GRADE-L3',        description: 'Code of an existing grade / band (optional).' },
+      { key: 'site_code',          label: 'Site Code',               required: false, type: 'string', example: 'SITE-BLR',        description: 'Code of an existing site (optional).' },
+      { key: 'work_location_code', label: 'Work Location Code',      required: false, type: 'string', example: 'LOC-BLR',         description: 'Code of an existing work location (optional).' },
+      { key: 'cost_center_code',   label: 'Cost Center Code',        required: false, type: 'string', example: 'CC-ENG',          description: 'Code of an existing cost center (optional).' },
+      { key: 'sanctioned_count',   label: 'Sanctioned Count',        required: false, type: 'number', example: '3',               description: 'Authorised headcount for this slot (positive integer). Defaults to 1.' },
+      { key: 'status',             label: 'Status',                  required: false, type: 'enum', enumValues: ['active', 'frozen', 'abolished'], example: 'active', description: 'Position status. Defaults to active.' },
+      { key: 'effective_date',     label: 'Effective Date (YYYY-MM-DD)', required: false, type: 'date', example: '2025-04-01',  description: 'Date the slot was sanctioned. Defaults to today.' },
+      { key: 'notes',              label: 'Notes',                   required: false, type: 'string', example: 'Backfill for attrition', description: 'Optional free-text notes.' },
+    ],
+    sampleRows: [
+      { code: 'ENG-SR-001', title: 'Senior Engineer', department_code: 'DEPT-ENG', designation_code: 'DESIG-SDE', grade_code: 'GRADE-L3', site_code: 'SITE-BLR', work_location_code: 'LOC-BLR', cost_center_code: 'CC-ENG', sanctioned_count: '3', status: 'active', effective_date: '2025-04-01', notes: '' },
+      { code: 'HR-MGR-001', title: 'HR Manager',      department_code: 'DEPT-HR',  designation_code: 'DESIG-HRBP', grade_code: 'GRADE-M1', site_code: 'SITE-MUM', work_location_code: 'LOC-MUM', cost_center_code: '',      sanctioned_count: '1', status: 'active', effective_date: '',           notes: '' },
+    ],
+  },
+
   // ── Payroll Masters ───────────────────────────────────────────────────────────
 
   salary_structures: {
