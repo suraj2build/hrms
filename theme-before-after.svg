@@ -1,0 +1,388 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1640" viewBox="0 0 1300 1640" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="navy-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1A4D8F"/><stop offset="1" stop-color="#2260A8"/>
+    </linearGradient>
+    <linearGradient id="petrol-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0F3D44"/><stop offset="1" stop-color="#14505A"/>
+    </linearGradient>
+    <linearGradient id="sidebar-old" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F3F5F8"/>
+    </linearGradient>
+    <linearGradient id="sidebar-new" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0C2C34"/><stop offset="1" stop-color="#061C20"/>
+    </linearGradient>
+    <filter id="s" x="-10%" y="-20%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="3" flood-color="#1a1a1a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1300" height="1640" fill="#F4F5F7"/>
+
+  <!-- ══ Title ══ -->
+  <text x="40" y="52" font-size="26" font-weight="700" fill="#1B1D20">Color Token Map — Before (Navy) → After (Petrol + Gold)</text>
+  <text x="40" y="78" font-size="13" fill="#6B7177">Every CSS variable in index.css mapped. Green = unchanged. Yellow = new value. Red label = biggest visual change.</text>
+
+  <!-- Column headers -->
+  <rect x="40"  y="96" width="310" height="32" rx="8" fill="#E8E9EB"/>
+  <rect x="370" y="96" width="210" height="32" rx="8" fill="#DCEAF8"/>
+  <rect x="600" y="96" width="40"  height="32" rx="8" fill="#E8E9EB"/>
+  <rect x="660" y="96" width="210" height="32" rx="8" fill="#D8EEE8"/>
+  <rect x="890" y="96" width="370" height="32" rx="8" fill="#E8E9EB"/>
+  <text x="195"  y="117" font-size="12" font-weight="700" fill="#3A4048" text-anchor="middle">CSS TOKEN</text>
+  <text x="475"  y="117" font-size="12" font-weight="700" fill="#1A3A6A" text-anchor="middle">BEFORE (Navy)</text>
+  <text x="620"  y="117" font-size="12" font-weight="700" fill="#6B7177" text-anchor="middle">→</text>
+  <text x="765"  y="117" font-size="12" font-weight="700" fill="#0A3038" text-anchor="middle">AFTER (Petrol+Gold)</text>
+  <text x="1075" y="117" font-size="12" font-weight="700" fill="#3A4048" text-anchor="middle">WHAT IT AFFECTS</text>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 1: SURFACES
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="142" width="1220" height="26" rx="7" fill="#1B2226"/>
+  <text x="56" y="160" font-size="12" font-weight="700" fill="#C8D8D8" letter-spacing="1">SURFACES</text>
+
+  <!-- Row helper: y positions starting at 178, step 42 -->
+
+  <!-- --background -->
+  <g transform="translate(0,178)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--background</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#F3F5F8" stroke="#D0D8E0"/>
+    <text x="475" y="22" font-size="11.5" fill="#3A4A58" text-anchor="middle">#F3F5F8 cool-gray</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#F2F7F7" stroke="#C8D8D8"/>
+    <text x="765" y="22" font-size="11.5" fill="#1A3A3A" text-anchor="middle">#F2F7F7 teal-canvas</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Page canvas — very subtle, blue-tint → teal-tint</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --foreground -->
+  <g transform="translate(0,220)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--foreground</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#17202B" stroke="#17202B"/>
+    <text x="475" y="22" font-size="11.5" fill="#E8EFF8" text-anchor="middle">#17202B navy-black</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#061C20" stroke="#061C20"/>
+    <text x="765" y="22" font-size="11.5" fill="#C8E0E4" text-anchor="middle">#061C20 teal-black</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Primary text — near-identical visually, slightly warmer</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --card -->
+  <g transform="translate(0,262)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--card / --popover</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#FFFFFF" stroke="#D0D8E0"/>
+    <text x="475" y="22" font-size="11.5" fill="#3A4A58" text-anchor="middle">#FFFFFF</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#FFFFFF" stroke="#C8D8D8"/>
+    <text x="765" y="22" font-size="11.5" fill="#3A4A58" text-anchor="middle">#FFFFFF · NO CHANGE</text>
+    <rect x="893" y="6" width="106" height="20" rx="6" fill="#E0F2EB"/>
+    <text x="946" y="20" font-size="11" font-weight="600" fill="#1A7A50" text-anchor="middle">UNCHANGED</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 2: PRIMARY / BRAND
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="316" width="1220" height="26" rx="7" fill="#1B2226"/>
+  <text x="56" y="334" font-size="12" font-weight="700" fill="#C8D8D8" letter-spacing="1">PRIMARY BRAND  ← BIGGEST CHANGE</text>
+
+  <!-- --primary -->
+  <g transform="translate(0,352)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--primary</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#1A4D8F"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#1A4D8F Deep Navy</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#0F3D44"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#0F3D44 Petrol Teal</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">Buttons, active nav, focus ring, links, badges</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --primary hover (via gradient) -->
+  <g transform="translate(0,394)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--primary hover</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#163F75"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#163F75</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#14505A"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#14505A</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Button hover state</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --ring -->
+  <g transform="translate(0,436)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--ring</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#1A4D8F"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#1A4D8F</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#0F3D44"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#0F3D44</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Focus ring on all inputs, buttons, selects</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --grad-primary (nav gradient) -->
+  <g transform="translate(0,478)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--grad-primary / nav</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="url(#navy-grad)"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#1A4D8F → #2260A8</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="url(#petrol-grad)"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#0F3D44 → #14505A</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">hero-band, grad-hero, KPI hero cards, chip-grad</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- NEW: gold accent for actions -->
+  <g transform="translate(0,520)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--accent-gold (NEW)</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#EBF3FC" stroke="#B8D0F0"/>
+    <text x="475" y="22" font-size="11.5" fill="#1A3F75" text-anchor="middle">n/a (blue tint used)</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#C9A040"/>
+    <text x="765" y="22" font-size="11.5" fill="#1A1000" text-anchor="middle">#C9A040 Champ.Gold</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">Run Payroll button · active sidebar item · hero numbers</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 3: SOFT TINTS (secondary / accent / muted)
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="574" width="1220" height="26" rx="7" fill="#2A3640"/>
+  <text x="56" y="592" font-size="12" font-weight="700" fill="#C8D8D8" letter-spacing="1">SOFT TINTS — secondary, accent, muted (hover backgrounds, chips)</text>
+
+  <!-- --secondary / --accent -->
+  <g transform="translate(0,610)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--secondary / --accent</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#EBF3FC" stroke="#B8D0F0"/>
+    <text x="475" y="22" font-size="11.5" fill="#1A3F75" text-anchor="middle">#EBF3FC blue-tint</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#E0F0F2" stroke="#A8C8CC"/>
+    <text x="765" y="22" font-size="11.5" fill="#0A3038" text-anchor="middle">#E0F0F2 teal-tint</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Selected chip bg · soft hover bg · secondary btns</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --muted -->
+  <g transform="translate(0,652)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--muted</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#EEF1F5" stroke="#D0D8E0"/>
+    <text x="475" y="22" font-size="11.5" fill="#3A4A58" text-anchor="middle">#EEF1F5</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#EAF2F2" stroke="#C0D4D4"/>
+    <text x="765" y="22" font-size="11.5" fill="#1A3A3A" text-anchor="middle">#EAF2F2</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Table zebra-stripe, skeleton loaders, disabled state</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --muted-foreground -->
+  <g transform="translate(0,694)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--muted-foreground</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#637080" stroke="#637080"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#637080</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#567880" stroke="#567880"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#567880</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Placeholder text, labels, table column headers</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --border / --input -->
+  <g transform="translate(0,736)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--border / --input</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#E3E9F0" stroke="#B8C8D8"/>
+    <text x="475" y="22" font-size="11.5" fill="#3A4A58" text-anchor="middle">#E3E9F0</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#D8E8E8" stroke="#A8C0C0"/>
+    <text x="765" y="22" font-size="11.5" fill="#1A3A3A" text-anchor="middle">#D8E8E8</text>
+    <text x="900" y="20" font-size="12" fill="#567070">All dividers, input outlines, card borders</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 4: SIDEBAR — BIGGEST VISUAL CHANGE
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="790" width="1220" height="26" rx="7" fill="#7B2020"/>
+  <text x="56" y="808" font-size="12" font-weight="700" fill="#FFD0C0" letter-spacing="1">SIDEBAR  ← MOST DRAMATIC CHANGE: white → deep dark petrol</text>
+
+  <!-- --sidebar background -->
+  <g transform="translate(0,826)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--sidebar</text>
+    <rect x="370" y="1"  width="210" height="34" rx="7" fill="url(#sidebar-old)" stroke="#D0D8E0"/>
+    <text x="475" y="22" font-size="11.5" fill="#3A4A58" text-anchor="middle">#FFFFFF white panel</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="1"  width="210" height="34" rx="7" fill="url(#sidebar-new)"/>
+    <text x="765" y="22" font-size="11.5" fill="#A8D0D4" text-anchor="middle">#0A2830 dark petrol</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">Entire left sidebar panel background</text>
+    <rect x="40" y="44" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --sidebar-foreground -->
+  <g transform="translate(0,880)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--sidebar-foreground</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#17202B" stroke="#17202B"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#17202B dark text</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#8ABCC4" stroke="#8ABCC4"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#8ABCC4 light teal</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">Nav item text on dark sidebar</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --sidebar-primary (active item) -->
+  <g transform="translate(0,922)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--sidebar-primary</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#1A4D8F"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#1A4D8F navy</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#C9A040"/>
+    <text x="765" y="22" font-size="11.5" fill="#1A1000" text-anchor="middle">#C9A040 GOLD</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">Active nav item left-bar + active text colour</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- --sidebar-accent (hover) -->
+  <g transform="translate(0,964)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--sidebar-accent</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#EBF3FC" stroke="#B8D0F0"/>
+    <text x="475" y="22" font-size="11.5" fill="#1A3F75" text-anchor="middle">#EBF3FC light-blue tint</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#0E3040" stroke="#0E3040"/>
+    <text x="765" y="22" font-size="11.5" fill="#90C0C8" text-anchor="middle">#0E3040 lighter petrol</text>
+    <text x="900" y="20" font-size="12" fill="#C44000" font-weight="600">Sidebar hover row background</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 5: STATUS COLORS — UNCHANGED
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="1018" width="1220" height="26" rx="7" fill="#1A4040"/>
+  <text x="56" y="1036" font-size="12" font-weight="700" fill="#90D8C8" letter-spacing="1">STATUS COLORS — ALL UNCHANGED (green/amber/red stay universal)</text>
+
+  <g transform="translate(0,1054)">
+    <!-- success -->
+    <rect x="56"  y="4"  width="160" height="28" rx="7" fill="#1A8050"/>
+    <text x="136" y="22" font-size="11.5" fill="#fff" text-anchor="middle">--success #1A8050</text>
+    <!-- warning -->
+    <rect x="230" y="4"  width="160" height="28" rx="7" fill="#B07B18"/>
+    <text x="310" y="22" font-size="11.5" fill="#fff" text-anchor="middle">--warning #B07B18</text>
+    <!-- destructive -->
+    <rect x="404" y="4"  width="160" height="28" rx="7" fill="#C93535"/>
+    <text x="484" y="22" font-size="11.5" fill="#fff" text-anchor="middle">--destructive #C93535</text>
+    <!-- info: changes from navy-blue to petrol -->
+    <rect x="578" y="4"  width="240" height="28" rx="7" fill="#0F3D44" stroke="#0F3D44"/>
+    <text x="698" y="22" font-size="11.5" fill="#7ACCD4" text-anchor="middle">--info #0F3D44 (was #2260A8)</text>
+    <!-- unchanged label -->
+    <rect x="830" y="6"  width="106" height="20" rx="6" fill="#E0F2EB"/>
+    <text x="883" y="20" font-size="11" font-weight="600" fill="#1A7A50" text-anchor="middle">UNCHANGED</text>
+    <rect x="946" y="6"  width="106" height="20" rx="6" fill="#E0F2EB"/>
+    <text x="999" y="20" font-size="11" font-weight="600" fill="#1A7A50" text-anchor="middle">UNCHANGED</text>
+    <rect x="1058" y="6" width="106" height="20" rx="6" fill="#E0F2EB"/>
+    <text x="1111" y="20" font-size="11" font-weight="600" fill="#1A7A50" text-anchor="middle">UNCHANGED</text>
+    <rect x="40" y="40" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <text x="56" y="1118" font-size="12" fill="#1A6050" font-weight="600">Paid=green · Overdue=red · Warning=amber · They never change — alerts are always universally readable.</text>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 6: CHARTS
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="1136" width="1220" height="26" rx="7" fill="#2A3640"/>
+  <text x="56" y="1154" font-size="12" font-weight="700" fill="#C8D8D8" letter-spacing="1">CHART COLORS</text>
+
+  <g transform="translate(0,1172)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--chart-1 (primary series)</text>
+    <rect x="370" y="4"  width="210" height="28" rx="7" fill="#1A4D8F"/>
+    <text x="475" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#1A4D8F navy</text>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="28" rx="7" fill="#0F3D44"/>
+    <text x="765" y="22" font-size="11.5" fill="#fff" text-anchor="middle">#0F3D44 petrol</text>
+    <text x="900" y="20" font-size="12" fill="#567070">Primary bar/line on all charts — headcount, payroll trend</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <g transform="translate(0,1214)">
+    <text x="56"  y="20" font-size="12.5" fill="#2A3038" font-family="JetBrains Mono, monospace">--chart-2/3/4/5</text>
+    <rect x="370" y="6" width="30" height="22" rx="5" fill="#1A8050"/><rect x="406" y="6" width="30" height="22" rx="5" fill="#B07B18"/><rect x="442" y="6" width="30" height="22" rx="5" fill="#C93535"/><rect x="478" y="6" width="30" height="22" rx="5" fill="#2260A8"/>
+    <text x="620" y="22" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="6" width="30" height="22" rx="5" fill="#1A8050"/><rect x="696" y="6" width="30" height="22" rx="5" fill="#B07B18"/><rect x="732" y="6" width="30" height="22" rx="5" fill="#C93535"/><rect x="768" y="6" width="30" height="22" rx="5" fill="#C9A040"/>
+    <text x="900" y="20" font-size="12" fill="#567070">Green/Amber/Red unchanged · chart-5 navy→gold</text>
+    <rect x="893" y="6" width="106" height="20" rx="6" fill="#E0F2EB"/>
+    <text x="946" y="20" font-size="11" font-weight="600" fill="#1A7A50" text-anchor="middle">MOSTLY SAME</text>
+    <rect x="40" y="36" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 7: HARDCODED UTILITIES
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="1268" width="1220" height="26" rx="7" fill="#2A3640"/>
+  <text x="56" y="1286" font-size="12" font-weight="700" fill="#C8D8D8" letter-spacing="1">HARDCODED UTILITY CLASSES (need find-replace in index.css)</text>
+
+  <g transform="translate(0,1304)">
+    <text x="56"  y="16" font-size="12" fill="#2A3038" font-family="JetBrains Mono, monospace">.hero-band background</text>
+    <text x="56"  y="34" font-size="12" fill="#2A3038" font-family="JetBrains Mono, monospace">.chip-grad background</text>
+    <text x="56"  y="52" font-size="12" fill="#2A3038" font-family="JetBrains Mono, monospace">.op-pill-active background</text>
+    <text x="56"  y="70" font-size="12" fill="#2A3038" font-family="JetBrains Mono, monospace">.op-accent-bar / .op-heading color</text>
+    <text x="56"  y="88" font-size="12" fill="#2A3038" font-family="JetBrains Mono, monospace">.op-tint-medium / .op-lane-medium</text>
+    <text x="56"  y="106" font-size="12" fill="#2A3038" font-family="JetBrains Mono, monospace">.mission-lane-active</text>
+    <!-- Before column -->
+    <rect x="370" y="4"  width="210" height="112" rx="7" fill="#1A4D8F"/>
+    <text x="475" y="30"  font-size="11" fill="#C0D4F0" text-anchor="middle">All hardcoded</text>
+    <text x="475" y="46"  font-size="11" fill="#C0D4F0" text-anchor="middle">rgba(26, 77, 143, …)</text>
+    <text x="475" y="62"  font-size="11" fill="#C0D4F0" text-anchor="middle">#1A4D8F navy</text>
+    <text x="475" y="78"  font-size="11" fill="#C0D4F0" text-anchor="middle">throughout</text>
+    <!-- After column -->
+    <text x="620" y="64" font-size="16" fill="#6B7177" text-anchor="middle">→</text>
+    <rect x="660" y="4"  width="210" height="112" rx="7" fill="#0F3D44"/>
+    <text x="765" y="30"  font-size="11" fill="#90C8CC" text-anchor="middle">Replaced with</text>
+    <text x="765" y="46"  font-size="11" fill="#90C8CC" text-anchor="middle">rgba(15, 61, 68, …)</text>
+    <text x="765" y="62"  font-size="11" fill="#90C8CC" text-anchor="middle">#0F3D44 petrol</text>
+    <text x="765" y="78"  font-size="11" fill="#90C8CC" text-anchor="middle">throughout</text>
+    <text x="900" y="30"  font-size="12" fill="#567070">Hero header bands on pages</text>
+    <text x="900" y="48"  font-size="12" fill="#567070">Icon gradient chips</text>
+    <text x="900" y="66"  font-size="12" fill="#567070">Active filter pills (or swap to gold)</text>
+    <text x="900" y="84"  font-size="12" fill="#567070">Section headings, accent strips</text>
+    <text x="900" y="102" font-size="12" fill="#567070">Medium severity tint rows</text>
+    <rect x="40" y="126" width="1220" height="1" fill="#E4E6E8"/>
+  </g>
+
+  <!-- ════════════════════════════════════════════════
+       SUMMARY BOX
+  ════════════════════════════════════════════════ -->
+  <rect x="40" y="1448" width="1220" height="172" rx="14" fill="#061C20"/>
+  <rect x="40" y="1448" width="6"    height="172" rx="3"  fill="#C9A040"/>
+
+  <text x="68" y="1478" font-size="16" font-weight="700" fill="#E8D080">Summary — what actually changes visually</text>
+
+  <!-- col 1 -->
+  <text x="68"  y="1506" font-size="12.5" fill="#A8C8C8">● Page canvas</text>
+  <text x="68"  y="1524" font-size="12.5" fill="#A8C8C8">● Primary buttons</text>
+  <text x="68"  y="1542" font-size="12.5" fill="#A8C8C8">● Focus rings, links</text>
+  <text x="68"  y="1560" font-size="12.5" fill="#A8C8C8">● KPI hero card</text>
+  <text x="68"  y="1578" font-size="12.5" fill="#A8C8C8">● Header band / nav gradient</text>
+  <text x="68"  y="1600" font-size="12.5" fill="#A8C8C8">● Charts (primary series)</text>
+
+  <text x="320" y="1506" font-size="12.5" fill="#C8E8E0">cool gray → teal tint (#F3F5F8→#F2F7F7)</text>
+  <text x="320" y="1524" font-size="12.5" fill="#C8E8E0">navy → petrol (#1A4D8F→#0F3D44)</text>
+  <text x="320" y="1542" font-size="12.5" fill="#C8E8E0">navy → petrol</text>
+  <text x="320" y="1560" font-size="12.5" fill="#C8E8E0">navy gradient → petrol gradient</text>
+  <text x="320" y="1578" font-size="12.5" fill="#C8E8E0">navy → petrol</text>
+  <text x="320" y="1600" font-size="12.5" fill="#C8E8E0">navy → petrol</text>
+
+  <!-- col 2 -->
+  <text x="700" y="1506" font-size="12.5" fill="#A8C8C8">● Sidebar panel</text>
+  <text x="700" y="1524" font-size="12.5" fill="#A8C8C8">● Sidebar active item</text>
+  <text x="700" y="1542" font-size="12.5" fill="#A8C8C8">● Hover tints / chips</text>
+  <text x="700" y="1560" font-size="12.5" fill="#E8D080">● Status (success/warn/error)</text>
+  <text x="700" y="1578" font-size="12.5" fill="#E8D080">● Cards, popovers</text>
+  <text x="700" y="1596" font-size="12.5" fill="#E8D080">● Text, borders, inputs</text>
+
+  <text x="950" y="1506" font-size="12.5" fill="#E84040" font-weight="600">WHITE → DARK PETROL (biggest change!)</text>
+  <text x="950" y="1524" font-size="12.5" fill="#E84040" font-weight="600">navy pill → GOLD bar + gold text</text>
+  <text x="950" y="1542" font-size="12.5" fill="#C8E8E0">blue-tint → teal-tint</text>
+  <text x="950" y="1560" font-size="12.5" fill="#E8D080" font-weight="600">UNCHANGED — green / amber / red</text>
+  <text x="950" y="1578" font-size="12.5" fill="#E8D080" font-weight="600">UNCHANGED — always white</text>
+  <text x="950" y="1596" font-size="12.5" fill="#E8D080" font-weight="600">NEAR-IDENTICAL — tiny warmth shift</text>
+</svg>
