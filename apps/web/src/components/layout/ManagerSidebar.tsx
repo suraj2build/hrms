@@ -367,7 +367,7 @@ export function ManagerSidebar() {
 
             {/* Sub-groups — nested under the section, shown when it is open */}
             {(sidebarCollapsed || isOpen(section.label)) && (
-              <div className={cn(!sidebarCollapsed && 'mt-1 ml-3 pl-2 border-l border-border/70 space-y-0.5')}>
+              <div className={cn(!sidebarCollapsed && 'mt-1.5 ml-2 space-y-1')}>
                 {(section.groups ?? [{ label: '', items: section.items ?? [] }]).map((group, gi) => {
                   const mgr   = section.type === 'manager'
                   const gOpen = isOpen(group.label)
@@ -378,21 +378,25 @@ export function ManagerSidebar() {
                           type="button"
                           onClick={() => toggle(group.label)}
                           className={cn(
-                            'flex items-center justify-between w-full gap-2 px-2.5 py-1.5 rounded-md transition-colors select-none',
-                            'text-[10.5px] font-semibold uppercase tracking-wider',
+                            'flex items-center justify-between w-full gap-2 px-2.5 py-1.5 rounded-md border transition-colors select-none',
+                            'text-[11px] font-bold uppercase tracking-wide',
+                            mgr ? 'text-warning' : 'text-primary',
                             gOpen
-                              ? (mgr ? 'text-warning' : 'text-primary')
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                              ? (mgr ? 'bg-warning/15 border-warning/30 hover:bg-warning/20' : 'bg-primary/[0.12] border-primary/25 hover:bg-primary/15')
+                              : (mgr ? 'bg-warning/[0.08] border-warning/20 hover:bg-warning/15' : 'bg-primary/[0.06] border-primary/15 hover:bg-primary/[0.12]'),
                           )}
                         >
-                          <span className="truncate">{group.label}</span>
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className={cn('h-3 w-1 rounded-full shrink-0', gOpen ? (mgr ? 'bg-warning' : 'bg-primary') : (mgr ? 'bg-warning/50' : 'bg-primary/50'))} />
+                            <span className="truncate">{group.label}</span>
+                          </span>
                           {gOpen
-                            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            : <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+                            ? <ChevronDown className={cn('h-3.5 w-3.5 shrink-0', mgr ? 'text-warning' : 'text-primary')} />
+                            : <ChevronRight className={cn('h-3.5 w-3.5 shrink-0', mgr ? 'text-warning/70' : 'text-primary/70')} />}
                         </button>
                       )}
                       {(sidebarCollapsed || !group.label || gOpen) && (
-                        <div className={cn('space-y-0.5', !sidebarCollapsed && group.label && 'mt-0.5')}>
+                        <div className={cn('space-y-0.5', !sidebarCollapsed && group.label && 'mt-1')}>
                           {group.items.map(item => renderNavItem(item, section.type, location.pathname, sidebarCollapsed))}
                         </div>
                       )}
