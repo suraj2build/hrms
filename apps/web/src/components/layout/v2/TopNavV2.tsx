@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Sun, Moon, LogOut, ChevronDown, Menu, BarChart3, Waves } from 'lucide-react'
+import { Sun, Waves, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -47,8 +47,8 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const executiveMode        = useUIStore(s => s.executiveMode)
   const toggleExecutiveMode  = useUIStore(s => s.toggleExecutiveMode)
   const [notifOpen, setNotifOpen]  = useState(false)
-  const { theme, resolvedTheme, setTheme } = useTheme()
-  const dark = resolvedTheme === 'dark'
+  const { theme, setTheme } = useTheme()
+  const isPetrol = theme === 'petrol'
 
   // In Executive Mode show only the curated exec domain set; otherwise role-filtered full set.
   const activeDomain   = executiveMode
@@ -188,31 +188,15 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         </div>
         <NotificationCenter open={notifOpen} onClose={() => setNotifOpen(false)} />
 
-        {/* Theme picker */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/90 hover:text-white"
-              title="Change theme"
-            >
-              {theme === 'petrol' ? <Waves className="h-4 w-4" /> : dark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36">
-            <DropdownMenuLabel className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wide">Theme</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setTheme('light')} className={cn('gap-2', theme === 'light' && 'bg-accent')}>
-              <Sun className="h-3.5 w-3.5" /> Light
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme('dark')} className={cn('gap-2', theme === 'dark' && 'bg-accent')}>
-              <Moon className="h-3.5 w-3.5" /> Dark
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme('petrol')} className={cn('gap-2', theme === 'petrol' && 'bg-accent')}>
-              <Waves className="h-3.5 w-3.5" /> Petrol
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Theme toggle: Blue ↔ Petrol */}
+        <button
+          type="button"
+          onClick={() => setTheme(isPetrol ? 'light' : 'petrol')}
+          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/90 hover:text-white"
+          title={isPetrol ? 'Switch to Blue theme' : 'Switch to Petrol theme'}
+        >
+          {isPetrol ? <Sun className="h-4 w-4" /> : <Waves className="h-4 w-4" />}
+        </button>
 
         {/* User dropdown */}
         <DropdownMenu>

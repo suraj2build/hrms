@@ -1,58 +1,41 @@
 import * as React from 'react'
 
-type Theme = 'light' | 'dark' | 'system' | 'petrol'
+type Theme = 'light' | 'petrol'
 
 type ThemeContextValue = {
-  theme:         Theme
-  resolvedTheme: 'light' | 'dark'
-  setTheme:      (theme: Theme) => void
+  theme:     Theme
+  setTheme:  (theme: Theme) => void
 }
 
 const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefined)
 
 const STORAGE_KEY = 'aurora-theme'
 
-function applyTheme(theme: Theme): 'light' | 'dark' {
-  if (typeof document === 'undefined') return 'light'
-  const root       = document.documentElement
-  const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const isDark     = theme === 'dark' || (theme === 'system' && systemDark)
-  root.classList.toggle('dark', isDark)
-  root.dataset.theme         = theme === 'petrol' ? 'petrol' : ''
-  root.style.colorScheme     = isDark ? 'dark' : 'light'
-  return isDark ? 'dark' : 'light'
+function applyTheme(theme: Theme): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  root.classList.remove('dark')
+  root.dataset.theme     = theme === 'petrol' ? 'petrol' : ''
+  root.style.colorScheme = 'light'
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState]       = React.useState<Theme>('light')
-  const [resolvedTheme, setResolvedTheme] = React.useState<'light' | 'dark'>('light')
+  const [theme, setThemeState] = React.useState<Theme>('light')
 
-  // Read persisted preference on mount; default to light if nothing stored.
   React.useEffect(() => {
-    const stored = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? 'light'
+    const raw    = localStorage.getItem(STORAGE_KEY)
+    const stored = (raw === 'petrol' ? 'petrol' : 'light') as Theme
     setThemeState(stored)
-    setResolvedTheme(applyTheme(stored))
+    applyTheme(stored)
   }, [])
-
-  // Follow system preference changes when theme === 'system'.
-  React.useEffect(() => {
-    if (theme !== 'system') return
-    const mq       = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => setResolvedTheme(applyTheme('system'))
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [theme])
 
   const setTheme = React.useCallback((next: Theme) => {
     localStorage.setItem(STORAGE_KEY, next)
     setThemeState(next)
-    setResolvedTheme(applyTheme(next))
+    applyTheme(next)
   }, [])
 
-  const value = React.useMemo(
-    () => ({ theme, resolvedTheme, setTheme }),
-    [theme, resolvedTheme, setTheme],
-  )
+  const value = React.useMemo(() => ({ theme, setTheme }), [theme, setTheme])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
@@ -62,3 +45,6 @@ export function useTheme() {
   if (!ctx) throw new Error('useTheme must be used within ThemeProvider')
   return ctx
 }
+
+// Kept for any remaining callers that destructure resolvedTheme
+export type { Theme }
