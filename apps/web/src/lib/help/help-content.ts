@@ -59,6 +59,7 @@ export const HELP_CONTENT: HelpEntry[] = [
     match:   '/admin/control-center',
     title:   'Control Center',
     summary: 'Cross-module operational overview — exceptions, KPIs and platform health in one view.',
+    why:     'A single place to spot issues across modules means nothing slips through before it affects payroll or compliance.',
     steps: [
       { title: 'Scan the exception tiles', detail: 'Each tile is a category of issues. A non-zero count is work waiting for you.' },
       { title: 'Drill into a tile', detail: 'Click a tile to open the module where the issue lives and resolve it.' },
@@ -100,6 +101,7 @@ export const HELP_CONTENT: HelpEntry[] = [
     match:   '/admin/employees/',   // employee profile (deeper than list)
     title:   'Employee Profile',
     summary: 'The full record for one employee, organised into tabs.',
+    why:     'Complete, accurate profile data is what payroll and statutory filings draw from — gaps here surface as held slips later.',
     steps: [
       { title: 'Move through the tabs', detail: 'Each tab (Personal, Job, Bank & Statutory, Documents…) loads its own section. Switch tabs to view or edit that area.' },
       { title: 'Keep statutory IDs complete', detail: 'Under **Bank & Statutory**, fill PAN, UAN, ESI and bank/IFSC — these feed payroll and statutory filings.' },
@@ -202,6 +204,7 @@ export const HELP_CONTENT: HelpEntry[] = [
     match:   '/admin/payroll/filing-pack',
     title:   'Filing Pack',
     summary: 'Generate ready-to-file statutory bundles — ECR 2.0, Form 24Q and consolidated challans.',
+    why:     'Generating from finalized payroll gives you portal-ready files, so filings go through without manual rework or rejections.',
     steps: [
       { title: 'Run the readiness check', detail: 'A pre-flight verifies registrations and that payroll is finalized for the month.' },
       { title: 'Generate the artifact', detail: 'Export ECR (EPF), 24Q (TDS) or the challan sheet for the selected period.' },
@@ -242,6 +245,7 @@ export const HELP_CONTENT: HelpEntry[] = [
     match:   '/admin/explorer',
     title:   'Data Explorer',
     summary: 'Slice any dataset into a table, chain group-bys, and drill all the way down to the employee list.',
+    why:     'Drilling from a number straight to the people behind it lets you verify the figure and act on it without exporting.',
     steps: [
       { title: 'Pick a surface', detail: 'People, Payroll, Attendance, Leave, Separation or Assets.' },
       { title: 'Group & measure', detail: 'Choose a Group-By and a Metric; the summary stats (Count/Sum/Average/Median/%) update live.' },
@@ -253,6 +257,7 @@ export const HELP_CONTENT: HelpEntry[] = [
     match:   '/admin/reports',
     title:   'Reports Hub',
     summary: 'All reporting, analytics and executive views in one place.',
+    why:     'Pulling reports from a single hub against the right finalized period keeps the numbers you share consistent and audit-ready.',
     steps: [
       { title: 'Pick a category', detail: 'Operational registers, Analytics surfaces, or Executive read-outs.' },
       { title: 'Set the period', detail: 'Payroll-based reports default to your latest finalized month; change it with the month picker.' },

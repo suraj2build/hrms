@@ -18,6 +18,7 @@ import { Input }         from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api/client'
 import { cn }  from '@/lib/utils'
+import { useOpenOnParam } from '@/lib/runbooks/useOpenOnParam'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,9 @@ export function EssHelpdesk() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState(defaultForm)
+
+  // Runbook deep-link (?new=1) auto-opens the new-ticket dialog.
+  useOpenOnParam('new', () => setCreateOpen(true))
   const [openTicketId, setOpenTicketId] = useState<string | null>(null)
   const [reply, setReply] = useState('')
 

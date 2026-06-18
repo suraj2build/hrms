@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api/client'
+import { useOpenOnParam } from '@/lib/runbooks/useOpenOnParam'
 
 interface ReimbCategory {
   id: string
@@ -79,6 +80,9 @@ export function EssReimbursements() {
   const qc = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState<ClaimForm>({ ...defaultForm, claim_month: getCurrentMonth() })
+
+  // Runbook deep-link (?new=1) auto-opens the create-claim dialog.
+  useOpenOnParam('new', () => openDialog())
 
   const { data: categories = [] } = useQuery<ReimbCategory[]>({
     queryKey: ['reimbursements', 'categories'],
