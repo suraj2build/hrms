@@ -57,6 +57,7 @@ import {
   TabsContent,
 } from '@/components/ui/tabs'
 import { api }           from '@/lib/api/client'
+import { EmployeeLabel }  from '@/components/employee/EmployeeLabel'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
@@ -290,7 +291,7 @@ function LifecycleAnalyticsTab() {
                       <div className="text-xs font-medium">
                         {f.employees
                           ? `${f.employees.first_name} ${f.employees.last_name}`
-                          : f.employee_id.slice(0, 8) + '…'}
+                          : <EmployeeLabel id={f.employee_id} />}
                       </div>
                       {f.employees && (
                         <div className="text-[10px] text-muted-foreground">{f.employees.employee_code}</div>
@@ -351,7 +352,7 @@ function LifecycleAnalyticsTab() {
                       <div className="text-xs font-medium">
                         {hc.employees
                           ? `${hc.employees.first_name} ${hc.employees.last_name}`
-                          : hc.employee_id.slice(0, 8) + '…'}
+                          : <EmployeeLabel id={hc.employee_id} />}
                       </div>
                       {hc.employees && (
                         <div className="text-[10px] text-muted-foreground">{hc.employees.employee_code}</div>
@@ -922,7 +923,7 @@ export default function LeaveGovernanceWorkspace() {
                           <div className="font-medium text-xs">
                             {g.employees
                               ? `${g.employees.first_name} ${g.employees.last_name}`
-                              : g.employee_id.slice(0, 8)}
+                              : <EmployeeLabel id={g.employee_id} />}
                           </div>
                           {g.employees?.employee_code && (
                             <div className="text-xs text-muted-foreground">{g.employees.employee_code}</div>

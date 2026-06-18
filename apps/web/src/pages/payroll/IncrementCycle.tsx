@@ -20,6 +20,7 @@ import {
   CheckCircle2, AlertTriangle, ListChecks, Sparkles,
 } from 'lucide-react'
 import { api }           from '@/lib/api/client'
+import { EmployeeLabel }  from '@/components/employee/EmployeeLabel'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
@@ -235,7 +236,7 @@ export function IncrementCycle() {
                     <tbody className="divide-y">
                       {preview.created.map(r => (
                         <tr key={r.employee_id} className="hover:bg-muted/30">
-                          <td className="px-3 py-2 font-medium">{r.name ?? r.employee_id.slice(0, 8)}</td>
+                          <td className="px-3 py-2 font-medium">{r.name ?? <EmployeeLabel id={r.employee_id} />}</td>
                           <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{inr(r.before_ctc_annual)}</td>
                           <td className="px-3 py-2 text-right tabular-nums font-medium">{inr(r.new_ctc_annual)}</td>
                           <td className="px-3 py-2 text-right">
