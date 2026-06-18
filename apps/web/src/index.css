@@ -766,3 +766,122 @@
     flex-direction: column;
   }
 }
+
+/* ── Petrol + Teal theme ───────────────────────────────────────────────────── */
+:root[data-theme="petrol"] {
+  --background:            #F2F7F7;
+  --foreground:            #061C20;
+  --card:                  #FFFFFF;
+  --card-foreground:       #061C20;
+  --popover:               #FFFFFF;
+  --popover-foreground:    #061C20;
+
+  --primary:               #0F3D44;
+  --primary-foreground:    #FFFFFF;
+
+  --secondary:             #E0F0F2;
+  --secondary-foreground:  #0A2830;
+  --muted:                 #EAF2F2;
+  --muted-foreground:      #567880;
+  --accent:                #E0F0F2;
+  --accent-foreground:     #0A2830;
+
+  --destructive:             #C93535;
+  --destructive-foreground:  #FFFFFF;
+  --success:                 #1A8050;
+  --success-foreground:      #FFFFFF;
+  --warning:                 #B07B18;
+  --warning-foreground:      #FFFFFF;
+  --info:                    #0F3D44;
+  --info-foreground:         #FFFFFF;
+
+  --border:  #D8E8E8;
+  --input:   #D8E8E8;
+  --ring:    #0F3D44;
+
+  --chart-1: #0F3D44;
+  --chart-2: #1A8050;
+  --chart-3: #B07B18;
+  --chart-4: #C93535;
+  --chart-5: #14505A;
+
+  --sidebar:                    #FFFFFF;
+  --sidebar-foreground:         #061C20;
+  --sidebar-primary:            #0F3D44;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent:             #E0F0F2;
+  --sidebar-accent-foreground:  #0A2830;
+  --sidebar-border:             #D8E8E8;
+  --sidebar-ring:               #0F3D44;
+
+  --grad-hero:    linear-gradient(135deg, #062228 0%, #14505A 100%);
+  --grad-primary: linear-gradient(135deg, #0F3D44 0%, #14505A 100%);
+  --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #F2F7F7 100%);
+  --gradient-nav: linear-gradient(to right, #0C3840, #0F3D44, #145060);
+
+  --brand-navy:      #0F3D44;
+  --brand-navy-deep: #062228;
+  --brand-navy-soft: #14505A;
+  --primary-glow:    oklch(0.62 0.09 185);
+
+  --elev-1: 0 1px 2px rgba(6,34,40,0.05), 0 8px 20px -12px rgba(6,34,40,0.12), 0 0 0 1px rgba(6,34,40,0.035);
+  --elev-2: 0 2px 6px rgba(6,34,40,0.06), 0 14px 32px -14px rgba(6,34,40,0.16), 0 0 0 1px rgba(6,34,40,0.03);
+  --elev-3: 0 10px 24px rgba(6,34,40,0.08), 0 32px 60px -24px rgba(6,34,40,0.22), 0 0 0 1px rgba(6,34,40,0.03);
+}
+
+:root[data-theme="petrol"] .app-canvas {
+  background:
+    radial-gradient(60% 48% at 100% 0%,  rgba(15,61,68,0.07), transparent 70%),
+    radial-gradient(48% 40% at 0% 100%,  rgba(26,128,80,0.055), transparent 72%),
+    var(--color-background);
+}
+
+:root[data-theme="petrol"] .hero-band {
+  background: linear-gradient(135deg, #062228 0%, #0F3D44 55%, #052830 100%);
+  box-shadow: 0 24px 56px -22px rgba(15,61,68,0.55);
+}
+:root[data-theme="petrol"] .hero-band::after {
+  background: rgba(20,80,90,0.28);
+}
+
+:root[data-theme="petrol"] .chip-grad {
+  background: linear-gradient(145deg, #14505A 0%, #0F3D44 100%);
+  box-shadow: 0 6px 14px -6px rgba(15,61,68,0.55), inset 0 1px 0 rgba(255,255,255,0.35);
+}
+
+:root[data-theme="petrol"] .brand-gradient-text {
+  background: linear-gradient(135deg, #0F3D44 0%, #14505A 45%, #185060 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:root[data-theme="petrol"] .op-pill-active {
+  background: #0F3D44;
+  box-shadow: 0 1px 3px rgba(15,61,68,0.30);
+}
+:root[data-theme="petrol"] .op-pill-inactive:hover {
+  border-color: #A8D0D4;
+  background: #E0F0F2;
+  color: #0F3D44;
+}
+:root[data-theme="petrol"] .op-accent-bar      { background: #0F3D44; }
+:root[data-theme="petrol"] .op-heading          { color: #0F3D44; }
+:root[data-theme="petrol"] .op-section-bg       { border-color: rgba(15,61,68,0.07); }
+:root[data-theme="petrol"] .op-meta-pill        { background: rgba(15,61,68,0.07); color: #0F3D44; }
+:root[data-theme="petrol"] .op-tint-medium      { background: rgba(224,240,242,0.90) !important; }
+:root[data-theme="petrol"] .op-lane-medium      { border-left-color: rgba(15,61,68,0.40); background: rgba(224,240,242,0.50); }
+:root[data-theme="petrol"] .op-lane-default     { border-left-color: rgba(15,61,68,0.15); }
+:root[data-theme="petrol"] .mission-lane-active { background: rgba(224,240,242,0.75); border-left-color: rgba(15,61,68,0.40); color: #0F3D44; }
+:root[data-theme="petrol"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(15,61,68,0.28), 0 4px 12px rgba(0,0,0,0.08) !important; }
+:root[data-theme="petrol"] .op-row-selected     { background: rgba(224,240,242,0.85) !important; box-shadow: inset 2px 0 0 rgba(15,61,68,0.50), 0 0 0 1px rgba(15,61,68,0.14) !important; }
+:root[data-theme="petrol"] .op-row-processing::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(15,61,68,0.035) 35%,
+    rgba(15,61,68,0.070) 50%,
+    rgba(15,61,68,0.035) 65%,
+    transparent 100%
+  );
+}

@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-type Theme = 'light' | 'dark' | 'system'
+type Theme = 'light' | 'dark' | 'system' | 'petrol'
 
 type ThemeContextValue = {
   theme:         Theme
@@ -16,10 +16,11 @@ function applyTheme(theme: Theme): 'light' | 'dark' {
   if (typeof document === 'undefined') return 'light'
   const root       = document.documentElement
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const resolved   = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme
-  root.classList.toggle('dark', resolved === 'dark')
-  root.style.colorScheme = resolved
-  return resolved
+  const isDark     = theme === 'dark' || (theme === 'system' && systemDark)
+  root.classList.toggle('dark', isDark)
+  root.dataset.theme         = theme === 'petrol' ? 'petrol' : ''
+  root.style.colorScheme     = isDark ? 'dark' : 'light'
+  return isDark ? 'dark' : 'light'
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
