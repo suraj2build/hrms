@@ -1263,9 +1263,11 @@ export async function validateImportRows(
             .map((r) => (r.normalizedData[field] as string).toUpperCase()),
         ),
       ]
-      const [stateIdMap, clusterIdMap] = await Promise.all([
-        resolveCodeToId(supabase, tenantId, 'states',   'code', pick('state_code')),
-        resolveCodeToId(supabase, tenantId, 'clusters', 'code', pick('cluster_code')),
+      const [stateIdMap, clusterIdMap, costCenterIdMap, parentSiteIdMap] = await Promise.all([
+        resolveCodeToId(supabase, tenantId, 'states',       'code', pick('state_code')),
+        resolveCodeToId(supabase, tenantId, 'clusters',     'code', pick('cluster_code')),
+        resolveCodeToId(supabase, tenantId, 'cost_centers', 'code', pick('cost_center_code')),
+        resolveCodeToId(supabase, tenantId, 'sites',        'code', pick('parent_site_code')),
       ])
       for (const vr of validatedRows) {
         if (!vr.isValid) continue
@@ -1280,6 +1282,24 @@ export async function validateImportRows(
           const clusterId = clusterIdMap.get(clusterCode.toUpperCase())
           if (clusterId) vr.normalizedData.cluster_id = clusterId
           else vr.warnings.push({ field: 'cluster_code', message: `Cluster "${clusterCode}" not found — cluster link will be left blank`, severity: 'warning' })
+        }
+        const costCenterCode = vr.normalizedData.cost_center_code as string | undefined
+        if (costCenterCode) {
+          const costCenterId = costCenterIdMap.get(costCenterCode.toUpperCase())
+          if (costCenterId) vr.normalizedData.cost_center_id = costCenterId
+          else vr.warnings.push({ field: 'cost_center_code', message: `Cost center "${costCenterCode}" not found — cost center link will be left blank`, severity: 'warning' })
+        }
+        const parentSiteCode = vr.normalizedData.parent_site_code as string | undefined
+        if (parentSiteCode) {
+          // Guard against a site pointing at itself as parent.
+          const selfCode = (vr.normalizedData.code as string | undefined)?.toUpperCase()
+          if (selfCode && parentSiteCode.toUpperCase() === selfCode) {
+            vr.warnings.push({ field: 'parent_site_code', message: 'A site cannot be its own parent — parent will be left blank', severity: 'warning' })
+          } else {
+            const parentSiteId = parentSiteIdMap.get(parentSiteCode.toUpperCase())
+            if (parentSiteId) vr.normalizedData.parent_site_id = parentSiteId
+            else vr.warnings.push({ field: 'parent_site_code', message: `Parent site "${parentSiteCode}" not found — parent will be left blank`, severity: 'warning' })
+          }
         }
       }
     }

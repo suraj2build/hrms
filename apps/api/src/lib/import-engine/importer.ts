@@ -135,24 +135,42 @@ const TABLE_MAP: Record<string, TableConfig> = {
   sites: {
     table: 'sites',
     uniqueColumn: 'code',
-    mapRow: (tenantId, norm) => ({
-      tenant_id: tenantId,
-      code:      norm.code,
-      name:      norm.name,
-      location:  norm.location  ?? null,
-      timezone:  (norm.timezone as string) || 'Asia/Kolkata',
-      // state_id / cluster_id resolved from state_code / cluster_code by the validator.
-      state_id:            norm.state_id            ?? null,
-      cluster_id:          norm.cluster_id          ?? null,
-      // state_code is also kept as the legacy free-text column for back-compat.
-      state_code:          norm.state_code          ?? null,
-      site_type:           norm.site_type           ?? null,
-      city:                norm.city                ?? null,
-      pincode:             norm.pincode             ?? null,
-      gstin:               norm.gstin               ?? null,
-      pf_registration_no:  norm.pf_registration_no  ?? null,
-      esi_registration_no: norm.esi_registration_no ?? null,
-    }),
+    mapRow: (tenantId, norm) => {
+      const row: Record<string, unknown> = {
+        tenant_id: tenantId,
+        code:      norm.code,
+        name:      norm.name,
+        location:  norm.location  ?? null,
+        timezone:  (norm.timezone as string) || 'Asia/Kolkata',
+        // state_id / cluster_id resolved from state_code / cluster_code by the validator.
+        state_id:            norm.state_id            ?? null,
+        cluster_id:          norm.cluster_id          ?? null,
+        // state_code is also kept as the legacy free-text column for back-compat.
+        state_code:          norm.state_code          ?? null,
+        site_type:           norm.site_type           ?? null,
+        city:                norm.city                ?? null,
+        pincode:             norm.pincode             ?? null,
+        gstin:               norm.gstin               ?? null,
+        pf_registration_no:  norm.pf_registration_no  ?? null,
+        esi_registration_no: norm.esi_registration_no ?? null,
+      }
+      // Site master expansion (migration 275). Written only when the cell carries
+      // a value so a blank column on re-import never overwrites an existing value
+      // and NOT-NULL/defaulted columns (e.g. status) keep their defaults.
+      // cost_center_id / parent_site_id are resolved from *_code by the validator.
+      const EXPANSION_KEYS = [
+        'short_name', 'status', 'opening_date', 'region', 'zone',
+        'cost_center_id', 'parent_site_id',
+        'address_line1', 'address_line2', 'district', 'country',
+        'latitude', 'longitude', 'geofence_radius_m',
+        'pt_registration_no', 'lwf_registration_no', 'shops_estab_reg_no', 'factory_license_no',
+        'contact_person', 'contact_phone', 'contact_email', 'sanctioned_headcount',
+      ]
+      for (const k of EXPANSION_KEYS) {
+        if (norm[k] !== undefined && norm[k] !== '') row[k] = norm[k]
+      }
+      return row
+    },
   },
 
   states: {
