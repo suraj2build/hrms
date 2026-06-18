@@ -310,6 +310,10 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
 
       const now = new Date().toISOString()
 
+      // Status precondition: only un-decided records may be verified/rejected.
+      // verification_status ∈ ('pending','under_review','verified','rejected');
+      // the verify workflow may only transition from the pending states below — an
+      // already-decided (verified/rejected) record must not be silently re-flipped.
       const { data, error } = await fastify.supabase
         .from('previous_employment_tax_details')
         .update({
@@ -321,11 +325,13 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
         })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
+        .in('verification_status', ['pending', 'under_review'])
         .select()
-        .single()
+        .maybeSingle()
 
       if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-      if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
+      // No row matched the precondition: either not found, or already decided.
+      if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Record not found or already decided' })
 
       return reply.send({ data })
     },

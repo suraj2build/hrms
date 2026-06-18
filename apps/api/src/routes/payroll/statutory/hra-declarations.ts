@@ -373,6 +373,10 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
 
       const now = new Date().toISOString()
 
+      // Status precondition: only un-decided declarations may be verified/rejected.
+      // hra_declarations.status ∈ ('draft','submitted','verified','rejected','superseded');
+      // the verify workflow may only transition from the pending states below — an
+      // already-decided (verified/rejected) or superseded record must not be re-flipped.
       const { data, error } = await fastify.supabase
         .from('hra_declarations')
         .update({
@@ -384,11 +388,13 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
         })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
+        .in('status', ['draft', 'submitted'])
         .select()
-        .single()
+        .maybeSingle()
 
       if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-      if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'HRA declaration not found' })
+      // No row matched the precondition: either not found, or already decided.
+      if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'HRA declaration not found or already decided' })
 
       return reply.send({ data })
     },
