@@ -796,6 +796,29 @@ export function ApprovalInbox() {
   const regTotal     = pagination?.reg_total   ?? regItems.length
   const totalPending = leaveTotal + regTotal
 
+  // Pending counts for the embedded approval tabs. Same query keys as the panels
+  // so the cache is shared (no double-fetch); any error degrades to 0.
+  const { data: otData } = useQuery<{ data?: unknown[] }>({
+    queryKey:  ['manager-team-overtime', 'pending'],
+    queryFn:   () => api.get('/overtime/requests?status=PENDING'),
+    staleTime: 30_000,
+  })
+  const overtimeCount = (otData?.data ?? []).length
+
+  const { data: coData } = useQuery<{ data?: unknown[] }>({
+    queryKey:  ['manager-team-compoff', 'pending'],
+    queryFn:   () => api.get('/attendance/comp-off?status=pending'),
+    staleTime: 30_000,
+  })
+  const compOffCount = (coData?.data ?? []).length
+
+  const { data: loanData } = useQuery<{ advances?: unknown[]; loans?: unknown[] }>({
+    queryKey:  ['manager-loan-pending'],
+    queryFn:   () => api.get('/payroll/ess/manager/pending'),
+    staleTime: 30_000,
+  })
+  const loansCount = (loanData?.advances ?? []).length + (loanData?.loans ?? []).length
+
   const showLeave = activeTab === 'all' || activeTab === 'leave'
   const showReg   = activeTab === 'all' || activeTab === 'regularisation'
 
@@ -811,9 +834,9 @@ export function ApprovalInbox() {
     { key: 'all',            label: 'All',            count: totalPending },
     { key: 'leave',          label: 'Leave',          count: leaveTotal },
     { key: 'regularisation', label: 'Regularisation', count: regTotal },
-    { key: 'overtime',       label: 'Overtime',       count: 0 },
-    { key: 'comp-off',       label: 'Comp-Off',       count: 0 },
-    { key: 'loans',          label: 'Loans',          count: 0 },
+    { key: 'overtime',       label: 'Overtime',       count: overtimeCount },
+    { key: 'comp-off',       label: 'Comp-Off',       count: compOffCount },
+    { key: 'loans',          label: 'Loans',          count: loansCount },
   ]
 
   // The three new tabs embed the dedicated manager approval pages; the
