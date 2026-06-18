@@ -30,7 +30,7 @@ import {
 } from '../../lib/payroll-engine.js'
 import { resolveEmployeeStatutoryParams } from '../../lib/statutory/statutory-governance.js'
 import { applyStatutoryToSlip, applyTdsToSlip } from '../../lib/statutory-payroll.js'
-import { computeTDS } from '../../lib/statutory/tds-engine.js'
+import { computeTaxWithDB } from '../../lib/statutory/tax-computation-engine.js'
 import { round2 as round2fn } from '../../lib/payroll-engine.js'
 
 /** Indian financial year (Apr–Mar) for a YYYY-MM month → e.g. '2026-27'. */
@@ -51,11 +51,11 @@ function remainingMonthsFromRun(month: string, fy: string): number {
 
 /**
  * Compute this month's TDS for an employee and inject it into the slip — IF TDS
- * is enabled in payroll_statutory_settings. Uses the employee's ELECTED regime
- * (falling back to the tenant default), credits TDS already deducted earlier in
- * the FY, and spreads the remaining tax over the months left (true-up) rather
- * than re-spreading the full annual tax every month. The old regime additionally
- * applies approved Chapter-VI-A declarations.
+ * is enabled in payroll_statutory_settings. Routes through the same DB-driven
+ * tax engine the IT statement uses (computeTaxWithDB), so it correctly handles
+ * BOTH regimes, the employee's ELECTED regime, approved Chapter-VI-A
+ * declarations, previous-employer income/TDS (Form 12B), YTD already-deducted
+ * credit, and spreads the remaining tax over the months left (true-up).
  */
 async function applyTdsForRun(
   supabase: any, tenantId: string, employeeId: string, month: string,
@@ -69,6 +69,7 @@ async function applyTdsForRun(
   if (!s?.tds_enabled) return slip
 
   const fy = financialYearOf(month)
+  const fyStart = parseInt(fy.split('-')[0], 10)
 
   // Per-employee elected regime wins over the tenant default.
   const { data: election } = await supabase
@@ -79,39 +80,66 @@ async function applyTdsForRun(
     .maybeSingle()
   const regime = ((election?.regime ?? s.tds_default_regime) ?? 'new') as 'old' | 'new'
 
-  let totalDeductions = 0
-  if (regime === 'old') {
-    const { data: decls } = await supabase
-      .from('tax_declarations')
-      .select('approved_amount')
-      .eq('tenant_id', tenantId).eq('employee_id', employeeId)
-      .eq('financial_year', fy).eq('status', 'approved')
-    totalDeductions = (decls ?? []).reduce((acc: number, d: any) => acc + (Number(d.approved_amount) || 0), 0)
-  }
-
-  // YTD true-up: credit TDS already deducted in earlier months of this FY and
-  // spread the remaining tax over the months left, so an employee taxed
-  // correctly mid-year is not re-charged the full annual tax every month.
-  const fyStart = parseInt(fy.split('-')[0], 10)
+  // Prior FY slips → YTD gross (for projection) and YTD TDS (for true-up).
   const { data: prior } = await supabase
     .from('payroll_slips')
-    .select('tds_deducted')
+    .select('gross_pay, tds_deducted')
     .eq('tenant_id', tenantId).eq('employee_id', employeeId)
     .gte('month', `${fyStart}-04`)
     .lt('month', month)
+  const priorGross      = (prior ?? []).reduce((acc: number, r: any) => acc + (Number(r.gross_pay) || 0), 0)
   const alreadyDeducted = (prior ?? []).reduce((acc: number, r: any) => acc + (Number(r.tds_deducted) || 0), 0)
   const remainingMonths = remainingMonthsFromRun(month, fy)
+  // Project annual gross from actual prior months + the remaining months
+  // (current included) at the current month's gross.
+  const projectedAnnualGross = round2fn(priorGross + remainingMonths * slip.gross_pay)
 
-  const result = computeTDS(
-    {
-      grossAnnualIncome: round2fn(slip.gross_pay * 12),
-      regime,
-      totalDeductions,
-      alreadyDeducted,
-      remainingMonths,
+  // Approved declarations, summed by section (the engine applies per-regime caps).
+  const { data: decls } = await supabase
+    .from('tax_declarations')
+    .select('section, declaration_category, approved_amount, declared_amount')
+    .eq('tenant_id', tenantId).eq('employee_id', employeeId)
+    .eq('financial_year', fy).eq('status', 'approved')
+  const bySection: Record<string, number> = {}
+  for (const d of (decls ?? []) as any[]) {
+    const key = d.section ?? d.declaration_category
+    if (!key) continue
+    bySection[key] = (bySection[key] ?? 0) + (Number(d.approved_amount ?? d.declared_amount) || 0)
+  }
+  const get = (k: string) => bySection[k] ?? 0
+
+  // Verified previous-employer income & TDS (Form 12B) for this FY.
+  const { data: prevEmp } = await supabase
+    .from('previous_employment_tax_details')
+    .select('gross_income, tds_deducted')
+    .eq('tenant_id', tenantId).eq('employee_id', employeeId)
+    .eq('financial_year', fy).eq('verification_status', 'verified')
+  const previousEmployerSalary = (prevEmp ?? []).reduce((acc: number, r: any) => acc + (Number(r.gross_income) || 0), 0)
+  const previousEmployerTDS    = (prevEmp ?? []).reduce((acc: number, r: any) => acc + (Number(r.tds_deducted) || 0), 0)
+
+  const result = await computeTaxWithDB(supabase, {
+    grossAnnualIncome: projectedAnnualGross,
+    regime,
+    financialYear: fy,
+    deductions: {
+      section80C:             get('80C'),
+      section80CCD1B:         get('NPS'),
+      section80D:             get('80D'),
+      section80E:             get('80E'),
+      section80G:             get('80G'),
+      section80TTA:           get('80TTA'),
+      hraExemption:           get('HRA'),
+      homeLoanInterest:       get('home_loan_interest'),
+      otherDeductions:        get('other'),
+      professionalTax:        get('professional_tax'),
+      previousEmployerTDS,
+      tdsOthers:              0,
+      otherIncome:            0,
+      previousEmployerSalary,
     },
-    { financialYear: fy },
-  )
+    alreadyDeducted,
+    remainingMonths,
+  })
   return applyTdsToSlip(slip, result.monthlyTDS)
 }
 
