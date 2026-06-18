@@ -3241,13 +3241,32 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
     const { data, error } = await fastify.supabase
       .from('payroll_freeze_log')
-      .select('id, freeze_month, action, reason, frozen_at, frozen_by, unfrozen_at, payroll_run_id, profiles!payroll_freeze_log_frozen_by_fkey(full_name)')
+      .select('id, freeze_month, action, reason, frozen_at, frozen_by, unfrozen_at, payroll_run_id')
       .eq('tenant_id', tenantId)
       .order('frozen_at', { ascending: false })
       .limit(100)
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? [] })
+
+    // Resolve actor names with a plain id→name lookup rather than a PostgREST
+    // embed. payroll_freeze_log has TWO foreign keys to profiles (frozen_by and
+    // unfrozen_by); the named-FK embed (profiles!payroll_freeze_log_frozen_by_fkey)
+    // 500s the entire endpoint if the relationship cache is stale or the
+    // constraint name differs from what is expected. A separate lookup never does.
+    const rows = (data ?? []) as Array<Record<string, any>>
+    const actorIds = [...new Set(rows.map(r => r.frozen_by).filter(Boolean))]
+    let nameById = new Map<string, string | null>()
+    if (actorIds.length > 0) {
+      const { data: profs } = await fastify.supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', actorIds)
+      nameById = new Map((profs ?? []).map((p: any) => [p.id as string, p.full_name as string | null]))
+    }
+
+    return reply.send({
+      data: rows.map(r => ({ ...r, profiles: { full_name: nameById.get(r.frozen_by) ?? null } })),
+    })
   })
 
   // ── POST /payroll/freeze-month ────────────────────────────────────────────────
