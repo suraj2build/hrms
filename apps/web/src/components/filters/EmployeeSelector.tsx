@@ -20,6 +20,8 @@ export interface EmployeeSelectorProps {
   disabled?: boolean
   className?: string
   tenantId?: string
+  /** Employee ids to hide from the list (e.g. the current employee for a manager picker). */
+  excludeIds?: string[]
 }
 
 // ── Debounce ──────────────────────────────────────────────────────────────────
@@ -43,10 +45,15 @@ export function EmployeeSelector({
   disabled = false,
   className,
   tenantId,
+  excludeIds,
 }: EmployeeSelectorProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [options, setOptions] = useState<EmployeeOption[]>([])
+  const [optionsRaw, setOptions] = useState<EmployeeOption[]>([])
+  const options = useMemo(
+    () => (excludeIds && excludeIds.length ? optionsRaw.filter((o) => !excludeIds.includes(o.id)) : optionsRaw),
+    [optionsRaw, excludeIds],
+  )
   const [loading, setLoading] = useState(false)
   const [focusIndex, setFocusIndex] = useState(-1)
   // Accumulated id → label cache so the trigger/selected chips can always show

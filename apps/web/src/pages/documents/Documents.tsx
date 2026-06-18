@@ -13,8 +13,9 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { formatDate } from '@/lib/utils'
-import type { Document, DocType, EmployeeListItem } from '@/types'
+import type { Document, DocType } from '@/types'
 
 const DOC_TYPES: { value: DocType; label: string }[] = [
   { value: 'aadhaar', label: 'Aadhaar Card' },
@@ -64,12 +65,6 @@ export function Documents() {
     staleTime: 30_000,
   })
 
-  // Employees list for dropdown
-  const { data: empData } = useQuery<{ data: EmployeeListItem[] }>({
-    queryKey: ['employees-list'],
-    queryFn: () => api.get('/employees?limit=500'),
-    staleTime: 60_000,
-  })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/documents/${id}`),
@@ -145,7 +140,6 @@ export function Documents() {
     (d) => d.expires_at && new Date(d.expires_at) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
   )
 
-  const employees = empData?.data ?? []
 
   return (
     <div className="space-y-4">
@@ -290,26 +284,12 @@ export function Documents() {
             {/* Employee dropdown */}
             <div className="space-y-1.5">
               <Label>Employee *</Label>
-              <Select
+              <EmployeeSelector
                 value={uploadMeta.employee_id}
-                onValueChange={(v) => setUploadMeta((p) => ({ ...p, employee_id: v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select employee…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {employees.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">No employees found</div>
-                  ) : (
-                    employees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
-                        {emp.first_name} {emp.last_name}
-                        <span className="text-muted-foreground ml-2 text-xs">— {emp.employee_code}</span>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                onChange={(v) => setUploadMeta((p) => ({ ...p, employee_id: typeof v === 'string' ? v : (v[0] ?? '') }))}
+                placeholder="Search employee by name or code…"
+                className="w-full"
+              />
             </div>
 
             {/* Document type */}

@@ -46,6 +46,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Switch } from '@/components/ui/switch'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter } from '@/components/ui/sheet'
 import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
@@ -4148,10 +4149,13 @@ export function EmployeeProfile() {
             {/* Reporting Manager */}
             <div>
               <Label className="text-xs">Reporting Manager</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.manager_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,manager_id:e.target.value||null}))}>
-                <option value="">— None —</option>
-                {(managerListData?.data ?? []).filter((m:any)=>m.id!==id).map((m:any)=><option key={m.id} value={m.id}>{m.first_name} {m.last_name} #{m.employee_code}</option>)}
-              </select>
+              <EmployeeSelector
+                value={jobForm.manager_id ?? ''}
+                onChange={(v) => { const val = typeof v === 'string' ? v : (v[0] ?? ''); setJobForm((p:any)=>({ ...p, manager_id: val || null })) }}
+                excludeIds={id ? [id] : []}
+                placeholder="Search manager by name or code…"
+                className="mt-1 w-full"
+              />
             </div>
             {/* Work Location + Cost Center */}
             <div className="grid grid-cols-2 gap-2">
