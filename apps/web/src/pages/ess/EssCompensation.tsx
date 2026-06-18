@@ -969,8 +969,16 @@ export function EssCompensation() {
   const estEmpDeductions = latest
     ? Math.max(0, Math.round(((latest.total_deductions ?? 0) - (latest.lop_amount ?? 0)) * 100) / 100)
     : null
-  const netMonthly = estEmpDeductions != null
-    ? Math.round((grossMonthly - estEmpDeductions) * 100) / 100
+  // Only trust the payslip-derived deduction when it is consistent with the
+  // current structure's standing gross. A finalized payslip can carry one-off,
+  // non-standing items (TDS recovery, arrears, prior-period recoveries) that
+  // exceed the standing monthly gross — subtracting those would produce a
+  // nonsensical negative "take-home". In that case we fall back to the real
+  // payslip net pay (tile) and the gross-vs-employer split (composition bar).
+  const deductionsConsistent =
+    estEmpDeductions != null && grossMonthly > 0 && estEmpDeductions <= grossMonthly
+  const netMonthly = deductionsConsistent
+    ? Math.round((grossMonthly - (estEmpDeductions as number)) * 100) / 100
     : null
 
   const annualCtc = ctcMonthlyCalc > 0 ? ctcMonthlyCalc * 12 : (comp?.ctc_annual ?? 0)
@@ -1116,7 +1124,9 @@ export function EssCompensation() {
                   <p className="mt-3 text-[11px] text-muted-foreground">
                     {netMonthly != null
                       ? 'Composition reflects take-home, statutory deductions and employer contributions that make up your CTC.'
-                      : 'Net take-home split appears once your first payslip is finalized.'}
+                      : latest
+                        ? 'Showing gross earnings vs employer contributions. A detailed take-home split is shown once a payslip’s standing deductions align with your current structure.'
+                        : 'Net take-home split appears once your first payslip is finalized.'}
                   </p>
                 </>
               ) : (
