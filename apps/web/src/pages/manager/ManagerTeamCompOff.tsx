@@ -102,7 +102,7 @@ function CoRow({ req, onAction }: {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function ManagerTeamCompOff() {
+export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean }) {
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
   const qc = useQueryClient()
 
@@ -133,19 +133,8 @@ export function ManagerTeamCompOff() {
   const rows = data?.data ?? []
   const pendingCount = rows.filter(r => r.status === 'pending').length
 
-  return (
-    <PageContainer>
-      <PageHeader
-        title="Team Comp-Off"
-        subtitle="Review compensatory off requests for employees who worked on holidays or weekly offs."
-        actions={
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={cn('h-4 w-4 mr-1', isFetching && 'animate-spin')} />
-            Refresh
-          </Button>
-        }
-      />
-
+  const body = (
+    <>
       <div className="flex gap-1 mb-4 border-b border-border">
         {(['pending', 'history'] as const).map(t => (
           <button
@@ -179,6 +168,24 @@ export function ManagerTeamCompOff() {
           ))
         )}
       </SectionCard>
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Team Comp-Off"
+        subtitle="Review compensatory off requests for employees who worked on holidays or weekly offs."
+        actions={
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={cn('h-4 w-4 mr-1', isFetching && 'animate-spin')} />
+            Refresh
+          </Button>
+        }
+      />
+      {body}
     </PageContainer>
   )
 }

@@ -117,7 +117,7 @@ function OtRow({ req, onAction }: {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function ManagerTeamOvertimeRequests() {
+export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: boolean }) {
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
   const qc = useQueryClient()
 
@@ -160,19 +160,8 @@ export function ManagerTeamOvertimeRequests() {
   const rows = data?.data ?? []
   const pending = rows.filter(r => r.status === 'PENDING')
 
-  return (
-    <PageContainer>
-      <PageHeader
-        title="Team Overtime"
-        subtitle="Review and approve overtime requests for your team."
-        actions={
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={cn('h-4 w-4 mr-1', isFetching && 'animate-spin')} />
-            Refresh
-          </Button>
-        }
-      />
-
+  const body = (
+    <>
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b border-border">
         {(['pending', 'history'] as const).map(t => (
@@ -205,6 +194,24 @@ export function ManagerTeamOvertimeRequests() {
           </div>
         )}
       </SectionCard>
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Team Overtime"
+        subtitle="Review and approve overtime requests for your team."
+        actions={
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={cn('h-4 w-4 mr-1', isFetching && 'animate-spin')} />
+            Refresh
+          </Button>
+        }
+      />
+      {body}
     </PageContainer>
   )
 }
