@@ -1,0 +1,268 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="960" viewBox="0 0 1280 960" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <!-- Petrol hero gradient -->
+    <linearGradient id="petrol" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#14505A"/>
+      <stop offset="0.45" stop-color="#0C3840"/>
+      <stop offset="1"   stop-color="#062228"/>
+    </linearGradient>
+    <!-- Deep petrol sidebar -->
+    <linearGradient id="sidebar-bg" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0"   stop-color="#061C20"/>
+      <stop offset="1"   stop-color="#0C2C34"/>
+    </linearGradient>
+    <!-- Gold gradient -->
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#D4A83A"/>
+      <stop offset="1"   stop-color="#A87C22"/>
+    </linearGradient>
+    <!-- Gold button -->
+    <linearGradient id="gold-btn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"   stop-color="#C9A040"/>
+      <stop offset="1"   stop-color="#9A7820"/>
+    </linearGradient>
+    <!-- Sheen -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"   stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1"   stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Gold sheen on hero number -->
+    <linearGradient id="gold-sheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"   stop-color="#F0D070"/>
+      <stop offset="0.5" stop-color="#FFFFFF"/>
+      <stop offset="1"   stop-color="#D4A838"/>
+    </linearGradient>
+    <filter id="shadow-sm" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#061C20" flood-opacity="0.14"/>
+    </filter>
+    <filter id="shadow-lg" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="18" flood-color="#062228" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+
+  <!-- ───── Canvas ───── -->
+  <rect width="1280" height="960" fill="#F2F7F7"/>
+
+  <!-- ═══════════════════════════════════════════════════════
+       FULL APP MOCKUP
+  ═══════════════════════════════════════════════════════ -->
+
+  <!-- ── Top bar (white) ── -->
+  <rect x="0" y="0" width="1280" height="56" fill="#FFFFFF"/>
+  <rect x="0" y="55" width="1280" height="1" fill="#D8E8E8"/>
+
+  <!-- Logo mark -->
+  <rect x="20" y="12" width="32" height="32" rx="9" fill="url(#petrol)"/>
+  <rect x="20" y="12" width="32" height="16" rx="9" fill="url(#sheen)"/>
+  <!-- C ring in logo -->
+  <circle cx="36" cy="28" r="7" fill="none" stroke="url(#gold)" stroke-width="2.5" stroke-dasharray="32 12" stroke-dashoffset="-6"/>
+  <text x="64" y="34" font-size="18" font-weight="700" fill="#061C20">Cognix<tspan fill="url(#gold)">HR</tspan></text>
+
+  <!-- Nav -->
+  <text x="310" y="34" font-size="13" font-weight="600" fill="#0C3840">Operations</text>
+  <text x="406" y="34" font-size="13" fill="#7A9898">Workforce</text>
+  <text x="494" y="34" font-size="13" fill="#7A9898">Payroll</text>
+  <text x="572" y="34" font-size="13" fill="#7A9898">Compliance</text>
+
+  <!-- Search bar -->
+  <rect x="700" y="14" width="200" height="28" rx="8" fill="#EEF5F5" stroke="#C8DADA"/>
+  <text x="715" y="32" font-size="11.5" fill="#8AACAC">Search…</text>
+
+  <!-- Avatar -->
+  <circle cx="1248" cy="28" r="16" fill="url(#petrol)"/>
+  <circle cx="1248" cy="28" r="15" fill="none" stroke="url(#gold)" stroke-width="1.5"/>
+  <text x="1248" y="33" font-size="11.5" font-weight="700" fill="#E8D080" text-anchor="middle">SK</text>
+
+  <!-- ── Sidebar (deep petrol, dark) ── -->
+  <rect x="0" y="56" width="240" height="904" fill="url(#sidebar-bg)"/>
+  <rect x="239" y="56" width="1" height="904" fill="#0E3038"/>
+
+  <!-- Sidebar section label -->
+  <text x="28" y="98" font-size="10.5" font-weight="700" letter-spacing="1.2" fill="#4A7880">MAIN MENU</text>
+
+  <!-- Active item — petrol lighter with gold left bar -->
+  <rect x="14" y="110" width="212" height="40" rx="10" fill="#0E3840"/>
+  <rect x="14" y="110" width="4"   height="40" rx="2"  fill="url(#gold)"/>
+  <text x="38" y="135" font-size="13" font-weight="700" fill="#E8D080">Dashboard</text>
+
+  <!-- Sidebar items -->
+  <text x="38" y="184" font-size="13" fill="#8ABCC4">Employees</text>
+  <text x="38" y="228" font-size="13" fill="#8ABCC4">Attendance</text>
+  <text x="38" y="272" font-size="13" fill="#8ABCC4">Payroll</text>
+
+  <!-- Hover item — subtle teal tint -->
+  <rect x="14" y="288" width="212" height="40" rx="10" fill="#0A303A"/>
+  <text x="38" y="313" font-size="13" fill="#9ACCD4">Reports</text>
+
+  <text x="38" y="362" font-size="13" fill="#8ABCC4">Compliance</text>
+
+  <text x="28" y="412" font-size="10.5" font-weight="700" letter-spacing="1.2" fill="#4A7880">ADMIN</text>
+  <text x="38" y="444" font-size="13" fill="#8ABCC4">Masters</text>
+  <text x="38" y="488" font-size="13" fill="#8ABCC4">Settings</text>
+
+  <!-- Sidebar gold badge -->
+  <rect x="14" y="520" width="212" height="54" rx="10" fill="#0A2830"/>
+  <rect x="14" y="520" width="212" height="1.5" rx="1" fill="#1A4858"/>
+  <text x="28" y="544" font-size="10.5" fill="#5A9098">Payroll cycle</text>
+  <text x="28" y="564" font-size="12" font-weight="700" fill="#D4A838">June 2026 · Open</text>
+
+  <!-- ── Main content area ── -->
+
+  <!-- Page header -->
+  <text x="272" y="100" font-size="23" font-weight="700" fill="#061C20">Workforce Overview</text>
+  <text x="272" y="124" font-size="13" fill="#7A9898">Smarter Workforce. Stronger Future.</text>
+
+  <!-- ── KPI Hero card (petrol + gold numbers) ── -->
+  <rect x="272" y="144" width="310" height="128" rx="16" fill="url(#petrol)" filter="url(#shadow-lg)"/>
+  <rect x="272" y="144" width="310" height="60" rx="16" fill="url(#sheen)"/>
+  <!-- thin gold top border line -->
+  <rect x="272" y="144" width="310" height="2" rx="1" fill="url(#gold)"/>
+  <text x="300" y="180" font-size="12" fill="#88B8BC">Total Annual CTC</text>
+  <text x="300" y="220" font-size="32" font-weight="700" fill="url(#gold-sheen)">₹2.46 Cr</text>
+  <text x="300" y="244" font-size="11.5" fill="#60A8B0">▲ 8.2% vs last year</text>
+
+  <!-- ── KPI white cards ── -->
+  <g filter="url(#shadow-sm)">
+    <rect x="598" y="144" width="210" height="128" rx="16" fill="#FFFFFF"/>
+    <rect x="826" y="144" width="210" height="128" rx="16" fill="#FFFFFF"/>
+    <rect x="1054" y="144" width="196" height="128" rx="16" fill="#FFFFFF"/>
+  </g>
+  <!-- thin top accent lines on white cards -->
+  <rect x="598"  y="144" width="210" height="2" rx="1" fill="#C8D8D8"/>
+  <rect x="826"  y="144" width="210" height="2" rx="1" fill="url(#gold)"/>
+  <rect x="1054" y="144" width="196" height="2" rx="1" fill="#C8D8D8"/>
+
+  <text x="622" y="180" font-size="12" fill="#7A9898">Headcount</text>
+  <text x="622" y="218" font-size="28" font-weight="700" fill="#061C20">1,284</text>
+  <text x="622" y="244" font-size="11.5" fill="#2E7D52">▲ 24 joiners</text>
+
+  <text x="850" y="180" font-size="12" fill="#7A9898">Fill Rate</text>
+  <text x="850" y="218" font-size="28" font-weight="700" fill="#0C3840">92%</text>
+  <text x="850" y="244" font-size="11.5" fill="#7A9898">of sanctioned</text>
+
+  <text x="1074" y="180" font-size="12" fill="#7A9898">Attrition</text>
+  <text x="1074" y="218" font-size="28" font-weight="700" fill="#061C20">6.4%</text>
+  <text x="1074" y="244" font-size="11.5" fill="#C2890F">▲ watch</text>
+
+  <!-- ── Action row ── -->
+  <!-- Primary button: gold-filled -->
+  <rect x="272" y="298" width="156" height="42" rx="11" fill="url(#gold-btn)" filter="url(#shadow-sm)"/>
+  <rect x="272" y="298" width="156" height="21" rx="11" fill="url(#sheen)"/>
+  <text x="350" y="324" font-size="13.5" font-weight="700" fill="#1A1000" text-anchor="middle">Run Payroll</text>
+
+  <!-- Secondary: petrol outline -->
+  <rect x="440" y="298" width="128" height="42" rx="11" fill="#FFFFFF" stroke="#0C3840" stroke-width="1.5"/>
+  <text x="504" y="324" font-size="13.5" font-weight="600" fill="#0C3840" text-anchor="middle">Export</text>
+
+  <!-- Ghost -->
+  <rect x="580" y="298" width="112" height="42" rx="11" fill="#FFFFFF" stroke="#C8DADA" stroke-width="1.5"/>
+  <text x="636" y="324" font-size="13.5" font-weight="600" fill="#3A5858" text-anchor="middle">Filters</text>
+
+  <!-- Badges -->
+  <rect x="716" y="308" width="78" height="24" rx="12" fill="#E0F2EB"/>
+  <text x="755" y="324" font-size="11.5" font-weight="600" fill="#1F7C52" text-anchor="middle">Active</text>
+  <rect x="804" y="308" width="88" height="24" rx="12" fill="#FBF0D8"/>
+  <text x="848" y="324" font-size="11.5" font-weight="600" fill="#A07010" text-anchor="middle">Pending</text>
+  <rect x="902" y="308" width="88" height="24" rx="12" fill="#FBE3E4"/>
+  <text x="946" y="324" font-size="11.5" font-weight="600" fill="#C42B32" text-anchor="middle">Overdue</text>
+
+  <!-- ── Table ── -->
+  <rect x="272" y="366" width="978" height="258" rx="16" fill="#FFFFFF" filter="url(#shadow-sm)"/>
+  <!-- Table header strip — very light petrol tint -->
+  <rect x="272" y="366" width="978" height="46" rx="16" fill="#EDF5F5"/>
+  <rect x="272" y="396" width="978" height="16" fill="#EDF5F5"/>
+  <!-- Gold underline on header -->
+  <rect x="272" y="411" width="978" height="1.5" fill="#C8D8D8"/>
+
+  <text x="296" y="394" font-size="11.5" font-weight="700" fill="#0C3840" letter-spacing="0.4">EMPLOYEE</text>
+  <text x="568" y="394" font-size="11.5" font-weight="700" fill="#0C3840" letter-spacing="0.4">DEPARTMENT</text>
+  <text x="808" y="394" font-size="11.5" font-weight="700" fill="#0C3840" letter-spacing="0.4">STATUS</text>
+  <text x="1018" y="394" font-size="11.5" font-weight="700" fill="#0C3840" letter-spacing="0.4">NET PAY</text>
+
+  <!-- Row 1 -->
+  <text x="296" y="448" font-size="13" font-weight="600" fill="#061C20">Suraj Kumar</text>
+  <text x="390" y="448" font-size="11" fill="#7A9898"> · SK0001</text>
+  <text x="568" y="448" font-size="13" fill="#3A5858">Retail Operations</text>
+  <rect x="808" y="436" width="64" height="22" rx="11" fill="#E0F2EB"/>
+  <text x="840" y="451" font-size="11" font-weight="600" fill="#1F7C52" text-anchor="middle">Paid</text>
+  <text x="1018" y="448" font-size="13" font-weight="700" fill="#061C20">₹1,72,300</text>
+  <rect x="272" y="464" width="978" height="1" fill="#E8F0F0"/>
+
+  <!-- Row 2 -->
+  <text x="296" y="500" font-size="13" font-weight="600" fill="#061C20">Priya Nair</text>
+  <text x="366" y="500" font-size="11" fill="#7A9898"> · PN0044</text>
+  <text x="568" y="500" font-size="13" fill="#3A5858">Finance</text>
+  <rect x="808" y="488" width="76" height="22" rx="11" fill="#FBF0D8"/>
+  <text x="846" y="503" font-size="11" font-weight="600" fill="#A07010" text-anchor="middle">Pending</text>
+  <text x="1018" y="500" font-size="13" font-weight="700" fill="#061C20">₹1,98,000</text>
+  <rect x="272" y="516" width="978" height="1" fill="#E8F0F0"/>
+
+  <!-- Row 3 -->
+  <text x="296" y="552" font-size="13" font-weight="600" fill="#061C20">Arjun Rao</text>
+  <text x="362" y="552" font-size="11" fill="#7A9898"> · AR0210</text>
+  <text x="568" y="552" font-size="13" fill="#3A5858">Engineering</text>
+  <rect x="808" y="540" width="64" height="22" rx="11" fill="#E0F2EB"/>
+  <text x="840" y="555" font-size="11" font-weight="600" fill="#1F7C52" text-anchor="middle">Paid</text>
+  <text x="1018" y="552" font-size="13" font-weight="700" fill="#061C20">₹2,41,500</text>
+  <rect x="272" y="568" width="978" height="1" fill="#E8F0F0"/>
+
+  <!-- Row 4 -->
+  <text x="296" y="604" font-size="13" font-weight="600" fill="#061C20">Meera Shah</text>
+  <text x="376" y="604" font-size="11" fill="#7A9898"> · MS0088</text>
+  <text x="568" y="604" font-size="13" fill="#3A5858">HR Operations</text>
+  <rect x="808" y="592" width="64" height="22" rx="11" fill="#E0F2EB"/>
+  <text x="840" y="607" font-size="11" font-weight="600" fill="#1F7C52" text-anchor="middle">Paid</text>
+  <text x="1018" y="604" font-size="13" font-weight="700" fill="#061C20">₹1,58,900</text>
+
+  <!-- ═══════════════════════════════════════════════════════
+       PALETTE PANEL + REASONING
+  ═══════════════════════════════════════════════════════ -->
+  <rect x="272" y="652" width="978" height="280" rx="16" fill="#FFFFFF" filter="url(#shadow-sm)"/>
+
+  <text x="296" y="690" font-size="16" font-weight="700" fill="#061C20">Palette · Petrol Dark Teal + Champagne Gold</text>
+
+  <!-- Swatch row -->
+  <g text-anchor="middle">
+    <rect x="296"  y="710" width="112" height="64" rx="12" fill="url(#petrol)"/>
+    <rect x="296"  y="710" width="112" height="32" rx="12" fill="url(#sheen)"/>
+    <text x="352"  y="790" font-size="11" fill="#3A5858">Primary · #0F3D44</text>
+
+    <rect x="424"  y="710" width="112" height="64" rx="12" fill="#14505A"/>
+    <text x="480"  y="790" font-size="11" fill="#3A5858">Hover · #14505A</text>
+
+    <rect x="552"  y="710" width="112" height="64" rx="12" fill="url(#gold)"/>
+    <text x="608"  y="790" font-size="11" fill="#3A5858">Gold · #C9A040</text>
+
+    <rect x="680"  y="710" width="112" height="64" rx="12" fill="url(#sidebar-bg)"/>
+    <text x="736"  y="790" font-size="11" fill="#3A5858">Sidebar · #0A2830</text>
+
+    <rect x="808"  y="710" width="112" height="64" rx="12" fill="#F2F7F7" stroke="#C8DADA"/>
+    <text x="864"  y="790" font-size="11" fill="#3A5858">Canvas · #F2F7F7</text>
+
+    <rect x="936"  y="710" width="86"  height="64" rx="12" fill="#2E7D52"/>
+    <text x="979"  y="790" font-size="11" fill="#3A5858">Success</text>
+
+    <rect x="1036" y="710" width="86"  height="64" rx="12" fill="#DC3545"/>
+    <text x="1079" y="790" font-size="11" fill="#3A5858">Error</text>
+  </g>
+
+  <!-- Verdict box -->
+  <rect x="296" y="806" width="930" height="110" rx="12" fill="#F0F8F8"/>
+  <rect x="296" y="806" width="4"   height="110" rx="2"  fill="url(#gold)"/>
+
+  <text x="318" y="830" font-size="14" font-weight="700" fill="#061C20">My honest opinion — this is the best combination.</text>
+
+  <text x="318" y="854" font-size="12.5" fill="#3A5858">
+    <tspan>· </tspan><tspan font-weight="600">Petrol teal</tspan><tspan> is almost unused in HRTech — your app will look like nothing else in the market.</tspan>
+  </text>
+  <text x="318" y="874" font-size="12.5" fill="#3A5858">
+    <tspan>· Gold accent on dark teal is a </tspan><tspan font-weight="600">classic luxury contrast</tspan><tspan> (think premium hospitality, private banking) — feels premium, not corporate.</tspan>
+  </text>
+  <text x="318" y="894" font-size="12.5" fill="#3A5858">
+    <tspan>· The cool-warm pairing (teal + gold) is </tspan><tspan font-weight="600">naturally high contrast</tspan><tspan> — great readability, no eye strain on long shifts.</tspan>
+  </text>
+  <text x="318" y="914" font-size="12.5" fill="#3A5858">
+    <tspan>· </tspan><tspan font-weight="600">Ready to wire up</tspan><tspan> — just say "yes" and I'll add it as a toggle-able theme (blue brand untouched).</tspan>
+  </text>
+</svg>
