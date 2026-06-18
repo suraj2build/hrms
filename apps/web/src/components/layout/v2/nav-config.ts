@@ -727,6 +727,7 @@ export const DOMAINS: Domain[] = [
       '/admin/settings',
       // Organizational masters
       '/admin/organization',
+      '/admin/positions',                // Positions master (Org Structure group) → Setup
       '/admin/masters',                  // broad — all /admin/masters/* belong here
       // Attendance config overrides (longer than /admin/attendance)
       '/admin/shift-master',
