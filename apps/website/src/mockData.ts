@@ -5,7 +5,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-101",
     name: "Aditya Sharma",
     email: "aditya.sharma@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMkU2RkU2Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5BUzwvdGV4dD48L3N2Zz4=",
     role: "Lead Software Architect",
     department: "Engineering",
     joinedDate: "2023-01-15",
@@ -19,7 +19,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-102",
     name: "Priya Nair",
     email: "priya.nair@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMTVCOEE2Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5QTjwvdGV4dD48L3N2Zz4=",
     role: "Senior UX Researcher",
     department: "Marketing",
     joinedDate: "2023-03-10",
@@ -33,7 +33,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-103",
     name: "Vikram Malhotra",
     email: "vikram.m@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMUE0RkEwJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5WTTwvdGV4dD48L3N2Zz4=",
     role: "HR Operations Specialist",
     department: "HR",
     joinedDate: "2023-06-01",
@@ -47,7 +47,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-104",
     name: "Ananya Iyer",
     email: "ananya.iyer@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjRUM0ODk5Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5BSTwvdGV4dD48L3N2Zz4=",
     role: "V.P. of Product Marketing",
     department: "Marketing",
     joinedDate: "2022-11-20",
@@ -61,7 +61,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-105",
     name: "Rohan Deshmukh",
     email: "rohan.d@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjRjU5RTBCJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5SRDwvdGV4dD48L3N2Zz4=",
     role: "DevOps Engineer",
     department: "Engineering",
     joinedDate: "2024-02-18",
@@ -75,7 +75,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-106",
     name: "Kavita Rao",
     email: "kavita.rao@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMTBCOTgxJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5LUjwvdGV4dD48L3N2Zz4=",
     role: "Chief Of HR / VP People Services",
     department: "HR",
     joinedDate: "2021-08-01",
@@ -89,7 +89,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-107",
     name: "Siddharth Verma",
     email: "siddharth.v@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMEY3NjZFJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5TVjwvdGV4dD48L3N2Zz4=",
     role: "Senior Sales Executive",
     department: "Sales",
     joinedDate: "2023-10-05",
@@ -103,7 +103,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: "EMP-108",
     name: "Meera Fernandez",
     email: "meera.f@saartech.in",
-    avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=150&auto=format&fit=crop",
+    avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjN0MzQUVEJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5NRjwvdGV4dD48L3N2Zz4=",
     role: "Senior Finance Controller",
     department: "Finance",
     joinedDate: "2022-04-12",
@@ -201,7 +201,7 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     id: "LV-201",
     employeeId: "EMP-104",
     employeeName: "Ananya Iyer",
-    employeeAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop",
+    employeeAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjRUM0ODk5Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5BSTwvdGV4dD48L3N2Zz4=",
     leaveType: "Privilege Leave",
     startDate: "2026-06-10",
     endDate: "2026-06-17",
@@ -214,7 +214,7 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     id: "LV-202",
     employeeId: "EMP-102",
     employeeName: "Priya Nair",
-    employeeAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop",
+    employeeAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMTVCOEE2Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5QTjwvdGV4dD48L3N2Zz4=",
     leaveType: "Sick Leave",
     startDate: "2026-06-08",
     endDate: "2026-06-09",
@@ -227,7 +227,7 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     id: "LV-203",
     employeeId: "EMP-105",
     employeeName: "Rohan Deshmukh",
-    employeeAvatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=150&auto=format&fit=crop",
+    employeeAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjRjU5RTBCJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5SRDwvdGV4dD48L3N2Zz4=",
     leaveType: "Casual Leave",
     startDate: "2026-06-12",
     endDate: "2026-06-12",
@@ -240,7 +240,7 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     id: "LV-204",
     employeeId: "EMP-107",
     employeeName: "Siddharth Verma",
-    employeeAvatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=150&auto=format&fit=crop",
+    employeeAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMEY3NjZFJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5TVjwvdGV4dD48L3N2Zz4=",
     leaveType: "Unpaid Leave",
     startDate: "2026-05-12",
     endDate: "2026-05-15",
@@ -315,7 +315,7 @@ export const INITIAL_ANNOUNCEMENTS: Announcement[] = [
     author: {
       name: "Kavita Rao",
       role: "VP People Services",
-      avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=150&auto=format&fit=crop"
+      avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMTBCOTgxJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5LUjwvdGV4dD48L3N2Zz4="
     }
   },
   {
@@ -327,7 +327,7 @@ export const INITIAL_ANNOUNCEMENTS: Announcement[] = [
     author: {
       name: "Rahul Singhal",
       role: "Founder & CEO",
-      avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=150&auto=format&fit=crop"
+      avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMEY3NjZFJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5SUzwvdGV4dD48L3N2Zz4="
     }
   },
   {
@@ -339,7 +339,7 @@ export const INITIAL_ANNOUNCEMENTS: Announcement[] = [
     author: {
       name: "Sanjana Mehta",
       role: "Chief Of Technology",
-      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop"
+      avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjRUM0ODk5Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5TTTwvdGV4dD48L3N2Zz4="
     }
   }
 ];
@@ -348,9 +348,9 @@ export const INITIAL_FEEDBACK_POSTS: PublicShoutout[] = [
   {
     id: "FEED-01",
     senderName: "Aditya Sharma",
-    senderAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150&auto=format&fit=crop",
+    senderAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMkU2RkU2Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5BUzwvdGV4dD48L3N2Zz4=",
     receiverName: "Rohan Deshmukh",
-    receiverAvatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=150&auto=format&fit=crop",
+    receiverAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjRjU5RTBCJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5SRDwvdGV4dD48L3N2Zz4=",
     message: "A massive shoutout to Rohan for staying up past midnight yesterday to patch the AWS network route tables! He restored our staging database cluster without losing anything. True Bias for Action, my friend!",
     badge: "Bias for Action",
     date: "2026-06-08",
@@ -359,9 +359,9 @@ export const INITIAL_FEEDBACK_POSTS: PublicShoutout[] = [
   {
     id: "FEED-02",
     senderName: "Priya Nair",
-    senderAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop",
+    senderAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMTVCOEE2Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5QTjwvdGV4dD48L3N2Zz4=",
     receiverName: "Vikram Malhotra",
-    receiverAvatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=150&auto=format&fit=crop",
+    receiverAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMUE0RkEwJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5WTTwvdGV4dD48L3N2Zz4=",
     message: "Thank you Vikram for making the relocation claim and paper process so painless last week. Standard reimbursement can be difficult, but you sat with me and solved it in 15 minutes. Pure Excellence!",
     badge: "Excellence",
     date: "2026-06-07",
@@ -370,9 +370,9 @@ export const INITIAL_FEEDBACK_POSTS: PublicShoutout[] = [
   {
     id: "FEED-03",
     senderName: "Kavita Rao",
-    senderAvatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=150&auto=format&fit=crop",
+    senderAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMTBCOTgxJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5LUjwvdGV4dD48L3N2Zz4=",
     receiverName: "Meera Fernandez",
-    receiverAvatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=150&auto=format&fit=crop",
+    receiverAvatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjN0MzQUVEJy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5NRjwvdGV4dD48L3N2Zz4=",
     message: "Grateful to Meera for her relentless precision during the annual audit coordination. We successfully passed compliance with zero corrective actions needed. High level of Collaboration and ownership!",
     badge: "Collaboration",
     date: "2026-06-06",

@@ -20,12 +20,12 @@ interface AnalyticsChartsProps {
 }
 
 const DEPT_COLORS = {
-  Engineering: '#6366f1', // indigo
-  Sales: '#14b8a6',       // teal
-  HR: '#ec4899',          // pink
-  Marketing: '#f59e0b',   // amber
-  Operations: '#3b82f6',  // blue
-  Finance: '#a855f7'      // purple
+  Engineering: '#2E6FE6', // CognixHR royal blue
+  Sales: '#15B8A6',       // CognixHR teal
+  HR: '#1A4FA0',          // deep navy blue
+  Marketing: '#F59E0B',   // amber
+  Operations: '#10B981',  // emerald
+  Finance: '#0F766E'      // dark teal
 };
 
 export default function AnalyticsCharts({ employees, candidates, attendance }: AnalyticsChartsProps) {

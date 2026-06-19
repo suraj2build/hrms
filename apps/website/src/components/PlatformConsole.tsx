@@ -168,7 +168,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
       status: 'Active',
       workMode: employeeForm.workMode,
       phone: employeeForm.phone || '+91 90001 00002',
-      avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=150&auto=format&fit=crop", // placeholder
+      avatar: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzUwJyBmaWxsPScjMkU2RkU2Jy8+PHRleHQgeD0nNTAnIHk9JzY3JyBmb250LWZhbWlseT0nc3lzdGVtLXVpLHNhbnMtc2VyaWYnIGZvbnQtd2VpZ2h0PSc3MDAnIGZvbnQtc2l6ZT0nNDAnIHRleHQtYW5jaG9yPSdtaWRkbGUnIGZpbGw9J3doaXRlJz5OVzwvdGV4dD48L3N2Zz4=",
       manager: 'Kavita Rao'
     };
 
