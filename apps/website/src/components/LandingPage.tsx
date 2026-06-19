@@ -41,8 +41,12 @@ interface LandingPageProps {
   onLaunchDemo: (role: 'admin' | 'employee') => void;
 }
 
-const DEMO_URL = import.meta.env.VITE_DEMO_URL || '/demo';
+// The HRMS app's public URL. The demo runs on the SAME deployment at /demo
+// (no separate build needed). Override either with env if your domain differs.
+const APP_URL  = import.meta.env.VITE_APP_URL  || 'https://hrms-web-alpha.vercel.app';
+const DEMO_URL = import.meta.env.VITE_DEMO_URL || `${APP_URL}/demo`;
 const openLiveDemo = () => window.open(DEMO_URL, '_blank', 'noopener,noreferrer');
+const openSignIn   = () => window.open(`${APP_URL}/login`, '_blank', 'noopener,noreferrer');
 
 /** CognixHR brand mark — canonical raster artwork (public/brand/cognixhr-icon.png). */
 function CognixMark({ size = 36, className }: { size?: number; className?: string }) {
@@ -285,7 +289,7 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
           <div className="flex items-center gap-2 sm:gap-3">
             <button
               id="cta-sign-in"
-              onClick={() => onLaunchDemo('employee')}
+              onClick={openSignIn}
               className="text-sm font-semibold text-slate-700 hover:text-[var(--color-brand-blue)] px-3 py-2 transition-colors cursor-pointer"
             >
               Sign in
@@ -368,13 +372,6 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
               className="w-full sm:w-auto text-sm md:text-base font-bold text-white bg-gradient-to-r from-[var(--color-brand-blue)] to-[var(--color-brand-navy)] hover:to-[var(--color-brand-blue)] shadow-[0_10px_30px_rgba(46,111,230,0.40),inset_0_1px_0_rgba(255,255,255,0.25)] px-8 py-4 rounded-full transition-all hover:scale-[1.03] active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
             >
               Live Demo <ArrowRight className="w-4 h-4" />
-            </button>
-            <button
-              id="hero-quick-tour"
-              onClick={() => onLaunchDemo('admin')}
-              className="w-full sm:w-auto text-sm md:text-base font-bold text-white border border-white/20 bg-white/5 hover:bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] px-8 py-4 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer hover:border-white/40 hover:scale-[1.01] active:scale-95"
-            >
-              <Play className="w-4 h-4 fill-white" /> Quick tour
             </button>
           </motion.div>
 
@@ -922,12 +919,6 @@ export default function LandingPage({ onLaunchDemo }: LandingPageProps) {
                     className="w-full sm:w-auto text-sm md:text-base font-bold text-white bg-gradient-to-r from-[var(--color-brand-blue)] to-[var(--color-brand-navy)] px-8 py-4 rounded-full transition-all hover:scale-[1.03] active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-[0_10px_30px_rgba(46,111,230,0.40)]"
                   >
                     Live Demo <ArrowRight className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => onLaunchDemo('admin')}
-                    className="w-full sm:w-auto text-sm md:text-base font-bold text-white border border-white/20 bg-white/5 hover:bg-white/10 px-8 py-4 rounded-full transition-all flex items-center justify-center gap-2 cursor-pointer hover:border-white/40"
-                  >
-                    <Play className="w-4 h-4 fill-white" /> Quick tour
                   </button>
                 </div>
               </div>

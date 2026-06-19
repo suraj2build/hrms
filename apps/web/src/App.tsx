@@ -594,6 +594,8 @@ export default function App() {
               </Route>
 
               {/* ── Public ─────────────────────────────────────────────────── */}
+              {/* Demo entry — activates demo mode (see lib/demo) then lands in the app. */}
+              <Route path="/demo"          element={<Navigate to="/admin/control-center" replace />} />
               <Route path="/login"         element={<Login />} />
               <Route path="/signup"        element={<Signup />} />
               <Route path="/terms"         element={<TermsPage />} />
