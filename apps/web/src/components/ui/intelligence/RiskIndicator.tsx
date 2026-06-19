@@ -9,8 +9,8 @@ interface RiskIndicatorProps {
 export function RiskIndicator({ score, label, className }: RiskIndicatorProps) {
   const colorClass =
     score >= 75 ? 'text-destructive' :
-    score >= 50 ? 'text-warning dark:text-amber-400' :
-    'text-success dark:text-emerald-400'
+    score >= 50 ? 'text-warning dark:text-warning' :
+    'text-success dark:text-success'
 
   return (
     <span className={cn('text-xs font-medium tabular-nums', colorClass, className)}>

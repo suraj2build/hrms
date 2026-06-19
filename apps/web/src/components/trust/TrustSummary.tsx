@@ -55,10 +55,10 @@ export function useEmployeeTrust(employeeId: string | null) {
 
 function severityColor(s: string | null): string {
   switch (s) {
-    case 'low':      return 'text-success dark:text-emerald-400'
-    case 'medium':   return 'text-warning dark:text-amber-400'
-    case 'high':     return 'text-accent-coral dark:text-orange-400'
-    case 'critical': return 'text-destructive dark:text-red-400'
+    case 'low':      return 'text-success dark:text-success'
+    case 'medium':   return 'text-warning dark:text-warning'
+    case 'high':     return 'text-accent-coral dark:text-accent-coral'
+    case 'critical': return 'text-destructive dark:text-destructive'
     default:         return 'text-muted-foreground'
   }
 }

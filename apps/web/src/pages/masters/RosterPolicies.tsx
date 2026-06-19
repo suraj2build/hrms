@@ -216,7 +216,7 @@ function PolicyCard({
             className={cn(
               'rounded-full text-[10px] px-2 py-0',
               policy.is_active
-                ? 'bg-success/15 text-success border-success hover:bg-emerald-500/15'
+                ? 'bg-success/15 text-success border-success hover:bg-success/15'
                 : 'text-muted-foreground',
             )}
           >

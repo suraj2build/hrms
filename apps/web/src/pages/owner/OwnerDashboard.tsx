@@ -47,11 +47,11 @@ function StatCard({
   color?: 'indigo' | 'green' | 'amber' | 'red' | 'slate'
 }) {
   const colorMap = {
-    indigo: { ring: 'ring-accent-teal/15',  icon: 'bg-gradient-to-br from-accent-teal to-primary text-white',  glow: 'before:bg-teal-500/10' },
-    green:  { ring: 'ring-success/15', icon: 'bg-gradient-to-br from-success to-accent-teal text-white', glow: 'before:bg-emerald-500/10' },
-    amber:  { ring: 'ring-warning/20',  icon: 'bg-gradient-to-br from-warning to-accent-coral text-white', glow: 'before:bg-amber-500/10' },
-    red:    { ring: 'ring-destructive/15',    icon: 'bg-gradient-to-br from-destructive to-destructive text-white',     glow: 'before:bg-red-500/10' },
-    slate:  { ring: 'ring-ring/40',  icon: 'bg-gradient-to-br from-muted to-muted text-white',  glow: 'before:bg-slate-400/10' },
+    indigo: { ring: 'ring-accent-teal/15',  icon: 'bg-gradient-to-br from-accent-teal to-primary text-white',  glow: 'before:bg-accent-teal/10' },
+    green:  { ring: 'ring-success/15', icon: 'bg-gradient-to-br from-success to-accent-teal text-white', glow: 'before:bg-success/10' },
+    amber:  { ring: 'ring-warning/20',  icon: 'bg-gradient-to-br from-warning to-accent-coral text-white', glow: 'before:bg-warning/10' },
+    red:    { ring: 'ring-destructive/15',    icon: 'bg-gradient-to-br from-destructive to-destructive text-white',     glow: 'before:bg-destructive/10' },
+    slate:  { ring: 'ring-ring/40',  icon: 'bg-gradient-to-br from-muted to-muted text-white',  glow: 'before:bg-muted/10' },
   }
   const c = colorMap[color]
   return (

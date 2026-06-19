@@ -59,8 +59,8 @@ export function PredictiveWarningsStrip({ warnings, isLoading = false }: Predict
               w.severity === 'critical'
                 ? 'bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/20'
                 : w.severity === 'high'
-                ? 'bg-accent-coral/10 text-accent-coral border-accent-coral/30 hover:bg-orange-500/20'
-                : 'bg-warning/10 text-warning border-warning/30 hover:bg-amber-500/20',
+                ? 'bg-accent-coral/10 text-accent-coral border-accent-coral/30 hover:bg-accent-coral/20'
+                : 'bg-warning/10 text-warning border-warning/30 hover:bg-warning/20',
               expanded === w.id && 'ring-1 ring-offset-1 ring-current',
             )}
           >

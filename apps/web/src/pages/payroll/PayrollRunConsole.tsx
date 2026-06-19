@@ -131,10 +131,10 @@ function StatusBadge({ status }: { status: RunStatus }) {
       })()}
       className={cn(
         'text-[10px] font-medium',
-        status === 'finalized'      && 'border-success  bg-success  text-success  dark:bg-green-900/20 dark:text-green-300',
-        status === 'frozen'         && 'border-info   bg-info   text-info   dark:bg-blue-900/20 dark:text-blue-300',
-        status === 'processing'     && 'border-info   bg-info   text-info   dark:bg-blue-900/20 dark:text-blue-300',
-        status === 'reopened'       && 'border-warning  bg-warning  text-warning  dark:bg-amber-900/20 dark:text-amber-300',
+        status === 'finalized'      && 'border-success  bg-success  text-success  dark:bg-success/20 dark:text-success',
+        status === 'frozen'         && 'border-info   bg-info   text-info   dark:bg-info/20 dark:text-info',
+        status === 'processing'     && 'border-info   bg-info   text-info   dark:bg-info/20 dark:text-info',
+        status === 'reopened'       && 'border-warning  bg-warning  text-warning  dark:bg-warning/20 dark:text-warning',
       )}
     >
       {STATUS_LABELS[status]}
@@ -231,9 +231,9 @@ function deriveRisks(run: PayrollRun): RiskPill[] {
 }
 
 const PILL_CLASSES: Record<RiskPill['severity'], string> = {
-  warning:  'bg-warning  text-warning  border border-warning  dark:bg-amber-900/20 dark:text-amber-300',
-  high:     'bg-accent-coral text-accent-coral border border-accent-coral dark:bg-orange-900/20 dark:text-orange-300',
-  critical: 'bg-destructive    text-destructive    border border-destructive    dark:bg-red-900/20 dark:text-red-300',
+  warning:  'bg-warning  text-warning  border border-warning  dark:bg-warning/20 dark:text-warning',
+  high:     'bg-accent-coral text-accent-coral border border-accent-coral dark:bg-accent-coral/20 dark:text-accent-coral',
+  critical: 'bg-destructive    text-destructive    border border-destructive    dark:bg-destructive/20 dark:text-destructive',
 }
 
 function RiskPills({ run }: { run: PayrollRun }) {

@@ -43,8 +43,8 @@ const colsMap: Record<NonNullable<WorkspaceKpiStripProps['cols']>, string> = {
 }
 
 const deltaDirClass: Record<NonNullable<KpiCardData['deltaDir']>, string> = {
-  up:   'text-success dark:text-green-400',
-  down: 'text-destructive dark:text-red-400',
+  up:   'text-success dark:text-success',
+  down: 'text-destructive dark:text-destructive',
   flat: 'text-muted-foreground',
 }
 

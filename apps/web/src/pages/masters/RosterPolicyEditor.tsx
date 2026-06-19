@@ -210,16 +210,16 @@ function MatrixCell({
         'h-10 w-full rounded-lg border-2 transition-all duration-100 flex items-center justify-center text-[10px] font-semibold tracking-wide select-none focus:outline-none focus:ring-2 focus:ring-primary/40',
         state === 'working' && [
           'border-success bg-success text-success',
-          'hover:bg-emerald-100 hover:border-emerald-300',
+          'hover:bg-success hover:border-success',
           isWeekend && 'border-success/60 bg-success/50',
         ],
         state === 'off' && [
           'border-destructive bg-destructive text-destructive',
-          'hover:bg-rose-100 hover:border-rose-300',
+          'hover:bg-destructive hover:border-destructive',
         ],
         state === 'half_day' && [
           'border-warning bg-warning text-warning',
-          'hover:bg-amber-100 hover:border-amber-300',
+          'hover:bg-warning hover:border-warning',
         ],
       )}
     >
@@ -640,7 +640,7 @@ export function RosterPolicyEditor() {
                   className={cn(
                     'rounded-full text-[10px] px-2',
                     isActive
-                      ? 'bg-success/15 text-success border-success hover:bg-emerald-500/15'
+                      ? 'bg-success/15 text-success border-success hover:bg-success/15'
                       : 'text-muted-foreground',
                   )}
                 >

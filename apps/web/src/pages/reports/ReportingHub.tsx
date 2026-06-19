@@ -60,7 +60,7 @@ const SECTIONS: ReportSection[] = [
     id:    'operational',
     label: 'Operational Reports',
     blurb: 'Standard HR registers — headcount, attendance, payroll, statutory compliance and more.',
-    accent: { tile: 'bg-info/10', text: 'text-info', border: 'hover:border-blue-300' },
+    accent: { tile: 'bg-info/10', text: 'text-info', border: 'hover:border-info' },
     links: [
       { label: 'Headcount & Attrition',    description: 'Workforce visibility · joiner / separation trend',          route: '/admin/reports/operational?tab=headcount',        icon: Users         },
       { label: 'Attendance & LOP',          description: 'Per-employee attendance · loss-of-pay analysis',            route: '/admin/reports/operational?tab=attendance',       icon: Clock         },
@@ -77,7 +77,7 @@ const SECTIONS: ReportSection[] = [
     id:    'analytics',
     label: 'Analytics',
     blurb: 'Deep-dive analytics surfaces — cost intelligence, workforce patterns, compliance posture.',
-    accent: { tile: 'bg-accent-violet/10', text: 'text-accent-violet', border: 'hover:border-violet-300' },
+    accent: { tile: 'bg-accent-violet/10', text: 'text-accent-violet', border: 'hover:border-accent-violet' },
     links: [
       { label: 'Analytics Studio',     description: 'Explore payroll, headcount & attendance data by dimension, metric and time range.', route: '/admin/reports/analytics',            icon: Sparkles, badge: 'New' },
       { label: 'Workforce Analytics',  description: 'Headcount distribution, reliability and movement patterns.',                        route: '/admin/analytics/workforce',          icon: LineChart  },

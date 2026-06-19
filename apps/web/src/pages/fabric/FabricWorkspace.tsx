@@ -146,8 +146,8 @@ function severityColor(sev: string): 'default' | 'secondary' | 'destructive' | '
 }
 
 function scoreColor(score: number) {
-  if (score >= 75) return 'text-success dark:text-emerald-400'
-  if (score >= 50) return 'text-warning dark:text-amber-400'
+  if (score >= 75) return 'text-success dark:text-success'
+  if (score >= 50) return 'text-warning dark:text-warning'
   return 'text-destructive'
 }
 
@@ -162,7 +162,7 @@ function ScoreBar({ label, value, invert = false }: { label: string; value: numb
     <div className="space-y-1">
       <div className="flex justify-between text-sm">
         <span className="text-muted-foreground">{label}</span>
-        <span className={cn('font-medium tabular-nums', invert ? (value <= 25 ? 'text-success dark:text-emerald-400' : value <= 50 ? 'text-warning dark:text-amber-400' : 'text-destructive') : scoreColor(display))}>
+        <span className={cn('font-medium tabular-nums', invert ? (value <= 25 ? 'text-success dark:text-success' : value <= 50 ? 'text-warning dark:text-warning' : 'text-destructive') : scoreColor(display))}>
           {display.toFixed(0)}/100
         </span>
       </div>

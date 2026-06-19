@@ -136,9 +136,9 @@ function TimelineEntry({ item, isLast }: { item: TimelineItem; isLast: boolean }
             'mt-1 h-7 w-7 shrink-0 rounded-full flex items-center justify-center ring-2 ring-background',
             item.is_milestone
               ? 'bg-gradient-to-br from-[#2E6FE6] to-[#15B8A6]'
-              : item.severity === 'critical' ? 'bg-destructive dark:bg-red-900/30'
-              : item.severity === 'warning'  ? 'bg-warning dark:bg-amber-900/30'
-              : item.severity === 'success'  ? 'bg-success dark:bg-emerald-900/30'
+              : item.severity === 'critical' ? 'bg-destructive dark:bg-destructive/30'
+              : item.severity === 'warning'  ? 'bg-warning dark:bg-warning/30'
+              : item.severity === 'success'  ? 'bg-success dark:bg-success/30'
               : 'bg-muted',
           )}
         >
@@ -146,10 +146,10 @@ function TimelineEntry({ item, isLast }: { item: TimelineItem; isLast: boolean }
             ? <CategoryIcon className="h-3.5 w-3.5 text-white" />
             : <SeverityIcon className={cn(
                 'h-3.5 w-3.5',
-                item.severity === 'critical' ? 'text-destructive dark:text-red-400'
-                : item.severity === 'warning'  ? 'text-warning dark:text-amber-400'
-                : item.severity === 'success'  ? 'text-success dark:text-emerald-400'
-                : 'text-info dark:text-blue-400',
+                item.severity === 'critical' ? 'text-destructive dark:text-destructive'
+                : item.severity === 'warning'  ? 'text-warning dark:text-warning'
+                : item.severity === 'success'  ? 'text-success dark:text-success'
+                : 'text-info dark:text-info',
               )} />
           }
         </div>
@@ -255,7 +255,7 @@ function MilestoneBar({ items }: { items: TimelineItem[] }) {
                 </div>
                 <span className={cn(
                   'text-[9px] font-medium text-center whitespace-nowrap',
-                  done    ? 'text-success dark:text-emerald-400'
+                  done    ? 'text-success dark:text-success'
                   : active ? 'text-[#2E6FE6]'
                   : 'text-muted-foreground',
                 )}>{m.label}</span>

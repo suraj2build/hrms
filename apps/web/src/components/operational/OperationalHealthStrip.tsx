@@ -68,9 +68,9 @@ function riskStatus(count: number): MetricStatus {
 
 function statusTextColor(status: MetricStatus): string {
   switch (status) {
-    case 'healthy':  return 'text-success dark:text-green-400'
-    case 'warning':  return 'text-warning dark:text-amber-400'
-    case 'critical': return 'text-destructive dark:text-red-400'
+    case 'healthy':  return 'text-success dark:text-success'
+    case 'warning':  return 'text-warning dark:text-warning'
+    case 'critical': return 'text-destructive dark:text-destructive'
     case 'loading':  return 'text-muted-foreground'
   }
 }

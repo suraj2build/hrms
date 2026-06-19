@@ -379,12 +379,12 @@ const LEDGER_COLUMNS: DataTableColumn<LedgerRow>[] = [
 
 // ── Leave card color palette (cycles by index) ─────────────────────────────
 const LEAVE_CARD_COLORS = [
-  { topBar: 'bg-info',    iconBg: 'bg-info dark:bg-blue-950/40',    iconText: 'text-info dark:text-blue-400',    bar: 'bg-info'    },
-  { topBar: 'bg-success', iconBg: 'bg-success dark:bg-emerald-950/40', iconText: 'text-success dark:text-emerald-400', bar: 'bg-success' },
-  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet dark:bg-violet-950/40',  iconText: 'text-accent-violet dark:text-violet-400',   bar: 'bg-accent-violet'  },
-  { topBar: 'bg-destructive',    iconBg: 'bg-destructive dark:bg-rose-950/40',    iconText: 'text-destructive dark:text-rose-400',    bar: 'bg-destructive'    },
-  { topBar: 'bg-warning',   iconBg: 'bg-warning dark:bg-amber-950/40',   iconText: 'text-warning dark:text-amber-400',   bar: 'bg-warning'   },
-  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal dark:bg-cyan-950/40',    iconText: 'text-accent-teal dark:text-cyan-400',    bar: 'bg-accent-teal'    },
+  { topBar: 'bg-info',    iconBg: 'bg-info dark:bg-info/40',    iconText: 'text-info dark:text-info',    bar: 'bg-info'    },
+  { topBar: 'bg-success', iconBg: 'bg-success dark:bg-success/40', iconText: 'text-success dark:text-success', bar: 'bg-success' },
+  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet dark:bg-accent-violet/40',  iconText: 'text-accent-violet dark:text-accent-violet',   bar: 'bg-accent-violet'  },
+  { topBar: 'bg-destructive',    iconBg: 'bg-destructive dark:bg-destructive/40',    iconText: 'text-destructive dark:text-destructive',    bar: 'bg-destructive'    },
+  { topBar: 'bg-warning',   iconBg: 'bg-warning dark:bg-warning/40',   iconText: 'text-warning dark:text-warning',   bar: 'bg-warning'   },
+  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal dark:bg-accent-teal/40',    iconText: 'text-accent-teal dark:text-accent-teal',    bar: 'bg-accent-teal'    },
 ] as const
 
 // ── Main component ────────────────────────────────────────────────────────────

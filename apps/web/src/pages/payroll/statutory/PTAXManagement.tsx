@@ -447,7 +447,7 @@ export function PTAXManagement() {
               <span className={cn(
                 'text-[10px] font-bold px-1.5 py-0.5 rounded-full border mt-0.5 inline-block',
                 selectedState.enabled
-                  ? 'bg-success text-success border-success dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                  ? 'bg-success text-success border-success dark:bg-success/40 dark:text-success dark:border-success'
                   : 'bg-muted text-muted-foreground border-border',
               )}>
                 {selectedState.enabled ? 'Active' : 'Inactive'}

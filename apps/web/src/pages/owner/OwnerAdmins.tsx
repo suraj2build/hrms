@@ -111,8 +111,8 @@ export function OwnerAdmins() {
                 onClick={() => toggleActive(a.id, a.is_active)}
                 className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                   a.is_active
-                    ? 'border-destructive/30 text-destructive hover:bg-red-500/10'
-                    : 'border-success/30 text-success hover:bg-emerald-500/10'
+                    ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+                    : 'border-success/30 text-success hover:bg-success/10'
                 }`}
               >
                 {a.is_active ? <><UserX className="h-3.5 w-3.5" /> Deactivate</> : <><UserCheck className="h-3.5 w-3.5" /> Activate</>}

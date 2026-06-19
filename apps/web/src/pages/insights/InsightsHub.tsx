@@ -68,7 +68,7 @@ const CATEGORIES: InsightCategory[] = [
     label: 'Workforce',
     blurb: 'People signals, org shape and what needs attention.',
     icon:  Users,
-    accent: { tile: 'bg-primary/10', text: 'text-primary dark:text-indigo-400', rail: 'group-hover:border-indigo-500/40' },
+    accent: { tile: 'bg-primary/10', text: 'text-primary dark:text-primary', rail: 'group-hover:border-primary/40' },
     cards: [
       { title: 'Workforce Signals',   description: 'Live, prioritised observations about your people — stalled onboarding, pending separations, assets at risk, probation due.', route: '/admin/intelligence/workforce-command', icon: Activity },
       { title: 'Headcount Analytics', description: 'Workforce distribution, reliability and movement patterns — now in the Executive dashboard.', route: '/admin/executive/headcount', icon: LineChart },
@@ -83,7 +83,7 @@ const CATEGORIES: InsightCategory[] = [
     label: 'Attendance & Time',
     blurb: 'Coverage, risk and the quality of your time data.',
     icon:  CalendarClock,
-    accent: { tile: 'bg-warning/10', text: 'text-warning dark:text-amber-400', rail: 'group-hover:border-amber-500/40' },
+    accent: { tile: 'bg-warning/10', text: 'text-warning dark:text-warning', rail: 'group-hover:border-warning/40' },
     cards: [
       { title: 'Session Intelligence', description: 'Live sessions, missing punches, cross-midnight cases and anomaly review.', route: '/admin/attendance/intelligence-center', icon: Activity, engine: 'Attendance Intelligence Center' },
       { title: 'Health Index',         description: 'A single attendance health score by employee, department, site or org.', route: '/admin/attendance/health-index', icon: Gauge },
@@ -98,7 +98,7 @@ const CATEGORIES: InsightCategory[] = [
     label: 'Payroll & Cost',
     blurb: 'Where the money is going and where it might surprise you.',
     icon:  DollarSign,
-    accent: { tile: 'bg-accent-violet/10', text: 'text-accent-violet dark:text-violet-400', rail: 'group-hover:border-violet-500/40' },
+    accent: { tile: 'bg-accent-violet/10', text: 'text-accent-violet dark:text-accent-violet', rail: 'group-hover:border-accent-violet/40' },
     cards: [
       { title: 'Cost Intelligence', description: 'Department-level cost trends, overtime-heavy teams and high-variance alerts.', route: '/admin/payroll/cost-intelligence', icon: BarChart3 },
       { title: 'Payroll Forecast',  description: 'Projected gross and net for next month with risk factors and confidence.', route: '/admin/payroll/forecast', icon: TrendingUp },
@@ -110,7 +110,7 @@ const CATEGORIES: InsightCategory[] = [
     label: 'Control Centers',
     blurb: 'Operational cockpits that combine signals with quick actions.',
     icon:  Command,
-    accent: { tile: 'bg-info/10', text: 'text-info dark:text-sky-400', rail: 'group-hover:border-sky-500/40' },
+    accent: { tile: 'bg-info/10', text: 'text-info dark:text-info', rail: 'group-hover:border-info/40' },
     cards: [
       { title: 'Command Center',         description: 'Exception-first home — system health, reconciliation and the operations feed.', route: '/admin/control-center', icon: Command },
       { title: 'Workforce Operations',   description: 'People-operations cockpit — attention queue, onboarding pipeline and distribution.', route: '/admin/workforce/center', icon: Users },
@@ -123,7 +123,7 @@ const CATEGORIES: InsightCategory[] = [
     label: 'Explore & Build',
     blurb: 'Self-serve analytics — slice the canonical datasets your own way.',
     icon:  SlidersHorizontal,
-    accent: { tile: 'bg-success/10', text: 'text-success dark:text-emerald-400', rail: 'group-hover:border-emerald-500/40' },
+    accent: { tile: 'bg-success/10', text: 'text-success dark:text-success', rail: 'group-hover:border-success/40' },
     cards: [
       { title: 'Analytics Studio',  description: 'Guided chart builder — pick a dataset, dimension and measure to chart headcount, cost, attendance and more. Now disaggregates by site, region and zone.', route: '/admin/reports/analytics', icon: SlidersHorizontal, engine: 'Analytics Studio (L4)' },
       { title: 'Data Explorer',     description: 'Table-first investigation — read metrics as columns and drill row-by-row down to the employee list. Export to CSV / Excel.', route: '/admin/explorer', icon: Table2, engine: 'Data Explorer (L5)' },

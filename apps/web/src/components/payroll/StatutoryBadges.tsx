@@ -61,9 +61,9 @@ export function InfoTooltip({ text, className }: { text: string; className?: str
 export type PFMode = 'actual' | 'capped' | 'override'
 
 const PF_MODE_STYLES: Record<PFMode, { label: string; cls: string }> = {
-  actual:   { label: 'Actual PF',  cls: 'bg-info text-info border-info dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800' },
-  capped:   { label: 'Capped PF',  cls: 'bg-muted text-muted-foreground border-border dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700' },
-  override: { label: 'Override',   cls: 'bg-warning text-warning border-warning dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800' },
+  actual:   { label: 'Actual PF',  cls: 'bg-info text-info border-info dark:bg-info/40 dark:text-info dark:border-info' },
+  capped:   { label: 'Capped PF',  cls: 'bg-muted text-muted-foreground border-border dark:bg-muted dark:text-muted-foreground dark:border-border' },
+  override: { label: 'Override',   cls: 'bg-warning text-warning border-warning dark:bg-warning/40 dark:text-warning dark:border-warning' },
 }
 
 /** One-liner "why" text shown beneath the badge as muted helper copy. */
@@ -104,7 +104,7 @@ export function PFModeWithExplain({ mode, className }: { mode: PFMode; className
       <PFModeBadge mode={mode} />
       <p className={cn(
         'text-[10px] leading-snug',
-        isException ? 'text-warning/80 dark:text-amber-400/80' : 'text-muted-foreground',
+        isException ? 'text-warning/80 dark:text-warning/80' : 'text-muted-foreground',
       )}>
         {PF_MODE_EXPLAIN[mode]}
       </p>
@@ -119,10 +119,10 @@ export function PFModeWithExplain({ mode, className }: { mode: PFMode; className
 export type ESIStatusType = 'eligible' | 'not_applicable' | 'continuation' | 'exempt'
 
 const ESI_STATUS_STYLES: Record<ESIStatusType, { label: string; cls: string }> = {
-  eligible:       { label: 'ESI Eligible',   cls: 'bg-success text-success border-success dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800' },
+  eligible:       { label: 'ESI Eligible',   cls: 'bg-success text-success border-success dark:bg-success/40 dark:text-success dark:border-success' },
   not_applicable: { label: 'Not Applicable', cls: 'bg-muted text-muted-foreground border-border' },
-  continuation:   { label: 'Continuation',   cls: 'bg-warning text-warning border-warning dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800' },
-  exempt:         { label: 'Exempt',         cls: 'bg-muted text-muted-foreground border-border dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700' },
+  continuation:   { label: 'Continuation',   cls: 'bg-warning text-warning border-warning dark:bg-warning/40 dark:text-warning dark:border-warning' },
+  exempt:         { label: 'Exempt',         cls: 'bg-muted text-muted-foreground border-border dark:bg-muted dark:text-muted-foreground dark:border-border' },
 }
 
 export const ESI_STATUS_EXPLAIN: Record<ESIStatusType, string> = {
@@ -163,7 +163,7 @@ export function ESIStatusWithExplain({ status, className }: { status: ESIStatusT
       <ESIStatusBadge status={status} />
       <p className={cn(
         'text-[10px] leading-snug',
-        isException ? 'text-warning/80 dark:text-amber-400/80' : 'text-muted-foreground',
+        isException ? 'text-warning/80 dark:text-warning/80' : 'text-muted-foreground',
       )}>
         {ESI_STATUS_EXPLAIN[status]}
       </p>
@@ -218,7 +218,7 @@ export function StatutorySummaryStrip({
           <span className="text-muted-foreground">{item.label}:</span>
           <span className={cn(
             'font-semibold',
-            item.accent ? 'text-warning dark:text-amber-400' : 'text-foreground',
+            item.accent ? 'text-warning dark:text-warning' : 'text-foreground',
           )}>
             {item.value}
           </span>
@@ -250,8 +250,8 @@ export function StatCountChip({
 }) {
   const variantCls: Record<string, string> = {
     default: 'bg-muted/60 text-foreground border-border',
-    amber:   'bg-warning text-warning border-warning dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
-    blue:    'bg-info text-info border-info dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
+    amber:   'bg-warning text-warning border-warning dark:bg-warning/40 dark:text-warning dark:border-warning',
+    blue:    'bg-info text-info border-info dark:bg-info/40 dark:text-info dark:border-info',
     muted:   'bg-muted text-muted-foreground border-border',
   }
   const Tag = onClick ? 'button' : 'div'

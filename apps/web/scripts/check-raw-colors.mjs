@@ -47,6 +47,7 @@ const BANNED_PALETTE_COLORS = [
  */
 const COLOR_PATTERN = new RegExp(
   '(?:^|[\\s\'"({[,`])' +
+  '(?:[a-z][a-z0-9-]*:)*' +   // optional variant chain: hover:, dark:, focus:, group-hover:, …
   '(?:bg|text|border|ring|fill|stroke|from|via|to|shadow|divide|placeholder|accent|caret|outline)' +
   '-(' + BANNED_PALETTE_COLORS.join('|') + ')' +
   '-[0-9]' +
@@ -148,7 +149,7 @@ const SUGGESTIONS = {
 }
 
 function getSuggestion(match) {
-  const parts = match.trim().replace(/^['"`]/, '')
+  const parts = match.trim().replace(/^['"`]/, '').replace(/^(?:[a-z][a-z0-9-]*:)+/, '')
   // Extract the base class (e.g. bg-emerald from bg-emerald-500)
   const base = parts.replace(/-\d+.*$/, '')
   return SUGGESTIONS[base] ?? '→ use a design token from src/theme/usage.md'
