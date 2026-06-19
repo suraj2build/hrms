@@ -1728,3 +1728,44 @@
 /* ── Rings ── */
 :root[data-theme="dark"] .ring-slate-200,
 :root[data-theme="dark"] .ring-slate-300 { --tw-ring-color: var(--border); }
+
+/* ── Custom surface utility classes (defined with hardcoded white) ──
+   These reusable classes (surface-premium is used across 14 files: KPI/stat
+   cards, op-tables, queue rows, drawers…) bake in white backgrounds, so they
+   stayed light under dark. Re-skin them with dark tokens here. */
+:root[data-theme="dark"] .surface-premium {
+  background: linear-gradient(180deg, var(--card) 0%, color-mix(in oklab, var(--card) 86%, #000) 100%);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.40), 0 14px 30px -16px rgba(0,0,0,0.55);
+}
+:root[data-theme="dark"] .surface-premium::before {
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
+}
+
+:root[data-theme="dark"] .op-table tbody tr {
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+}
+:root[data-theme="dark"] .op-table tbody tr:hover {
+  background: var(--card);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.07);
+}
+
+:root[data-theme="dark"] .op-row {
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+}
+:root[data-theme="dark"] .op-row:hover {
+  background: var(--card);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.07);
+}
+
+:root[data-theme="dark"] .op-section-bg { background: rgba(255,255,255,0.02); }
+:root[data-theme="dark"] .op-pill-inactive {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--muted-foreground);
+}
+:root[data-theme="dark"] .op-drawer { background: var(--card); border-left-color: var(--border); }
+:root[data-theme="dark"] .op-lane-critical { background: rgba(248,113,113,0.10); border-left-color: rgba(248,113,113,0.55); }
+:root[data-theme="dark"] .op-lane-high     { background: rgba(251,191,36,0.10);  border-left-color: rgba(251,191,36,0.50); }
