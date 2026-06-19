@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="700" viewBox="0 0 1440 700" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="em-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A3D"/><stop offset="1" stop-color="#E0521A"/></linearGradient>
+    <linearGradient id="em-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1A120C"/><stop offset="0.5" stop-color="#24180F"/><stop offset="1" stop-color="#1A120C"/></linearGradient>
+    <linearGradient id="fo-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34D399"/><stop offset="1" stop-color="#0E9466"/></linearGradient>
+    <linearGradient id="fo-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0A140F"/><stop offset="0.5" stop-color="#11201A"/><stop offset="1" stop-color="#0A140F"/></linearGradient>
+    <linearGradient id="go-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8C66A"/><stop offset="1" stop-color="#B8923A"/></linearGradient>
+    <linearGradient id="go-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0E0E0F"/><stop offset="0.5" stop-color="#16140F"/><stop offset="1" stop-color="#0E0E0F"/></linearGradient>
+    <linearGradient id="sy-btn" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22D3EE"/><stop offset="1" stop-color="#C026D3"/></linearGradient>
+    <linearGradient id="sy-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#120A24"/><stop offset="0.5" stop-color="#1C1140"/><stop offset="1" stop-color="#120A24"/></linearGradient>
+  </defs>
+
+  <rect width="1440" height="700" fill="#060507"/>
+  <text x="36" y="44" font-size="26" font-weight="700" fill="#F2EEF6">Dark theme — bold &amp; distinctive directions</text>
+  <text x="36" y="70" font-size="14" fill="#8C8896">Standalone characters that don't echo the existing light themes. Each is a statement.</text>
+
+  <!-- ===== 1 EMBER ===== -->
+  <g transform="translate(36,96)">
+    <rect width="324" height="560" rx="16" fill="#140E09" stroke="#3A2616"/>
+    <rect width="324" height="46" rx="16" fill="url(#em-nav)"/><rect y="28" width="324" height="18" fill="url(#em-nav)"/>
+    <circle cx="30" cy="23" r="11" fill="#140E09" stroke="#5A3A1E"/><text x="25" y="27" font-size="11" font-weight="800" fill="#FF8A3D">C</text>
+    <text x="48" y="27" font-size="12.5" font-weight="700" fill="#F2E6D8">Cognix</text><text x="100" y="27" font-size="12.5" font-weight="700" fill="#FF8A3D">HR</text>
+    <rect x="0" y="46" width="104" height="514" fill="#170F09"/><line x1="104" y1="46" x2="104" y2="560" stroke="#33220F"/>
+    <rect x="10" y="60" width="84" height="28" rx="8" fill="#2E1B0E"/><rect x="10" y="60" width="3" height="28" fill="#FF8A3D"/>
+    <text x="22" y="78" font-size="10.5" font-weight="600" fill="#FFB37A">Dashboard</text>
+    <text x="22" y="110" font-size="10.5" fill="#A08868">Employees</text>
+    <text x="22" y="138" font-size="10.5" fill="#A08868">Payroll</text>
+    <text x="22" y="166" font-size="10.5" fill="#A08868">Reports</text>
+    <text x="120" y="78" font-size="16" font-weight="700" fill="#F2E6D8">Ember</text>
+    <text x="120" y="96" font-size="10.5" fill="#9A8268">Charcoal + molten amber glow</text>
+    <rect x="120" y="110" width="186" height="64" rx="11" fill="#1E140C" stroke="#3A2616"/>
+    <text x="132" y="134" font-size="10" fill="#A08868">Total CTC</text>
+    <text x="132" y="158" font-size="19" font-weight="700" fill="#F2E6D8">₹2.46 Cr</text>
+    <text x="250" y="158" font-size="10" fill="#34D399">▲ 8.2%</text>
+    <rect x="120" y="186" width="120" height="36" rx="9" fill="url(#em-btn)"/><text x="142" y="209" font-size="12" font-weight="700" fill="#2A1003">Run Payroll</text>
+    <rect x="250" y="186" width="56" height="36" rx="9" fill="#1E140C" stroke="#E0521A"/><text x="262" y="209" font-size="11" fill="#FF8A3D">Export</text>
+    <rect x="120" y="234" width="58" height="24" rx="12" fill="#3A2210"/><text x="130" y="250" font-size="9.5" fill="#FFB37A">Active</text>
+    <rect x="186" y="234" width="58" height="24" rx="12" fill="rgba(255,138,61,0.15)"/><text x="198" y="250" font-size="9.5" fill="#FF8A3D">Hot</text>
+    <rect x="120" y="272" width="44" height="34" rx="7" fill="#FF8A3D"/><rect x="170" y="272" width="44" height="34" rx="7" fill="#E0521A"/><rect x="220" y="272" width="44" height="34" rx="7" fill="#1E140C" stroke="#3A2616"/><rect x="270" y="272" width="36" height="34" rx="7" fill="#140E09" stroke="#3A2616"/>
+    <text x="120" y="334" font-size="11" fill="#F2E6D8" font-weight="600">Vibe: warm, energetic, bold</text>
+    <text x="120" y="354" font-size="10.5" fill="#9A8268">bg #140E09 · accent #FF8A3D</text>
+    <text x="120" y="372" font-size="10.5" fill="#9A8268">Cosy &amp; striking — unlike anything you have</text>
+  </g>
+
+  <!-- ===== 2 EMERALD FOREST ===== -->
+  <g transform="translate(384,96)">
+    <rect width="324" height="560" rx="16" fill="#091310" stroke="#16322A"/>
+    <rect width="324" height="46" rx="16" fill="url(#fo-nav)"/><rect y="28" width="324" height="18" fill="url(#fo-nav)"/>
+    <circle cx="30" cy="23" r="11" fill="#091310" stroke="#1E4A3A"/><text x="25" y="27" font-size="11" font-weight="800" fill="#34D399">C</text>
+    <text x="48" y="27" font-size="12.5" font-weight="700" fill="#E0EFE8">Cognix</text><text x="100" y="27" font-size="12.5" font-weight="700" fill="#34D399">HR</text>
+    <rect x="0" y="46" width="104" height="514" fill="#0B1813"/><line x1="104" y1="46" x2="104" y2="560" stroke="#163025"/>
+    <rect x="10" y="60" width="84" height="28" rx="8" fill="#123226"/><rect x="10" y="60" width="3" height="28" fill="#34D399"/>
+    <text x="22" y="78" font-size="10.5" font-weight="600" fill="#6EE7B7">Dashboard</text>
+    <text x="22" y="110" font-size="10.5" fill="#7E9A8C">Employees</text>
+    <text x="22" y="138" font-size="10.5" fill="#7E9A8C">Payroll</text>
+    <text x="22" y="166" font-size="10.5" fill="#7E9A8C">Reports</text>
+    <text x="120" y="78" font-size="16" font-weight="700" fill="#E0EFE8">Emerald Forest</text>
+    <text x="120" y="96" font-size="10.5" fill="#789486">Deep green-black + emerald</text>
+    <rect x="120" y="110" width="186" height="64" rx="11" fill="#0F1F19" stroke="#16322A"/>
+    <text x="132" y="134" font-size="10" fill="#7E9A8C">Total CTC</text>
+    <text x="132" y="158" font-size="19" font-weight="700" fill="#E0EFE8">₹2.46 Cr</text>
+    <text x="250" y="158" font-size="10" fill="#6EE7B7">▲ 8.2%</text>
+    <rect x="120" y="186" width="120" height="36" rx="9" fill="url(#fo-btn)"/><text x="142" y="209" font-size="12" font-weight="700" fill="#03200F">Run Payroll</text>
+    <rect x="250" y="186" width="56" height="36" rx="9" fill="#0F1F19" stroke="#0E9466"/><text x="262" y="209" font-size="11" fill="#34D399">Export</text>
+    <rect x="120" y="234" width="58" height="24" rx="12" fill="#143A2A"/><text x="130" y="250" font-size="9.5" fill="#6EE7B7">Active</text>
+    <rect x="186" y="234" width="58" height="24" rx="12" fill="rgba(110,231,183,0.14)"/><text x="196" y="250" font-size="9.5" fill="#6EE7B7">Leaf</text>
+    <rect x="120" y="272" width="44" height="34" rx="7" fill="#34D399"/><rect x="170" y="272" width="44" height="34" rx="7" fill="#A3E635"/><rect x="220" y="272" width="44" height="34" rx="7" fill="#0F1F19" stroke="#16322A"/><rect x="270" y="272" width="36" height="34" rx="7" fill="#091310" stroke="#16322A"/>
+    <text x="120" y="334" font-size="11" fill="#E0EFE8" font-weight="600">Vibe: fresh, calm, "growth"</text>
+    <text x="120" y="354" font-size="10.5" fill="#789486">bg #091310 · accent #34D399 + lime</text>
+    <text x="120" y="372" font-size="10.5" fill="#789486">Nature-led — great HR/people story</text>
+  </g>
+
+  <!-- ===== 3 ONYX &amp; GOLD ===== -->
+  <g transform="translate(732,96)">
+    <rect width="324" height="560" rx="16" fill="#0B0B0C" stroke="#2A2616"/>
+    <rect width="324" height="46" rx="16" fill="url(#go-nav)"/><rect y="28" width="324" height="18" fill="url(#go-nav)"/>
+    <circle cx="30" cy="23" r="11" fill="#0B0B0C" stroke="#4A3E1E"/><text x="25" y="27" font-size="11" font-weight="800" fill="#E8C66A">C</text>
+    <text x="48" y="27" font-size="12.5" font-weight="700" fill="#EFEAE0">Cognix</text><text x="100" y="27" font-size="12.5" font-weight="700" fill="#E8C66A">HR</text>
+    <rect x="0" y="46" width="104" height="514" fill="#100F0C"/><line x1="104" y1="46" x2="104" y2="560" stroke="#2A2616"/>
+    <rect x="10" y="60" width="84" height="28" rx="8" fill="#241F12"/><rect x="10" y="60" width="3" height="28" fill="#E8C66A"/>
+    <text x="22" y="78" font-size="10.5" font-weight="600" fill="#F0D78E">Dashboard</text>
+    <text x="22" y="110" font-size="10.5" fill="#9C937E">Employees</text>
+    <text x="22" y="138" font-size="10.5" fill="#9C937E">Payroll</text>
+    <text x="22" y="166" font-size="10.5" fill="#9C937E">Reports</text>
+    <text x="120" y="78" font-size="16" font-weight="700" fill="#EFEAE0">Onyx &amp; Gold</text>
+    <text x="120" y="96" font-size="10.5" fill="#938A75">True black + champagne gold</text>
+    <rect x="120" y="110" width="186" height="64" rx="11" fill="#16140F" stroke="#2A2616"/>
+    <text x="132" y="134" font-size="10" fill="#9C937E">Total CTC</text>
+    <text x="132" y="158" font-size="19" font-weight="700" fill="#EFEAE0">₹2.46 Cr</text>
+    <text x="250" y="158" font-size="10" fill="#34D399">▲ 8.2%</text>
+    <rect x="120" y="186" width="120" height="36" rx="9" fill="url(#go-btn)"/><text x="142" y="209" font-size="12" font-weight="700" fill="#241B05">Run Payroll</text>
+    <rect x="250" y="186" width="56" height="36" rx="9" fill="#16140F" stroke="#B8923A"/><text x="262" y="209" font-size="11" fill="#E8C66A">Export</text>
+    <rect x="120" y="234" width="58" height="24" rx="12" fill="#2C2614"/><text x="130" y="250" font-size="9.5" fill="#F0D78E">Active</text>
+    <rect x="186" y="234" width="58" height="24" rx="12" fill="rgba(232,198,106,0.14)"/><text x="198" y="250" font-size="9.5" fill="#E8C66A">VIP</text>
+    <rect x="120" y="272" width="44" height="34" rx="7" fill="#E8C66A"/><rect x="170" y="272" width="44" height="34" rx="7" fill="#B8923A"/><rect x="220" y="272" width="44" height="34" rx="7" fill="#16140F" stroke="#2A2616"/><rect x="270" y="272" width="36" height="34" rx="7" fill="#0B0B0C" stroke="#2A2616"/>
+    <text x="120" y="334" font-size="11" fill="#EFEAE0" font-weight="600">Vibe: luxury, executive, exclusive</text>
+    <text x="120" y="354" font-size="10.5" fill="#938A75">bg #0B0B0C · accent gold #E8C66A</text>
+    <text x="120" y="372" font-size="10.5" fill="#938A75">Premium "boardroom" feel — very high-end</text>
+  </g>
+
+  <!-- ===== 4 SYNTHWAVE ===== -->
+  <g transform="translate(1080,96)">
+    <rect width="324" height="560" rx="16" fill="#0D0820" stroke="#2A1A52"/>
+    <rect width="324" height="46" rx="16" fill="url(#sy-nav)"/><rect y="28" width="324" height="18" fill="url(#sy-nav)"/>
+    <circle cx="30" cy="23" r="11" fill="#0D0820" stroke="#3E2A6E"/><text x="25" y="27" font-size="11" font-weight="800" fill="#22D3EE">C</text>
+    <text x="48" y="27" font-size="12.5" font-weight="700" fill="#ECE6FA">Cognix</text><text x="100" y="27" font-size="12.5" font-weight="700" fill="#E879F9">HR</text>
+    <rect x="0" y="46" width="104" height="514" fill="#120C28"/><line x1="104" y1="46" x2="104" y2="560" stroke="#281A4E"/>
+    <rect x="10" y="60" width="84" height="28" rx="8" fill="#1E1240"/><rect x="10" y="60" width="3" height="28" fill="#22D3EE"/>
+    <text x="22" y="78" font-size="10.5" font-weight="600" fill="#7DE9F7">Dashboard</text>
+    <text x="22" y="110" font-size="10.5" fill="#8E84B0">Employees</text>
+    <text x="22" y="138" font-size="10.5" fill="#8E84B0">Payroll</text>
+    <text x="22" y="166" font-size="10.5" fill="#8E84B0">Reports</text>
+    <text x="120" y="78" font-size="16" font-weight="700" fill="#ECE6FA">Synthwave</text>
+    <text x="120" y="96" font-size="10.5" fill="#897EB4">Indigo-black + cyan/magenta neon</text>
+    <rect x="120" y="110" width="186" height="64" rx="11" fill="#16102E" stroke="#2A1A52"/>
+    <text x="132" y="134" font-size="10" fill="#8E84B0">Total CTC</text>
+    <text x="132" y="158" font-size="19" font-weight="700" fill="#ECE6FA">₹2.46 Cr</text>
+    <text x="250" y="158" font-size="10" fill="#34D399">▲ 8.2%</text>
+    <rect x="120" y="186" width="120" height="36" rx="9" fill="url(#sy-btn)"/><text x="138" y="209" font-size="12" font-weight="700" fill="#0A0420">Run Payroll</text>
+    <rect x="250" y="186" width="56" height="36" rx="9" fill="#16102E" stroke="#22D3EE"/><text x="262" y="209" font-size="11" fill="#22D3EE">Export</text>
+    <rect x="120" y="234" width="58" height="24" rx="12" fill="#1E2A48"/><text x="130" y="250" font-size="9.5" fill="#7DE9F7">Active</text>
+    <rect x="186" y="234" width="58" height="24" rx="12" fill="rgba(232,121,249,0.16)"/><text x="198" y="250" font-size="9.5" fill="#E879F9">Pop</text>
+    <rect x="120" y="272" width="44" height="34" rx="7" fill="#22D3EE"/><rect x="170" y="272" width="44" height="34" rx="7" fill="#E879F9"/><rect x="220" y="272" width="44" height="34" rx="7" fill="#16102E" stroke="#2A1A52"/><rect x="270" y="272" width="36" height="34" rx="7" fill="#0D0820" stroke="#2A1A52"/>
+    <text x="120" y="334" font-size="11" fill="#ECE6FA" font-weight="600">Vibe: futuristic, vivid, youthful</text>
+    <text x="120" y="354" font-size="10.5" fill="#897EB4">bg #0D0820 · cyan #22D3EE + magenta</text>
+    <text x="120" y="372" font-size="10.5" fill="#897EB4">Boldest — a real head-turner (less corporate)</text>
+  </g>
+</svg>
