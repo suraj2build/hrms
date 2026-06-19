@@ -133,9 +133,9 @@ function AttendanceTab({ data, isLoading }: AttendanceTabProps) {
       <div className="grid grid-cols-4 gap-2">
         {[
           { label: 'Total',   value: totalDays, color: 'text-foreground' },
-          { label: 'Present', value: present,   color: 'text-emerald-600' },
+          { label: 'Present', value: present,   color: 'text-success' },
           { label: 'Absent',  value: absent,    color: 'text-destructive' },
-          { label: 'Late',    value: late,       color: 'text-amber-600' },
+          { label: 'Late',    value: late,       color: 'text-warning' },
         ].map(stat => (
           <div key={stat.label} className="rounded-lg border border-border bg-card px-3 py-2 text-center">
             <p className={cn('text-lg font-bold leading-none', stat.color)}>{stat.value}</p>
@@ -166,10 +166,10 @@ function AttendanceTab({ data, isLoading }: AttendanceTabProps) {
                   <span className={cn(
                     'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
                     (r['status'] || '').toLowerCase().includes('present')
-                      ? 'bg-emerald-500/10 text-emerald-600'
+                      ? 'bg-success/10 text-success'
                       : (r['status'] || '').toLowerCase().includes('absent')
                         ? 'bg-destructive/10 text-destructive'
-                        : 'bg-amber-500/10 text-amber-600',
+                        : 'bg-warning/10 text-warning',
                   )}>
                     {r['status'] || '—'}
                   </span>
@@ -214,14 +214,14 @@ function LeaveTab({ data, isLoading }: LeaveTabProps) {
         const colorClass = balance <= 0
           ? 'text-destructive'
           : balance < 3
-            ? 'text-amber-600'
-            : 'text-emerald-600'
+            ? 'text-warning'
+            : 'text-success'
 
         const barColor = balance <= 0
           ? 'bg-destructive'
           : balance < 3
-            ? 'bg-amber-500'
-            : 'bg-emerald-500'
+            ? 'bg-warning'
+            : 'bg-success'
 
         return (
           <div key={i} className="rounded-lg border border-border bg-card px-4 py-3">
@@ -310,10 +310,10 @@ function PayrollTab({ payrollData, compensationData, isLoading }: PayrollTabProp
                     <span className={cn(
                       'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
                       (r['status'] || '').toLowerCase() === 'processed'
-                        ? 'bg-emerald-500/10 text-emerald-600'
+                        ? 'bg-success/10 text-success'
                         : (r['status'] || '').toLowerCase() === 'locked'
-                          ? 'bg-blue-500/10 text-blue-600'
-                          : 'bg-amber-500/10 text-amber-600',
+                          ? 'bg-info/10 text-info'
+                          : 'bg-warning/10 text-warning',
                     )}>
                       {r['status'] || '—'}
                     </span>
@@ -360,7 +360,7 @@ function RosterTab({ data, isLoading }: RosterTabProps) {
           <div key={i} className={cn(
             'rounded-lg border px-4 py-3 transition-colors',
             isToday   ? 'border-primary/40 bg-primary/5'   :
-            isTomorrow ? 'border-amber-500/30 bg-amber-500/5' :
+            isTomorrow ? 'border-warning/30 bg-warning/5' :
             'border-border bg-card',
           )}>
             <div className="flex items-center justify-between">
@@ -411,9 +411,9 @@ function AnomaliesTab({ data, isLoading }: AnomaliesTabProps) {
   function severityDot(sev: string) {
     const map: Record<string, string> = {
       critical: 'bg-destructive',
-      high:     'bg-orange-500',
-      medium:   'bg-amber-500',
-      low:      'bg-blue-500',
+      high:     'bg-accent-coral',
+      medium:   'bg-warning',
+      low:      'bg-info',
     }
     return map[sev.toLowerCase()] ?? 'bg-muted-foreground'
   }
@@ -667,7 +667,7 @@ export function EmployeeOperationalProfile({
   const initials    = getInitials(displayName)
 
   const statusColor = employee?.status?.toLowerCase() === 'active'
-    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+    ? 'bg-success/10 text-success border-success/20'
     : 'bg-muted text-muted-foreground border-border'
 
   // ── Render ───────────────────────────────────────────────────────────────────

@@ -231,7 +231,7 @@ export function TeamLeaveBalances() {
                     className={cn(
                       'text-[9px] px-1 py-0 mt-0.5 font-medium',
                       lt.is_paid
-                        ? 'border-green-500/30 text-green-600 bg-green-500/5'
+                        ? 'border-success/30 text-success bg-success/5'
                         : 'border-muted-foreground/30 text-muted-foreground',
                     )}
                   >
@@ -286,7 +286,7 @@ export function TeamLeaveBalances() {
                     {hasLiability && (
                       <td className="px-3 py-3 text-right tabular-nums text-xs">
                         {emp.total_liability != null
-                          ? <span className={cn('font-semibold', emp.total_liability > 0 ? 'text-amber-700' : 'text-muted-foreground')}>{fmtINR(emp.total_liability)}</span>
+                          ? <span className={cn('font-semibold', emp.total_liability > 0 ? 'text-warning' : 'text-muted-foreground')}>{fmtINR(emp.total_liability)}</span>
                           : <span className="text-muted-foreground/40">—</span>}
                       </td>
                     )}

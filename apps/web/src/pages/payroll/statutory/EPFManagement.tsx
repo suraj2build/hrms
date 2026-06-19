@@ -145,11 +145,11 @@ function EPFRateBar({ config }: { config: EPFConfig }) {
   const total       = empRate + pfRate + pensionRate + edliRate + adminRate
 
   const segments = [
-    { label: 'Employee Share',         rate: empRate,     colorBar: 'bg-emerald-500', colorDot: 'bg-emerald-500' },
+    { label: 'Employee Share',         rate: empRate,     colorBar: 'bg-success', colorDot: 'bg-success' },
     { label: 'Employer EPF Share',     rate: pfRate,      colorBar: 'bg-primary',     colorDot: 'bg-primary'     },
-    { label: 'Employer Pension (EPS)', rate: pensionRate, colorBar: 'bg-sky-400',     colorDot: 'bg-sky-400'     },
-    { label: 'EDLI',                   rate: edliRate,    colorBar: 'bg-violet-400',  colorDot: 'bg-violet-400'  },
-    { label: 'Admin Charges',          rate: adminRate,   colorBar: 'bg-amber-400',   colorDot: 'bg-amber-400'   },
+    { label: 'Employer Pension (EPS)', rate: pensionRate, colorBar: 'bg-info',     colorDot: 'bg-info'     },
+    { label: 'EDLI',                   rate: edliRate,    colorBar: 'bg-accent-violet',  colorDot: 'bg-accent-violet'  },
+    { label: 'Admin Charges',          rate: adminRate,   colorBar: 'bg-warning',   colorDot: 'bg-warning'   },
   ]
 
   return (
@@ -471,9 +471,9 @@ export function EPFManagement() {
             ))
           : <>
               <ColoredStatCard icon={Building}    label="Filing Headcount"         value={totalEmployees}                sub="staff active"
-                iconBg="bg-orange-50 dark:bg-orange-950/40"  iconBorder="border-orange-100 dark:border-orange-800"  iconColor="text-orange-600 dark:text-orange-400" />
+                iconBg="bg-accent-coral dark:bg-orange-950/40"  iconBorder="border-accent-coral dark:border-orange-800"  iconColor="text-accent-coral dark:text-orange-400" />
               <ColoredStatCard icon={TrendingUp}  label="Employee Contribution Pool" value={fmtCurrency(totalEmployeeContrib)} sub={`@${config?.employee_contribution_pct ?? 12}%`}
-                iconBg="bg-emerald-50 dark:bg-emerald-950/40" iconBorder="border-emerald-100 dark:border-emerald-800" iconColor="text-emerald-600 dark:text-emerald-400" />
+                iconBg="bg-success dark:bg-emerald-950/40" iconBorder="border-success dark:border-emerald-800" iconColor="text-success dark:text-emerald-400" />
               <ColoredStatCard icon={ShieldCheck} label="Employer Liability"         value={fmtCurrency(totalEmployerContrib)} sub="incl. EPS"
                 iconBg="bg-primary/10" iconBorder="border-primary/20" iconColor="text-primary" valueColor="text-primary" />
             </>

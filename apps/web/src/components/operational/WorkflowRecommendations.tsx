@@ -126,7 +126,7 @@ const SEVERITY_BORDER: Record<Recommendation['severity'], string> = {
 
 const SEVERITY_BG: Record<Recommendation['severity'], string> = {
   critical: 'bg-destructive/5',
-  warning:  'bg-amber-500/5',
+  warning:  'bg-warning/5',
   info:     'bg-primary/5',
 }
 
@@ -138,7 +138,7 @@ const SEVERITY_ICON: Record<Recommendation['severity'], React.ComponentType<{ cl
 
 const SEVERITY_ICON_COLOR: Record<Recommendation['severity'], string> = {
   critical: 'text-destructive',
-  warning:  'text-amber-500',
+  warning:  'text-warning',
   info:     'text-primary',
 }
 

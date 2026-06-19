@@ -118,7 +118,7 @@ export function TasksPanel({ employeeId, tasks, isLoading, isError, stats }: Tas
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-border">
         <div
-          className={cn('h-full rounded-full transition-all duration-500', stats.pct === 100 ? 'bg-emerald-500' : 'bg-[#2E6FE6]')}
+          className={cn('h-full rounded-full transition-all duration-500', stats.pct === 100 ? 'bg-success' : 'bg-[#2E6FE6]')}
           style={{ width: `${stats.pct}%` }}
         />
       </div>

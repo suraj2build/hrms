@@ -126,19 +126,19 @@ interface DetectionRule {
 // ── Severity configs ──────────────────────────────────────────────────────────
 
 const SEV: Record<string, { label: string; color: string }> = {
-  critical: { label: 'Critical', color: 'bg-red-50    text-red-700    border-red-200'    },
-  high:     { label: 'High',     color: 'bg-orange-50 text-orange-700 border-orange-200' },
-  medium:   { label: 'Medium',   color: 'bg-amber-50  text-amber-700  border-amber-200'  },
-  low:      { label: 'Low',      color: 'bg-blue-50   text-blue-700   border-blue-200'   },
-  info:     { label: 'Info',     color: 'bg-gray-100  text-gray-600   border-gray-200'   },
+  critical: { label: 'Critical', color: 'bg-destructive    text-destructive    border-destructive'    },
+  high:     { label: 'High',     color: 'bg-accent-coral text-accent-coral border-accent-coral' },
+  medium:   { label: 'Medium',   color: 'bg-warning  text-warning  border-warning'  },
+  low:      { label: 'Low',      color: 'bg-info   text-info   border-info'   },
+  info:     { label: 'Info',     color: 'bg-muted  text-muted-foreground   border-border'   },
 }
 
 const ALERT_STATUS: Record<string, { label: string; color: string }> = {
-  open:           { label: 'Open',          color: 'bg-red-50    text-red-700    border-red-200'    },
-  acknowledged:   { label: 'Acknowledged',  color: 'bg-amber-50  text-amber-700  border-amber-200'  },
-  investigating:  { label: 'Investigating', color: 'bg-blue-50   text-blue-700   border-blue-200'   },
-  resolved:       { label: 'Resolved',      color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  false_positive: { label: 'False Positive', color: 'bg-gray-100 text-gray-600   border-gray-200'   },
+  open:           { label: 'Open',          color: 'bg-destructive    text-destructive    border-destructive'    },
+  acknowledged:   { label: 'Acknowledged',  color: 'bg-warning  text-warning  border-warning'  },
+  investigating:  { label: 'Investigating', color: 'bg-info   text-info   border-info'   },
+  resolved:       { label: 'Resolved',      color: 'bg-success text-success border-success' },
+  false_positive: { label: 'False Positive', color: 'bg-muted text-muted-foreground   border-border'   },
 }
 
 function fmtSeconds(s: number | null) {
@@ -290,10 +290,10 @@ export function SecurityOpsWorkspace() {
               <SectionCard title="Alerts (Last 30 Days)">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: 'Open Alerts',    value: health.alerts_30d.open,          color: health.alerts_30d.open > 0          ? 'text-amber-600' : 'text-foreground' },
-                    { label: 'Critical Open',  value: health.alerts_30d.critical_open, color: health.alerts_30d.critical_open > 0 ? 'text-red-600'   : 'text-foreground' },
-                    { label: 'High Open',      value: health.alerts_30d.high_open,     color: health.alerts_30d.high_open > 0     ? 'text-orange-600': 'text-foreground' },
-                    { label: 'Resolved',       value: health.alerts_30d.resolved,      color: 'text-emerald-600' },
+                    { label: 'Open Alerts',    value: health.alerts_30d.open,          color: health.alerts_30d.open > 0          ? 'text-warning' : 'text-foreground' },
+                    { label: 'Critical Open',  value: health.alerts_30d.critical_open, color: health.alerts_30d.critical_open > 0 ? 'text-destructive'   : 'text-foreground' },
+                    { label: 'High Open',      value: health.alerts_30d.high_open,     color: health.alerts_30d.high_open > 0     ? 'text-accent-coral': 'text-foreground' },
+                    { label: 'Resolved',       value: health.alerts_30d.resolved,      color: 'text-success' },
                   ].map(k => (
                     <div key={k.label} className="rounded-lg border p-3">
                       <p className={cn('text-2xl font-bold', k.color)}>{k.value}</p>
@@ -399,18 +399,18 @@ export function SecurityOpsWorkspace() {
                   const statusMeta = ALERT_STATUS[a.status]
                   const isOpen     = a.status === 'open'
                   return (
-                    <div key={a.id} className={cn('py-3.5 flex items-start gap-3', isOpen && a.severity === 'critical' && 'bg-red-50/30')}>
+                    <div key={a.id} className={cn('py-3.5 flex items-start gap-3', isOpen && a.severity === 'critical' && 'bg-destructive/30')}>
                       <div className={cn(
                         'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        a.severity === 'critical' ? 'bg-red-100'    :
-                        a.severity === 'high'     ? 'bg-orange-100' :
-                        'bg-amber-100',
+                        a.severity === 'critical' ? 'bg-destructive'    :
+                        a.severity === 'high'     ? 'bg-accent-coral' :
+                        'bg-warning',
                       )}>
                         <ShieldAlert className={cn(
                           'h-3.5 w-3.5',
-                          a.severity === 'critical' ? 'text-red-600'    :
-                          a.severity === 'high'     ? 'text-orange-600' :
-                          'text-amber-600',
+                          a.severity === 'critical' ? 'text-destructive'    :
+                          a.severity === 'high'     ? 'text-accent-coral' :
+                          'text-warning',
                         )} />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -523,7 +523,7 @@ export function SecurityOpsWorkspace() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-medium">{r.rule_name}</p>
                           {sm && <Badge variant="outline" className={cn('text-[10px]', sm.color)}>{sm.label}</Badge>}
-                          <Badge variant="outline" className={cn('text-[10px]', r.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200')}>
+                          <Badge variant="outline" className={cn('text-[10px]', r.enabled ? 'bg-success text-success border-success' : 'bg-muted text-muted-foreground border-border')}>
                             {r.enabled ? 'Enabled' : 'Disabled'}
                           </Badge>
                         </div>
@@ -537,7 +537,7 @@ export function SecurityOpsWorkspace() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className={cn('gap-1.5 flex-shrink-0', r.enabled ? 'text-emerald-600' : 'text-muted-foreground')}
+                        className={cn('gap-1.5 flex-shrink-0', r.enabled ? 'text-success' : 'text-muted-foreground')}
                         onClick={() => toggleRuleMutation.mutate({ id: r.id, enabled: !r.enabled })}
                         disabled={toggleRuleMutation.isPending}
                       >
@@ -589,14 +589,14 @@ export function SecurityOpsWorkspace() {
                     <div key={e.id} className="py-3 flex items-start gap-3">
                       <div className={cn(
                         'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        e.severity === 'critical' ? 'bg-red-100'    :
-                        e.severity === 'high'     ? 'bg-orange-100' :
-                        e.severity === 'warning'  ? 'bg-amber-100'  : 'bg-gray-100',
+                        e.severity === 'critical' ? 'bg-destructive'    :
+                        e.severity === 'high'     ? 'bg-accent-coral' :
+                        e.severity === 'warning'  ? 'bg-warning'  : 'bg-muted',
                       )}>
                         <Brain className={cn('h-3.5 w-3.5',
-                          e.severity === 'critical' ? 'text-red-600'    :
-                          e.severity === 'high'     ? 'text-orange-600' :
-                          e.severity === 'warning'  ? 'text-amber-600'  : 'text-gray-500')} />
+                          e.severity === 'critical' ? 'text-destructive'    :
+                          e.severity === 'high'     ? 'text-accent-coral' :
+                          e.severity === 'warning'  ? 'text-warning'  : 'text-muted-foreground')} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -672,7 +672,7 @@ export function SecurityOpsWorkspace() {
                     <div key={e.id} className="py-3 flex items-start gap-3">
                       <div className={cn(
                         'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        isVerified ? 'bg-emerald-100' : isFailed ? 'bg-red-100' : 'bg-gray-100',
+                        isVerified ? 'bg-success' : isFailed ? 'bg-destructive' : 'bg-muted',
                       )}>
                         {isVerified
                           ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -684,9 +684,9 @@ export function SecurityOpsWorkspace() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium uppercase">{e.verification_type.replace('_', ' ')}</span>
                           <Badge variant="outline" className={cn('text-[10px]',
-                            isVerified ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            isFailed   ? 'bg-red-50 text-red-700 border-red-200' :
-                                         'bg-gray-100 text-gray-600 border-gray-200')}>
+                            isVerified ? 'bg-success text-success border-success' :
+                            isFailed   ? 'bg-destructive text-destructive border-destructive' :
+                                         'bg-muted text-muted-foreground border-border')}>
                             {e.status}
                           </Badge>
                           <Badge variant="outline" className="text-[10px] capitalize">{e.entity_type}</Badge>

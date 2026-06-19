@@ -123,10 +123,10 @@ function StatusBadge({ status }: { status: string }) {
 function ScoreBar({ score, severity }: { score: number; severity?: string }) {
   const colour =
     severity === 'critical' ? 'bg-destructive'  :
-    severity === 'high'     ? 'bg-orange-500'   :
-    severity === 'medium'   ? 'bg-yellow-500'   :
-    score < 60              ? 'bg-orange-500'   :
-    'bg-emerald-500'
+    severity === 'high'     ? 'bg-accent-coral'   :
+    severity === 'medium'   ? 'bg-warning'   :
+    score < 60              ? 'bg-accent-coral'   :
+    'bg-success'
   return (
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-20 rounded-full bg-muted overflow-hidden">
@@ -268,8 +268,8 @@ function TrustSignalsTab() {
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             { label: 'Scored', value: totalScored, icon: BarChart2, cls: 'text-foreground' },
-            { label: 'Low risk', value: bySeveity.low ?? 0, icon: ShieldCheck, cls: 'text-emerald-600' },
-            { label: 'Medium / High', value: (bySeveity.medium ?? 0) + (bySeveity.high ?? 0), icon: ShieldAlert, cls: 'text-amber-500' },
+            { label: 'Low risk', value: bySeveity.low ?? 0, icon: ShieldCheck, cls: 'text-success' },
+            { label: 'Medium / High', value: (bySeveity.medium ?? 0) + (bySeveity.high ?? 0), icon: ShieldAlert, cls: 'text-warning' },
             { label: 'Critical', value: bySeveity.critical ?? 0, icon: ShieldX, cls: 'text-destructive' },
           ].map(({ label, value, icon: Icon, cls }) => (
             <div key={label} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5">

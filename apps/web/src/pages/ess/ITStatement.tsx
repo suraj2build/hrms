@@ -297,7 +297,7 @@ export function ITStatement() {
               label="Balance Tax Payable"
               value={data.balance_tax_payable}
               bold
-              className={data.balance_tax_payable < 0 ? 'text-green-600' : ''}
+              className={data.balance_tax_payable < 0 ? 'text-success' : ''}
             />
             <StatRow
               label={`Monthly Recovery (${data.remaining_months} remaining months)`}

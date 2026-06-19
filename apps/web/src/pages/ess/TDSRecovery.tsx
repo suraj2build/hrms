@@ -257,8 +257,8 @@ export function TDSRecovery() {
                               className={cn(
                                 'text-[10px] capitalize',
                                 row.regime === 'new'
-                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                  : 'bg-slate-50 text-slate-700 border-slate-200'
+                                  ? 'bg-primary text-primary border-primary'
+                                  : 'bg-muted text-muted-foreground border-border'
                               )}
                             >
                               {row.regime}

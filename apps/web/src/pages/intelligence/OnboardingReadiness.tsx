@@ -25,10 +25,10 @@ interface ReadinessData {
 }
 
 const BADGE_STYLES: Record<ReadinessScore, { bg: string; text: string; label: string }> = {
-  ready:            { bg: 'bg-green-100',  text: 'text-green-800',  label: 'Ready'           },
-  nearly_ready:     { bg: 'bg-blue-100',   text: 'text-blue-800',   label: 'Nearly Ready'    },
-  needs_attention:  { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Needs Attention' },
-  blocked:          { bg: 'bg-red-100',    text: 'text-red-800',    label: 'Blocked'         },
+  ready:            { bg: 'bg-success',  text: 'text-success',  label: 'Ready'           },
+  nearly_ready:     { bg: 'bg-info',   text: 'text-info',   label: 'Nearly Ready'    },
+  needs_attention:  { bg: 'bg-accent-coral', text: 'text-accent-coral', label: 'Needs Attention' },
+  blocked:          { bg: 'bg-destructive',    text: 'text-destructive',    label: 'Blocked'         },
 }
 
 export function OnboardingReadiness({ sessionId }: { sessionId: string }) {

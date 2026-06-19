@@ -132,28 +132,28 @@ function categoryLabel(cat: string): string {
 
 function categoryColor(cat: string): string {
   const map: Record<string, string> = {
-    documentation: 'bg-blue-100 text-blue-700',
-    it_setup: 'bg-sky-100 text-sky-700',
-    training: 'bg-amber-100 text-amber-700',
-    hr_formalities: 'bg-rose-100 text-rose-700',
-    compliance: 'bg-red-100 text-red-700',
-    orientation: 'bg-teal-100 text-teal-700',
-    equipment: 'bg-orange-100 text-orange-700',
-    other: 'bg-gray-100 text-gray-600',
+    documentation: 'bg-info text-info',
+    it_setup: 'bg-info text-info',
+    training: 'bg-warning text-warning',
+    hr_formalities: 'bg-destructive text-destructive',
+    compliance: 'bg-destructive text-destructive',
+    orientation: 'bg-accent-teal text-accent-teal',
+    equipment: 'bg-accent-coral text-accent-coral',
+    other: 'bg-muted text-muted-foreground',
   }
-  return map[cat] ?? 'bg-gray-100 text-gray-600'
+  return map[cat] ?? 'bg-muted text-muted-foreground'
 }
 
 function statusColor(status: string): string {
   const map: Record<string, string> = {
-    not_started: 'bg-gray-100 text-gray-600',
-    in_progress: 'bg-blue-100 text-blue-700',
-    completed: 'bg-green-100 text-green-700',
-    overdue: 'bg-red-100 text-red-700',
-    pending: 'bg-gray-100 text-gray-600',
-    skipped: 'bg-yellow-100 text-yellow-700',
+    not_started: 'bg-muted text-muted-foreground',
+    in_progress: 'bg-info text-info',
+    completed: 'bg-success text-success',
+    overdue: 'bg-destructive text-destructive',
+    pending: 'bg-muted text-muted-foreground',
+    skipped: 'bg-warning text-warning',
   }
-  return map[status] ?? 'bg-gray-100 text-gray-600'
+  return map[status] ?? 'bg-muted text-muted-foreground'
 }
 
 function statusLabel(status: string): string {
@@ -834,8 +834,8 @@ function EmployeeOnboardingTab() {
                         <div
                           className={cn(
                             'h-full rounded-full transition-all',
-                            cl.status === 'completed' ? 'bg-green-500' :
-                            cl.status === 'overdue' ? 'bg-red-500' :
+                            cl.status === 'completed' ? 'bg-success' :
+                            cl.status === 'overdue' ? 'bg-destructive' :
                             'bg-primary'
                           )}
                           style={{ width: `${progressPercent(cl)}%` }}

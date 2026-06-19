@@ -209,16 +209,16 @@ function MatrixCell({
       className={cn(
         'h-10 w-full rounded-lg border-2 transition-all duration-100 flex items-center justify-center text-[10px] font-semibold tracking-wide select-none focus:outline-none focus:ring-2 focus:ring-primary/40',
         state === 'working' && [
-          'border-emerald-200 bg-emerald-50 text-emerald-700',
+          'border-success bg-success text-success',
           'hover:bg-emerald-100 hover:border-emerald-300',
-          isWeekend && 'border-emerald-300/60 bg-emerald-50/50',
+          isWeekend && 'border-success/60 bg-success/50',
         ],
         state === 'off' && [
-          'border-rose-200 bg-rose-50 text-rose-700',
+          'border-destructive bg-destructive text-destructive',
           'hover:bg-rose-100 hover:border-rose-300',
         ],
         state === 'half_day' && [
-          'border-amber-200 bg-amber-50 text-amber-700',
+          'border-warning bg-warning text-warning',
           'hover:bg-amber-100 hover:border-amber-300',
         ],
       )}
@@ -292,9 +292,9 @@ function MatrixGrid({
                   title={`Set all ${DAY_LABELS_LONG[day]}s to ${allOff ? 'Working' : 'Off'}`}
                   className={cn(
                     'w-5 h-1.5 rounded-full transition-colors',
-                    allOff   && 'bg-rose-400',
-                    allWork  && 'bg-emerald-400',
-                    !allOff && !allWork && 'bg-amber-300',
+                    allOff   && 'bg-destructive',
+                    allWork  && 'bg-success',
+                    !allOff && !allWork && 'bg-warning',
                   )}
                 />
               </div>
@@ -445,9 +445,9 @@ function MonthlyPreview({ matrix }: { matrix: PolicyMatrix }) {
             className={cn(
               'aspect-square rounded text-[9px] flex items-center justify-center font-medium',
               !cell.date && 'invisible',
-              cell.state === 'working'  && 'bg-emerald-500/15 text-emerald-700',
-              cell.state === 'off'      && 'bg-rose-500/15 text-rose-600',
-              cell.state === 'half_day' && 'bg-amber-400/20 text-amber-700',
+              cell.state === 'working'  && 'bg-success/15 text-success',
+              cell.state === 'off'      && 'bg-destructive/15 text-destructive',
+              cell.state === 'half_day' && 'bg-warning/20 text-warning',
             )}
           >
             {cell.date}
@@ -640,7 +640,7 @@ export function RosterPolicyEditor() {
                   className={cn(
                     'rounded-full text-[10px] px-2',
                     isActive
-                      ? 'bg-emerald-500/15 text-emerald-700 border-emerald-200 hover:bg-emerald-500/15'
+                      ? 'bg-success/15 text-success border-success hover:bg-emerald-500/15'
                       : 'text-muted-foreground',
                   )}
                 >

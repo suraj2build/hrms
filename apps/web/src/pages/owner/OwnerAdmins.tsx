@@ -79,8 +79,8 @@ export function OwnerAdmins() {
             {/* Avatar */}
             <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm ${
               a.role === 'owner'
-                ? 'bg-gradient-to-br from-indigo-500 to-teal-500'
-                : 'bg-gradient-to-br from-slate-400 to-slate-600'
+                ? 'bg-gradient-to-br from-primary to-accent-teal'
+                : 'bg-gradient-to-br from-muted to-muted'
             }`}>
               <span className="text-sm font-bold text-white">{a.name.charAt(0).toUpperCase()}</span>
             </div>
@@ -94,7 +94,7 @@ export function OwnerAdmins() {
                 )}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 ${
                   a.role === 'owner'
-                    ? 'border-purple-500/40 text-purple-700 bg-purple-500/10'
+                    ? 'border-primary/40 text-primary bg-primary/10'
                     : 'border-border text-muted-foreground'
                 }`}>
                   {a.role === 'owner' ? <Crown className="h-2.5 w-2.5" /> : <Shield className="h-2.5 w-2.5" />}
@@ -111,8 +111,8 @@ export function OwnerAdmins() {
                 onClick={() => toggleActive(a.id, a.is_active)}
                 className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                   a.is_active
-                    ? 'border-red-500/30 text-red-600 hover:bg-red-500/10'
-                    : 'border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10'
+                    ? 'border-destructive/30 text-destructive hover:bg-red-500/10'
+                    : 'border-success/30 text-success hover:bg-emerald-500/10'
                 }`}
               >
                 {a.is_active ? <><UserX className="h-3.5 w-3.5" /> Deactivate</> : <><UserCheck className="h-3.5 w-3.5" /> Activate</>}

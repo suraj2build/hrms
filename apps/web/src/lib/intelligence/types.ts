@@ -190,22 +190,22 @@ export function scoreToGrade(score: number): ScoreGrade {
 
 export const INSIGHT_SEVERITY_META: Record<InsightSeverity, { label: string; color: string; bg: string; border: string }> = {
   critical: { label: 'Critical', color: 'text-destructive', bg: 'bg-destructive/10', border: 'border-destructive/30' },
-  high:     { label: 'High',     color: 'text-orange-600',  bg: 'bg-orange-500/10',  border: 'border-orange-500/30' },
-  medium:   { label: 'Medium',   color: 'text-amber-600',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30' },
-  low:      { label: 'Low',      color: 'text-blue-600',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30'  },
+  high:     { label: 'High',     color: 'text-accent-coral',  bg: 'bg-accent-coral/10',  border: 'border-accent-coral/30' },
+  medium:   { label: 'Medium',   color: 'text-warning',   bg: 'bg-warning/10',   border: 'border-warning/30' },
+  low:      { label: 'Low',      color: 'text-info',    bg: 'bg-info/10',    border: 'border-info/30'  },
 } as const satisfies Record<InsightSeverity, { label: string; color: string; bg: string; border: string }>
 
 export const CONFIDENCE_META: Record<ConfidenceLevel, { label: string; color: string; bg: string }> = {
-  very_high: { label: '90–100%', color: 'text-emerald-600',      bg: 'bg-emerald-500/10' },
-  high:      { label: '70–89%',  color: 'text-blue-600',         bg: 'bg-blue-500/10'    },
-  medium:    { label: '50–69%',  color: 'text-amber-600',        bg: 'bg-amber-500/10'   },
+  very_high: { label: '90–100%', color: 'text-success',      bg: 'bg-success/10' },
+  high:      { label: '70–89%',  color: 'text-info',         bg: 'bg-info/10'    },
+  medium:    { label: '50–69%',  color: 'text-warning',        bg: 'bg-warning/10'   },
   low:       { label: '<50%',    color: 'text-muted-foreground', bg: 'bg-muted/50'       },
 } as const satisfies Record<ConfidenceLevel, { label: string; color: string; bg: string }>
 
 export const GRADE_META: Record<ScoreGrade, { color: string; bg: string }> = {
-  A: { color: 'text-emerald-600', bg: 'bg-emerald-500/10' },
-  B: { color: 'text-blue-600',    bg: 'bg-blue-500/10'    },
-  C: { color: 'text-amber-600',   bg: 'bg-amber-500/10'   },
-  D: { color: 'text-orange-600',  bg: 'bg-orange-500/10'  },
+  A: { color: 'text-success', bg: 'bg-success/10' },
+  B: { color: 'text-info',    bg: 'bg-info/10'    },
+  C: { color: 'text-warning',   bg: 'bg-warning/10'   },
+  D: { color: 'text-accent-coral',  bg: 'bg-accent-coral/10'  },
   F: { color: 'text-destructive', bg: 'bg-destructive/10' },
 } as const satisfies Record<ScoreGrade, { color: string; bg: string }>

@@ -128,36 +128,36 @@ function currentMonth() {
 }
 
 const ADV_STATUS_BADGE: Record<string, string> = {
-  pending:         'bg-amber-50 text-amber-700 border-amber-200',
-  approved:        'bg-blue-50 text-blue-700 border-blue-200',
-  rejected:        'bg-red-50 text-red-700 border-red-200',
-  disbursed:       'bg-indigo-50 text-indigo-700 border-indigo-200',
-  recovering:      'bg-emerald-50 text-emerald-700 border-emerald-200',
-  fully_recovered: 'bg-slate-50 text-slate-600 border-slate-200',
-  cancelled:       'bg-slate-50 text-slate-500 border-slate-200',
+  pending:         'bg-warning text-warning border-warning',
+  approved:        'bg-info text-info border-info',
+  rejected:        'bg-destructive text-destructive border-destructive',
+  disbursed:       'bg-primary text-primary border-primary',
+  recovering:      'bg-success text-success border-success',
+  fully_recovered: 'bg-muted text-muted-foreground border-border',
+  cancelled:       'bg-muted text-muted-foreground border-border',
 }
 
 const LOAN_STATUS_BADGE: Record<string, string> = {
-  pending:    'bg-amber-50 text-amber-700 border-amber-200',
-  approved:   'bg-blue-50 text-blue-700 border-blue-200',
-  rejected:   'bg-red-50 text-red-700 border-red-200',
-  active:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-  disbursed:  'bg-indigo-50 text-indigo-700 border-indigo-200',
-  foreclosed: 'bg-orange-50 text-orange-700 border-orange-200',
-  completed:  'bg-slate-50 text-slate-600 border-slate-200',
-  cancelled:  'bg-slate-50 text-slate-500 border-slate-200',
+  pending:    'bg-warning text-warning border-warning',
+  approved:   'bg-info text-info border-info',
+  rejected:   'bg-destructive text-destructive border-destructive',
+  active:     'bg-success text-success border-success',
+  disbursed:  'bg-primary text-primary border-primary',
+  foreclosed: 'bg-accent-coral text-accent-coral border-accent-coral',
+  completed:  'bg-muted text-muted-foreground border-border',
+  cancelled:  'bg-muted text-muted-foreground border-border',
 }
 
 const SCHED_STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-amber-50 text-amber-700 border-amber-200',
-  recovered: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  paid:      'bg-emerald-50 text-emerald-700 border-emerald-200',
-  skipped:   'bg-slate-50 text-slate-500 border-slate-200',
-  adjusted:  'bg-slate-50 text-slate-500 border-slate-200',
+  pending:   'bg-warning text-warning border-warning',
+  recovered: 'bg-success text-success border-success',
+  paid:      'bg-success text-success border-success',
+  skipped:   'bg-muted text-muted-foreground border-border',
+  adjusted:  'bg-muted text-muted-foreground border-border',
 }
 
 function StatusPill({ status, map }: { status: string; map: Record<string, string> }) {
-  const cls = map[status] ?? 'bg-slate-50 text-slate-500 border-slate-200'
+  const cls = map[status] ?? 'bg-muted text-muted-foreground border-border'
   return (
     <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border', cls)}>
       {status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
@@ -1558,16 +1558,16 @@ export function LoansAndAdvances() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <KpiCard icon={AlertTriangle} label="Pending Approvals" value={String(pendingApprovals)}
           sub="requires action"
-          accent={pendingApprovals > 0 ? 'bg-amber-100 text-amber-600' : 'bg-muted text-muted-foreground'} />
+          accent={pendingApprovals > 0 ? 'bg-warning text-warning' : 'bg-muted text-muted-foreground'} />
         <KpiCard icon={Users} label="Active (Adv + Loans)" value={String(activeAdvances + activeLoans)}
           sub={`${activeAdvances} advances · ${activeLoans} loans`}
-          accent="bg-blue-100 text-blue-600" />
+          accent="bg-info text-info" />
         <KpiCard icon={CreditCard} label="This Month EMI" value={fmtINR(thisMonthEmi)}
           sub="auto-deducted via payroll"
           accent="bg-primary/10 text-primary" />
         <KpiCard icon={Banknote} label="Total Outstanding" value={fmtINR(totalOutstanding)}
           sub="across advances + loans"
-          accent="bg-violet-100 text-violet-600" />
+          accent="bg-accent-violet text-accent-violet" />
       </div>
 
       {/* Tab nav */}

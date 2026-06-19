@@ -159,7 +159,7 @@ function WeeklyPreview({ rules, shifts }: WeeklyPreviewProps) {
                 className={cn(
                   'w-8 font-medium',
                   dow === 0 || dow === 6
-                    ? 'text-orange-500'
+                    ? 'text-accent-coral'
                     : 'text-foreground',
                 )}
               >

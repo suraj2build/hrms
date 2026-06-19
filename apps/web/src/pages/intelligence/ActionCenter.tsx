@@ -43,19 +43,19 @@ const EVENT_ICON: Record<string, React.ComponentType<{ className?: string }>> = 
 }
 
 const EVENT_COLOR: Record<string, string> = {
-  new_hire:                 'border-blue-200 bg-blue-50',
-  separation_initiated:     'border-orange-200 bg-orange-50',
-  asset_assigned:           'border-slate-200 bg-slate-50',
-  asset_separation_overlap: 'border-red-200 bg-red-50',
-  on_notice:                'border-yellow-200 bg-yellow-50',
+  new_hire:                 'border-info bg-info',
+  separation_initiated:     'border-accent-coral bg-accent-coral',
+  asset_assigned:           'border-border bg-muted',
+  asset_separation_overlap: 'border-destructive bg-destructive',
+  on_notice:                'border-warning bg-warning',
 }
 
 const EVENT_ICON_COLOR: Record<string, string> = {
-  new_hire:                 'text-blue-600',
-  separation_initiated:     'text-orange-600',
-  asset_assigned:           'text-slate-600',
-  asset_separation_overlap: 'text-red-600',
-  on_notice:                'text-yellow-600',
+  new_hire:                 'text-info',
+  separation_initiated:     'text-accent-coral',
+  asset_assigned:           'text-muted-foreground',
+  asset_separation_overlap: 'text-destructive',
+  on_notice:                'text-warning',
 }
 
 const EVENT_LABEL: Record<string, string> = {

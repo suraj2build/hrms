@@ -71,10 +71,10 @@ function TabSkeleton() {
 
 function AttendanceBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    present:  'bg-emerald-100 text-emerald-700',
-    absent:   'bg-red-100 text-red-700',
-    half_day: 'bg-amber-100 text-amber-700',
-    holiday:  'bg-blue-100 text-blue-700',
+    present:  'bg-success text-success',
+    absent:   'bg-destructive text-destructive',
+    half_day: 'bg-warning text-warning',
+    holiday:  'bg-info text-info',
   }
   return (
     <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', map[status] ?? 'bg-muted text-muted-foreground')}>
@@ -276,13 +276,13 @@ function OtTab({ employeeId, activeTab }: { employeeId: string; activeTab: TabId
           const pct     = Math.round((hrs / maxHours) * 100)
           const flagged = row['flagged'] === 'true' || row['status'] === 'flagged'
           return (
-            <div key={idx} className={cn('flex items-center gap-2', flagged && 'bg-amber-50 rounded px-1')}>
+            <div key={idx} className={cn('flex items-center gap-2', flagged && 'bg-warning rounded px-1')}>
               <span className="text-[11px] text-muted-foreground w-20 shrink-0">
                 {row['date'] ?? `Day ${idx + 1}`}
               </span>
               <div className="flex-1 h-3 rounded bg-muted overflow-hidden">
                 <div
-                  className={cn('h-3 rounded transition-all', flagged ? 'bg-amber-400' : 'bg-primary')}
+                  className={cn('h-3 rounded transition-all', flagged ? 'bg-warning' : 'bg-primary')}
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -336,7 +336,7 @@ function LeaveTab({
             key={idx}
             className={cn(
               'rounded border px-3 py-2 text-xs',
-              conflict ? 'border-amber-300 bg-amber-50' : 'border-border bg-card',
+              conflict ? 'border-warning bg-warning' : 'border-border bg-card',
             )}
           >
             <div className="flex items-center justify-between">

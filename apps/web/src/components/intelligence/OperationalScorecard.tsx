@@ -30,8 +30,8 @@ const SCORE_METRICS: ScoreMetric[] = [
 ]
 
 function barColor(value: number): string {
-  if (value >= 80) return 'bg-emerald-500'
-  if (value >= 60) return 'bg-amber-500'
+  if (value >= 80) return 'bg-success'
+  if (value >= 60) return 'bg-warning'
   return 'bg-destructive'
 }
 

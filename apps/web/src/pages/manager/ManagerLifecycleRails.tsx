@@ -110,7 +110,7 @@ export function ManagerLifecycleRails() {
                     <span className={
                       l.n === 0 ? 'text-xs font-semibold tabular-nums text-muted-foreground'
                       : l.tone === 'danger' ? 'text-xs font-semibold tabular-nums text-destructive'
-                      : l.tone === 'warn' ? 'text-xs font-semibold tabular-nums text-amber-600'
+                      : l.tone === 'warn' ? 'text-xs font-semibold tabular-nums text-warning'
                       : 'text-xs font-semibold tabular-nums text-foreground'
                     }>{l.n}</span>
                   </div>

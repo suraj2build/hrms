@@ -121,8 +121,8 @@ function ageDays(iso: string) {
 function slaStatus(createdAt: string): { label: string; color: string } {
   const hours = (Date.now() - new Date(createdAt).getTime()) / 3_600_000
   if (hours > 48) return { label: 'SLA breach', color: 'text-destructive' }
-  if (hours > 24) return { label: 'Near SLA',   color: 'text-amber-600 dark:text-amber-400' }
-  return                 { label: 'On time',     color: 'text-emerald-600 dark:text-emerald-400' }
+  if (hours > 24) return { label: 'Near SLA',   color: 'text-warning dark:text-amber-400' }
+  return                 { label: 'On time',     color: 'text-success dark:text-emerald-400' }
 }
 
 type SortOrder = 'none' | 'asc' | 'desc'

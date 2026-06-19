@@ -68,18 +68,18 @@ function riskStatus(count: number): MetricStatus {
 
 function statusTextColor(status: MetricStatus): string {
   switch (status) {
-    case 'healthy':  return 'text-green-600 dark:text-green-400'
-    case 'warning':  return 'text-amber-600 dark:text-amber-400'
-    case 'critical': return 'text-red-600 dark:text-red-400'
+    case 'healthy':  return 'text-success dark:text-green-400'
+    case 'warning':  return 'text-warning dark:text-amber-400'
+    case 'critical': return 'text-destructive dark:text-red-400'
     case 'loading':  return 'text-muted-foreground'
   }
 }
 
 function statusDotColor(status: MetricStatus): string {
   switch (status) {
-    case 'healthy':  return 'bg-green-500'
-    case 'warning':  return 'bg-amber-500'
-    case 'critical': return 'bg-red-500'
+    case 'healthy':  return 'bg-success'
+    case 'warning':  return 'bg-warning'
+    case 'critical': return 'bg-destructive'
     case 'loading':  return 'bg-muted-foreground'
   }
 }

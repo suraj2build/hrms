@@ -594,9 +594,9 @@ export function ESIManagement() {
                 sub={`/ ${totalEmployees} active workforce`}
                 footer="Corporate Scope:"
                 footerValue={todayYM}
-                iconBg="bg-orange-50 dark:bg-orange-950/40"
-                iconBorder="border-orange-100 dark:border-orange-800"
-                iconColor="text-orange-600 dark:text-orange-400"
+                iconBg="bg-accent-coral dark:bg-orange-950/40"
+                iconBorder="border-accent-coral dark:border-orange-800"
+                iconColor="text-accent-coral dark:text-orange-400"
               />
               <ColoredStatCard
                 icon={TrendingUp}
@@ -605,9 +605,9 @@ export function ESIManagement() {
                 sub={`${config?.employee_contribution_pct ?? 0.75}% share`}
                 footer="ESI Wage Base:"
                 footerValue={fmtCurrency(contribList.reduce((s, c) => s + (Number(c.esi_wages) || 0), 0))}
-                iconBg="bg-emerald-50 dark:bg-emerald-950/40"
-                iconBorder="border-emerald-100 dark:border-emerald-800"
-                iconColor="text-emerald-600 dark:text-emerald-400"
+                iconBg="bg-success dark:bg-emerald-950/40"
+                iconBorder="border-success dark:border-emerald-800"
+                iconColor="text-success dark:text-emerald-400"
               />
               <ColoredStatCard
                 icon={BadgeIndianRupee}

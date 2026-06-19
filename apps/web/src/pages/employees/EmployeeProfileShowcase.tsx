@@ -41,9 +41,9 @@ function Badge({ children, className, variant = 'default' }: {
   const variants: Record<string, string> = {
     default:     'bg-primary text-primary-foreground',
     secondary:   'bg-secondary text-secondary-foreground',
-    success:     'bg-emerald-100 text-emerald-800 border border-emerald-200',
-    warning:     'bg-amber-100 text-amber-800 border border-amber-200',
-    destructive: 'bg-red-100 text-red-800 border border-red-200',
+    success:     'bg-success text-success border border-success',
+    warning:     'bg-warning text-warning border border-warning',
+    destructive: 'bg-destructive text-destructive border border-destructive',
     outline:     'border border-border text-foreground',
   }
   return (
@@ -201,10 +201,10 @@ const JOURNEY_ICON: Record<string, React.ElementType> = {
 }
 
 const JOURNEY_COLOR: Record<string, string> = {
-  join:      'text-emerald-600 bg-emerald-50 border-emerald-200',
-  milestone: 'text-blue-600   bg-blue-50   border-blue-200',
-  promo:     'text-violet-600 bg-violet-50 border-violet-200',
-  comp:      'text-amber-600  bg-amber-50  border-amber-200',
+  join:      'text-success bg-success border-success',
+  milestone: 'text-info   bg-info   border-info',
+  promo:     'text-accent-violet bg-accent-violet border-accent-violet',
+  comp:      'text-warning  bg-warning  border-warning',
 }
 
 function KV({ label, value }: { label: string; value?: string | null }) {
@@ -449,9 +449,9 @@ export function EmployeeProfileShowcase() {
               <CardContent>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: 'Trust Score',     value: '92%', sub: 'All documents verified',  color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
-                    { label: 'Leave Balance',   value: '14d', sub: '8 EL · 6 SL remaining',  color: 'text-blue-600',    bg: 'bg-blue-50   border-blue-200'   },
-                    { label: 'Open Actions',    value: '0',   sub: 'No pending items',        color: 'text-slate-600',   bg: 'bg-slate-50  border-slate-200'  },
+                    { label: 'Trust Score',     value: '92%', sub: 'All documents verified',  color: 'text-success', bg: 'bg-success border-success' },
+                    { label: 'Leave Balance',   value: '14d', sub: '8 EL · 6 SL remaining',  color: 'text-info',    bg: 'bg-info   border-info'   },
+                    { label: 'Open Actions',    value: '0',   sub: 'No pending items',        color: 'text-muted-foreground',   bg: 'bg-muted  border-border'  },
                   ].map(item => (
                     <div key={item.label} className={cn('rounded-xl border p-3', item.bg)}>
                       <p className={cn('text-xl font-black tabular-nums', item.color)}>{item.value}</p>
@@ -517,7 +517,7 @@ export function EmployeeProfileShowcase() {
               <div className="relative space-y-0">
                 {JOURNEY.map((event, idx) => {
                   const Icon = JOURNEY_ICON[event.type] ?? Star
-                  const color = JOURNEY_COLOR[event.type] ?? 'text-slate-600 bg-slate-50 border-slate-200'
+                  const color = JOURNEY_COLOR[event.type] ?? 'text-muted-foreground bg-muted border-border'
                   const isLast = idx === JOURNEY.length - 1
                   return (
                     <div key={idx} className="flex gap-4">
@@ -741,7 +741,7 @@ export function EmployeeProfileShowcase() {
                     <div key={item.label} className={cn(
                       'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium',
                       item.active
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        ? 'bg-success border-success text-success'
                         : 'bg-muted/40 border-border text-muted-foreground',
                     )}>
                       {item.active ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}

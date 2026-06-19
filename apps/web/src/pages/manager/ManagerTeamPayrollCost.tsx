@@ -60,7 +60,7 @@ function fmtINR(n: number) {
 
 function VolatilityBadge({ vi }: { vi: number | null }) {
   if (vi == null) return <span className="text-muted-foreground">—</span>
-  const cls = vi > 15 ? 'text-destructive font-semibold' : vi > 8 ? 'text-amber-600' : 'text-muted-foreground'
+  const cls = vi > 15 ? 'text-destructive font-semibold' : vi > 8 ? 'text-warning' : 'text-muted-foreground'
   return <span className={cn('tabular-nums text-xs', cls)}>{vi.toFixed(1)}%</span>
 }
 
@@ -128,8 +128,8 @@ export function ManagerTeamPayrollCost() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
           {[
             { label: 'Total Gross', val: total.gross_pay, cls: '' },
-            { label: 'Total Net',   val: total.net_pay,   cls: 'text-green-600' },
-            { label: 'OT Cost',     val: total.ot_cost,   cls: total.ot_cost > 0 ? 'text-amber-600' : '' },
+            { label: 'Total Net',   val: total.net_pay,   cls: 'text-success' },
+            { label: 'OT Cost',     val: total.ot_cost,   cls: total.ot_cost > 0 ? 'text-warning' : '' },
             { label: 'LOP Impact',  val: total.lop_deduction, cls: total.lop_deduction > 0 ? 'text-destructive' : '' },
           ].map(tile => (
             <div key={tile.label} className="rounded-lg border border-border bg-card p-3">

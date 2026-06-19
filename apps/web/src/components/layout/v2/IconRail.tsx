@@ -57,7 +57,7 @@ export function IconRail() {
                   'w-12 h-12 rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer relative group',
                   isActive
                     ? 'bg-[#1E293B] text-white'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50',
+                    : 'text-muted-foreground hover:text-slate-200 hover:bg-slate-800/50',
                 )}
               >
                 <Icon className="w-5 h-5" />

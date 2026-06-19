@@ -131,10 +131,10 @@ function StatusBadge({ status }: { status: RunStatus }) {
       })()}
       className={cn(
         'text-[10px] font-medium',
-        status === 'finalized'      && 'border-green-300  bg-green-50  text-green-800  dark:bg-green-900/20 dark:text-green-300',
-        status === 'frozen'         && 'border-blue-300   bg-blue-50   text-blue-800   dark:bg-blue-900/20 dark:text-blue-300',
-        status === 'processing'     && 'border-blue-300   bg-blue-50   text-blue-800   dark:bg-blue-900/20 dark:text-blue-300',
-        status === 'reopened'       && 'border-amber-300  bg-amber-50  text-amber-800  dark:bg-amber-900/20 dark:text-amber-300',
+        status === 'finalized'      && 'border-success  bg-success  text-success  dark:bg-green-900/20 dark:text-green-300',
+        status === 'frozen'         && 'border-info   bg-info   text-info   dark:bg-blue-900/20 dark:text-blue-300',
+        status === 'processing'     && 'border-info   bg-info   text-info   dark:bg-blue-900/20 dark:text-blue-300',
+        status === 'reopened'       && 'border-warning  bg-warning  text-warning  dark:bg-amber-900/20 dark:text-amber-300',
       )}
     >
       {STATUS_LABELS[status]}
@@ -231,9 +231,9 @@ function deriveRisks(run: PayrollRun): RiskPill[] {
 }
 
 const PILL_CLASSES: Record<RiskPill['severity'], string> = {
-  warning:  'bg-amber-50  text-amber-800  border border-amber-200  dark:bg-amber-900/20 dark:text-amber-300',
-  high:     'bg-orange-50 text-orange-800 border border-orange-200 dark:bg-orange-900/20 dark:text-orange-300',
-  critical: 'bg-red-50    text-red-800    border border-red-200    dark:bg-red-900/20 dark:text-red-300',
+  warning:  'bg-warning  text-warning  border border-warning  dark:bg-amber-900/20 dark:text-amber-300',
+  high:     'bg-accent-coral text-accent-coral border border-accent-coral dark:bg-orange-900/20 dark:text-orange-300',
+  critical: 'bg-destructive    text-destructive    border border-destructive    dark:bg-red-900/20 dark:text-red-300',
 }
 
 function RiskPills({ run }: { run: PayrollRun }) {

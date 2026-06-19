@@ -60,9 +60,9 @@ const CRIT_LABEL: Record<string, string> = { technical: 'Technical', communicati
 
 function leniencyBadge(l: number | null) {
   if (l === null) return { label: '—', cls: 'text-muted-foreground' }
-  if (l >= 0.5)  return { label: `+${l.toFixed(2)} lenient`, cls: 'text-amber-600 bg-amber-50 border-amber-200' }
-  if (l <= -0.5) return { label: `${l.toFixed(2)} strict`,   cls: 'text-blue-600 bg-blue-50 border-blue-200' }
-  return { label: `${l > 0 ? '+' : ''}${l.toFixed(2)} balanced`, cls: 'text-emerald-600 bg-emerald-50 border-emerald-200' }
+  if (l >= 0.5)  return { label: `+${l.toFixed(2)} lenient`, cls: 'text-warning bg-warning border-warning' }
+  if (l <= -0.5) return { label: `${l.toFixed(2)} strict`,   cls: 'text-info bg-info border-info' }
+  return { label: `${l > 0 ? '+' : ''}${l.toFixed(2)} balanced`, cls: 'text-success bg-success border-success' }
 }
 
 export function AdminInterviewAnalytics() {
@@ -152,7 +152,7 @@ export function AdminInterviewAnalytics() {
                       <td className="py-2 px-3 text-xs font-medium">{CRIT_LABEL[c.criterion] ?? c.criterion}</td>
                       <td className="py-2 px-3 text-xs text-right text-success">{c.avg_hired ?? '—'}</td>
                       <td className="py-2 px-3 text-xs text-right text-destructive">{c.avg_rejected ?? '—'}</td>
-                      <td className={cn('py-2 px-3 text-xs text-right font-semibold', (c.lift ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                      <td className={cn('py-2 px-3 text-xs text-right font-semibold', (c.lift ?? 0) >= 0 ? 'text-success' : 'text-destructive')}>
                         {c.lift != null ? (c.lift > 0 ? `+${c.lift}` : c.lift) : '—'}
                       </td>
                     </tr>

@@ -322,12 +322,12 @@ function isoDate(y: number, m: number, d: number) {
 
 // ── Leave type card color palette (cycles by index) ────────────────────────────
 const LT_CARD_COLORS = [
-  { topBar: 'bg-blue-500',    iconBg: 'bg-blue-100 dark:bg-blue-950/40',       iconText: 'text-blue-600 dark:text-blue-400'       },
-  { topBar: 'bg-emerald-500', iconBg: 'bg-emerald-100 dark:bg-emerald-950/40', iconText: 'text-emerald-600 dark:text-emerald-400' },
-  { topBar: 'bg-violet-500',  iconBg: 'bg-violet-100 dark:bg-violet-950/40',   iconText: 'text-violet-600 dark:text-violet-400'   },
-  { topBar: 'bg-rose-500',    iconBg: 'bg-rose-100 dark:bg-rose-950/40',       iconText: 'text-rose-600 dark:text-rose-400'       },
-  { topBar: 'bg-amber-500',   iconBg: 'bg-amber-100 dark:bg-amber-950/40',     iconText: 'text-amber-600 dark:text-amber-400'     },
-  { topBar: 'bg-cyan-500',    iconBg: 'bg-cyan-100 dark:bg-cyan-950/40',       iconText: 'text-cyan-600 dark:text-cyan-400'       },
+  { topBar: 'bg-info',    iconBg: 'bg-info dark:bg-blue-950/40',       iconText: 'text-info dark:text-blue-400'       },
+  { topBar: 'bg-success', iconBg: 'bg-success dark:bg-emerald-950/40', iconText: 'text-success dark:text-emerald-400' },
+  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet dark:bg-violet-950/40',   iconText: 'text-accent-violet dark:text-violet-400'   },
+  { topBar: 'bg-destructive',    iconBg: 'bg-destructive dark:bg-rose-950/40',       iconText: 'text-destructive dark:text-rose-400'       },
+  { topBar: 'bg-warning',   iconBg: 'bg-warning dark:bg-amber-950/40',     iconText: 'text-warning dark:text-amber-400'     },
+  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal dark:bg-cyan-950/40',       iconText: 'text-accent-teal dark:text-cyan-400'       },
 ] as const
 
 // ── Reason chips constant ──────────────────────────────────────────────────────
@@ -399,7 +399,7 @@ function LeaveCalendar({
         case 'present':       return { annotation: 'P',  annotationCls: 'text-success',                              bgCls: 'bg-success/8'                              }
         case 'late':          return { annotation: 'P',  annotationCls: 'text-warning',                              bgCls: 'bg-warning/8'                              }
         case 'early_out':     return { annotation: 'P',  annotationCls: 'text-warning',                              bgCls: 'bg-warning/5'                              }
-        case 'holiday':       return { annotation: 'H',  annotationCls: 'text-violet-600 dark:text-violet-400',      bgCls: 'bg-violet-50 dark:bg-violet-950/30'        }
+        case 'holiday':       return { annotation: 'H',  annotationCls: 'text-accent-violet dark:text-violet-400',      bgCls: 'bg-accent-violet dark:bg-violet-950/30'        }
         case 'weekend':
         case 'weekly_off':    return { annotation: 'O',  annotationCls: 'text-muted-foreground/50',                  bgCls: ''                                          }
         case 'leave':         return { annotation: 'OL', annotationCls: 'text-info',                                 bgCls: 'bg-info/8'                                 }
@@ -409,7 +409,7 @@ function LeaveCalendar({
         case 'missing_punch': return { annotation: 'MP', annotationCls: 'text-warning',                              bgCls: 'bg-warning/8'                              }
       }
     }
-    if (isHol)     return { annotation: 'H',  annotationCls: 'text-violet-600 dark:text-violet-400', bgCls: 'bg-violet-50/60 dark:bg-violet-950/20' }
+    if (isHol)     return { annotation: 'H',  annotationCls: 'text-accent-violet dark:text-violet-400', bgCls: 'bg-accent-violet/60 dark:bg-violet-950/20' }
     if (isExLeave) return { annotation: 'OL', annotationCls: 'text-info',                            bgCls: 'bg-info/6'                             }
     if (isWO)      return { annotation: 'O',  annotationCls: 'text-muted-foreground/40',             bgCls: ''                                      }
     return { annotation: '', annotationCls: '', bgCls: '' }
@@ -528,7 +528,7 @@ function LeaveCalendar({
         {[
           { label: 'Present',  dot: 'bg-success/40' },
           { label: 'On Leave', dot: 'bg-info/40' },
-          { label: 'Holiday',  dot: 'bg-violet-300/60' },
+          { label: 'Holiday',  dot: 'bg-accent-violet/60' },
           { label: 'Absent',   dot: 'bg-destructive/40' },
           { label: 'Week Off', dot: 'bg-muted/60' },
         ].map(({ label, dot }) => (
@@ -1610,10 +1610,10 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
           {/* Working / Holiday / Weekend / Sandwich stats */}
           <div className="grid grid-cols-4 gap-1.5">
             {[
-              { label: 'Working',  value: durationResult?.breakdown.working  ?? 0, cls: 'text-emerald-400' },
-              { label: 'Holiday',  value: durationResult?.breakdown.holiday  ?? 0, cls: 'text-violet-400'  },
-              { label: 'Weekend',  value: durationResult?.breakdown.weekend  ?? 0, cls: 'text-slate-400'   },
-              { label: 'Sandwich', value: durationResult?.breakdown.sandwich ?? 0, cls: 'text-amber-400'   },
+              { label: 'Working',  value: durationResult?.breakdown.working  ?? 0, cls: 'text-success' },
+              { label: 'Holiday',  value: durationResult?.breakdown.holiday  ?? 0, cls: 'text-accent-violet'  },
+              { label: 'Weekend',  value: durationResult?.breakdown.weekend  ?? 0, cls: 'text-muted-foreground'   },
+              { label: 'Sandwich', value: durationResult?.breakdown.sandwich ?? 0, cls: 'text-warning'   },
             ].map(({ label, value, cls }) => (
               <div key={label} className="bg-muted rounded-lg p-2 text-center">
                 <p className={cn('text-sm font-bold tabular-nums', cls)}>{value}</p>

@@ -296,8 +296,8 @@ function KpiCard({
   label:          string
   value:          string | number
   icon:           React.ComponentType<{ className?: string }>
-  iconBg:         string   // e.g. 'bg-teal-50'
-  iconColor:      string   // e.g. 'text-teal-600'
+  iconBg:         string   // e.g. 'bg-accent-teal'
+  iconColor:      string   // e.g. 'text-accent-teal'
   valueColor?:    string
   sub?:           string
   trend?:         string   // e.g. '+12%' or '↑ 3'
@@ -806,14 +806,14 @@ export function ControlCenter() {
             icon={Users} label="Employees"
             stat={`${dashStats?.total_employees ?? freshness?.total_active_employees ?? '—'} active`}
             status="healthy"
-            iconBg="bg-sky-50" iconColor="text-sky-600"
+            iconBg="bg-info" iconColor="text-info"
             onClick={() => nav('/admin/employees')}
           />
           <ModuleCard
             icon={CalendarCheck} label="Attendance"
             stat={freshness?.health === 'healthy' ? 'All synced' : `${freshness?.employees_missing ?? 0} missing data`}
             status={(freshness?.health ?? 'unknown') as ModuleStatus}
-            iconBg="bg-violet-50" iconColor="text-violet-600"
+            iconBg="bg-accent-violet" iconColor="text-accent-violet"
             badge={(freshness?.employees_missing ?? 0) > 0 ? freshness!.employees_missing : null}
             onClick={() => nav('/admin/attendance/center')}
           />
@@ -821,7 +821,7 @@ export function ControlCenter() {
             icon={CalendarDays} label="Leave"
             stat={regList.length > 0 ? `${regList.length} pending approval` : 'All approved'}
             status={regList.length > 0 ? 'degraded' : 'healthy'}
-            iconBg="bg-emerald-50" iconColor="text-emerald-600"
+            iconBg="bg-success" iconColor="text-success"
             badge={regList.length > 0 ? regList.length : null}
             onClick={() => nav('/admin/leave/balances')}
           />
@@ -831,14 +831,14 @@ export function ControlCenter() {
               ? `${payroll.current_month} · ${payroll.current_run.status.charAt(0).toUpperCase() + payroll.current_run.status.slice(1)}`
               : (payroll?.current_month ?? 'No run yet')}
             status={payrollHealth as ModuleStatus}
-            iconBg="bg-amber-50" iconColor="text-amber-600"
+            iconBg="bg-warning" iconColor="text-warning"
             onClick={() => nav('/admin/payroll/center')}
           />
           <ModuleCard
             icon={BarChart3} label="Analytics"
             stat="CEO · CHRO · Workforce views"
             status="healthy"
-            iconBg="bg-blue-50" iconColor="text-blue-600"
+            iconBg="bg-info" iconColor="text-info"
             onClick={() => nav('/admin/executive')}
           />
           <ModuleCard
@@ -847,7 +847,7 @@ export function ControlCenter() {
               ? `${schedulers.filter(s => !s.is_stale).length}/${schedulers.length} engines healthy`
               : overallHealth.charAt(0).toUpperCase() + overallHealth.slice(1)}
             status={(schedulers.some(s => s.is_stale) ? 'degraded' : overallHealth === 'healthy' ? 'healthy' : overallHealth) as ModuleStatus}
-            iconBg="bg-slate-50" iconColor="text-slate-600"
+            iconBg="bg-muted" iconColor="text-muted-foreground"
             badge={schedulers.filter(s => s.is_stale).length || null}
             onClick={() => nav('/admin/system/observability')}
           />
@@ -925,9 +925,9 @@ export function ControlCenter() {
           label="Pending Regularisations"
           value={regList.length}
           icon={ClipboardList}
-          iconBg={regList.length > 0 ? 'bg-violet-50' : 'bg-muted'}
-          iconColor={regList.length > 0 ? 'text-violet-600' : 'text-muted-foreground'}
-          valueColor={regList.length > 0 ? 'text-violet-700' : undefined}
+          iconBg={regList.length > 0 ? 'bg-accent-violet' : 'bg-muted'}
+          iconColor={regList.length > 0 ? 'text-accent-violet' : 'text-muted-foreground'}
+          valueColor={regList.length > 0 ? 'text-accent-violet' : undefined}
           sub="Awaiting manager action"
           trend={regList.length > 0 ? `${regList.length} pending` : undefined}
           trendPositive={false}
@@ -1230,9 +1230,9 @@ export function ControlCenter() {
             label="New Joiners"
             value={dashStats?.new_joiners_this_month ?? '—'}
             icon={UserPlus}
-            iconBg="bg-sky-50"
-            iconColor="text-sky-600"
-            valueColor={(dashStats?.new_joiners_this_month ?? 0) > 0 ? 'text-sky-600' : undefined}
+            iconBg="bg-info"
+            iconColor="text-info"
+            valueColor={(dashStats?.new_joiners_this_month ?? 0) > 0 ? 'text-info' : undefined}
             sub="This month"
             trend={(dashStats?.new_joiners_this_month ?? 0) > 0 ? `+${dashStats!.new_joiners_this_month}` : undefined}
             trendPositive={true}
@@ -1241,9 +1241,9 @@ export function ControlCenter() {
             label="Absent Today"
             value={todayAbsent}
             icon={UserX}
-            iconBg={todayAbsent > 0 ? 'bg-amber-50' : 'bg-muted'}
-            iconColor={todayAbsent > 0 ? 'text-amber-600' : 'text-muted-foreground'}
-            valueColor={todayAbsent > 0 ? 'text-amber-600' : undefined}
+            iconBg={todayAbsent > 0 ? 'bg-warning' : 'bg-muted'}
+            iconColor={todayAbsent > 0 ? 'text-warning' : 'text-muted-foreground'}
+            valueColor={todayAbsent > 0 ? 'text-warning' : undefined}
             sub="Real-time"
             trend={todayAbsent > 0 ? `${todayAbsent} out` : undefined}
             trendPositive={false}
@@ -1313,9 +1313,9 @@ export function ControlCenter() {
           label="Pending Corrections"
           value={correctionsCount}
           icon={CheckSquare}
-          iconBg={correctionsCount > 0 ? 'bg-orange-50' : 'bg-emerald-50'}
-          iconColor={correctionsCount > 0 ? 'text-orange-500' : 'text-emerald-600'}
-          valueColor={correctionsCount > 0 ? 'text-orange-500' : undefined}
+          iconBg={correctionsCount > 0 ? 'bg-accent-coral' : 'bg-success'}
+          iconColor={correctionsCount > 0 ? 'text-accent-coral' : 'text-success'}
+          valueColor={correctionsCount > 0 ? 'text-accent-coral' : undefined}
           sub={correctionsCount > 0 ? 'Awaiting approval' : 'All corrections clear'}
           trend={correctionsCount > 0 ? `${correctionsCount} pending` : 'All clear'}
           trendPositive={correctionsCount === 0}

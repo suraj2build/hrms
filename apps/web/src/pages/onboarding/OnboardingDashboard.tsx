@@ -314,9 +314,9 @@ export function OnboardingDashboard({ embedded = false }: { embedded?: boolean }
           title="Total Sessions"
           value={statsLoading ? '—' : (stats?.total_sessions ?? 0)}
           icon={Users}
-          iconColor="text-blue-600"
-          iconBg="bg-blue-50"
-          accent="bg-blue-500"
+          iconColor="text-info"
+          iconBg="bg-info"
+          accent="bg-info"
         />
         <StatCard
           title="Pending Review"

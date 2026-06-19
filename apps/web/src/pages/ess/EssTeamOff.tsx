@@ -63,10 +63,10 @@ function initials(name: string) {
   return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase() || '?'
 }
 const AVATAR_COLORS = [
-  'bg-blue-100 text-blue-700', 'bg-emerald-100 text-emerald-700',
-  'bg-amber-100 text-amber-700', 'bg-violet-100 text-violet-700',
-  'bg-rose-100 text-rose-700', 'bg-cyan-100 text-cyan-700',
-  'bg-indigo-100 text-indigo-700', 'bg-teal-100 text-teal-700',
+  'bg-info text-info', 'bg-success text-success',
+  'bg-warning text-warning', 'bg-accent-violet text-accent-violet',
+  'bg-destructive text-destructive', 'bg-accent-teal text-accent-teal',
+  'bg-primary text-primary', 'bg-accent-teal text-accent-teal',
 ]
 function colorFor(id: string) {
   let h = 0
@@ -204,7 +204,7 @@ export function EssTeamOff() {
                       className={cn(
                         'min-h-[92px] border-b border-r border-border p-1.5 align-top',
                         !inMonth && 'bg-muted/30',
-                        holidayName && 'bg-amber-50',
+                        holidayName && 'bg-warning',
                       )}
                     >
                       <div className="flex items-center justify-between">

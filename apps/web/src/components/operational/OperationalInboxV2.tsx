@@ -97,7 +97,7 @@ const CATEGORY_META: Record<InboxCategory, {
 }> = {
   attendance_approval: { label: 'Attendance', Icon: ClipboardCheck, color: 'text-primary' },
   leave_approval:      { label: 'Leave',      Icon: CalendarCheck,  color: 'text-primary' },
-  anomaly_review:      { label: 'Anomalies',  Icon: AlertTriangle,  color: 'text-amber-500' },
+  anomaly_review:      { label: 'Anomalies',  Icon: AlertTriangle,  color: 'text-warning' },
   payroll_blocker:     { label: 'Payroll',    Icon: DollarSign,     color: 'text-destructive' },
   compliance_alert:    { label: 'Compliance', Icon: ShieldAlert,    color: 'text-destructive' },
   correction_request:  { label: 'Correction', Icon: ClipboardEdit,  color: 'text-primary' },

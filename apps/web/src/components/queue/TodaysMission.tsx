@@ -19,18 +19,18 @@ export function TodaysMission({ mission, onModeChange }: TodaysMissionProps) {
   const cardCn = cn(
     'rounded-xl border p-4',
     blockers_remaining === 0
-      ? 'bg-emerald-50 border-emerald-200'
+      ? 'bg-success border-success'
       : blockers_remaining <= 2
-        ? 'bg-amber-50 border-amber-200'
-        : 'bg-red-50 border-red-200',
+        ? 'bg-warning border-warning'
+        : 'bg-destructive border-destructive',
   )
 
   const readinessCn = cn(
     'h-2 rounded-full transition-all',
     estimated_payroll_readiness >= 90
-      ? 'bg-emerald-500'
+      ? 'bg-success'
       : estimated_payroll_readiness >= 60
-        ? 'bg-amber-500'
+        ? 'bg-warning'
         : 'bg-destructive',
   )
 
@@ -50,10 +50,10 @@ export function TodaysMission({ mission, onModeChange }: TodaysMissionProps) {
             className={cn(
               'inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-bold leading-none',
               blockers_remaining === 0
-                ? 'bg-emerald-100 text-emerald-700'
+                ? 'bg-success text-success'
                 : blockers_remaining <= 2
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-red-100 text-red-700',
+                  ? 'bg-warning text-warning'
+                  : 'bg-destructive text-destructive',
             )}
           >
             {blockers_remaining}

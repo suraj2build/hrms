@@ -224,16 +224,16 @@ export function WorkforceActivityGraph({
 
   const readinessColor =
     payrollReadiness.pct >= 90
-      ? 'bg-emerald-500'
+      ? 'bg-success'
       : payrollReadiness.pct >= 70
-        ? 'bg-amber-500'
+        ? 'bg-warning'
         : 'bg-destructive'
 
   const readinessTextColor =
     payrollReadiness.pct >= 90
-      ? 'text-emerald-600'
+      ? 'text-success'
       : payrollReadiness.pct >= 70
-        ? 'text-amber-600'
+        ? 'text-warning'
         : 'text-destructive'
 
   // ── Panel 6: Compliance Risk Trends ───────────────────────────────────────

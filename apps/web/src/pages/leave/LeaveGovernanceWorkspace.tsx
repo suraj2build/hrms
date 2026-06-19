@@ -425,18 +425,18 @@ function GrantStatusBadge({ status }: { status: EventGrant['status'] }) {
 // ── Ledger txn type badge ─────────────────────────────────────────────────────
 
 const TXN_BADGE_CLASS: Record<LedgerTxnType, string> = {
-  accrual:            'bg-green-100 text-green-700 border-green-200',
-  carry_forward:      'bg-blue-100 text-blue-700 border-blue-200',
-  manual_credit:      'bg-sky-100 text-sky-700 border-sky-200',
-  deduction:          'bg-red-100 text-red-700 border-red-200',
-  encashment:         'bg-emerald-100 text-emerald-700 border-emerald-200',
-  expiry:             'bg-gray-100 text-gray-600 border-gray-200',
-  opening_balance:    'bg-indigo-100 text-indigo-700 border-indigo-200',
-  event_grant:        'bg-purple-100 text-purple-700 border-purple-200',
-  reversal:           'bg-orange-100 text-orange-700 border-orange-200',
-  payroll_adjustment: 'bg-amber-100 text-amber-700 border-amber-200',
-  correction:         'bg-rose-100 text-rose-700 border-rose-200',
-  lop_recovery:       'bg-pink-100 text-pink-700 border-pink-200',
+  accrual:            'bg-success text-success border-success',
+  carry_forward:      'bg-info text-info border-info',
+  manual_credit:      'bg-info text-info border-info',
+  deduction:          'bg-destructive text-destructive border-destructive',
+  encashment:         'bg-success text-success border-success',
+  expiry:             'bg-muted text-muted-foreground border-border',
+  opening_balance:    'bg-primary text-primary border-primary',
+  event_grant:        'bg-primary text-primary border-primary',
+  reversal:           'bg-accent-coral text-accent-coral border-accent-coral',
+  payroll_adjustment: 'bg-warning text-warning border-warning',
+  correction:         'bg-destructive text-destructive border-destructive',
+  lop_recovery:       'bg-accent-magenta text-accent-magenta border-accent-magenta',
 }
 
 function TxnTypeBadge({ type }: { type: LedgerTxnType }) {
@@ -455,9 +455,9 @@ function TxnTypeBadge({ type }: { type: LedgerTxnType }) {
 function SeverityBadge({ severity }: { severity: ReconciliationRun['severity'] }) {
   const map: Record<ReconciliationRun['severity'], { label: string; className: string }> = {
     ok:       { label: 'OK',       className: 'bg-success/10 text-success border-success/20' },
-    low:      { label: 'Low',      className: 'bg-blue-100 text-blue-700 border-blue-200' },
+    low:      { label: 'Low',      className: 'bg-info text-info border-info' },
     medium:   { label: 'Medium',   className: 'bg-warning/10 text-warning border-warning/20' },
-    high:     { label: 'High',     className: 'bg-orange-100 text-orange-700 border-orange-200' },
+    high:     { label: 'High',     className: 'bg-accent-coral text-accent-coral border-accent-coral' },
     critical: { label: 'Critical', className: 'bg-destructive/10 text-destructive border-destructive/20' },
   }
   const { label, className } = map[severity] ?? map.ok
@@ -1000,9 +1000,9 @@ export default function LeaveGovernanceWorkspace() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 {[
                   { label: 'Total Requests (this year)', value: analyticsData.total_requests,      color: 'text-primary' },
-                  { label: 'Half-Day',                   value: analyticsData.half_day_count,      color: 'text-blue-600' },
+                  { label: 'Half-Day',                   value: analyticsData.half_day_count,      color: 'text-info' },
                   { label: 'Cross-Session',              value: analyticsData.cross_session_count, color: 'text-warning' },
-                  { label: 'Hourly',                     value: analyticsData.hourly_count,        color: 'text-purple-600' },
+                  { label: 'Hourly',                     value: analyticsData.hourly_count,        color: 'text-primary' },
                 ].map(s => (
                   <div key={s.label} className="rounded-lg border border-border bg-card p-3">
                     <p className="text-xs text-muted-foreground">{s.label}</p>

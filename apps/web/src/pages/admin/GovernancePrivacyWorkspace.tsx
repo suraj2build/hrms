@@ -130,20 +130,20 @@ interface ErasureRequest {
 // ── Status configs ────────────────────────────────────────────────────────────
 
 const CONTROL_STATUS: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
-  verified:    { label: 'Verified',    color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
-  implemented: { label: 'Implemented', color: 'bg-blue-50   text-blue-700   border-blue-200',     icon: CheckCircle2 },
-  in_progress: { label: 'In Progress', color: 'bg-amber-50  text-amber-700  border-amber-200',    icon: Clock        },
-  not_started: { label: 'Not Started', color: 'bg-gray-100  text-gray-600   border-gray-200',     icon: XCircle      },
-  waived:      { label: 'Waived',      color: 'bg-purple-50 text-purple-700 border-purple-200',   icon: CheckCircle2 },
+  verified:    { label: 'Verified',    color: 'bg-success text-success border-success', icon: CheckCircle2 },
+  implemented: { label: 'Implemented', color: 'bg-info   text-info   border-info',     icon: CheckCircle2 },
+  in_progress: { label: 'In Progress', color: 'bg-warning  text-warning  border-warning',    icon: Clock        },
+  not_started: { label: 'Not Started', color: 'bg-muted  text-muted-foreground   border-border',     icon: XCircle      },
+  waived:      { label: 'Waived',      color: 'bg-primary text-primary border-primary',   icon: CheckCircle2 },
 }
 
 const ERASURE_STATUS: Record<string, { label: string; color: string }> = {
-  pending:     { label: 'Pending',     color: 'bg-amber-50  text-amber-700  border-amber-200'  },
-  in_progress: { label: 'In Progress', color: 'bg-blue-50   text-blue-700   border-blue-200'   },
-  completed:   { label: 'Completed',   color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  rejected:    { label: 'Rejected',    color: 'bg-red-50    text-red-700    border-red-200'    },
-  partial:     { label: 'Partial',     color: 'bg-orange-50 text-orange-700 border-orange-200' },
-  on_hold:     { label: 'On Hold',     color: 'bg-gray-100  text-gray-600   border-gray-200'   },
+  pending:     { label: 'Pending',     color: 'bg-warning  text-warning  border-warning'  },
+  in_progress: { label: 'In Progress', color: 'bg-info   text-info   border-info'   },
+  completed:   { label: 'Completed',   color: 'bg-success text-success border-success' },
+  rejected:    { label: 'Rejected',    color: 'bg-destructive    text-destructive    border-destructive'    },
+  partial:     { label: 'Partial',     color: 'bg-accent-coral text-accent-coral border-accent-coral' },
+  on_hold:     { label: 'On Hold',     color: 'bg-muted  text-muted-foreground   border-border'   },
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -301,9 +301,9 @@ export function GovernancePrivacyWorkspace() {
               <SectionCard title="Data Erasure (GDPR / DPDPA)">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: 'Open Requests',   value: health.erasure_requests.open,         color: health.erasure_requests.open > 0 ? 'text-amber-600' : 'text-foreground' },
-                    { label: 'SLA Breached',    value: health.erasure_requests.breached_sla, color: health.erasure_requests.breached_sla > 0 ? 'text-red-600' : 'text-foreground' },
-                    { label: 'Completed (All)', value: health.erasure_requests.completed,    color: 'text-emerald-600' },
+                    { label: 'Open Requests',   value: health.erasure_requests.open,         color: health.erasure_requests.open > 0 ? 'text-warning' : 'text-foreground' },
+                    { label: 'SLA Breached',    value: health.erasure_requests.breached_sla, color: health.erasure_requests.breached_sla > 0 ? 'text-destructive' : 'text-foreground' },
+                    { label: 'Completed (All)', value: health.erasure_requests.completed,    color: 'text-success' },
                     { label: 'Total Requests',  value: health.erasure_requests.total,        color: 'text-foreground' },
                   ].map(k => (
                     <div key={k.label} className="rounded-lg border p-3">
@@ -327,7 +327,7 @@ export function GovernancePrivacyWorkspace() {
               <SectionCard title="PII Access (Last 30 Days)">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg border p-3">
-                    <p className={cn('text-2xl font-bold', health.flagged_pii_access_30d > 0 ? 'text-red-600' : 'text-foreground')}>
+                    <p className={cn('text-2xl font-bold', health.flagged_pii_access_30d > 0 ? 'text-destructive' : 'text-foreground')}>
                       {health.flagged_pii_access_30d}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">Flagged Access Events</p>
@@ -347,11 +347,11 @@ export function GovernancePrivacyWorkspace() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {[
                     { label: 'Total Controls', value: health.control_health.total, color: 'text-foreground' },
-                    { label: 'Verified',        value: health.control_health.verified,    color: 'text-emerald-600' },
-                    { label: 'Implemented',     value: health.control_health.implemented, color: 'text-blue-600'    },
-                    { label: 'In Progress',     value: health.control_health.in_progress, color: 'text-amber-600'   },
-                    { label: 'Not Started',     value: health.control_health.not_started, color: health.control_health.not_started > 0 ? 'text-red-600' : 'text-foreground' },
-                    { label: 'Waived',          value: health.control_health.waived,      color: 'text-purple-600'  },
+                    { label: 'Verified',        value: health.control_health.verified,    color: 'text-success' },
+                    { label: 'Implemented',     value: health.control_health.implemented, color: 'text-info'    },
+                    { label: 'In Progress',     value: health.control_health.in_progress, color: 'text-warning'   },
+                    { label: 'Not Started',     value: health.control_health.not_started, color: health.control_health.not_started > 0 ? 'text-destructive' : 'text-foreground' },
+                    { label: 'Waived',          value: health.control_health.waived,      color: 'text-primary'  },
                   ].map(k => (
                     <div key={k.label} className="rounded-lg border p-3">
                       <p className={cn('text-2xl font-bold', k.color)}>{k.value}</p>
@@ -419,7 +419,7 @@ export function GovernancePrivacyWorkspace() {
                         {c.latest_evidence && (
                           <div className={cn(
                             'flex-shrink-0 rounded-full h-6 w-6 flex items-center justify-center',
-                            c.latest_evidence.pass ? 'bg-emerald-100' : 'bg-red-100',
+                            c.latest_evidence.pass ? 'bg-success' : 'bg-destructive',
                           )}>
                             {c.latest_evidence.pass
                               ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -477,10 +477,10 @@ export function GovernancePrivacyWorkspace() {
             ) : (
               <div className="divide-y divide-border">
                 {(piiQ.data?.data ?? []).map(e => (
-                  <div key={e.id} className={cn('py-3 flex items-start gap-3', e.flagged && 'bg-red-50/30')}>
+                  <div key={e.id} className={cn('py-3 flex items-start gap-3', e.flagged && 'bg-destructive/30')}>
                     <div className={cn(
                       'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                      e.flagged ? 'bg-red-100' : 'bg-muted',
+                      e.flagged ? 'bg-destructive' : 'bg-muted',
                     )}>
                       {e.flagged
                         ? <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
@@ -553,7 +553,7 @@ export function GovernancePrivacyWorkspace() {
                 {(erasureQ.data?.data ?? []).map(r => {
                   const sm = ERASURE_STATUS[r.status]
                   return (
-                    <div key={r.id} className={cn('py-3.5 flex items-start gap-3', r.sla_breached && 'bg-red-50/30')}>
+                    <div key={r.id} className={cn('py-3.5 flex items-start gap-3', r.sla_breached && 'bg-destructive/30')}>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-medium">{r.subject_name ?? r.subject_email ?? 'Unknown subject'}</p>
@@ -569,7 +569,7 @@ export function GovernancePrivacyWorkspace() {
                           {r.subject_email && r.subject_name && <span>{r.subject_email}</span>}
                           <span>Requested {format(new Date(r.requested_at), 'dd MMM yyyy')}</span>
                           {r.sla_deadline && (
-                            <span className={r.sla_breached ? 'text-red-600 font-medium' : ''}>
+                            <span className={r.sla_breached ? 'text-destructive font-medium' : ''}>
                               SLA: {format(new Date(r.sla_deadline), 'dd MMM yyyy')}
                             </span>
                           )}
@@ -634,14 +634,14 @@ export function GovernancePrivacyWorkspace() {
             ) : (
               <div className="divide-y divide-border">
                 {(evaluationsQ.data?.data ?? []).map(e => {
-                  const sevColor = e.severity === 'critical' ? 'bg-red-50 text-red-700 border-red-200'
-                    : e.severity === 'high'    ? 'bg-orange-50 text-orange-700 border-orange-200'
-                    : e.severity === 'warning' ? 'bg-amber-50  text-amber-700  border-amber-200'
-                    :                            'bg-gray-100  text-gray-600   border-gray-200'
+                  const sevColor = e.severity === 'critical' ? 'bg-destructive text-destructive border-destructive'
+                    : e.severity === 'high'    ? 'bg-accent-coral text-accent-coral border-accent-coral'
+                    : e.severity === 'warning' ? 'bg-warning  text-warning  border-warning'
+                    :                            'bg-muted  text-muted-foreground   border-border'
                   return (
-                    <div key={e.id} className={cn('py-3 flex items-start gap-3', !e.compliant && 'bg-red-50/20')}>
+                    <div key={e.id} className={cn('py-3 flex items-start gap-3', !e.compliant && 'bg-destructive/20')}>
                       <div className={cn('mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        e.compliant ? 'bg-emerald-100' : 'bg-red-100')}>
+                        e.compliant ? 'bg-success' : 'bg-destructive')}>
                         {e.compliant
                           ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                           : <AlertTriangle className="h-3.5 w-3.5 text-destructive" />}
@@ -653,7 +653,7 @@ export function GovernancePrivacyWorkspace() {
                           {e.rule_id && <Badge variant="outline" className="text-[10px]">{e.rule_id}</Badge>}
                           <Badge variant="outline" className={cn('text-[10px] capitalize', sevColor)}>{e.severity}</Badge>
                           <Badge variant="outline" className={cn('text-[10px]',
-                            e.compliant ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200')}>
+                            e.compliant ? 'bg-success text-success border-success' : 'bg-destructive text-destructive border-destructive')}>
                             {e.compliant ? 'Compliant' : 'Non-Compliant'}
                           </Badge>
                         </div>
@@ -702,7 +702,7 @@ export function GovernancePrivacyWorkspace() {
                 {(retentionQ.data?.data ?? []).map(r => {
                   const hasErrors = Array.isArray(r.errors) && r.errors.length > 0
                   return (
-                    <div key={r.id} className={cn('py-3.5', hasErrors && 'bg-amber-50/30')}>
+                    <div key={r.id} className={cn('py-3.5', hasErrors && 'bg-warning/30')}>
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium">
@@ -722,9 +722,9 @@ export function GovernancePrivacyWorkspace() {
                       <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2">
                         {[
                           { label: 'Evaluated', value: r.records_evaluated, color: 'text-foreground' },
-                          { label: 'Deleted',   value: r.records_deleted,   color: r.records_deleted   > 0 ? 'text-red-600'     : 'text-foreground' },
-                          { label: 'Anonymized',value: r.records_anonymized,color: r.records_anonymized > 0 ? 'text-amber-600'   : 'text-foreground' },
-                          { label: 'Retained',  value: r.records_retained,  color: 'text-emerald-600' },
+                          { label: 'Deleted',   value: r.records_deleted,   color: r.records_deleted   > 0 ? 'text-destructive'     : 'text-foreground' },
+                          { label: 'Anonymized',value: r.records_anonymized,color: r.records_anonymized > 0 ? 'text-warning'   : 'text-foreground' },
+                          { label: 'Retained',  value: r.records_retained,  color: 'text-success' },
                         ].map(k => (
                           <div key={k.label} className="rounded border p-2">
                             <p className={cn('text-sm font-semibold', k.color)}>{k.value.toLocaleString()}</p>

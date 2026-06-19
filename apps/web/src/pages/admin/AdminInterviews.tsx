@@ -95,10 +95,10 @@ const TYPE_META: Record<string, { label: string; icon: React.ReactNode }> = {
 }
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
-  scheduled:  { label: 'Scheduled',  className: 'text-blue-600   bg-blue-50   border-blue-200'   },
-  completed:  { label: 'Completed',  className: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
-  cancelled:  { label: 'Cancelled',  className: 'text-gray-500   bg-gray-50   border-gray-200'   },
-  no_show:    { label: 'No-show',    className: 'text-red-600    bg-red-50    border-red-200'     },
+  scheduled:  { label: 'Scheduled',  className: 'text-info   bg-info   border-info'   },
+  completed:  { label: 'Completed',  className: 'text-success bg-success border-success' },
+  cancelled:  { label: 'Cancelled',  className: 'text-muted-foreground   bg-muted   border-border'   },
+  no_show:    { label: 'No-show',    className: 'text-destructive    bg-destructive    border-destructive'     },
 }
 
 function fmtDT(s: string | null): string {
@@ -674,14 +674,14 @@ export function AdminInterviews() {
                       key={ivr.id}
                       className={cn(
                         'flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors',
-                        form.interviewer_ids.includes(ivr.id) ? 'bg-purple-50/60' : 'hover:bg-muted/40'
+                        form.interviewer_ids.includes(ivr.id) ? 'bg-primary/60' : 'hover:bg-muted/40'
                       )}
                     >
                       <input
                         type="checkbox"
                         checked={form.interviewer_ids.includes(ivr.id)}
                         onChange={() => toggleInterviewer(ivr.id)}
-                        className="accent-purple-600 w-4 h-4"
+                        className="accent-primary w-4 h-4"
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{ivr.full_name}</p>
@@ -775,8 +775,8 @@ export function AdminInterviews() {
                 <tbody>
                   {scorecardRows.map(s => {
                     const recColors: Record<string, string> = {
-                      strong_yes: 'text-emerald-600', yes: 'text-green-600',
-                      maybe: 'text-amber-600', no: 'text-orange-600', strong_no: 'text-red-600',
+                      strong_yes: 'text-success', yes: 'text-success',
+                      maybe: 'text-warning', no: 'text-accent-coral', strong_no: 'text-destructive',
                     }
                     return (
                       <tr key={s.id} className="border-b border-border/50 hover:bg-muted/20">
@@ -833,11 +833,11 @@ export function AdminInterviews() {
                 {(['strong_yes','yes','maybe','no','strong_no'] as const).map(rec => {
                   const recLabel: Record<string, string> = { strong_yes: 'Strong Yes', yes: 'Yes', maybe: 'Maybe', no: 'No', strong_no: 'Strong No' }
                   const recColor: Record<string, string> = {
-                    strong_yes: 'border-emerald-500 bg-emerald-50 text-emerald-700',
-                    yes: 'border-green-400 bg-green-50 text-green-700',
-                    maybe: 'border-amber-400 bg-amber-50 text-amber-700',
-                    no: 'border-orange-400 bg-orange-50 text-orange-700',
-                    strong_no: 'border-red-500 bg-red-50 text-red-700',
+                    strong_yes: 'border-success bg-success text-success',
+                    yes: 'border-success bg-success text-success',
+                    maybe: 'border-warning bg-warning text-warning',
+                    no: 'border-accent-coral bg-accent-coral text-accent-coral',
+                    strong_no: 'border-destructive bg-destructive text-destructive',
                   }
                   return (
                     <button

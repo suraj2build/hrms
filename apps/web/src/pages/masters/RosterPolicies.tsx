@@ -174,9 +174,9 @@ function PolicyCard({
                 title={`${wk.replace('week', 'W')} ${day.charAt(0).toUpperCase() + day.slice(1)}: ${state}`}
                 className={cn(
                   'w-3 h-3 rounded-[2px] flex-shrink-0',
-                  state === 'working'  && 'bg-emerald-500/70',
-                  state === 'off'      && 'bg-rose-500/70',
-                  state === 'half_day' && 'bg-amber-400/70',
+                  state === 'working'  && 'bg-success/70',
+                  state === 'off'      && 'bg-destructive/70',
+                  state === 'half_day' && 'bg-warning/70',
                 )}
               />
             )
@@ -216,7 +216,7 @@ function PolicyCard({
             className={cn(
               'rounded-full text-[10px] px-2 py-0',
               policy.is_active
-                ? 'bg-emerald-500/15 text-emerald-700 border-emerald-200 hover:bg-emerald-500/15'
+                ? 'bg-success/15 text-success border-success hover:bg-emerald-500/15'
                 : 'text-muted-foreground',
             )}
           >
@@ -246,7 +246,7 @@ function PolicyCard({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={e => { e.stopPropagation(); onToggleActive() }}
-                  className={policy.is_active ? 'text-destructive' : 'text-emerald-600'}
+                  className={policy.is_active ? 'text-destructive' : 'text-success'}
                 >
                   {policy.is_active
                     ? <><Archive className="h-3.5 w-3.5 mr-2" />Archive Policy</>

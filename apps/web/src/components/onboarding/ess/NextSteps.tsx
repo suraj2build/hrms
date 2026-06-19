@@ -160,9 +160,9 @@ function StepIcon({ kind, pending }: { kind: StepKind; pending: boolean }) {
   const cls = 'mt-0.5 h-5 w-5 shrink-0'
   switch (kind) {
     case 'task':         return <Circle className={cn(cls, 'text-[#2E6FE6]')} />
-    case 'document':     return <FileWarning className={cn(cls, 'text-amber-500')} />
+    case 'document':     return <FileWarning className={cn(cls, 'text-warning')} />
     case 'notification': return <Bell className={cn(cls, 'text-[#2E6FE6]')} />
-    case 'blocker':      return <AlertTriangle className={cn(cls, 'text-red-500')} />
+    case 'blocker':      return <AlertTriangle className={cn(cls, 'text-destructive')} />
     default:             return <CheckCircle2 className={cls} />
   }
 }

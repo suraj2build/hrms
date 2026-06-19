@@ -8,8 +8,8 @@ interface HealthIndicatorProps {
 }
 
 function dotColor(signal: string): string {
-  if (signal === 'healthy')  return 'bg-emerald-500'
-  if (signal === 'degraded') return 'bg-amber-500'
+  if (signal === 'healthy')  return 'bg-success'
+  if (signal === 'degraded') return 'bg-warning'
   if (signal === 'critical') return 'bg-destructive'
   return 'bg-muted-foreground'
 }

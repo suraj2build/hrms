@@ -47,9 +47,9 @@ export function HeroStat({
   tone?: 'default' | 'success' | 'warning' | 'danger'
 }) {
   const valTone =
-    tone === 'success' ? 'text-emerald-300'
-    : tone === 'warning' ? 'text-amber-300'
-    : tone === 'danger'  ? 'text-rose-300'
+    tone === 'success' ? 'text-success'
+    : tone === 'warning' ? 'text-warning'
+    : tone === 'danger'  ? 'text-destructive'
     : 'text-white'
   return (
     <div className="gloss-sheen rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur-xl ring-1 ring-white/10">

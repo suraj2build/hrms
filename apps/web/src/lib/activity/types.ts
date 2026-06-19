@@ -137,9 +137,9 @@ export interface EscalatedItem {
 /** Tailwind + hex colour tokens keyed by EventSeverity. */
 export const SEVERITY_COLORS = {
   critical: { bg: 'bg-destructive/10', text: 'text-destructive',      border: 'border-destructive/30', dot: 'bg-destructive',      bar: '#ef4444' },
-  high:     { bg: 'bg-orange-500/10',  text: 'text-orange-600',       border: 'border-orange-500/30',  dot: 'bg-orange-500',       bar: '#f97316' },
-  medium:   { bg: 'bg-amber-500/10',   text: 'text-amber-600',        border: 'border-amber-500/30',   dot: 'bg-amber-500',        bar: '#f59e0b' },
-  low:      { bg: 'bg-blue-500/10',    text: 'text-blue-600',         border: 'border-blue-500/30',    dot: 'bg-blue-500',         bar: '#3b82f6' },
+  high:     { bg: 'bg-accent-coral/10',  text: 'text-accent-coral',       border: 'border-accent-coral/30',  dot: 'bg-accent-coral',       bar: '#f97316' },
+  medium:   { bg: 'bg-warning/10',   text: 'text-warning',        border: 'border-warning/30',   dot: 'bg-warning',        bar: '#f59e0b' },
+  low:      { bg: 'bg-info/10',    text: 'text-info',         border: 'border-info/30',    dot: 'bg-info',         bar: '#3b82f6' },
   info:     { bg: 'bg-muted/50',       text: 'text-muted-foreground', border: 'border-border',         dot: 'bg-muted-foreground', bar: '#94a3b8' },
 } as const satisfies Record<EventSeverity, { bg: string; text: string; border: string; dot: string; bar: string }>
 
@@ -147,18 +147,18 @@ export const SEVERITY_COLORS = {
 export const STATUS_META = {
   open:      { label: 'Open',      color: 'text-destructive'      },
   resolved:  { label: 'Resolved',  color: 'text-success'          },
-  escalated: { label: 'Escalated', color: 'text-orange-600'       },
-  pending:   { label: 'Pending',   color: 'text-amber-600'        },
+  escalated: { label: 'Escalated', color: 'text-accent-coral'       },
+  pending:   { label: 'Pending',   color: 'text-warning'        },
   dismissed: { label: 'Dismissed', color: 'text-muted-foreground' },
 } as const satisfies Record<EventStatus, { label: string; color: string }>
 
 /** Display label + Tailwind colour/bg tokens keyed by WorkspaceCtx. */
 export const WORKSPACE_META: Record<WorkspaceCtx, { label: string; color: string; bg: string }> = {
-  attendance:  { label: 'Attendance',  color: 'text-blue-600',         bg: 'bg-blue-500/10'   },
-  roster:      { label: 'Roster',      color: 'text-purple-600',       bg: 'bg-purple-500/10' },
-  payroll:     { label: 'Payroll',     color: 'text-emerald-600',      bg: 'bg-emerald-500/10'},
-  workforce:   { label: 'Workforce',   color: 'text-orange-600',       bg: 'bg-orange-500/10' },
-  compliance:  { label: 'Compliance',  color: 'text-red-600',          bg: 'bg-red-500/10'    },
-  leave:       { label: 'Leave',       color: 'text-indigo-600',       bg: 'bg-indigo-500/10' },
+  attendance:  { label: 'Attendance',  color: 'text-info',         bg: 'bg-info/10'   },
+  roster:      { label: 'Roster',      color: 'text-primary',       bg: 'bg-primary/10' },
+  payroll:     { label: 'Payroll',     color: 'text-success',      bg: 'bg-success/10'},
+  workforce:   { label: 'Workforce',   color: 'text-accent-coral',       bg: 'bg-accent-coral/10' },
+  compliance:  { label: 'Compliance',  color: 'text-destructive',          bg: 'bg-destructive/10'    },
+  leave:       { label: 'Leave',       color: 'text-primary',       bg: 'bg-primary/10' },
   system:      { label: 'System',      color: 'text-muted-foreground', bg: 'bg-muted/50'      },
 }

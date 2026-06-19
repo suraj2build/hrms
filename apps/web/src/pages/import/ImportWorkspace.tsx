@@ -341,12 +341,12 @@ const IMPORT_GROUPS: ImportGroupDef[] = [
 // Per-group accent palette — soft tinted section boxes + matching card icons.
 // Opacity-based so it reads correctly in both light and dark mode.
 const GROUP_ACCENT: Record<string, { box: string; label: string; icon: string }> = {
-  organization: { box: 'bg-blue-500/[0.05] border-blue-500/15',     label: 'text-blue-600 dark:text-blue-400',     icon: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
-  people:       { box: 'bg-violet-500/[0.05] border-violet-500/15',  label: 'text-violet-600 dark:text-violet-400', icon: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
-  payroll:      { box: 'bg-emerald-500/[0.05] border-emerald-500/15', label: 'text-emerald-600 dark:text-emerald-400', icon: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  enterprise:   { box: 'bg-amber-500/[0.06] border-amber-500/20',    label: 'text-amber-600 dark:text-amber-400',   icon: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  onboarding:   { box: 'bg-cyan-500/[0.05] border-cyan-500/15',      label: 'text-cyan-600 dark:text-cyan-400',     icon: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' },
-  reference:    { box: 'bg-slate-500/[0.06] border-slate-500/15',    label: 'text-slate-600 dark:text-slate-300',   icon: 'bg-slate-500/10 text-slate-600 dark:text-slate-300' },
+  organization: { box: 'bg-blue-500/[0.05] border-info/15',     label: 'text-info dark:text-blue-400',     icon: 'bg-info/10 text-info dark:text-blue-400' },
+  people:       { box: 'bg-violet-500/[0.05] border-accent-violet/15',  label: 'text-accent-violet dark:text-violet-400', icon: 'bg-accent-violet/10 text-accent-violet dark:text-violet-400' },
+  payroll:      { box: 'bg-emerald-500/[0.05] border-success/15', label: 'text-success dark:text-emerald-400', icon: 'bg-success/10 text-success dark:text-emerald-400' },
+  enterprise:   { box: 'bg-amber-500/[0.06] border-warning/20',    label: 'text-warning dark:text-amber-400',   icon: 'bg-warning/10 text-warning dark:text-amber-400' },
+  onboarding:   { box: 'bg-cyan-500/[0.05] border-accent-teal/15',      label: 'text-accent-teal dark:text-cyan-400',     icon: 'bg-accent-teal/10 text-accent-teal dark:text-cyan-400' },
+  reference:    { box: 'bg-slate-500/[0.06] border-border/15',    label: 'text-muted-foreground dark:text-slate-300',   icon: 'bg-muted/10 text-muted-foreground dark:text-slate-300' },
 }
 const DEFAULT_ACCENT = { box: 'bg-muted/40 border-border', label: 'text-muted-foreground', icon: 'bg-muted text-muted-foreground' }
 

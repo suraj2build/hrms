@@ -102,24 +102,24 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  linkedin: 'bg-blue-100 text-blue-700',
-  naukri:   'bg-orange-100 text-orange-700',
-  indeed:   'bg-indigo-100 text-indigo-700',
-  referral: 'bg-purple-100 text-purple-700',
-  portal:   'bg-teal-100 text-teal-700',
-  agency:   'bg-pink-100 text-pink-700',
-  direct:   'bg-gray-100 text-gray-600',
-  other:    'bg-gray-100 text-gray-600',
+  linkedin: 'bg-info text-info',
+  naukri:   'bg-accent-coral text-accent-coral',
+  indeed:   'bg-primary text-primary',
+  referral: 'bg-primary text-primary',
+  portal:   'bg-accent-teal text-accent-teal',
+  agency:   'bg-accent-magenta text-accent-magenta',
+  direct:   'bg-muted text-muted-foreground',
+  other:    'bg-muted text-muted-foreground',
 }
 
 const APP_STATUS_META: Record<string, { label: string; className: string }> = {
-  applied:      { label: 'Applied',       className: 'text-gray-600   bg-gray-50   border-gray-200'   },
-  screening:    { label: 'Screening',     className: 'text-blue-600   bg-blue-50   border-blue-200'   },
-  interviewing: { label: 'Interviewing',  className: 'text-purple-600 bg-purple-50 border-purple-200' },
-  offer:        { label: 'Offer',         className: 'text-amber-600  bg-amber-50  border-amber-200'  },
-  hired:        { label: 'Hired',         className: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
-  rejected:     { label: 'Rejected',      className: 'text-red-600    bg-red-50    border-red-200'    },
-  withdrawn:    { label: 'Withdrawn',     className: 'text-gray-500   bg-gray-50   border-gray-200'   },
+  applied:      { label: 'Applied',       className: 'text-muted-foreground   bg-muted   border-border'   },
+  screening:    { label: 'Screening',     className: 'text-info   bg-info   border-info'   },
+  interviewing: { label: 'Interviewing',  className: 'text-primary bg-primary border-primary' },
+  offer:        { label: 'Offer',         className: 'text-warning  bg-warning  border-warning'  },
+  hired:        { label: 'Hired',         className: 'text-success bg-success border-success' },
+  rejected:     { label: 'Rejected',      className: 'text-destructive    bg-destructive    border-destructive'    },
+  withdrawn:    { label: 'Withdrawn',     className: 'text-muted-foreground   bg-muted   border-border'   },
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -631,10 +631,10 @@ export function AdminCandidates() {
                     <div className="space-y-2">
                       {candidateInterviews.map(iv => {
                         const ivStatusMeta: Record<string, string> = {
-                          scheduled: 'text-blue-600 bg-blue-50 border-blue-200',
-                          completed: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-                          cancelled: 'text-gray-500 bg-gray-50 border-gray-200',
-                          no_show:   'text-red-600 bg-red-50 border-red-200',
+                          scheduled: 'text-info bg-info border-info',
+                          completed: 'text-success bg-success border-success',
+                          cancelled: 'text-muted-foreground bg-muted border-border',
+                          no_show:   'text-destructive bg-destructive border-destructive',
                         }
                         return (
                           <div key={iv.id} className="rounded-lg border border-border p-2.5">
@@ -678,7 +678,7 @@ export function AdminCandidates() {
                   ) : (
                     <div className="space-y-2">
                       {candidateApps.map(app => {
-                        const statusMeta = APP_STATUS_META[app.status] ?? { label: app.status, className: 'text-gray-600 bg-gray-50 border-gray-200' }
+                        const statusMeta = APP_STATUS_META[app.status] ?? { label: app.status, className: 'text-muted-foreground bg-muted border-border' }
                         return (
                           <div key={app.id} className="rounded-lg border border-border p-2.5 flex items-start justify-between gap-2">
                             <div>

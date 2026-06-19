@@ -104,9 +104,9 @@ function artifactLabel(type: string): string {
 }
 
 const STATUS_CLASSES: Record<Artifact['status'], { bg: string; text: string; label: string }> = {
-  generated:    { bg: 'bg-blue-50',    text: 'text-blue-700',    label: 'Generated' },
-  submitted:    { bg: 'bg-amber-50',   text: 'text-amber-700',   label: 'Submitted' },
-  acknowledged: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: 'Acknowledged' },
+  generated:    { bg: 'bg-info',    text: 'text-info',    label: 'Generated' },
+  submitted:    { bg: 'bg-warning',   text: 'text-warning',   label: 'Submitted' },
+  acknowledged: { bg: 'bg-success', text: 'text-success', label: 'Acknowledged' },
 }
 
 // ── ReadinessCard ─────────────────────────────────────────────────────────────
@@ -126,9 +126,9 @@ function ReadinessCard({ label, icon: Icon, check, loading }: ReadinessCardProps
     : 'warning'
 
   const COLORS = {
-    success:  { border: 'border-emerald-200', icon: 'text-emerald-600 bg-emerald-50', indicator: 'text-emerald-600', dot: 'bg-emerald-500' },
-    critical: { border: 'border-rose-200',    icon: 'text-rose-600 bg-rose-50',       indicator: 'text-rose-600',    dot: 'bg-rose-500' },
-    warning:  { border: 'border-amber-200',   icon: 'text-amber-600 bg-amber-50',     indicator: 'text-amber-600',   dot: 'bg-amber-500' },
+    success:  { border: 'border-success', icon: 'text-success bg-success', indicator: 'text-success', dot: 'bg-success' },
+    critical: { border: 'border-destructive',    icon: 'text-destructive bg-destructive',       indicator: 'text-destructive',    dot: 'bg-destructive' },
+    warning:  { border: 'border-warning',   icon: 'text-warning bg-warning',     indicator: 'text-warning',   dot: 'bg-warning' },
     neutral:  { border: 'border-border',      icon: 'text-muted-foreground bg-muted', indicator: 'text-muted-foreground', dot: 'bg-muted-foreground/40' },
   }[severity]
 
@@ -433,8 +433,8 @@ export function FilingPackCenter() {
               <span className={cn(
                 'inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border',
                 overall
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-rose-50 text-rose-700 border-rose-200',
+                  ? 'bg-success text-success border-success'
+                  : 'bg-destructive text-destructive border-destructive',
               )}>
                 {overall
                   ? <><CheckCircle2 className="h-3 w-3" /> All systems ready</>
@@ -506,9 +506,9 @@ export function FilingPackCenter() {
                   <span className="text-[11px] font-medium text-muted-foreground">Deductor (TAN / PAN)</span>
                   {deductor?.data && (
                     <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded-full border',
-                      deductor.data.tan_status === 'ok' ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                        : deductor.data.tan_status === 'invalid' ? 'text-amber-700 bg-amber-50 border-amber-200'
-                        : 'text-red-700 bg-red-50 border-red-200')}>
+                      deductor.data.tan_status === 'ok' ? 'text-success bg-success border-success'
+                        : deductor.data.tan_status === 'invalid' ? 'text-warning bg-warning border-warning'
+                        : 'text-destructive bg-destructive border-destructive')}>
                       TAN {deductor.data.tan_status}
                     </span>
                   )}
@@ -531,9 +531,9 @@ export function FilingPackCenter() {
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-muted-foreground">Filing readiness</span>
                     <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase',
-                      r24.readiness.status === 'ready' ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                        : r24.readiness.status === 'warning' ? 'text-amber-700 bg-amber-50 border-amber-200'
-                        : 'text-red-700 bg-red-50 border-red-200')}>
+                      r24.readiness.status === 'ready' ? 'text-success bg-success border-success'
+                        : r24.readiness.status === 'warning' ? 'text-warning bg-warning border-warning'
+                        : 'text-destructive bg-destructive border-destructive')}>
                       {r24.readiness.status}
                     </span>
                   </div>
@@ -545,7 +545,7 @@ export function FilingPackCenter() {
                     <ul className="space-y-0.5 pt-1">
                       {r24.validation.map(v => (
                         <li key={v.code} className={cn('text-[10.5px] flex items-start gap-1',
-                          v.severity === 'blocker' ? 'text-red-600' : v.severity === 'warning' ? 'text-amber-600' : 'text-muted-foreground')}>
+                          v.severity === 'blocker' ? 'text-destructive' : v.severity === 'warning' ? 'text-warning' : 'text-muted-foreground')}>
                           <span className="mt-px">{v.severity === 'blocker' ? '⛔' : v.severity === 'warning' ? '⚠️' : 'ℹ️'}</span>
                           <span>{v.message}</span>
                         </li>

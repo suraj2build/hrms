@@ -201,9 +201,9 @@ function fmtMins(m: number | null): string {
 }
 
 const ANOMALY_SEVERITY_COLOR: Record<string, string> = {
-  info:     'text-blue-600 bg-blue-50 border-blue-200',
-  warning:  'text-amber-600 bg-amber-50 border-amber-200',
-  critical: 'text-red-600 bg-red-50 border-red-200',
+  info:     'text-info bg-info border-info',
+  warning:  'text-warning bg-warning border-warning',
+  critical: 'text-destructive bg-destructive border-destructive',
 }
 
 const ANOMALY_LABELS: Record<string, string> = {
@@ -217,13 +217,13 @@ const ANOMALY_LABELS: Record<string, string> = {
 }
 
 const STATE_STYLES: Record<string, string> = {
-  PRESENT:           'bg-green-100 text-green-800',
-  LATE:              'bg-yellow-100 text-yellow-800',
-  ABSENT:            'bg-red-100 text-red-800',
-  HOLIDAY:           'bg-amber-100 text-amber-800',
-  WEEKLY_OFF:        'bg-slate-100 text-slate-600',
-  INCOMPLETE_PUNCH:  'bg-orange-100 text-orange-700',
-  AUTO_REGULARIZED:  'bg-teal-100 text-teal-700',
+  PRESENT:           'bg-success text-success',
+  LATE:              'bg-warning text-warning',
+  ABSENT:            'bg-destructive text-destructive',
+  HOLIDAY:           'bg-warning text-warning',
+  WEEKLY_OFF:        'bg-muted text-muted-foreground',
+  INCOMPLETE_PUNCH:  'bg-accent-coral text-accent-coral',
+  AUTO_REGULARIZED:  'bg-accent-teal text-accent-teal',
 }
 
 // ── Shared Sub-components ──────────────────────────────────────────────────────
@@ -335,10 +335,10 @@ function EmpSearchDropdown({
 
 function KpiStrip({ stats }: { stats: AttendanceStats | undefined }) {
   const items = [
-    { label: 'Present Today',      value: stats?.present         ?? '—', color: 'text-green-600' },
-    { label: 'Anomalies',          value: stats?.anomalies        ?? '—', color: 'text-red-600' },
-    { label: 'Missing Punches',    value: stats?.missing_punches  ?? '—', color: 'text-amber-600' },
-    { label: 'Pending Approvals',  value: stats?.pending_approvals ?? '—', color: 'text-blue-600' },
+    { label: 'Present Today',      value: stats?.present         ?? '—', color: 'text-success' },
+    { label: 'Anomalies',          value: stats?.anomalies        ?? '—', color: 'text-destructive' },
+    { label: 'Missing Punches',    value: stats?.missing_punches  ?? '—', color: 'text-warning' },
+    { label: 'Pending Approvals',  value: stats?.pending_approvals ?? '—', color: 'text-info' },
   ]
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -362,11 +362,11 @@ function TabLive({ stats, statsLoading }: { stats: AttendanceStats | undefined; 
   })
 
   const kpiItems = [
-    { label: 'Present',   value: stats?.present  ?? 0, bg: 'bg-green-50',   text: 'text-green-700'  },
-    { label: 'Absent',    value: stats?.absent   ?? 0, bg: 'bg-red-50',     text: 'text-red-700'    },
-    { label: 'Late',      value: stats?.late     ?? 0, bg: 'bg-yellow-50',  text: 'text-yellow-700' },
-    { label: 'WFH',       value: stats?.wfh      ?? 0, bg: 'bg-blue-50',    text: 'text-blue-700'   },
-    { label: 'On Leave',  value: stats?.on_leave ?? 0, bg: 'bg-violet-50',  text: 'text-violet-700' },
+    { label: 'Present',   value: stats?.present  ?? 0, bg: 'bg-success',   text: 'text-success'  },
+    { label: 'Absent',    value: stats?.absent   ?? 0, bg: 'bg-destructive',     text: 'text-destructive'    },
+    { label: 'Late',      value: stats?.late     ?? 0, bg: 'bg-warning',  text: 'text-warning' },
+    { label: 'WFH',       value: stats?.wfh      ?? 0, bg: 'bg-info',    text: 'text-info'   },
+    { label: 'On Leave',  value: stats?.on_leave ?? 0, bg: 'bg-accent-violet',  text: 'text-accent-violet' },
     { label: 'Total',     value: stats?.total    ?? 0, bg: 'bg-muted/50',   text: 'text-foreground'  },
   ]
 
@@ -403,8 +403,8 @@ function TabLive({ stats, statsLoading }: { stats: AttendanceStats | undefined; 
                     variant="outline"
                     className={cn(
                       'text-[10px] capitalize',
-                      emp.status === 'PRESENT' ? 'text-green-700 border-green-200 bg-green-50' :
-                      emp.status === 'ABSENT'  ? 'text-red-700 border-red-200 bg-red-50' :
+                      emp.status === 'PRESENT' ? 'text-success border-success bg-success' :
+                      emp.status === 'ABSENT'  ? 'text-destructive border-destructive bg-destructive' :
                       emp.status === 'LATE'    ? 'text-warning border-warning/30 bg-warning/10' : '',
                     )}
                   >
@@ -596,7 +596,7 @@ function TabMissingPunches({ month, onMonthChange }: { month: string; onMonthCha
                   <tr key={i}
                     className={cn(
                       'border-b border-border/50',
-                      !e.in_punch ? 'bg-red-50/60' : !e.out_punch ? 'bg-amber-50/60' : '',
+                      !e.in_punch ? 'bg-destructive/60' : !e.out_punch ? 'bg-warning/60' : '',
                     )}
                   >
                     <td className="px-3 py-2 font-medium">{e.employee_name}</td>
@@ -687,9 +687,9 @@ function TabOT({ month, onMonthChange }: { month: string; onMonthChange: (m: str
                         variant="outline"
                         className={cn(
                           'text-[10px] capitalize',
-                          r.status === 'APPROVED'  ? 'text-green-700 border-green-200 bg-green-50' :
-                          r.status === 'PENDING'   ? 'text-amber-700 border-amber-200 bg-amber-50' :
-                          r.status === 'REJECTED'  ? 'text-red-700 border-red-200 bg-red-50' : '',
+                          r.status === 'APPROVED'  ? 'text-success border-success bg-success' :
+                          r.status === 'PENDING'   ? 'text-warning border-warning bg-warning' :
+                          r.status === 'REJECTED'  ? 'text-destructive border-destructive bg-destructive' : '',
                         )}
                       >
                         {r.status}
@@ -978,7 +978,7 @@ function TabReplay({ employees }: { employees: Employee[] }) {
                       variant="outline"
                       className={cn(
                         'text-[10px]',
-                        p.punch_type === 'IN' ? 'text-green-700 border-green-200 bg-green-50' : 'text-red-700 border-red-200 bg-red-50',
+                        p.punch_type === 'IN' ? 'text-success border-success bg-success' : 'text-destructive border-destructive bg-destructive',
                       )}
                     >
                       {p.punch_type}
@@ -1005,7 +1005,7 @@ function TabReplay({ employees }: { employees: Employee[] }) {
                     variant="outline"
                     className={cn(
                       'text-[10px]',
-                      s.is_complete ? 'text-green-700 border-green-200 bg-green-50' : 'text-amber-700 border-amber-200 bg-amber-50',
+                      s.is_complete ? 'text-success border-success bg-success' : 'text-warning border-warning bg-warning',
                     )}
                   >
                     {s.is_complete ? 'complete' : 'incomplete'}

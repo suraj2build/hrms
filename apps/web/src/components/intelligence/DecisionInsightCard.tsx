@@ -163,7 +163,7 @@ export function DecisionInsightCard({
             <span className={cn(
               'flex items-center gap-1',
               impactEstimate.complianceRisk === 'high'   ? 'text-destructive' :
-              impactEstimate.complianceRisk === 'medium' ? 'text-amber-600'   : 'text-blue-600',
+              impactEstimate.complianceRisk === 'medium' ? 'text-warning'   : 'text-info',
             )}>
               <AlertTriangle className="h-3 w-3" />
               {impactEstimate.complianceRisk} compliance risk

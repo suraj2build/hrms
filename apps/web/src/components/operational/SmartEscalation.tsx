@@ -51,7 +51,7 @@ const ESCALATED_TYPES = new Set([
 function HoursOpenBadge({ hoursOpen }: { hoursOpen: number }) {
   const colorClass =
     hoursOpen > 72 ? 'bg-destructive/15 text-destructive border-destructive/30' :
-    hoursOpen > 24 ? 'bg-amber-500/15 text-amber-600 border-amber-500/30' :
+    hoursOpen > 24 ? 'bg-warning/15 text-warning border-warning/30' :
                      'bg-muted text-muted-foreground border-border'
 
   return (

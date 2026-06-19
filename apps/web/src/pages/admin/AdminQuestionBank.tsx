@@ -61,17 +61,17 @@ interface QBItem {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<string, { label: string; color: string }> = {
-  technical:    { label: 'Technical',    color: 'text-blue-600   bg-blue-50   border-blue-200'   },
-  behavioural:  { label: 'Behavioural',  color: 'text-purple-600 bg-purple-50 border-purple-200' },
-  domain:       { label: 'Domain',       color: 'text-teal-600   bg-teal-50   border-teal-200'   },
-  situational:  { label: 'Situational',  color: 'text-amber-600  bg-amber-50  border-amber-200'  },
-  general:      { label: 'General',      color: 'text-gray-600   bg-gray-50   border-gray-200'   },
+  technical:    { label: 'Technical',    color: 'text-info   bg-info   border-info'   },
+  behavioural:  { label: 'Behavioural',  color: 'text-primary bg-primary border-primary' },
+  domain:       { label: 'Domain',       color: 'text-accent-teal   bg-accent-teal   border-accent-teal'   },
+  situational:  { label: 'Situational',  color: 'text-warning  bg-warning  border-warning'  },
+  general:      { label: 'General',      color: 'text-muted-foreground   bg-muted   border-border'   },
 }
 
 const DIFF_META: Record<string, { label: string; color: string }> = {
-  easy:   { label: 'Easy',   color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
-  medium: { label: 'Medium', color: 'text-amber-600   bg-amber-50   border-amber-200'  },
-  hard:   { label: 'Hard',   color: 'text-red-600     bg-red-50     border-red-200'    },
+  easy:   { label: 'Easy',   color: 'text-success bg-success border-success' },
+  medium: { label: 'Medium', color: 'text-warning   bg-warning   border-warning'  },
+  hard:   { label: 'Hard',   color: 'text-destructive     bg-destructive     border-destructive'    },
 }
 
 function errMsg(e: unknown, fallback: string): string {

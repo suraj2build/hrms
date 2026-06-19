@@ -94,7 +94,7 @@ function fmtRate(n: number | undefined | null): string {
 
 function reliabilityGradeColor(grade: string | undefined): string {
   if (grade === 'A') return 'text-success'
-  if (grade === 'B') return 'text-emerald-600'
+  if (grade === 'B') return 'text-success'
   if (grade === 'C') return 'text-warning'
   return 'text-destructive'
 }

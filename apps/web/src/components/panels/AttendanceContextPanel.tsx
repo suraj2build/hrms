@@ -159,7 +159,7 @@ export const AttendanceContextPanel = React.memo(function AttendanceContextPanel
           <span
             className={cn(
               'inline-block w-2 h-2 rounded-full',
-              isActive ? 'bg-green-500' : 'bg-muted-foreground',
+              isActive ? 'bg-success' : 'bg-muted-foreground',
             )}
             aria-label={isActive ? 'Employees active' : 'No active employees'}
           />

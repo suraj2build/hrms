@@ -485,7 +485,7 @@ function TaxPreview({
           <div className={cn(
             'rounded p-2',
             betterRegime === 'old'
-              ? 'bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800'
+              ? 'bg-success dark:bg-green-950/20 border border-success dark:border-green-800'
               : '',
           )}>
             <p className="text-xs text-muted-foreground">Old Regime</p>
@@ -497,7 +497,7 @@ function TaxPreview({
           <div className={cn(
             'rounded p-2',
             betterRegime === 'new'
-              ? 'bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800'
+              ? 'bg-success dark:bg-green-950/20 border border-success dark:border-green-800'
               : '',
           )}>
             <p className="text-xs text-muted-foreground">New Regime</p>

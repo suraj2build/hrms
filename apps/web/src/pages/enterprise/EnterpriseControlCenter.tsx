@@ -73,12 +73,12 @@ function truncateId(id: string): string {
 
 function ScoreBar({ score, severity, invert = false }: { score: number; severity?: string; invert?: boolean }) {
   const colour = invert
-    ? (score >= 75 ? 'bg-destructive' : score >= 50 ? 'bg-amber-500' : 'bg-emerald-500')
+    ? (score >= 75 ? 'bg-destructive' : score >= 50 ? 'bg-warning' : 'bg-success')
     : (severity === 'critical' ? 'bg-destructive'
-      : severity === 'high'    ? 'bg-orange-500'
-      : severity === 'warning' ? 'bg-amber-500'
-      : score >= 75            ? 'bg-emerald-500'
-      : score >= 50            ? 'bg-amber-500'
+      : severity === 'high'    ? 'bg-accent-coral'
+      : severity === 'warning' ? 'bg-warning'
+      : score >= 75            ? 'bg-success'
+      : score >= 50            ? 'bg-warning'
       : 'bg-destructive')
   return (
     <div className="flex items-center gap-2">

@@ -46,13 +46,13 @@ export function ManagerInsights() {
           <p className="text-2xl font-bold text-foreground">{d.new_joiners_this_month}</p>
           <p className="text-xs text-muted-foreground">New This Month</p>
         </div>
-        <div className={d.probation_due > 0 ? 'text-orange-700 space-y-0.5' : 'space-y-0.5'}>
+        <div className={d.probation_due > 0 ? 'text-accent-coral space-y-0.5' : 'space-y-0.5'}>
           <p className="text-2xl font-bold">{d.probation_due}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <AlertTriangle className="h-3 w-3" /> Probation Due
           </p>
         </div>
-        <div className={d.pending_leave_approvals > 0 ? 'text-blue-700 space-y-0.5' : 'space-y-0.5'}>
+        <div className={d.pending_leave_approvals > 0 ? 'text-info space-y-0.5' : 'space-y-0.5'}>
           <p className="text-2xl font-bold">{d.pending_leave_approvals}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Clock className="h-3 w-3" /> Leave Pending

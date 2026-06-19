@@ -207,8 +207,8 @@ export function ManagerTeamLifecycle() {
                     {j.readiness_pct != null ? (
                       <div>
                         <span className={cn('text-sm font-semibold tabular-nums',
-                          j.readiness_status === 'ready' ? 'text-emerald-600'
-                          : j.readiness_status === 'blocked' ? 'text-destructive' : 'text-amber-600')}>
+                          j.readiness_status === 'ready' ? 'text-success'
+                          : j.readiness_status === 'blocked' ? 'text-destructive' : 'text-warning')}>
                           {j.readiness_pct}%
                         </span>
                         <p className="text-[10px] text-muted-foreground">
@@ -277,8 +277,8 @@ export function ManagerTeamLifecycle() {
                     <span className="text-[11px] text-muted-foreground">
                       Manager clearance:{' '}
                       <span className={cn('font-medium capitalize',
-                        s.manager_clearance?.status === 'cleared' ? 'text-emerald-600'
-                        : s.manager_clearance?.status === 'rejected' ? 'text-destructive' : 'text-amber-600')}>
+                        s.manager_clearance?.status === 'cleared' ? 'text-success'
+                        : s.manager_clearance?.status === 'rejected' ? 'text-destructive' : 'text-warning')}>
                         {s.manager_clearance?.status ?? 'not required'}
                       </span>
                     </span>

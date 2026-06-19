@@ -87,11 +87,11 @@ const EMPTY_FORM: ReqForm = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
-  draft:     { label: 'Draft',     className: 'text-gray-600   border-gray-200   bg-gray-50'   },
-  open:      { label: 'Open',      className: 'text-emerald-600 border-emerald-200 bg-emerald-50' },
-  on_hold:   { label: 'On Hold',   className: 'text-amber-600  border-amber-200  bg-amber-50'  },
-  filled:    { label: 'Filled',    className: 'text-blue-600   border-blue-200   bg-blue-50'   },
-  cancelled: { label: 'Cancelled', className: 'text-red-600    border-red-200    bg-red-50'    },
+  draft:     { label: 'Draft',     className: 'text-muted-foreground   border-border   bg-muted'   },
+  open:      { label: 'Open',      className: 'text-success border-success bg-success' },
+  on_hold:   { label: 'On Hold',   className: 'text-warning  border-warning  bg-warning'  },
+  filled:    { label: 'Filled',    className: 'text-info   border-info   bg-info'   },
+  cancelled: { label: 'Cancelled', className: 'text-destructive    border-destructive    bg-destructive'    },
 }
 
 const EMP_TYPE_LABELS: Record<string, string> = {
@@ -400,7 +400,7 @@ export function AdminRecruitment() {
                       <td className="py-2 px-3 text-center">
                         <span className={cn(
                           'inline-flex items-center gap-1 text-xs font-medium rounded-full px-2 py-0.5',
-                          r.applicant_count > 0 ? 'bg-blue-50 text-blue-600' : 'text-muted-foreground',
+                          r.applicant_count > 0 ? 'bg-info text-info' : 'text-muted-foreground',
                         )}>
                           <Users className="h-3 w-3" />{r.applicant_count}
                         </span>

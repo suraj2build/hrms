@@ -100,7 +100,7 @@ function Connector({ bothCompleted }: ConnectorProps) {
     <div
       className={cn(
         'w-px h-4 mx-auto',
-        bothCompleted ? 'bg-green-500' : 'bg-border'
+        bothCompleted ? 'bg-success' : 'bg-border'
       )}
       aria-hidden="true"
     />
@@ -194,7 +194,7 @@ function GuidedWorkflowFlowImpl({
               key={step.id}
               className={cn(
                 'h-1.5 w-6 rounded-full',
-                step.status === 'completed' ? 'bg-green-500' : 'bg-muted'
+                step.status === 'completed' ? 'bg-success' : 'bg-muted'
               )}
               aria-hidden="true"
             />

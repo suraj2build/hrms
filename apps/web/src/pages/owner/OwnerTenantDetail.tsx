@@ -389,7 +389,7 @@ export function OwnerTenantDetail() {
                   </td>
                   <td className="px-4 py-2.5 text-[12px] text-muted-foreground">{fmtDate(k.last_used_at)}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+                    <span className={`text-[11px] font-medium ${k.is_active ? 'text-success' : 'text-muted-foreground'}`}>
                       {k.is_active ? 'Active' : 'Revoked'}
                     </span>
                   </td>

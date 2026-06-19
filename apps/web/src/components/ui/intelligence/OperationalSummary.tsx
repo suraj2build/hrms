@@ -17,7 +17,7 @@ interface OperationalSummaryProps {
 function severityValueClass(severity?: SeverityLevel): string {
   if (severity === 'critical') return 'text-destructive'
   if (severity === 'high')     return 'text-destructive'
-  if (severity === 'warning')  return 'text-amber-600 dark:text-amber-400'
+  if (severity === 'warning')  return 'text-warning dark:text-amber-400'
   return 'text-foreground'
 }
 

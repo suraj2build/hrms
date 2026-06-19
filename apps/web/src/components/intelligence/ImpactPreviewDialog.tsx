@@ -51,8 +51,8 @@ function RiskBadge({ level }: { level: 'high' | 'medium' | 'low' }) {
       className={cn(
         'text-[10px] font-semibold capitalize',
         level === 'high'   ? 'text-destructive bg-destructive/10 border-destructive/30' :
-        level === 'medium' ? 'text-amber-600 bg-amber-500/10 border-amber-500/30'       :
-                             'text-blue-600 bg-blue-500/10 border-blue-500/30',
+        level === 'medium' ? 'text-warning bg-warning/10 border-warning/30'       :
+                             'text-info bg-info/10 border-info/30',
       )}
     >
       {level}

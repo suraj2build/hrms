@@ -22,10 +22,10 @@ export interface StatusSelectorProps {
 // ── Variant dot color map ─────────────────────────────────────────────────────
 
 const DOT_CLASS: Record<NonNullable<StatusOption['variant']>, string> = {
-  success: 'bg-green-500',
-  warning: 'bg-yellow-500',
-  danger:  'bg-red-500',
-  info:    'bg-blue-500',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  danger:  'bg-destructive',
+  info:    'bg-info',
   muted:   'bg-muted-foreground',
   neutral: 'bg-border',
 }

@@ -93,10 +93,10 @@ function FieldRow({
 }
 
 const inputClass =
-  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
+  "w-full rounded-lg border border-border px-3 py-2.5 text-sm text-muted-foreground placeholder:text-muted-foreground focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
 
 const selectClass =
-  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 bg-white focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
+  "w-full rounded-lg border border-border px-3 py-2.5 text-sm text-muted-foreground bg-white focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
 
 // ---------------------------------------------------------------------------
 // Step components
@@ -593,7 +593,7 @@ function ProgressBar({ current }: { current: number }) {
                     ? "bg-[#2E6FE6] text-white"
                     : active
                     ? "bg-[#EEF3FB] text-[#2E6FE6] ring-2 ring-[#2E6FE6]"
-                    : "bg-gray-100 text-gray-400",
+                    : "bg-muted text-muted-foreground",
                 ].join(" ")}
               >
                 {done ? (
@@ -607,7 +607,7 @@ function ProgressBar({ current }: { current: number }) {
               <span
                 className={[
                   "text-xs hidden sm:block",
-                  active ? "text-[#2E6FE6] font-medium" : "text-gray-400",
+                  active ? "text-[#2E6FE6] font-medium" : "text-muted-foreground",
                 ].join(" ")}
               >
                 {s.label}
@@ -702,9 +702,9 @@ function DocSlot({
             className={[
               "cursor-pointer rounded-lg px-3 py-2 text-xs font-semibold transition inline-block",
               status === "done"
-                ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                ? "bg-muted text-muted-foreground hover:bg-gray-200"
                 : status === "error"
-                ? "bg-red-50 text-red-600 hover:bg-red-100"
+                ? "bg-destructive text-destructive hover:bg-red-100"
                 : "bg-[#2E6FE6] text-white hover:bg-[#1A4D8F]",
             ].join(" ")}
           >
@@ -1037,7 +1037,7 @@ export function PreJoinPortal() {
               <p
                 className={[
                   "text-xs mt-4",
-                  allMandatoryUploaded ? "text-green-600" : "text-gray-500",
+                  allMandatoryUploaded ? "text-success" : "text-muted-foreground",
                 ].join(" ")}
               >
                 All 4 required documents must be uploaded to continue.
@@ -1073,7 +1073,7 @@ export function PreJoinPortal() {
                 "flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition",
                 currentStep === 0
                   ? "invisible"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300",
+                  : "bg-muted text-muted-foreground hover:bg-gray-200 active:bg-gray-300",
               ].join(" ")}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

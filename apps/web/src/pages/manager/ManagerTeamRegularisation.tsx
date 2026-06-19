@@ -243,7 +243,7 @@ export function ManagerTeamRegularisation() {
                           <AlertTriangle className="h-3 w-3" /> Breached
                         </span>
                       ) : r.hours_remaining != null ? (
-                        <span className={cn('text-[11px] tabular-nums', r.hours_remaining <= 4 ? 'text-amber-600 font-semibold' : 'text-muted-foreground')}>
+                        <span className={cn('text-[11px] tabular-nums', r.hours_remaining <= 4 ? 'text-warning font-semibold' : 'text-muted-foreground')}>
                           {r.hours_remaining}h left
                         </span>
                       ) : '—'}

@@ -45,18 +45,18 @@ interface HelpdeskResponse {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const PRIORITY_COLORS: Record<string, string> = {
-  urgent: 'bg-red-100 text-red-800',
-  high:   'bg-orange-100 text-orange-800',
-  medium: 'bg-amber-100 text-amber-800',
-  low:    'bg-gray-100 text-gray-700',
+  urgent: 'bg-destructive text-destructive',
+  high:   'bg-accent-coral text-accent-coral',
+  medium: 'bg-warning text-warning',
+  low:    'bg-muted text-muted-foreground',
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  open:               'bg-blue-100 text-blue-800',
-  in_progress:        'bg-amber-100 text-amber-800',
-  awaiting_employee:  'bg-purple-100 text-purple-800',
-  resolved:           'bg-green-100 text-green-800',
-  closed:             'bg-gray-100 text-gray-600',
+  open:               'bg-info text-info',
+  in_progress:        'bg-warning text-warning',
+  awaiting_employee:  'bg-primary text-primary',
+  resolved:           'bg-success text-success',
+  closed:             'bg-muted text-muted-foreground',
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -107,9 +107,9 @@ export function ManagerTeamHelpdesk() {
       {summary && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
           {[
-            { label: 'Open',       val: summary.open,        cls: 'text-blue-600' },
-            { label: 'In Progress', val: summary.in_progress, cls: 'text-amber-600' },
-            { label: 'Resolved',   val: summary.resolved,    cls: 'text-green-600' },
+            { label: 'Open',       val: summary.open,        cls: 'text-info' },
+            { label: 'In Progress', val: summary.in_progress, cls: 'text-warning' },
+            { label: 'Resolved',   val: summary.resolved,    cls: 'text-success' },
             { label: 'SLA Breach', val: summary.breached,    cls: 'text-destructive' },
           ].map(tile => (
             <div key={tile.label} className="rounded-lg border border-border bg-card p-3">

@@ -35,7 +35,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Create Shift',
     icon: AlarmClock,
     route: '/admin/shift-master',
-    color: 'text-blue-600',
+    color: 'text-info',
     description: 'Define a new work shift',
   },
   {
@@ -43,7 +43,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Assign Roster',
     icon: CalendarClock,
     route: '/admin/roster',
-    color: 'text-violet-600',
+    color: 'text-accent-violet',
     description: 'Assign employees to roster',
   },
   {
@@ -51,7 +51,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Approve Attendance',
     icon: CheckCircle2,
     route: '/admin/attendance/regularisation',
-    color: 'text-green-600',
+    color: 'text-success',
     description: 'Review pending corrections',
   },
   {
@@ -59,7 +59,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Run Payroll',
     icon: DollarSign,
     route: '/admin/payroll',
-    color: 'text-amber-600',
+    color: 'text-warning',
     description: 'Start a payroll run',
   },
   {
@@ -67,7 +67,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Add Holiday',
     icon: CalendarPlus,
     route: '/admin/holidays',
-    color: 'text-orange-600',
+    color: 'text-accent-coral',
     description: 'Add a public holiday',
   },
   {
@@ -75,7 +75,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     label: 'Resolve Anomaly',
     icon: AlertTriangle,
     route: '/admin/attendance/anomalies',
-    color: 'text-red-600',
+    color: 'text-destructive',
     description: 'Clear attendance flags',
   },
 ];

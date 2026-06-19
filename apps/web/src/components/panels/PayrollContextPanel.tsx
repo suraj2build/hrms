@@ -84,7 +84,7 @@ function Section({ title, badge, children }: SectionProps) {
 // ── Readiness color ───────────────────────────────────────────────────────────
 
 function readinessColor(pct: number): string {
-  if (pct >= 90) return 'bg-green-500'
+  if (pct >= 90) return 'bg-success'
   if (pct >= 70) return 'bg-warning'
   return 'bg-destructive'
 }

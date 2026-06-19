@@ -47,11 +47,11 @@ function StatCard({
   color?: 'indigo' | 'green' | 'amber' | 'red' | 'slate'
 }) {
   const colorMap = {
-    indigo: { ring: 'ring-teal-500/15',  icon: 'bg-gradient-to-br from-teal-500 to-indigo-600 text-white',  glow: 'before:bg-teal-500/10' },
-    green:  { ring: 'ring-emerald-500/15', icon: 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white', glow: 'before:bg-emerald-500/10' },
-    amber:  { ring: 'ring-amber-500/20',  icon: 'bg-gradient-to-br from-amber-400 to-orange-500 text-white', glow: 'before:bg-amber-500/10' },
-    red:    { ring: 'ring-red-500/15',    icon: 'bg-gradient-to-br from-red-500 to-rose-600 text-white',     glow: 'before:bg-red-500/10' },
-    slate:  { ring: 'ring-slate-300/40',  icon: 'bg-gradient-to-br from-slate-500 to-slate-700 text-white',  glow: 'before:bg-slate-400/10' },
+    indigo: { ring: 'ring-accent-teal/15',  icon: 'bg-gradient-to-br from-accent-teal to-primary text-white',  glow: 'before:bg-teal-500/10' },
+    green:  { ring: 'ring-success/15', icon: 'bg-gradient-to-br from-success to-accent-teal text-white', glow: 'before:bg-emerald-500/10' },
+    amber:  { ring: 'ring-warning/20',  icon: 'bg-gradient-to-br from-warning to-accent-coral text-white', glow: 'before:bg-amber-500/10' },
+    red:    { ring: 'ring-destructive/15',    icon: 'bg-gradient-to-br from-destructive to-destructive text-white',     glow: 'before:bg-red-500/10' },
+    slate:  { ring: 'ring-ring/40',  icon: 'bg-gradient-to-br from-muted to-muted text-white',  glow: 'before:bg-slate-400/10' },
   }
   const c = colorMap[color]
   return (
@@ -200,16 +200,16 @@ export function OwnerDashboard() {
                 {healthRows.map(row => {
                   const t = row.tenant!
                   const STATUS_DOT: Record<string, string> = {
-                    active:    'bg-emerald-500',
-                    trial:     'bg-amber-500',
-                    suspended: 'bg-red-500',
-                    expired:   'bg-orange-500',
-                    cancelled: 'bg-slate-400',
+                    active:    'bg-success',
+                    trial:     'bg-warning',
+                    suspended: 'bg-destructive',
+                    expired:   'bg-accent-coral',
+                    cancelled: 'bg-muted',
                   }
                   const payrollColor: Record<string, string> = {
-                    finalized:  'text-emerald-600',
-                    processing: 'text-amber-600',
-                    draft:      'text-slate-400',
+                    finalized:  'text-success',
+                    processing: 'text-warning',
+                    draft:      'text-muted-foreground',
                   }
                   return (
                     <tr key={row.tenant_id} className="transition-colors hover:bg-primary/[0.04]">
@@ -224,7 +224,7 @@ export function OwnerDashboard() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[t.status] ?? 'bg-slate-400'}`} />
+                          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[t.status] ?? 'bg-muted'}`} />
                           <span className="text-[11px] text-muted-foreground capitalize">{t.status}</span>
                         </div>
                       </td>
@@ -236,8 +236,8 @@ export function OwnerDashboard() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-[12px]">
-                          <span className={`h-1.5 w-1.5 rounded-full ${row.active_users > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                          <span className={row.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${row.active_users > 0 ? 'bg-success' : 'bg-muted'}`} />
+                          <span className={row.active_users > 0 ? 'text-success font-medium' : 'text-muted-foreground'}>
                             {row.active_users}
                           </span>
                         </div>
@@ -249,7 +249,7 @@ export function OwnerDashboard() {
                         {row.last_payroll_run ? (
                           <div>
                             <span className="text-[12px] text-muted-foreground">{row.last_payroll_run.month}</span>
-                            <span className={`ml-1.5 text-[10px] font-semibold ${payrollColor[row.last_payroll_run.status] ?? 'text-slate-400'}`}>
+                            <span className={`ml-1.5 text-[10px] font-semibold ${payrollColor[row.last_payroll_run.status] ?? 'text-muted-foreground'}`}>
                               {row.last_payroll_run.status}
                             </span>
                           </div>

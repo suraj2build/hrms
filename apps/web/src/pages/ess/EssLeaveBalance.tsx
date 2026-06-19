@@ -379,12 +379,12 @@ const LEDGER_COLUMNS: DataTableColumn<LedgerRow>[] = [
 
 // ── Leave card color palette (cycles by index) ─────────────────────────────
 const LEAVE_CARD_COLORS = [
-  { topBar: 'bg-blue-500',    iconBg: 'bg-blue-100 dark:bg-blue-950/40',    iconText: 'text-blue-600 dark:text-blue-400',    bar: 'bg-blue-500'    },
-  { topBar: 'bg-emerald-500', iconBg: 'bg-emerald-100 dark:bg-emerald-950/40', iconText: 'text-emerald-600 dark:text-emerald-400', bar: 'bg-emerald-500' },
-  { topBar: 'bg-violet-500',  iconBg: 'bg-violet-100 dark:bg-violet-950/40',  iconText: 'text-violet-600 dark:text-violet-400',   bar: 'bg-violet-500'  },
-  { topBar: 'bg-rose-500',    iconBg: 'bg-rose-100 dark:bg-rose-950/40',    iconText: 'text-rose-600 dark:text-rose-400',    bar: 'bg-rose-500'    },
-  { topBar: 'bg-amber-500',   iconBg: 'bg-amber-100 dark:bg-amber-950/40',   iconText: 'text-amber-600 dark:text-amber-400',   bar: 'bg-amber-500'   },
-  { topBar: 'bg-cyan-500',    iconBg: 'bg-cyan-100 dark:bg-cyan-950/40',    iconText: 'text-cyan-600 dark:text-cyan-400',    bar: 'bg-cyan-500'    },
+  { topBar: 'bg-info',    iconBg: 'bg-info dark:bg-blue-950/40',    iconText: 'text-info dark:text-blue-400',    bar: 'bg-info'    },
+  { topBar: 'bg-success', iconBg: 'bg-success dark:bg-emerald-950/40', iconText: 'text-success dark:text-emerald-400', bar: 'bg-success' },
+  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet dark:bg-violet-950/40',  iconText: 'text-accent-violet dark:text-violet-400',   bar: 'bg-accent-violet'  },
+  { topBar: 'bg-destructive',    iconBg: 'bg-destructive dark:bg-rose-950/40',    iconText: 'text-destructive dark:text-rose-400',    bar: 'bg-destructive'    },
+  { topBar: 'bg-warning',   iconBg: 'bg-warning dark:bg-amber-950/40',   iconText: 'text-warning dark:text-amber-400',   bar: 'bg-warning'   },
+  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal dark:bg-cyan-950/40',    iconText: 'text-accent-teal dark:text-cyan-400',    bar: 'bg-accent-teal'    },
 ] as const
 
 // ── Main component ────────────────────────────────────────────────────────────

@@ -50,9 +50,9 @@ const PAGE_SIZE = 50
 
 function actionBadge(a: AuditRow['action']): string {
   switch (a) {
-    case 'INSERT': return 'text-emerald-600 border-emerald-200 bg-emerald-50'
-    case 'UPDATE': return 'text-amber-600 border-amber-200 bg-amber-50'
-    case 'DELETE': return 'text-red-600 border-red-200 bg-red-50'
+    case 'INSERT': return 'text-success border-success bg-success'
+    case 'UPDATE': return 'text-warning border-warning bg-warning'
+    case 'DELETE': return 'text-destructive border-destructive bg-destructive'
     default:       return ''
   }
 }

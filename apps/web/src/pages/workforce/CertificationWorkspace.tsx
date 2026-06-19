@@ -67,17 +67,17 @@ interface ExpiringCert extends Certification {
 }
 
 const TYPE_META: Record<string, { label: string; color: string }> = {
-  certification: { label: 'Certification', color: 'bg-blue-50   text-blue-700   border-blue-200'   },
-  license:       { label: 'License',       color: 'bg-purple-50 text-purple-700 border-purple-200' },
-  credential:    { label: 'Credential',    color: 'bg-teal-50   text-teal-700   border-teal-200'   },
-  membership:    { label: 'Membership',    color: 'bg-orange-50 text-orange-700 border-orange-200' },
+  certification: { label: 'Certification', color: 'bg-info   text-info   border-info'   },
+  license:       { label: 'License',       color: 'bg-primary text-primary border-primary' },
+  credential:    { label: 'Credential',    color: 'bg-accent-teal   text-accent-teal   border-accent-teal'   },
+  membership:    { label: 'Membership',    color: 'bg-accent-coral text-accent-coral border-accent-coral' },
 }
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
-  active:  { label: 'Active',  color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  expired: { label: 'Expired', color: 'bg-red-50     text-red-700     border-red-200'     },
-  revoked: { label: 'Revoked', color: 'bg-gray-100   text-gray-600    border-gray-200'    },
-  pending: { label: 'Pending', color: 'bg-amber-50   text-amber-700   border-amber-200'   },
+  active:  { label: 'Active',  color: 'bg-success text-success border-success' },
+  expired: { label: 'Expired', color: 'bg-destructive     text-destructive     border-destructive'     },
+  revoked: { label: 'Revoked', color: 'bg-muted   text-muted-foreground    border-border'    },
+  pending: { label: 'Pending', color: 'bg-warning   text-warning   border-warning'   },
 }
 
 // ── Form helper ───────────────────────────────────────────────────────────────
@@ -221,9 +221,9 @@ export function CertificationWorkspace() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           {[
             { label: 'Total',         value: stats.total,        color: 'text-foreground'   },
-            { label: 'Active',        value: stats.by_status?.active  ?? 0, color: 'text-emerald-600' },
-            { label: 'Expiring (30d)',value: stats.expiring_30d,  color: 'text-amber-600'    },
-            { label: 'Expired',       value: stats.by_status?.expired ?? 0, color: 'text-red-600'     },
+            { label: 'Active',        value: stats.by_status?.active  ?? 0, color: 'text-success' },
+            { label: 'Expiring (30d)',value: stats.expiring_30d,  color: 'text-warning'    },
+            { label: 'Expired',       value: stats.by_status?.expired ?? 0, color: 'text-destructive'     },
           ].map(s => (
             <div key={s.label} className="rounded-xl border bg-card p-4">
               <p className={cn('text-2xl font-bold', s.color)}>{s.value}</p>
@@ -439,7 +439,7 @@ function CertTable({
               {c.expiry_date && (
                 <span className={cn(
                   'flex items-center gap-1 text-xs',
-                  new Date(c.expiry_date) < new Date() ? 'text-red-600' : 'text-muted-foreground',
+                  new Date(c.expiry_date) < new Date() ? 'text-destructive' : 'text-muted-foreground',
                 )}>
                   <Calendar className="h-3 w-3" />
                   Expires {format(new Date(c.expiry_date), 'dd MMM yyyy')}
@@ -480,9 +480,9 @@ function ExpiringTable({
         <div key={c.id} className="py-3 flex items-center gap-3">
           <div className={cn(
             'h-10 w-10 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
-            c.days_remaining <= 7  ? 'bg-red-100 text-red-700'    :
-            c.days_remaining <= 30 ? 'bg-amber-100 text-amber-700' :
-            'bg-blue-100 text-blue-700',
+            c.days_remaining <= 7  ? 'bg-destructive text-destructive'    :
+            c.days_remaining <= 30 ? 'bg-warning text-warning' :
+            'bg-info text-info',
           )}>
             {c.days_remaining}d
           </div>
@@ -504,8 +504,8 @@ function ExpiringTable({
               )}
               <span className={cn(
                 'flex items-center gap-1 text-xs font-medium',
-                c.days_remaining <= 7  ? 'text-red-600' :
-                c.days_remaining <= 30 ? 'text-amber-600' : 'text-blue-600',
+                c.days_remaining <= 7  ? 'text-destructive' :
+                c.days_remaining <= 30 ? 'text-warning' : 'text-info',
               )}>
                 <AlertTriangle className="h-3 w-3" />
                 Expires {format(new Date(c.expiry_date!), 'dd MMM yyyy')} ({c.days_remaining} days left)

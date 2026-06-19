@@ -177,8 +177,8 @@ export function AssetMaster() {
 
   const STAT_CARDS = [
     { label: 'Total',          value: stats.total,     tone: 'text-foreground'   },
-    { label: 'Available',      value: stats.available, tone: 'text-emerald-600'  },
-    { label: 'Assigned',       value: stats.assigned,  tone: 'text-blue-600'     },
+    { label: 'Available',      value: stats.available, tone: 'text-success'  },
+    { label: 'Assigned',       value: stats.assigned,  tone: 'text-info'     },
     { label: 'Damaged / Lost', value: stats.issues,    tone: 'text-destructive'  },
   ]
 

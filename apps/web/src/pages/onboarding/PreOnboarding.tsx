@@ -181,11 +181,11 @@ function formatDate(iso?: string | null): string {
 }
 
 const STATUS_CONFIG: Record<InviteStatus, { label: string; className: string }> = {
-  pending:   { label: 'Pending',   className: 'bg-amber-100 text-amber-800 border-amber-200' },
-  submitted: { label: 'Submitted', className: 'bg-blue-100 text-blue-800 border-blue-200' },
-  approved:  { label: 'Approved',  className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  rejected:  { label: 'Rejected',  className: 'bg-red-100 text-red-800 border-red-200' },
-  expired:   { label: 'Expired',   className: 'bg-gray-100 text-gray-500 border-gray-200' },
+  pending:   { label: 'Pending',   className: 'bg-warning text-warning border-warning' },
+  submitted: { label: 'Submitted', className: 'bg-info text-info border-info' },
+  approved:  { label: 'Approved',  className: 'bg-success text-success border-success' },
+  rejected:  { label: 'Rejected',  className: 'bg-destructive text-destructive border-destructive' },
+  expired:   { label: 'Expired',   className: 'bg-muted text-muted-foreground border-border' },
 }
 
 function StatusBadge({ status }: { status: InviteStatus }) {
@@ -228,10 +228,10 @@ const MATCH_REASON_LABEL: Record<string, string> = {
 }
 
 const EMPLOYEE_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  active:     { label: 'Active',     className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  inactive:   { label: 'Inactive',   className: 'bg-gray-100 text-gray-600 border-gray-200' },
-  terminated: { label: 'Terminated', className: 'bg-red-100 text-red-800 border-red-200' },
-  on_leave:   { label: 'On Leave',   className: 'bg-amber-100 text-amber-800 border-amber-200' },
+  active:     { label: 'Active',     className: 'bg-success text-success border-success' },
+  inactive:   { label: 'Inactive',   className: 'bg-muted text-muted-foreground border-border' },
+  terminated: { label: 'Terminated', className: 'bg-destructive text-destructive border-destructive' },
+  on_leave:   { label: 'On Leave',   className: 'bg-warning text-warning border-warning' },
 }
 
 interface RehireCheckDialogProps {
@@ -245,7 +245,7 @@ interface RehireCheckDialogProps {
 function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }: RehireCheckDialogProps) {
   if (!data) return null
   const { existing_employee: emp, match_reason, invitationId } = data
-  const statusCfg = EMPLOYEE_STATUS_CONFIG[emp.status] ?? { label: emp.status, className: 'bg-gray-100 text-gray-600 border-gray-200' }
+  const statusCfg = EMPLOYEE_STATUS_CONFIG[emp.status] ?? { label: emp.status, className: 'bg-muted text-muted-foreground border-border' }
 
   return (
     <Dialog open={!!data} onOpenChange={v => { if (!v) onClose() }}>
@@ -767,10 +767,10 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
 
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-blue-100 text-blue-600" />
-        <StatCard label="Pending"           value={stats.pending}   icon={Clock}          accent="bg-amber-100 text-amber-600" />
-        <StatCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  accent="bg-blue-100 text-blue-600" />
-        <StatCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   accent="bg-emerald-100 text-emerald-600" />
+        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-info text-info" />
+        <StatCard label="Pending"           value={stats.pending}   icon={Clock}          accent="bg-warning text-warning" />
+        <StatCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  accent="bg-info text-info" />
+        <StatCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   accent="bg-success text-success" />
       </div>
 
       {/* Table */}

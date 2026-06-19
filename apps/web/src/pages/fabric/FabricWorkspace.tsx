@@ -146,8 +146,8 @@ function severityColor(sev: string): 'default' | 'secondary' | 'destructive' | '
 }
 
 function scoreColor(score: number) {
-  if (score >= 75) return 'text-emerald-600 dark:text-emerald-400'
-  if (score >= 50) return 'text-amber-600 dark:text-amber-400'
+  if (score >= 75) return 'text-success dark:text-emerald-400'
+  if (score >= 50) return 'text-warning dark:text-amber-400'
   return 'text-destructive'
 }
 
@@ -155,14 +155,14 @@ function ScoreBar({ label, value, invert = false }: { label: string; value: numb
   // When invert=true, lower value is better (e.g. risk)
   const display = value ?? 0
   const color = invert
-    ? (value <= 25 ? 'bg-emerald-500' : value <= 50 ? 'bg-amber-500' : 'bg-destructive')
-    : (value >= 75 ? 'bg-emerald-500' : value >= 50 ? 'bg-amber-500' : 'bg-destructive')
+    ? (value <= 25 ? 'bg-success' : value <= 50 ? 'bg-warning' : 'bg-destructive')
+    : (value >= 75 ? 'bg-success' : value >= 50 ? 'bg-warning' : 'bg-destructive')
 
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-sm">
         <span className="text-muted-foreground">{label}</span>
-        <span className={cn('font-medium tabular-nums', invert ? (value <= 25 ? 'text-emerald-600 dark:text-emerald-400' : value <= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-destructive') : scoreColor(display))}>
+        <span className={cn('font-medium tabular-nums', invert ? (value <= 25 ? 'text-success dark:text-emerald-400' : value <= 50 ? 'text-warning dark:text-amber-400' : 'text-destructive') : scoreColor(display))}>
           {display.toFixed(0)}/100
         </span>
       </div>
@@ -335,7 +335,7 @@ export default function FabricWorkspace() {
                   <div className="relative size-28 shrink-0">
                     <div className="absolute inset-0 rounded-full border-8 border-muted" />
                     <div
-                      className={cn('absolute inset-0 rounded-full border-8 transition-all', health.overall_score >= 75 ? 'border-emerald-500' : health.overall_score >= 50 ? 'border-amber-500' : 'border-destructive')}
+                      className={cn('absolute inset-0 rounded-full border-8 transition-all', health.overall_score >= 75 ? 'border-success' : health.overall_score >= 50 ? 'border-warning' : 'border-destructive')}
                       style={{ clipPath: `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.sin(health.overall_score / 100 * 2 * Math.PI)}% ${50 - 50 * Math.cos(health.overall_score / 100 * 2 * Math.PI)}%, 50% 50%)` }}
                     />
                     <div className="absolute inset-0 flex items-center justify-center">

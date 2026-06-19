@@ -52,9 +52,9 @@ const SEVERITY_FILTERS: Array<{ value: InsightSeverity | 'all'; label: string }>
 
 function ScoreBar({ value, label }: { value: number; label: string }) {
   const color =
-    value >= 80 ? 'bg-emerald-500' :
-    value >= 60 ? 'bg-amber-500'   :
-    value >= 40 ? 'bg-orange-500'  : 'bg-destructive'
+    value >= 80 ? 'bg-success' :
+    value >= 60 ? 'bg-warning'   :
+    value >= 40 ? 'bg-accent-coral'  : 'bg-destructive'
 
   return (
     <div className="space-y-0.5">
@@ -169,8 +169,8 @@ export function RecommendationCenter({ embedded = false }: RecommendationCenterP
                 w.severity === 'critical'
                   ? 'bg-destructive/10 text-destructive border-destructive/30'
                   : w.severity === 'high'
-                  ? 'bg-orange-500/10 text-orange-600 border-orange-500/30'
-                  : 'bg-amber-500/10 text-amber-600 border-amber-500/30',
+                  ? 'bg-accent-coral/10 text-accent-coral border-accent-coral/30'
+                  : 'bg-warning/10 text-warning border-warning/30',
               )}
             >
               <AlertTriangle className="h-3 w-3" />
@@ -330,7 +330,7 @@ export function RecommendationCenter({ embedded = false }: RecommendationCenterP
                   const isExpanded = expandedOptId === opt.id
                   const trendColor =
                     opt.trend === 'worsening' ? 'text-destructive' :
-                    opt.trend === 'improving' ? 'text-emerald-600' : 'text-muted-foreground'
+                    opt.trend === 'improving' ? 'text-success' : 'text-muted-foreground'
                   const TrendChipIcon =
                     opt.trend === 'worsening' ? TrendingDown :
                     opt.trend === 'improving' ? TrendingUp   : Minus

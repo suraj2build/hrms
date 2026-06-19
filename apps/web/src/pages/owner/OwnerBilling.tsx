@@ -119,7 +119,7 @@ export function OwnerBilling() {
                 <td className="px-4 py-2.5 font-semibold text-success">{fmtCurrency(r.amount_due)}</td>
                 <td className="px-4 py-2.5">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-700' : 'border-border text-muted-foreground'
+                    r.plan === 'enterprise' ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground'
                   }`}>
                     {r.plan}
                   </span>

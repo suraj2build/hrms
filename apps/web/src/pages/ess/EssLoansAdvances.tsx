@@ -80,18 +80,18 @@ function computeEMI(principal: number, annualRate: number, months: number): numb
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; Icon: React.ComponentType<{ className?: string }> }> = {
-  pending_manager: { label: 'Pending Manager',  color: 'text-yellow-600 bg-yellow-50 border-yellow-200',   Icon: Clock         },
-  pending_hr:      { label: 'Pending HR',       color: 'text-blue-600 bg-blue-50 border-blue-200',         Icon: Clock         },
-  pending:         { label: 'Pending HR',       color: 'text-blue-600 bg-blue-50 border-blue-200',         Icon: Clock         },
-  approved:        { label: 'Approved',         color: 'text-green-600 bg-green-50 border-green-200',      Icon: CheckCircle   },
-  rejected:        { label: 'Rejected',         color: 'text-red-600 bg-red-50 border-red-200',            Icon: XCircle       },
-  disbursed:       { label: 'Disbursed',        color: 'text-indigo-600 bg-indigo-50 border-indigo-200',   Icon: CheckCircle   },
-  recovering:      { label: 'Recovering',       color: 'text-violet-600 bg-violet-50 border-violet-200',   Icon: TrendingDown  },
-  fully_recovered: { label: 'Fully Recovered',  color: 'text-slate-600 bg-slate-50 border-slate-200',      Icon: CheckCircle   },
-  active:          { label: 'Active — EMI',     color: 'text-violet-600 bg-violet-50 border-violet-200',   Icon: TrendingDown  },
-  foreclosed:      { label: 'Foreclosed',       color: 'text-slate-600 bg-slate-50 border-slate-200',      Icon: CheckCircle   },
-  completed:       { label: 'Completed',        color: 'text-slate-600 bg-slate-50 border-slate-200',      Icon: CheckCircle   },
-  cancelled:       { label: 'Cancelled',        color: 'text-red-500 bg-red-50 border-red-100',            Icon: XCircle       },
+  pending_manager: { label: 'Pending Manager',  color: 'text-warning bg-warning border-warning',   Icon: Clock         },
+  pending_hr:      { label: 'Pending HR',       color: 'text-info bg-info border-info',         Icon: Clock         },
+  pending:         { label: 'Pending HR',       color: 'text-info bg-info border-info',         Icon: Clock         },
+  approved:        { label: 'Approved',         color: 'text-success bg-success border-success',      Icon: CheckCircle   },
+  rejected:        { label: 'Rejected',         color: 'text-destructive bg-destructive border-destructive',            Icon: XCircle       },
+  disbursed:       { label: 'Disbursed',        color: 'text-primary bg-primary border-primary',   Icon: CheckCircle   },
+  recovering:      { label: 'Recovering',       color: 'text-accent-violet bg-accent-violet border-accent-violet',   Icon: TrendingDown  },
+  fully_recovered: { label: 'Fully Recovered',  color: 'text-muted-foreground bg-muted border-border',      Icon: CheckCircle   },
+  active:          { label: 'Active — EMI',     color: 'text-accent-violet bg-accent-violet border-accent-violet',   Icon: TrendingDown  },
+  foreclosed:      { label: 'Foreclosed',       color: 'text-muted-foreground bg-muted border-border',      Icon: CheckCircle   },
+  completed:       { label: 'Completed',        color: 'text-muted-foreground bg-muted border-border',      Icon: CheckCircle   },
+  cancelled:       { label: 'Cancelled',        color: 'text-destructive bg-destructive border-destructive',            Icon: XCircle       },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -348,8 +348,8 @@ function AdvanceScheduleRow({ advanceId }: { advanceId: string }) {
               <td className="p-1.5 text-center">
                 <span className={cn(
                   'rounded-full px-1.5 py-0.5 text-[9px] font-medium',
-                  s.status === 'recovered' ? 'bg-green-100 text-green-700' :
-                  s.status === 'pending'   ? 'bg-blue-100 text-blue-700'   :
+                  s.status === 'recovered' ? 'bg-success text-success' :
+                  s.status === 'pending'   ? 'bg-info text-info'   :
                                             'bg-muted text-muted-foreground',
                 )}>
                   {s.status}
@@ -399,8 +399,8 @@ function LoanScheduleRow({ loanId }: { loanId: string }) {
               <td className="p-1.5 text-center">
                 <span className={cn(
                   'rounded-full px-1.5 py-0.5 text-[9px] font-medium',
-                  s.status === 'paid'    ? 'bg-green-100 text-green-700' :
-                  s.status === 'pending' ? 'bg-blue-100 text-blue-700'   :
+                  s.status === 'paid'    ? 'bg-success text-success' :
+                  s.status === 'pending' ? 'bg-info text-info'   :
                                           'bg-muted text-muted-foreground',
                 )}>
                   {s.status}
@@ -549,9 +549,9 @@ export function EssLoansAdvances() {
       {/* ── KPI row ───────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
         {[
-          { label: 'Pending Approval', value: String(pendingCount), icon: Clock, color: 'text-yellow-600 bg-yellow-500/10' },
-          { label: 'Active Advances',  value: String(activeAdvances), icon: Wallet, color: 'text-blue-600 bg-blue-500/10' },
-          { label: 'Active Loans',     value: String(activeLoans),    icon: CreditCard, color: 'text-violet-600 bg-violet-500/10' },
+          { label: 'Pending Approval', value: String(pendingCount), icon: Clock, color: 'text-warning bg-warning/10' },
+          { label: 'Active Advances',  value: String(activeAdvances), icon: Wallet, color: 'text-info bg-info/10' },
+          { label: 'Active Loans',     value: String(activeLoans),    icon: CreditCard, color: 'text-accent-violet bg-accent-violet/10' },
           { label: 'Monthly EMI',      value: monthlyEMI > 0 ? `₹${monthlyEMI.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—', icon: CalendarDays, color: 'text-primary bg-primary/10' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="rounded-lg border border-border bg-card px-3 py-2.5 flex items-center gap-2.5">

@@ -60,7 +60,7 @@ const SECTIONS: ReportSection[] = [
     id:    'operational',
     label: 'Operational Reports',
     blurb: 'Standard HR registers — headcount, attendance, payroll, statutory compliance and more.',
-    accent: { tile: 'bg-blue-500/10', text: 'text-blue-600', border: 'hover:border-blue-300' },
+    accent: { tile: 'bg-info/10', text: 'text-info', border: 'hover:border-blue-300' },
     links: [
       { label: 'Headcount & Attrition',    description: 'Workforce visibility · joiner / separation trend',          route: '/admin/reports/operational?tab=headcount',        icon: Users         },
       { label: 'Attendance & LOP',          description: 'Per-employee attendance · loss-of-pay analysis',            route: '/admin/reports/operational?tab=attendance',       icon: Clock         },
@@ -77,7 +77,7 @@ const SECTIONS: ReportSection[] = [
     id:    'analytics',
     label: 'Analytics',
     blurb: 'Deep-dive analytics surfaces — cost intelligence, workforce patterns, compliance posture.',
-    accent: { tile: 'bg-violet-500/10', text: 'text-violet-600', border: 'hover:border-violet-300' },
+    accent: { tile: 'bg-accent-violet/10', text: 'text-accent-violet', border: 'hover:border-violet-300' },
     links: [
       { label: 'Analytics Studio',     description: 'Explore payroll, headcount & attendance data by dimension, metric and time range.', route: '/admin/reports/analytics',            icon: Sparkles, badge: 'New' },
       { label: 'Workforce Analytics',  description: 'Headcount distribution, reliability and movement patterns.',                        route: '/admin/analytics/workforce',          icon: LineChart  },
@@ -101,7 +101,7 @@ const SECTIONS: ReportSection[] = [
     id:    'explorer',
     label: 'Explorer',
     blurb: 'Ad-hoc dataset querying — group, drill and export across every canonical dataset.',
-    accent: { tile: 'bg-emerald-500/10', text: 'text-emerald-600', border: 'border-emerald-500/20' },
+    accent: { tile: 'bg-success/10', text: 'text-success', border: 'border-success/20' },
     links: [
       { label: 'Data Explorer', description: 'Group by any dimension, drill row-by-row to the employee list, export CSV / Excel — across People, Payroll, Attendance, Leave, Separation & Assets.', route: '/admin/explorer', icon: Database, badge: 'New' },
     ],

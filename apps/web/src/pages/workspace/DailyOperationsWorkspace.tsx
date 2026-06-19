@@ -478,7 +478,7 @@ function MissingPunchesTab({
                           className={cn(
                             'text-xs',
                             hoursOpen > 48 ? 'border-destructive/40 text-destructive bg-destructive/10'
-                              : hoursOpen > 24 ? 'border-amber-500/40 text-amber-600 bg-amber-500/10'
+                              : hoursOpen > 24 ? 'border-warning/40 text-warning bg-warning/10'
                               : '',
                           )}
                         >
@@ -688,10 +688,10 @@ function ShiftConflictsTab({
       {unassignedCount > 0 && (
         <div className={cn(
           'flex items-center gap-2 rounded-lg border px-4 py-3',
-          unassignedCount > 5 ? 'border-destructive/40 bg-destructive/5' : 'border-amber-500/40 bg-amber-500/5',
+          unassignedCount > 5 ? 'border-destructive/40 bg-destructive/5' : 'border-warning/40 bg-warning/5',
         )}>
-          <AlertTriangle className={cn('h-4 w-4 shrink-0', unassignedCount > 5 ? 'text-destructive' : 'text-amber-600')} />
-          <p className={cn('text-sm font-medium', unassignedCount > 5 ? 'text-destructive' : 'text-amber-700')}>
+          <AlertTriangle className={cn('h-4 w-4 shrink-0', unassignedCount > 5 ? 'text-destructive' : 'text-warning')} />
+          <p className={cn('text-sm font-medium', unassignedCount > 5 ? 'text-destructive' : 'text-warning')}>
             {unassignedCount} shift{unassignedCount !== 1 ? 's' : ''} unassigned
           </p>
           <Button
@@ -1033,7 +1033,7 @@ function PendingApprovalsTab({
                   <Td>
                     <Badge
                       variant="outline"
-                      className={cn('text-xs', item.kind === 'regularisation' ? 'border-blue-500/40 text-blue-600 bg-blue-500/10' : 'border-purple-500/40 text-purple-600 bg-purple-500/10')}
+                      className={cn('text-xs', item.kind === 'regularisation' ? 'border-info/40 text-info bg-info/10' : 'border-primary/40 text-primary bg-primary/10')}
                     >
                       {item.kind === 'regularisation' ? 'Regularisation' : 'Correction'}
                     </Badge>
@@ -1102,14 +1102,14 @@ function PayrollBlockersTab({
         'flex items-center justify-between rounded-lg border px-4 py-3',
         payrollBlockers.length > 0
           ? 'border-destructive/40 bg-destructive/5'
-          : 'border-emerald-500/40 bg-emerald-500/5',
+          : 'border-success/40 bg-success/5',
       )}>
         <div className="flex items-center gap-2">
           {payrollBlockers.length > 0
             ? <ShieldAlert className="h-4 w-4 text-destructive shrink-0" />
             : <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
           }
-          <p className={cn('text-sm font-medium', payrollBlockers.length > 0 ? 'text-destructive' : 'text-emerald-700')}>
+          <p className={cn('text-sm font-medium', payrollBlockers.length > 0 ? 'text-destructive' : 'text-success')}>
             {payrollBlockers.length > 0
               ? `${payrollBlockers.length} blocker${payrollBlockers.length !== 1 ? 's' : ''} preventing payroll run`
               : 'No blockers — payroll run is clear'}

@@ -136,9 +136,9 @@ function TimelineEntry({ item, isLast }: { item: TimelineItem; isLast: boolean }
             'mt-1 h-7 w-7 shrink-0 rounded-full flex items-center justify-center ring-2 ring-background',
             item.is_milestone
               ? 'bg-gradient-to-br from-[#2E6FE6] to-[#15B8A6]'
-              : item.severity === 'critical' ? 'bg-red-100 dark:bg-red-900/30'
-              : item.severity === 'warning'  ? 'bg-amber-100 dark:bg-amber-900/30'
-              : item.severity === 'success'  ? 'bg-emerald-100 dark:bg-emerald-900/30'
+              : item.severity === 'critical' ? 'bg-destructive dark:bg-red-900/30'
+              : item.severity === 'warning'  ? 'bg-warning dark:bg-amber-900/30'
+              : item.severity === 'success'  ? 'bg-success dark:bg-emerald-900/30'
               : 'bg-muted',
           )}
         >
@@ -146,10 +146,10 @@ function TimelineEntry({ item, isLast }: { item: TimelineItem; isLast: boolean }
             ? <CategoryIcon className="h-3.5 w-3.5 text-white" />
             : <SeverityIcon className={cn(
                 'h-3.5 w-3.5',
-                item.severity === 'critical' ? 'text-red-600 dark:text-red-400'
-                : item.severity === 'warning'  ? 'text-amber-600 dark:text-amber-400'
-                : item.severity === 'success'  ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-blue-500 dark:text-blue-400',
+                item.severity === 'critical' ? 'text-destructive dark:text-red-400'
+                : item.severity === 'warning'  ? 'text-warning dark:text-amber-400'
+                : item.severity === 'success'  ? 'text-success dark:text-emerald-400'
+                : 'text-info dark:text-blue-400',
               )} />
           }
         </div>
@@ -245,7 +245,7 @@ function MilestoneBar({ items }: { items: TimelineItem[] }) {
                 <div className={cn(
                   'h-5 w-5 rounded-full border-2 flex items-center justify-center transition-colors',
                   done
-                    ? 'border-emerald-500 bg-emerald-500'
+                    ? 'border-success bg-success'
                     : active
                     ? 'border-[#2E6FE6] bg-[#2E6FE6]/10'
                     : 'border-border bg-background',
@@ -255,7 +255,7 @@ function MilestoneBar({ items }: { items: TimelineItem[] }) {
                 </div>
                 <span className={cn(
                   'text-[9px] font-medium text-center whitespace-nowrap',
-                  done    ? 'text-emerald-600 dark:text-emerald-400'
+                  done    ? 'text-success dark:text-emerald-400'
                   : active ? 'text-[#2E6FE6]'
                   : 'text-muted-foreground',
                 )}>{m.label}</span>
@@ -263,7 +263,7 @@ function MilestoneBar({ items }: { items: TimelineItem[] }) {
               {!isLast && (
                 <div className={cn(
                   'flex-1 h-px mx-1 mb-4 transition-colors',
-                  done ? 'bg-emerald-500' : 'bg-border',
+                  done ? 'bg-success' : 'bg-border',
                 )} />
               )}
             </div>

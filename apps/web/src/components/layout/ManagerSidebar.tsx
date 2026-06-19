@@ -215,7 +215,7 @@ function renderNavItem(
         active
           ? isEmp
             ? 'bg-primary text-primary-foreground font-medium'
-            : 'bg-amber-500 text-white font-medium'
+            : 'bg-warning text-white font-medium'
           : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
         collapsed && 'justify-center px-0 w-10 mx-auto',
       )}
@@ -233,7 +233,7 @@ function renderNavItem(
           {!!item.badge && item.badge > 0 && (
             <span className={cn(
               'text-[10px] rounded-full px-1.5 py-0.5 font-semibold tabular-nums leading-none',
-              active ? 'bg-white/25 text-white' : 'bg-red-500 text-white',
+              active ? 'bg-white/25 text-white' : 'bg-destructive text-white',
             )}>
               {item.badge > 99 ? '99+' : item.badge}
             </span>

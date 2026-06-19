@@ -176,7 +176,7 @@ function SourceCard({
   const statusColor = {
     success:  'text-success',
     error:    'text-destructive',
-    running:  'text-blue-500',
+    running:  'text-info',
     never_run:'text-muted-foreground',
   }[source.last_fetch_status ?? 'never_run']
 
@@ -185,8 +185,8 @@ function SourceCard({
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`flex-shrink-0 h-8 w-8 rounded-lg flex items-center justify-center ${source.is_active ? 'bg-teal-500/10' : 'bg-muted'}`}>
-            <Link2 className={`h-4 w-4 ${source.is_active ? 'text-teal-500' : 'text-muted-foreground'}`} />
+          <div className={`flex-shrink-0 h-8 w-8 rounded-lg flex items-center justify-center ${source.is_active ? 'bg-accent-teal/10' : 'bg-muted'}`}>
+            <Link2 className={`h-4 w-4 ${source.is_active ? 'text-accent-teal' : 'text-muted-foreground'}`} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">

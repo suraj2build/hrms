@@ -71,10 +71,10 @@ function statusBadge(s: TicketStatus): { variant: BadgeVariant; label: string } 
 }
 function priorityColor(p: TicketPriority): string {
   switch (p) {
-    case 'urgent': return 'text-red-600 border-red-200 bg-red-50'
-    case 'high':   return 'text-orange-600 border-orange-200 bg-orange-50'
-    case 'medium': return 'text-amber-600 border-amber-200 bg-amber-50'
-    default:       return 'text-emerald-600 border-emerald-200 bg-emerald-50'
+    case 'urgent': return 'text-destructive border-destructive bg-destructive'
+    case 'high':   return 'text-accent-coral border-accent-coral bg-accent-coral'
+    case 'medium': return 'text-warning border-warning bg-warning'
+    default:       return 'text-success border-success bg-success'
   }
 }
 function fmtDateTime(s: string): string {
@@ -210,11 +210,11 @@ export function AdminHelpdesk() {
         </div>
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs text-muted-foreground mb-1">Response Breached</p>
-          <p className={cn('text-xl font-semibold', (stats?.breached ?? 0) > 0 && 'text-red-600')}>{stats?.breached ?? '—'}</p>
+          <p className={cn('text-xl font-semibold', (stats?.breached ?? 0) > 0 && 'text-destructive')}>{stats?.breached ?? '—'}</p>
         </div>
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs text-muted-foreground mb-1">Resolution Breached</p>
-          <p className={cn('text-xl font-semibold', (stats?.resolution_breached ?? 0) > 0 && 'text-red-600')}>{stats?.resolution_breached ?? '—'}</p>
+          <p className={cn('text-xl font-semibold', (stats?.resolution_breached ?? 0) > 0 && 'text-destructive')}>{stats?.resolution_breached ?? '—'}</p>
         </div>
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs text-muted-foreground mb-1">Total</p>
@@ -421,7 +421,7 @@ export function AdminHelpdesk() {
                   detail.comments!.map(c => (
                     <div key={c.id} className={cn(
                       'rounded-lg p-2.5 text-sm border',
-                      c.is_internal ? 'bg-amber-50 border-amber-200'
+                      c.is_internal ? 'bg-warning border-warning'
                         : c.author_role === 'hr' ? 'bg-primary/5 border-primary/15' : 'bg-muted/40 border-border',
                     )}>
                       <div className="flex items-center justify-between mb-1">
@@ -444,7 +444,7 @@ export function AdminHelpdesk() {
                     value={reply} onChange={e => setReply(e.target.value)}
                     placeholder={internal ? 'Internal note (not visible to employee)…' : 'Reply to employee…'}
                     rows={2}
-                    className={cn('w-full text-sm border rounded-md px-3 py-2 bg-background text-foreground resize-none', internal ? 'border-amber-300' : 'border-border')}
+                    className={cn('w-full text-sm border rounded-md px-3 py-2 bg-background text-foreground resize-none', internal ? 'border-warning' : 'border-border')}
                   />
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">

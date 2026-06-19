@@ -43,10 +43,10 @@ const fmtDate = (iso: string) =>
   new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
 const STATUS_META: Record<Status, { label: string; icon: LucideIcon; cls: string; chip: string }> = {
-  overdue:   { label: 'Overdue',   icon: AlertTriangle, cls: 'text-red-600',     chip: 'bg-red-50 text-red-700 border-red-200' },
-  due_soon:  { label: 'Due Soon',  icon: Clock,         cls: 'text-amber-600',   chip: 'bg-amber-50 text-amber-700 border-amber-200' },
-  upcoming:  { label: 'Upcoming',  icon: CalendarClock, cls: 'text-blue-600',    chip: 'bg-blue-50 text-blue-700 border-blue-200' },
-  completed: { label: 'Completed', icon: CheckCircle2,  cls: 'text-emerald-600', chip: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  overdue:   { label: 'Overdue',   icon: AlertTriangle, cls: 'text-destructive',     chip: 'bg-destructive text-destructive border-destructive' },
+  due_soon:  { label: 'Due Soon',  icon: Clock,         cls: 'text-warning',   chip: 'bg-warning text-warning border-warning' },
+  upcoming:  { label: 'Upcoming',  icon: CalendarClock, cls: 'text-info',    chip: 'bg-info text-info border-info' },
+  completed: { label: 'Completed', icon: CheckCircle2,  cls: 'text-success', chip: 'bg-success text-success border-success' },
 }
 const ORDER: Status[] = ['overdue', 'due_soon', 'upcoming', 'completed']
 

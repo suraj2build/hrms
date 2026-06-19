@@ -29,9 +29,9 @@ function fmtRelative(iso: string): string {
 
 function ItemIcon({ severity, itemType }: { severity: string; itemType: string }) {
   const cls = 'mt-0.5 h-4 w-4 shrink-0'
-  if (itemType === 'action_required') return <AlertTriangle className={cn(cls, 'text-amber-500')} />
-  if (severity === 'success')         return <CheckCircle2 className={cn(cls, 'text-emerald-500')} />
-  if (severity === 'warning')         return <AlertTriangle className={cn(cls, 'text-amber-500')} />
+  if (itemType === 'action_required') return <AlertTriangle className={cn(cls, 'text-warning')} />
+  if (severity === 'success')         return <CheckCircle2 className={cn(cls, 'text-success')} />
+  if (severity === 'warning')         return <AlertTriangle className={cn(cls, 'text-warning')} />
   return <Info className={cn(cls, 'text-[#2E6FE6]')} />
 }
 

@@ -21,7 +21,7 @@ interface UnifiedTimelineProps {
 function dotColor(severity?: string): string {
   if (severity === 'critical') return 'bg-destructive'
   if (severity === 'high')     return 'bg-destructive'
-  if (severity === 'warning')  return 'bg-amber-500'
+  if (severity === 'warning')  return 'bg-warning'
   return 'bg-muted-foreground'
 }
 

@@ -606,7 +606,7 @@ function CalLegend() {
     { label: 'Absent Exception',        dot: 'bg-destructive rounded-full'          },
     { label: 'Late / Incomplete Hours', dot: 'bg-warning rounded-full'              },
     { label: 'On Leave',                dot: 'bg-info rounded-full'                 },
-    { label: 'Holidays',                dot: 'bg-violet-500 rounded-full'           },
+    { label: 'Holidays',                dot: 'bg-accent-violet rounded-full'           },
     { label: 'Weekly Off (WO)',         dot: 'bg-muted-foreground/30 rounded-full'  },
     { label: 'Pending Audit',           dot: 'bg-warning/60 rounded-full ring-1 ring-warning/40' },
   ]
@@ -1121,7 +1121,7 @@ export function MyAttendance() {
           iconCls="bg-accent/30 text-accent-foreground"
           bgCls=""
           valueCls="text-accent-foreground"
-          barCls="bg-violet-400"
+          barCls="bg-accent-violet"
           delta={null}
         />
       </div>

@@ -126,23 +126,23 @@ export function OperationalDigestCards({ layout = 'row' }: OperationalDigestCard
 
   const attendanceColor =
     attendancePct >= 90
-      ? 'text-emerald-600'
+      ? 'text-success'
       : attendancePct >= 70
-        ? 'text-amber-600'
+        ? 'text-warning'
         : 'text-destructive'
 
-  const risksColor = digest.unresolvedRisks > 0 ? 'text-destructive' : 'text-emerald-600'
+  const risksColor = digest.unresolvedRisks > 0 ? 'text-destructive' : 'text-success'
 
   const approvalsColor =
     digest.pendingApprovals > 5
-      ? 'text-amber-600'
+      ? 'text-warning'
       : digest.pendingApprovals > 0
-        ? 'text-blue-600'
+        ? 'text-info'
         : 'text-muted-foreground'
 
-  const blockersColor = digest.payrollBlockers > 0 ? 'text-destructive' : 'text-emerald-600'
+  const blockersColor = digest.payrollBlockers > 0 ? 'text-destructive' : 'text-success'
 
-  const complianceColor = digest.complianceWarnings > 0 ? 'text-orange-600' : 'text-emerald-600'
+  const complianceColor = digest.complianceWarnings > 0 ? 'text-accent-coral' : 'text-success'
 
   // ── Loading state ──────────────────────────────────────────────────────────
 

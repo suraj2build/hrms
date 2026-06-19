@@ -33,7 +33,7 @@ function trendIcon(trend: OptimizationInsight['trend']) {
 
 function trendIconColor(trend: OptimizationInsight['trend']): string {
   if (trend === 'worsening') return 'text-destructive'
-  if (trend === 'improving') return 'text-emerald-600'
+  if (trend === 'improving') return 'text-success'
   return 'text-muted-foreground'
 }
 
@@ -96,7 +96,7 @@ function InsightCard({ insight }: InsightCardProps) {
           insight.trend === 'worsening'
             ? 'bg-destructive/10 text-destructive'
             : insight.trend === 'improving'
-            ? 'bg-emerald-500/10 text-emerald-600'
+            ? 'bg-success/10 text-success'
             : 'bg-muted text-muted-foreground',
         )}
       >

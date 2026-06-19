@@ -371,7 +371,7 @@ export function EmployeeSidebar() {
                   className={cn(
                     'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors',
                     active
-                      ? 'bg-amber-500 text-white font-medium'
+                      ? 'bg-warning text-white font-medium'
                       : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                     sidebarCollapsed && 'justify-center px-0 w-10 mx-auto',
                   )}

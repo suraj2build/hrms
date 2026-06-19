@@ -46,9 +46,9 @@ function intensityColor(value: number, max: number): string {
   if (max === 0) return 'bg-muted/30'
   const pct = value / max
   if (pct === 0)   return 'bg-muted/20'
-  if (pct < 0.25)  return 'bg-blue-500/20'
-  if (pct < 0.50)  return 'bg-amber-500/30'
-  if (pct < 0.75)  return 'bg-orange-500/50'
+  if (pct < 0.25)  return 'bg-info/20'
+  if (pct < 0.50)  return 'bg-warning/30'
+  if (pct < 0.75)  return 'bg-accent-coral/50'
   return 'bg-destructive/70'
 }
 

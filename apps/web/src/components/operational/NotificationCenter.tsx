@@ -76,9 +76,9 @@ const TYPE_META: Record<NotificationType, {
   barColor:   string
 }> = {
   alert:    { Icon: AlertTriangle,  iconColor: 'text-destructive',  barColor: 'bg-destructive' },
-  reminder: { Icon: Clock,          iconColor: 'text-amber-500',    barColor: 'bg-amber-500'   },
+  reminder: { Icon: Clock,          iconColor: 'text-warning',    barColor: 'bg-warning'   },
   breach:   { Icon: ShieldAlert,    iconColor: 'text-destructive',  barColor: 'bg-destructive' },
-  deadline: { Icon: CalendarClock,  iconColor: 'text-amber-500',    barColor: 'bg-amber-500'   },
+  deadline: { Icon: CalendarClock,  iconColor: 'text-warning',    barColor: 'bg-warning'   },
   info:     { Icon: Info,           iconColor: 'text-primary',      barColor: 'bg-primary'     },
 }
 

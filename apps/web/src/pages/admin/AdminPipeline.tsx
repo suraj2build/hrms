@@ -64,14 +64,14 @@ interface Requisition {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  linkedin: 'bg-blue-100 text-blue-700',
-  naukri:   'bg-orange-100 text-orange-700',
-  indeed:   'bg-indigo-100 text-indigo-700',
-  referral: 'bg-purple-100 text-purple-700',
-  portal:   'bg-teal-100 text-teal-700',
-  agency:   'bg-pink-100 text-pink-700',
-  direct:   'bg-gray-100 text-gray-600',
-  other:    'bg-gray-100 text-gray-600',
+  linkedin: 'bg-info text-info',
+  naukri:   'bg-accent-coral text-accent-coral',
+  indeed:   'bg-primary text-primary',
+  referral: 'bg-primary text-primary',
+  portal:   'bg-accent-teal text-accent-teal',
+  agency:   'bg-accent-magenta text-accent-magenta',
+  direct:   'bg-muted text-muted-foreground',
+  other:    'bg-muted text-muted-foreground',
 }
 
 function daysSince(dateStr: string): number {
@@ -79,9 +79,9 @@ function daysSince(dateStr: string): number {
 }
 
 function scoreColor(s: number): string {
-  if (s >= 8) return 'text-emerald-600'
-  if (s >= 5) return 'text-amber-600'
-  return 'text-red-500'
+  if (s >= 8) return 'text-success'
+  if (s >= 5) return 'text-warning'
+  return 'text-destructive'
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

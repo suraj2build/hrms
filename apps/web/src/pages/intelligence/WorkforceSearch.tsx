@@ -59,14 +59,14 @@ const EXAMPLE_QUERIES = [
 ]
 
 const STATUS_COLORS: Record<string, string> = {
-  active:     'bg-green-100 text-green-800',
-  on_notice:  'bg-orange-100 text-orange-800',
-  separated:  'bg-red-100 text-red-800',
-  inactive:   'bg-gray-100 text-gray-700',
+  active:     'bg-success text-success',
+  on_notice:  'bg-accent-coral text-accent-coral',
+  separated:  'bg-destructive text-destructive',
+  inactive:   'bg-muted text-muted-foreground',
 }
 
 function statusBadgeClass(status: string) {
-  return STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-700'
+  return STATUS_COLORS[status] ?? 'bg-muted text-muted-foreground'
 }
 
 function formatDate(d: string | null) {

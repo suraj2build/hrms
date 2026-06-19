@@ -428,17 +428,17 @@ export function TaxGovernance() {
                   <StatChip
                     label="Submitted"
                     value={complianceData.stats.submitted}
-                    color="border-green-300 dark:border-green-800"
+                    color="border-success dark:border-green-800"
                   />
                   <StatChip
                     label="Pending"
                     value={complianceData.stats.pending}
-                    color="border-amber-300 dark:border-amber-800"
+                    color="border-warning dark:border-amber-800"
                   />
                   <StatChip
                     label="Proofs Under Review"
                     value={complianceData.stats.proofs_under_review}
-                    color="border-sky-300 dark:border-sky-800"
+                    color="border-info dark:border-sky-800"
                   />
                   <StatChip
                     label="Rejected"

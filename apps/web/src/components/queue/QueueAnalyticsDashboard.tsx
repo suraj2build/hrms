@@ -36,7 +36,7 @@ function MetricCard({ label, value, sublabel, accent = 'neutral' }: MetricCardPr
       <p
         className={cn(
           'text-2xl font-bold leading-none',
-          accent === 'green' && 'text-emerald-600',
+          accent === 'green' && 'text-success',
           accent === 'red'   && 'text-destructive',
           accent === 'neutral' && 'text-foreground',
         )}
@@ -229,7 +229,7 @@ export function QueueAnalyticsDashboard({ items, sla }: QueueAnalyticsDashboardP
                   key={row.site_id}
                   className={cn(
                     'border-b border-border last:border-0',
-                    row.blockers > 0 && 'bg-red-50/60',
+                    row.blockers > 0 && 'bg-destructive/60',
                   )}
                 >
                   <td className="px-4 py-2 font-medium text-foreground truncate max-w-[160px]">
@@ -239,7 +239,7 @@ export function QueueAnalyticsDashboard({ items, sla }: QueueAnalyticsDashboardP
                   <td className={cn('px-3 py-2 text-right', row.blockers > 0 ? 'text-destructive font-semibold' : 'text-foreground')}>
                     {row.blockers}
                   </td>
-                  <td className={cn('px-3 py-2 text-right', row.overdue > 0 ? 'text-orange-600' : 'text-foreground')}>
+                  <td className={cn('px-3 py-2 text-right', row.overdue > 0 ? 'text-accent-coral' : 'text-foreground')}>
                     {row.overdue}
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground">

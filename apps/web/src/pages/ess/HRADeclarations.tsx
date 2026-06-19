@@ -98,10 +98,10 @@ const EMPTY_FORM: FormState = {
 
 function StatusBadge({ status }: { status: RecordStatus }) {
   const map: Record<RecordStatus, { label: string; cls: string }> = {
-    pending:      { label: 'Pending',      cls: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-    under_review: { label: 'Under Review', cls: 'bg-blue-100 text-blue-800 border-blue-200' },
-    verified:     { label: 'Verified',     cls: 'bg-green-100 text-green-800 border-green-200' },
-    rejected:     { label: 'Rejected',     cls: 'bg-red-100 text-red-800 border-red-200' },
+    pending:      { label: 'Pending',      cls: 'bg-warning text-warning border-warning' },
+    under_review: { label: 'Under Review', cls: 'bg-info text-info border-info' },
+    verified:     { label: 'Verified',     cls: 'bg-success text-success border-success' },
+    rejected:     { label: 'Rejected',     cls: 'bg-destructive text-destructive border-destructive' },
   }
   const { label, cls } = map[status] ?? map.pending
   return (

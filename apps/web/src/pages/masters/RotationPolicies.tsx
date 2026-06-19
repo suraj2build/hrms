@@ -114,7 +114,7 @@ function PolicyCard({ policy, onEdit, onDuplicate, onToggle }: PolicyCardProps) 
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={(e) => { e.stopPropagation(); onToggle(policy.id, !policy.is_active) }}
-                className={policy.is_active ? 'text-destructive' : 'text-green-600'}
+                className={policy.is_active ? 'text-destructive' : 'text-success'}
               >
                 {policy.is_active ? (
                   <>
