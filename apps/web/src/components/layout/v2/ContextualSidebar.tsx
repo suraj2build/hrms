@@ -11,7 +11,7 @@
  *   · Badge counts via TanStack Query workspace stats
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { ChevronDown, ChevronRight, PanelLeftClose, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -175,12 +175,17 @@ export function ContextualSidebar() {
   const location = useLocation()
   // In Executive Mode: use the curated exec-domain set (pre-filtered, no role filter needed).
   // In normal mode: find domain by path, then filter by role.
-  const rawDomain = executiveMode
-    ? getExecutiveDomainForPath(location.pathname)
-    : getDomainForPath(location.pathname)
-  const domain: Domain | null = rawDomain
-    ? (executiveMode ? rawDomain : getVisibleDomain(rawDomain, profile?.role))
-    : null
+  // Memoized so `domain` keeps a STABLE reference across renders unless its
+  // inputs change. getVisibleDomain() returns a freshly-filtered object, so
+  // without this the [domain] effect below would fire every render and call
+  // setExpanded() → infinite re-render loop (whole portal feels frozen/slow).
+  const domain: Domain | null = useMemo(() => {
+    const rawDomain = executiveMode
+      ? getExecutiveDomainForPath(location.pathname)
+      : getDomainForPath(location.pathname)
+    if (!rawDomain) return null
+    return executiveMode ? rawDomain : getVisibleDomain(rawDomain, profile?.role)
+  }, [executiveMode, location.pathname, profile?.role])
 
   // Close the mobile drawer whenever the route changes
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, location.search, setMobileNavOpen])
