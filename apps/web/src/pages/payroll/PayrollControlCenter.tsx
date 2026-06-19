@@ -421,7 +421,7 @@ export function PayrollControlCenter(): JSX.Element {
     setActiveStep('readiness')
     setIsFrozen(false)
     setLastRunId(null)
-  }, [payrollMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [payrollMonth])
 
   // ── completeStep ─────────────────────────────────────────────────────────────
 
