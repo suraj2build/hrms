@@ -631,9 +631,9 @@ export function OwnerTenantDetail() {
             </div>
 
             {adminForm.password && showAdminPwd && (
-              <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs">
-                <span className="text-amber-600 font-semibold">Save before submitting: </span>
-                <code className="text-amber-200 font-mono select-all">{adminForm.password}</code>
+              <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-xs">
+                <span className="text-amber-800 font-semibold">Save before submitting: </span>
+                <code className="text-amber-950 font-mono font-semibold select-all">{adminForm.password}</code>
               </div>
             )}
           </div>
@@ -663,7 +663,7 @@ export function OwnerTenantDetail() {
             <div className="space-y-3 py-1">
               <p className="text-xs text-slate-500">New temporary password for <span className="text-slate-900">{resetResult.email}</span>:</p>
               <div className="flex items-center gap-2 rounded-lg bg-slate-100 border border-slate-200 px-3 py-2">
-                <code className="flex-1 font-mono text-sm text-amber-200 select-all">{resetResult.temp_password}</code>
+                <code className="flex-1 font-mono text-sm font-semibold text-slate-900 select-all">{resetResult.temp_password}</code>
                 <button
                   onClick={() => copyPassword(resetResult.temp_password)}
                   className="text-slate-500 hover:text-slate-800 transition-colors"

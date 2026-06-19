@@ -430,9 +430,9 @@ export function OwnerTenants() {
 
           {/* Show the generated password prominently before submit */}
           {form.admin_password && showPwd && (
-            <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs">
-              <span className="text-amber-400 font-semibold">Save this password: </span>
-              <code className="text-amber-200 font-mono select-all">{form.admin_password}</code>
+            <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-xs">
+              <span className="text-amber-800 font-semibold">Save this password: </span>
+              <code className="text-amber-950 font-mono font-semibold select-all">{form.admin_password}</code>
             </div>
           )}
 
