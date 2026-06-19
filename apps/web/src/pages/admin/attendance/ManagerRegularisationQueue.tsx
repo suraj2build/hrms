@@ -50,6 +50,12 @@ interface RegItem {
   employee_code:       string | null
 }
 
+interface BulkResult {
+  approved?: number
+  rejected?: number
+  summary?: { approved?: number; rejected?: number }
+}
+
 const TYPE_LABELS: Record<string, string> = {
   missed_punch:    'Missed Punch',
   forgot_checkout: 'Forgot Checkout',
@@ -101,7 +107,7 @@ export default function ManagerRegularisationQueue() {
   const items: RegItem[] = useMemo(() => {
     if (!data) return []
     if (Array.isArray(data)) return data
-    if (Array.isArray((data as any).data)) return (data as any).data
+    if (Array.isArray(data.data)) return data.data
     return []
   }, [data])
 
@@ -124,8 +130,8 @@ export default function ManagerRegularisationQueue() {
 
   const bulkApproveMutation = useMutation({
     mutationFn: (ids: string[]) =>
-      api.post('/attendance/regularisation/bulk-approve', { ids }),
-    onSuccess: (res: any) => {
+      api.post<BulkResult>('/attendance/regularisation/bulk-approve', { ids }),
+    onSuccess: (res) => {
       const s = res?.summary ?? res
       toast.success(`Approved ${s?.approved ?? selected.size} request${(s?.approved ?? 0) !== 1 ? 's' : ''}`)
       setSelected(new Set())
@@ -136,8 +142,8 @@ export default function ManagerRegularisationQueue() {
 
   const bulkRejectMutation = useMutation({
     mutationFn: ({ ids, reason }: { ids: string[]; reason: string }) =>
-      api.post('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined }),
-    onSuccess: (res: any) => {
+      api.post<BulkResult>('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined }),
+    onSuccess: (res) => {
       const s = res?.summary ?? res
       toast.success(`Rejected ${s?.rejected ?? selected.size} request${(s?.rejected ?? 0) !== 1 ? 's' : ''}`)
       setSelected(new Set())

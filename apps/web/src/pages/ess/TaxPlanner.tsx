@@ -188,7 +188,9 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-function statusBadgeVariant(status: DeclarationStatus): string {
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success'
+
+function statusBadgeVariant(status: DeclarationStatus): BadgeVariant {
   switch (status) {
     case 'approved':            return 'success'
     case 'payroll_applied':     return 'success'
@@ -216,7 +218,7 @@ function statusLabel(status: DeclarationStatus): string {
   }
 }
 
-function proofStateBadgeVariant(state: DocumentState): string {
+function proofStateBadgeVariant(state: DocumentState): BadgeVariant {
   switch (state) {
     case 'verified':    return 'success'
     case 'rejected':    return 'destructive'
@@ -489,7 +491,7 @@ function TaxPreview({
             <p className="text-xs text-muted-foreground">Old Regime</p>
             <p className="font-semibold tabular-nums">{inr(data.old_regime_tax)}</p>
             {betterRegime === 'old' && (
-              <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">Recommended</p>
+              <p className="text-xs text-success mt-0.5">Recommended</p>
             )}
           </div>
           <div className={cn(
@@ -501,16 +503,16 @@ function TaxPreview({
             <p className="text-xs text-muted-foreground">New Regime</p>
             <p className="font-semibold tabular-nums">{inr(data.new_regime_tax)}</p>
             {betterRegime === 'new' && (
-              <p className="text-xs text-green-600 dark:text-green-400 mt-0.5">Recommended</p>
+              <p className="text-xs text-success mt-0.5">Recommended</p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1 border-t">
-          <TrendingDown className="h-3.5 w-3.5 text-green-500" />
+          <TrendingDown className="h-3.5 w-3.5 text-success" />
           Save{' '}
           <span className="font-semibold text-foreground">{inr(saving)}</span>
           {' '}by choosing{' '}
-          <span className="font-semibold capitalize text-green-600 dark:text-green-400">
+          <span className="font-semibold capitalize text-success">
             {betterRegime} regime
           </span>
         </div>
@@ -560,9 +562,9 @@ function TaxPreview({
           Set as Active Declaration
         </Button>
       ) : (
-        <div className="flex items-center gap-2 rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/20 p-3">
-          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-          <span className="text-sm font-medium text-green-700 dark:text-green-300">
+        <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 p-3">
+          <CheckCircle2 className="h-4 w-4 text-success" />
+          <span className="text-sm font-medium text-success">
             Active Declaration
           </span>
         </div>
@@ -640,24 +642,24 @@ export function TaxPlanner() {
   const { data: regimeElection } = useQuery<TaxRegimeElection | null>({
     queryKey: ['tds', 'regime', 'my', fy],
     queryFn: () =>
-      api.get(`/payroll/statutory/tds/regime/my?financial_year=${fy}`)
-        .then((r: any) => r.data ?? null),
+      api.get<{ data?: TaxRegimeElection | null }>(`/payroll/statutory/tds/regime/my?financial_year=${fy}`)
+        .then(r => r.data ?? null),
     enabled: activeTab === 'status',
   })
 
   const { data: declarations = [] } = useQuery<Declaration[]>({
     queryKey: ['tds', 'declarations', 'my', fy],
     queryFn: () =>
-      api.get(`/payroll/statutory/tds/declarations/my?financial_year=${fy}`)
-        .then((r: any) => r.data ?? []),
+      api.get<{ data?: Declaration[] }>(`/payroll/statutory/tds/declarations/my?financial_year=${fy}`)
+        .then(r => r.data ?? []),
     enabled: activeTab === 'status',
   })
 
   const { data: projections = [] } = useQuery<TDSProjection[]>({
     queryKey: ['tds', 'projections', 'my', fy],
     queryFn: () =>
-      api.get(`/payroll/statutory/tds/projections/my?financial_year=${fy}`)
-        .then((r: any) => r.data ?? []),
+      api.get<{ data?: TDSProjection[] }>(`/payroll/statutory/tds/projections/my?financial_year=${fy}`)
+        .then(r => r.data ?? []),
     enabled: activeTab === 'status',
   })
 
@@ -877,7 +879,7 @@ export function TaxPlanner() {
                   >
                     {plan.plan_name}
                     {plan.status === 'submitted' || plan.is_primary ? (
-                      <Badge variant="outline" className="ml-1 text-[10px] py-0 px-1 border-green-400 text-green-600">
+                      <Badge variant="outline" className="ml-1 text-[10px] py-0 px-1 border-success/30 text-success">
                         Active
                       </Badge>
                     ) : (
@@ -929,7 +931,7 @@ export function TaxPlanner() {
                       <div className="p-4">
                         <DeclarationCard
                           title="HRA Exemption"
-                          icon={<FileText className="h-4 w-4 text-amber-500" />}
+                          icon={<FileText className="h-4 w-4 text-warning" />}
                           components={grouped.hra}
                           planItems={items}
                           planId={activePlanId}
@@ -942,7 +944,7 @@ export function TaxPlanner() {
                       <div className="p-4">
                         <DeclarationCard
                           title="Home Loan Interest u/s 24(b)"
-                          icon={<FileText className="h-4 w-4 text-purple-500" />}
+                          icon={<FileText className="h-4 w-4 text-primary" />}
                           components={grouped.house_property}
                           planItems={items}
                           planId={activePlanId}
@@ -955,7 +957,7 @@ export function TaxPlanner() {
                       <div className="p-4">
                         <DeclarationCard
                           title="Previous Employer Income & TDS"
-                          icon={<FileText className="h-4 w-4 text-orange-500" />}
+                          icon={<FileText className="h-4 w-4 text-warning" />}
                           components={grouped.previous_employment}
                           planItems={items}
                           planId={activePlanId}
@@ -968,7 +970,7 @@ export function TaxPlanner() {
                       <div className="p-4 space-y-3">
                         <DeclarationCard
                           title="Other Income"
-                          icon={<FileText className="h-4 w-4 text-sky-500" />}
+                          icon={<FileText className="h-4 w-4 text-primary" />}
                           components={grouped.other_income}
                           planItems={items}
                           planId={activePlanId}
@@ -976,7 +978,7 @@ export function TaxPlanner() {
                         />
                         <DeclarationCard
                           title="TDS / TCS Credits"
-                          icon={<Calculator className="h-4 w-4 text-sky-500" />}
+                          icon={<Calculator className="h-4 w-4 text-primary" />}
                           components={grouped.tds_tcs}
                           planItems={items}
                           planId={activePlanId}
@@ -1175,7 +1177,7 @@ export function TaxPlanner() {
                                 </td>
                                 <td className="py-2 px-3">
                                   <Badge
-                                    variant={statusBadgeVariant(d.status) as any}
+                                    variant={statusBadgeVariant(d.status)}
                                     className="text-[10px] capitalize"
                                   >
                                     {statusLabel(d.status)}
@@ -1196,7 +1198,7 @@ export function TaxPlanner() {
                                     <Badge variant="success" className="text-[10px]">Verified</Badge>
                                   ) : (
                                     <Badge
-                                      variant={proofStateBadgeVariant(d.declaration_proofs[0].document_state) as any}
+                                      variant={proofStateBadgeVariant(d.declaration_proofs[0].document_state)}
                                       className="text-[10px] capitalize"
                                     >
                                       {d.declaration_proofs[0].document_state}

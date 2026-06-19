@@ -695,7 +695,7 @@ export function SecurityOpsWorkspace() {
                         <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
                           <span>Score: {e.score}</span>
                           {e.flags.length > 0 && (
-                            <span className="text-amber-600">{e.flags.slice(0, 3).join(', ')}</span>
+                            <span className="text-warning">{e.flags.slice(0, 3).join(', ')}</span>
                           )}
                           <span>{format(new Date(e.verified_at), 'dd MMM yyyy HH:mm')}</span>
                         </div>
