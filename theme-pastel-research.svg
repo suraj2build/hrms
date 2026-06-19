@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="860" viewBox="0 0 1480 860" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="dl-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9B7BCB"/><stop offset="1" stop-color="#7C5CAE"/></linearGradient>
+    <linearGradient id="dl-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#CDB4DB"/><stop offset="0.5" stop-color="#FFC8DD"/><stop offset="1" stop-color="#A2D2FF"/></linearGradient>
+    <linearGradient id="cc-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E87DAD"/><stop offset="1" stop-color="#C2548A"/></linearGradient>
+    <linearGradient id="cc-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFC8DD"/><stop offset="0.5" stop-color="#FFAFCC"/><stop offset="1" stop-color="#BDE0FE"/></linearGradient>
+    <linearGradient id="lm-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9E8DC9"/><stop offset="1" stop-color="#6E5C9C"/></linearGradient>
+    <linearGradient id="lm-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#D8CBEC"/><stop offset="1" stop-color="#CDB4DB"/></linearGradient>
+    <linearGradient id="ps-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DB8090"/><stop offset="1" stop-color="#A85364"/></linearGradient>
+    <linearGradient id="ps-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFD8C2"/><stop offset="0.5" stop-color="#FFC4CF"/><stop offset="1" stop-color="#FFAFCC"/></linearGradient>
+  </defs>
+
+  <rect width="1480" height="860" fill="#FBFAFC"/>
+  <text x="40" y="50" font-size="28" font-weight="700" fill="#1A1A22">Pastel Dreamland — soft &amp; airy feminine directions</text>
+  <text x="40" y="80" font-size="15" font-weight="600" fill="#6B6B78">Based on the Coolors pastel set: lilac #CDB4DB · pink #FFC8DD · rose #FFAFCC · baby-blue #BDE0FE · sky #A2D2FF</text>
+  <text x="40" y="100" font-size="13" fill="#9A9AA8">Note: pastel themes use a soft tinted top bar with dark text (airier than the dark-bar themes). Buttons use a deepened pastel so white text stays readable.</text>
+
+  <!-- ===== A: PASTEL DREAMLAND ===== -->
+  <g transform="translate(40,124)">
+    <rect x="0" y="0" width="330" height="700" rx="18" fill="#FFFFFF" stroke="#E9DEF3" stroke-width="1.5"/>
+    <rect x="0" y="0" width="330" height="64" rx="18" fill="url(#dl-nav)"/>
+    <rect x="0" y="40" width="330" height="24" fill="url(#dl-nav)"/>
+    <circle cx="34" cy="32" r="13" fill="#FFFFFF"/><text x="28" y="37" font-size="14" font-weight="800" fill="#7C5CAE">C</text>
+    <text x="56" y="37" font-size="14" font-weight="700" fill="#3A2B55">Cognix</text><text x="116" y="37" font-size="14" font-weight="700" fill="#7C5CAE">HR</text>
+    <text x="20" y="100" font-size="20" font-weight="700" fill="#2E2440">Pastel Dreamland ⭐</text>
+    <text x="20" y="122" font-size="12" fill="#7E7193">Lilac + pink + sky · the full set</text>
+
+    <rect x="20" y="138" width="140" height="60" rx="10" fill="#7C5CAE"/><text x="32" y="172" font-size="13" font-weight="700" fill="#FFF">#7C5CAE</text><text x="32" y="189" font-size="10" fill="#D8C9EC">primary (buttons)</text>
+    <rect x="170" y="138" width="140" height="60" rx="10" fill="url(#dl-nav)"/><text x="182" y="172" font-size="11" font-weight="700" fill="#3A2B55">soft top bar</text><text x="182" y="189" font-size="9" fill="#4A3B65">lilac→pink→sky</text>
+    <rect x="20" y="206" width="68" height="48" rx="9" fill="#CDB4DB"/><text x="28" y="234" font-size="10" font-weight="700" fill="#3A2B55">#CDB4DB</text>
+    <rect x="96" y="206" width="68" height="48" rx="9" fill="#FFAFCC"/><text x="104" y="234" font-size="10" font-weight="700" fill="#5C2A3E">#FFAFCC</text>
+    <rect x="172" y="206" width="68" height="48" rx="9" fill="#A2D2FF"/><text x="180" y="234" font-size="10" font-weight="700" fill="#1E3A52">#A2D2FF</text>
+    <rect x="248" y="206" width="62" height="48" rx="9" fill="#FBF7FD" stroke="#E9DEF3"/><text x="256" y="230" font-size="9.5" font-weight="700" fill="#2E2440">canvas</text>
+
+    <rect x="20" y="272" width="290" height="80" rx="12" fill="#FBF7FD" stroke="#E9DEF3"/>
+    <rect x="20" y="272" width="3" height="80" rx="2" fill="#7C5CAE"/>
+    <rect x="34" y="288" width="4" height="18" rx="2" fill="url(#dl-btn)"/>
+    <text x="48" y="303" font-size="14" font-weight="700" fill="#2E2440">Team Reports</text>
+    <text x="48" y="322" font-size="11" fill="#7E7193">Operational HR reporting</text>
+    <rect x="34" y="330" width="96" height="16" rx="8" fill="#F1E9F8"/><text x="44" y="342" font-size="9" fill="#7C5CAE">PF · ESI · PT</text>
+
+    <rect x="20" y="366" width="130" height="38" rx="9" fill="url(#dl-btn)"/><text x="44" y="390" font-size="12.5" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="160" y="366" width="100" height="38" rx="9" fill="#FFF" stroke="#E9DEF3"/><text x="186" y="390" font-size="12.5" font-weight="600" fill="#7C5CAE">Export</text>
+    <rect x="20" y="418" width="76" height="26" rx="13" fill="#F1E9F8"/><text x="34" y="435" font-size="10.5" fill="#7C5CAE">Filter</text>
+    <rect x="106" y="418" width="64" height="26" rx="13" fill="#FFAFCC"/><text x="118" y="435" font-size="10.5" fill="#5C2A3E">Pink</text>
+    <rect x="180" y="418" width="64" height="26" rx="13" fill="#A2D2FF"/><text x="192" y="435" font-size="10.5" fill="#1E3A52">Sky</text>
+    <text x="20" y="476" font-size="12" fill="#7E7193">Body copy in muted lilac-grey for hints.</text>
+    <rect x="20" y="492" width="52" height="36" rx="9" fill="#1A8050"/><text x="27" y="515" font-size="9.5" fill="#FFF">success</text>
+    <rect x="80" y="492" width="52" height="36" rx="9" fill="#B07B18"/><text x="90" y="515" font-size="9.5" fill="#FFF">warn</text>
+    <rect x="140" y="492" width="52" height="36" rx="9" fill="#C93535"/><text x="150" y="515" font-size="9.5" fill="#FFF">alert</text>
+    <text x="20" y="560" font-size="11.5" fill="#2E2440" font-weight="600">Vibe: playful, dreamy, multi-pastel</text>
+    <text x="20" y="582" font-size="11" fill="#9A8FAE">The signature "dreamland" — most colourful</text>
+  </g>
+
+  <!-- ===== B: COTTON CANDY ===== -->
+  <g transform="translate(390,124)">
+    <rect x="0" y="0" width="330" height="700" rx="18" fill="#FFFFFF" stroke="#F3DCE6" stroke-width="1.5"/>
+    <rect x="0" y="0" width="330" height="64" rx="18" fill="url(#cc-nav)"/>
+    <rect x="0" y="40" width="330" height="24" fill="url(#cc-nav)"/>
+    <circle cx="34" cy="32" r="13" fill="#FFFFFF"/><text x="28" y="37" font-size="14" font-weight="800" fill="#D86A9C">C</text>
+    <text x="56" y="37" font-size="14" font-weight="700" fill="#4A1F33">Cognix</text><text x="116" y="37" font-size="14" font-weight="700" fill="#D86A9C">HR</text>
+    <text x="20" y="100" font-size="20" font-weight="700" fill="#361825">Cotton Candy</text>
+    <text x="20" y="122" font-size="12" fill="#9A6F81">Pink + baby-blue · sweet</text>
+
+    <rect x="20" y="138" width="140" height="60" rx="10" fill="#D86A9C"/><text x="32" y="172" font-size="13" font-weight="700" fill="#FFF">#D86A9C</text><text x="32" y="189" font-size="10" fill="#FAD9E6">primary (buttons)</text>
+    <rect x="170" y="138" width="140" height="60" rx="10" fill="url(#cc-nav)"/><text x="182" y="172" font-size="11" font-weight="700" fill="#4A1F33">soft top bar</text><text x="182" y="189" font-size="9" fill="#5C2A3E">pink→rose→blue</text>
+    <rect x="20" y="206" width="68" height="48" rx="9" fill="#FFC8DD"/><text x="28" y="234" font-size="10" font-weight="700" fill="#5C2A3E">#FFC8DD</text>
+    <rect x="96" y="206" width="68" height="48" rx="9" fill="#FFAFCC"/><text x="104" y="234" font-size="10" font-weight="700" fill="#5C2A3E">#FFAFCC</text>
+    <rect x="172" y="206" width="68" height="48" rx="9" fill="#BDE0FE"/><text x="180" y="234" font-size="10" font-weight="700" fill="#1E3A52">#BDE0FE</text>
+    <rect x="248" y="206" width="62" height="48" rx="9" fill="#FDF6F9" stroke="#F3DCE6"/><text x="256" y="230" font-size="9.5" font-weight="700" fill="#361825">canvas</text>
+
+    <rect x="20" y="272" width="290" height="80" rx="12" fill="#FDF6F9" stroke="#F3DCE6"/>
+    <rect x="20" y="272" width="3" height="80" rx="2" fill="#D86A9C"/>
+    <rect x="34" y="288" width="4" height="18" rx="2" fill="url(#cc-btn)"/>
+    <text x="48" y="303" font-size="14" font-weight="700" fill="#361825">Team Reports</text>
+    <text x="48" y="322" font-size="11" fill="#9A6F81">Operational HR reporting</text>
+    <rect x="34" y="330" width="96" height="16" rx="8" fill="#FBE7EF"/><text x="44" y="342" font-size="9" fill="#D86A9C">PF · ESI · PT</text>
+
+    <rect x="20" y="366" width="130" height="38" rx="9" fill="url(#cc-btn)"/><text x="44" y="390" font-size="12.5" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="160" y="366" width="100" height="38" rx="9" fill="#FFF" stroke="#F3DCE6"/><text x="186" y="390" font-size="12.5" font-weight="600" fill="#D86A9C">Export</text>
+    <rect x="20" y="418" width="76" height="26" rx="13" fill="#FBE7EF"/><text x="34" y="435" font-size="10.5" fill="#D86A9C">Filter</text>
+    <rect x="106" y="418" width="64" height="26" rx="13" fill="#FFAFCC"/><text x="118" y="435" font-size="10.5" fill="#5C2A3E">Rose</text>
+    <rect x="180" y="418" width="64" height="26" rx="13" fill="#BDE0FE"/><text x="192" y="435" font-size="10.5" fill="#1E3A52">Blue</text>
+    <text x="20" y="476" font-size="12" fill="#9A6F81">Body copy in muted rose-grey for hints.</text>
+    <rect x="20" y="492" width="52" height="36" rx="9" fill="#1A8050"/><text x="27" y="515" font-size="9.5" fill="#FFF">success</text>
+    <rect x="80" y="492" width="52" height="36" rx="9" fill="#B07B18"/><text x="90" y="515" font-size="9.5" fill="#FFF">warn</text>
+    <rect x="140" y="492" width="52" height="36" rx="9" fill="#C93535"/><text x="150" y="515" font-size="9.5" fill="#FFF">alert</text>
+    <text x="20" y="560" font-size="11.5" fill="#361825" font-weight="600">Vibe: sweet, soft, friendly</text>
+    <text x="20" y="582" font-size="11" fill="#B58593">Pink-led, gentle and warm</text>
+  </g>
+
+  <!-- ===== C: LAVENDER MIST ===== -->
+  <g transform="translate(740,124)">
+    <rect x="0" y="0" width="330" height="700" rx="18" fill="#FFFFFF" stroke="#E5DEF0" stroke-width="1.5"/>
+    <rect x="0" y="0" width="330" height="64" rx="18" fill="url(#lm-nav)"/>
+    <rect x="0" y="40" width="330" height="24" fill="url(#lm-nav)"/>
+    <circle cx="34" cy="32" r="13" fill="#FFFFFF"/><text x="28" y="37" font-size="14" font-weight="800" fill="#6E5C9C">C</text>
+    <text x="56" y="37" font-size="14" font-weight="700" fill="#2E2645">Cognix</text><text x="116" y="37" font-size="14" font-weight="700" fill="#6E5C9C">HR</text>
+    <text x="20" y="100" font-size="20" font-weight="700" fill="#28223A">Lavender Mist</text>
+    <text x="20" y="122" font-size="12" fill="#797090">Soft lilac monochrome · serene</text>
+
+    <rect x="20" y="138" width="140" height="60" rx="10" fill="#8B7AB8"/><text x="32" y="172" font-size="13" font-weight="700" fill="#FFF">#8B7AB8</text><text x="32" y="189" font-size="10" fill="#DCD3EC">primary (buttons)</text>
+    <rect x="170" y="138" width="140" height="60" rx="10" fill="url(#lm-nav)"/><text x="182" y="172" font-size="11" font-weight="700" fill="#2E2645">soft top bar</text><text x="182" y="189" font-size="9" fill="#4A3F68">lilac mist</text>
+    <rect x="20" y="206" width="92" height="48" rx="9" fill="#CDB4DB"/><text x="28" y="234" font-size="10" font-weight="700" fill="#3A2B49">#CDB4DB accent</text>
+    <rect x="120" y="206" width="92" height="48" rx="9" fill="#ECE6F5"/><text x="128" y="234" font-size="10" font-weight="700" fill="#6E5C9C">#ECE6F5 tint</text>
+    <rect x="220" y="206" width="90" height="48" rx="9" fill="#F9F7FC" stroke="#E5DEF0"/><text x="228" y="234" font-size="9.5" font-weight="700" fill="#28223A">canvas</text>
+
+    <rect x="20" y="272" width="290" height="80" rx="12" fill="#F9F7FC" stroke="#E5DEF0"/>
+    <rect x="20" y="272" width="3" height="80" rx="2" fill="#8B7AB8"/>
+    <rect x="34" y="288" width="4" height="18" rx="2" fill="url(#lm-btn)"/>
+    <text x="48" y="303" font-size="14" font-weight="700" fill="#28223A">Team Reports</text>
+    <text x="48" y="322" font-size="11" fill="#797090">Operational HR reporting</text>
+    <rect x="34" y="330" width="96" height="16" rx="8" fill="#ECE6F5"/><text x="44" y="342" font-size="9" fill="#8B7AB8">PF · ESI · PT</text>
+
+    <rect x="20" y="366" width="130" height="38" rx="9" fill="url(#lm-btn)"/><text x="44" y="390" font-size="12.5" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="160" y="366" width="100" height="38" rx="9" fill="#FFF" stroke="#E5DEF0"/><text x="186" y="390" font-size="12.5" font-weight="600" fill="#8B7AB8">Export</text>
+    <rect x="20" y="418" width="76" height="26" rx="13" fill="#ECE6F5"/><text x="34" y="435" font-size="10.5" fill="#8B7AB8">Filter</text>
+    <rect x="106" y="418" width="100" height="26" rx="13" fill="url(#lm-btn)"/><text x="120" y="435" font-size="10.5" fill="#FFF">Active chip</text>
+    <text x="20" y="476" font-size="12" fill="#797090">Body copy in muted lavender-grey for hints.</text>
+    <rect x="20" y="492" width="52" height="36" rx="9" fill="#1A8050"/><text x="27" y="515" font-size="9.5" fill="#FFF">success</text>
+    <rect x="80" y="492" width="52" height="36" rx="9" fill="#B07B18"/><text x="90" y="515" font-size="9.5" fill="#FFF">warn</text>
+    <rect x="140" y="492" width="52" height="36" rx="9" fill="#C93535"/><text x="150" y="515" font-size="9.5" fill="#FFF">alert</text>
+    <text x="20" y="560" font-size="11.5" fill="#28223A" font-weight="600">Vibe: serene, elegant, restrained</text>
+    <text x="20" y="582" font-size="11" fill="#9890AE">Single-hue pastel — most "office-safe"</text>
+  </g>
+
+  <!-- ===== D: PEACH SORBET ===== -->
+  <g transform="translate(1090,124)">
+    <rect x="0" y="0" width="330" height="700" rx="18" fill="#FFFFFF" stroke="#F1DED5" stroke-width="1.5"/>
+    <rect x="0" y="0" width="330" height="64" rx="18" fill="url(#ps-nav)"/>
+    <rect x="0" y="40" width="330" height="24" fill="url(#ps-nav)"/>
+    <circle cx="34" cy="32" r="13" fill="#FFFFFF"/><text x="28" y="37" font-size="14" font-weight="800" fill="#C96E7E">C</text>
+    <text x="56" y="37" font-size="14" font-weight="700" fill="#4A2520">Cognix</text><text x="116" y="37" font-size="14" font-weight="700" fill="#C96E7E">HR</text>
+    <text x="20" y="100" font-size="20" font-weight="700" fill="#341E1B">Peach Sorbet</text>
+    <text x="20" y="122" font-size="12" fill="#997068">Warm peach + rose · cosy</text>
+
+    <rect x="20" y="138" width="140" height="60" rx="10" fill="#C96E7E"/><text x="32" y="172" font-size="13" font-weight="700" fill="#FFF">#C96E7E</text><text x="32" y="189" font-size="10" fill="#F4D8DC">primary (buttons)</text>
+    <rect x="170" y="138" width="140" height="60" rx="10" fill="url(#ps-nav)"/><text x="182" y="172" font-size="11" font-weight="700" fill="#4A2520">soft top bar</text><text x="182" y="189" font-size="9" fill="#5C322C">peach→rose</text>
+    <rect x="20" y="206" width="68" height="48" rx="9" fill="#FFD8C2"/><text x="28" y="234" font-size="10" font-weight="700" fill="#5C322C">#FFD8C2</text>
+    <rect x="96" y="206" width="68" height="48" rx="9" fill="#FFAFCC"/><text x="104" y="234" font-size="10" font-weight="700" fill="#5C2A3E">#FFAFCC</text>
+    <rect x="172" y="206" width="68" height="48" rx="9" fill="#FBEAE3"/><text x="180" y="234" font-size="10" font-weight="700" fill="#C96E7E">#FBEAE3</text>
+    <rect x="248" y="206" width="62" height="48" rx="9" fill="#FDF7F4" stroke="#F1DED5"/><text x="256" y="230" font-size="9.5" font-weight="700" fill="#341E1B">canvas</text>
+
+    <rect x="20" y="272" width="290" height="80" rx="12" fill="#FDF7F4" stroke="#F1DED5"/>
+    <rect x="20" y="272" width="3" height="80" rx="2" fill="#C96E7E"/>
+    <rect x="34" y="288" width="4" height="18" rx="2" fill="url(#ps-btn)"/>
+    <text x="48" y="303" font-size="14" font-weight="700" fill="#341E1B">Team Reports</text>
+    <text x="48" y="322" font-size="11" fill="#997068">Operational HR reporting</text>
+    <rect x="34" y="330" width="96" height="16" rx="8" fill="#FBEAE3"/><text x="44" y="342" font-size="9" fill="#C96E7E">PF · ESI · PT</text>
+
+    <rect x="20" y="366" width="130" height="38" rx="9" fill="url(#ps-btn)"/><text x="44" y="390" font-size="12.5" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="160" y="366" width="100" height="38" rx="9" fill="#FFF" stroke="#F1DED5"/><text x="186" y="390" font-size="12.5" font-weight="600" fill="#C96E7E">Export</text>
+    <rect x="20" y="418" width="76" height="26" rx="13" fill="#FBEAE3"/><text x="34" y="435" font-size="10.5" fill="#C96E7E">Filter</text>
+    <rect x="106" y="418" width="64" height="26" rx="13" fill="#FFD8C2"/><text x="116" y="435" font-size="10.5" fill="#5C322C">Peach</text>
+    <rect x="180" y="418" width="64" height="26" rx="13" fill="#FFAFCC"/><text x="192" y="435" font-size="10.5" fill="#5C2A3E">Rose</text>
+    <text x="20" y="476" font-size="12" fill="#997068">Body copy in muted peach-grey for hints.</text>
+    <rect x="20" y="492" width="52" height="36" rx="9" fill="#1A8050"/><text x="27" y="515" font-size="9.5" fill="#FFF">success</text>
+    <rect x="80" y="492" width="52" height="36" rx="9" fill="#B07B18"/><text x="90" y="515" font-size="9.5" fill="#FFF">warn</text>
+    <rect x="140" y="492" width="52" height="36" rx="9" fill="#C93535"/><text x="150" y="515" font-size="9.5" fill="#FFF">alert</text>
+    <text x="20" y="560" font-size="11.5" fill="#341E1B" font-weight="600">Vibe: cosy, warm, inviting</text>
+    <text x="20" y="582" font-size="11" fill="#B89088">Peach-led, the warmest pastel</text>
+  </g>
+</svg>
