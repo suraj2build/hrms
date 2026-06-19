@@ -93,15 +93,15 @@ export default function ClockWidget({ employeeName, onClockInSuccess, onClockOut
       <div>
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Attendance Portal</h3>
-            <span className="text-[10px] text-slate-400 font-medium">Verify daily presence metrics</span>
+            <h3 className="text-sm font-bold text-slate-900">ESS — Clock In / Out</h3>
+            <span className="text-[10px] text-slate-400 font-medium">GPS or Wi-Fi geofence verified</span>
           </div>
           <div className="flex gap-1.5 p-0.5 bg-slate-100 rounded-lg">
             <button
               onClick={() => !isClockedIn && setWorkMode('Office')}
               disabled={isClockedIn}
               className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${
-                workMode === 'Office' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-900 disabled:opacity-50'
+                workMode === 'Office' ? 'bg-white text-[#2E6FE6] shadow-xs' : 'text-slate-500 hover:text-slate-900 disabled:opacity-50'
               }`}
             >
               Office
@@ -110,7 +110,7 @@ export default function ClockWidget({ employeeName, onClockInSuccess, onClockOut
               onClick={() => !isClockedIn && setWorkMode('Remote')}
               disabled={isClockedIn}
               className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${
-                workMode === 'Remote' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-900 disabled:opacity-50'
+                workMode === 'Remote' ? 'bg-white text-[#2E6FE6] shadow-xs' : 'text-slate-500 hover:text-slate-900 disabled:opacity-50'
               }`}
             >
               Remote
@@ -126,10 +126,10 @@ export default function ClockWidget({ employeeName, onClockInSuccess, onClockOut
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-indigo-900/10 backdrop-blur-xs flex flex-col items-center justify-center z-10"
+                className="absolute inset-0 bg-[#2E6FE6]/10 backdrop-blur-xs flex flex-col items-center justify-center z-10"
               >
-                <div className="w-12 h-12 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mb-2" />
-                <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-widest font-mono">Running Geo-Scans...</span>
+                <div className="w-12 h-12 rounded-full border-2 border-[#2E6FE6] border-t-transparent animate-spin mb-2" />
+                <span className="text-[10px] font-bold text-[#1A4FA0] uppercase tracking-widest font-mono">Running Geo-Scans...</span>
               </motion.div>
             )}
           </AnimatePresence>
@@ -179,7 +179,7 @@ export default function ClockWidget({ employeeName, onClockInSuccess, onClockOut
           <button
             id="click-main-clockin"
             onClick={handleClockIn}
-            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-100 hover:shadow-indigo-200 transition-all flex items-center justify-center gap-2 text-xs"
+            className="w-full py-3.5 bg-[#2E6FE6] hover:bg-[#1A5FD5] text-white font-bold rounded-xl shadow-lg shadow-blue-100 hover:shadow-blue-200 transition-all flex items-center justify-center gap-2 text-xs"
           >
             <Play className="w-4 h-4 fill-white" />
             <span>Clock In Session</span>

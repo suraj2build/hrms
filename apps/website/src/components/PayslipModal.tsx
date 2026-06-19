@@ -89,14 +89,14 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
           {/* Company branding */}
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-800 text-white font-bold text-xl flex items-center justify-center">
-                E
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-[#2E6FE6] to-[#15B8A6] text-white font-bold text-base flex items-center justify-center tracking-tight">
+                ST
               </div>
               <div>
-                <h2 className="text-lg font-extrabold text-slate-950 uppercase tracking-wide">CognixHR Technologies Private Limited</h2>
+                <h2 className="text-lg font-extrabold text-slate-950 uppercase tracking-wide">Saar Technologies Pvt Ltd</h2>
                 <p className="text-[10px] text-slate-400 leading-normal max-w-[320px]">
-                  B-Block, 4th Floor, Sector 62, Noida, NCR, India.<br />
-                  CIN: U74999DL2026PTC334512 | contact@cognixhr.co
+                  4th Floor, Koramangala, Bengaluru — 560034, Karnataka, India.<br />
+                  CIN: U72900KA2016PTC087123 | hr@saartech.in
                 </p>
               </div>
             </div>
@@ -132,11 +132,11 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
 
             <div>
               <span className="text-slate-400 block font-medium">Bank Name</span>
-              <span className="font-semibold text-slate-800">Landmark Alliance Bank</span>
+              <span className="font-semibold text-slate-800">HDFC Bank</span>
             </div>
             <div>
               <span className="text-slate-400 block font-medium">Bank A/C Number</span>
-              <span className="font-mono text-slate-800">XXXX XXXX 9081</span>
+              <span className="font-mono text-slate-800">XXXX XXXX 4127</span>
             </div>
             <div>
               <span className="text-slate-400 block font-medium">Tax Identifier (PAN)</span>
@@ -212,19 +212,19 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
           </div>
 
           {/* Ledger summary & signature */}
-          <div className="bg-indigo-900 text-white rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="bg-[#0F1E3C] text-white rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div className="space-y-1">
-              <span className="text-[10px] font-bold font-mono tracking-wider text-indigo-300 uppercase block">Net Salary (A - B)</span>
+              <span className="text-[10px] font-bold font-mono tracking-wider text-[#2DD4BF] uppercase block">Net Salary (A - B)</span>
               <span className="text-2xl font-extrabold font-mono text-white">₹{(record.grossSalary + 2500 - (record.pfDeduction + record.taxDeduction + 200)).toLocaleString('en-IN')}</span>
-              <span className="text-[10px] text-indigo-200 italic block pt-1 font-medium font-sans">
+              <span className="text-[10px] text-blue-200 italic block pt-1 font-medium font-sans">
                 In words: {amountToWords(record.grossSalary + 2500 - (record.pfDeduction + record.taxDeduction + 200))}
               </span>
             </div>
-            <div className="flex items-center gap-3 bg-indigo-950 px-4 py-2 rounded-xl border border-indigo-800">
-              <Landmark className="w-5 h-5 text-indigo-400" />
+            <div className="flex items-center gap-3 bg-[#0A1628] px-4 py-2 rounded-xl border border-[#2E6FE6]/30">
+              <Landmark className="w-5 h-5 text-[#2DD4BF]" />
               <div className="text-left font-sans">
                 <span className="text-[9px] text-slate-400 uppercase font-mono block">Direct Bank Transfer Auth</span>
-                <span className="text-xs font-bold text-indigo-200 font-mono text-left">Ref: #TXN-908122-LAB</span>
+                <span className="text-xs font-bold text-blue-200 font-mono text-left">Ref: #TXN-SAR-2605-HDFC</span>
               </div>
             </div>
           </div>
@@ -232,10 +232,10 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[10px] text-slate-400 gap-4 pt-4">
             <div className="max-w-[400px]">
               <span className="font-semibold block">Declaration Note:</span>
-              <p className="leading-relaxed">This slip represents a digitally generated tax credit invoice, authenticated by CognixHR HR Services. No manual signature validation is legally required under standard IT compliance codes.</p>
+              <p className="leading-relaxed">This is a system-generated payslip from CognixHR HRMS, authenticated by Saar Technologies Pvt Ltd. EPF, ESI, PT and TDS have been computed per applicable statutory rules. No physical signature is required.</p>
             </div>
             <div className="text-right font-serif opacity-30 select-none text-2xl font-bold tracking-widest uppercase border border-dashed border-slate-400 px-4 py-1">
-              CognixHR SECURE
+              SAAR VERIFIED
             </div>
           </div>
 

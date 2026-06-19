@@ -4,7 +4,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-101",
     name: "Aditya Sharma",
-    email: "aditya.sharma@cognixhr.co",
+    email: "aditya.sharma@saartech.in",
     avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150&auto=format&fit=crop",
     role: "Lead Software Architect",
     department: "Engineering",
@@ -18,7 +18,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-102",
     name: "Priya Nair",
-    email: "priya.nair@cognixhr.co",
+    email: "priya.nair@saartech.in",
     avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop",
     role: "Senior UX Researcher",
     department: "Marketing",
@@ -32,7 +32,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-103",
     name: "Vikram Malhotra",
-    email: "vikram.m@cognixhr.co",
+    email: "vikram.m@saartech.in",
     avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=150&auto=format&fit=crop",
     role: "HR Operations Specialist",
     department: "HR",
@@ -46,7 +46,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-104",
     name: "Ananya Iyer",
-    email: "ananya.iyer@cognixhr.co",
+    email: "ananya.iyer@saartech.in",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop",
     role: "V.P. of Product Marketing",
     department: "Marketing",
@@ -60,7 +60,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-105",
     name: "Rohan Deshmukh",
-    email: "rohan.d@cognixhr.co",
+    email: "rohan.d@saartech.in",
     avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=150&auto=format&fit=crop",
     role: "DevOps Engineer",
     department: "Engineering",
@@ -74,7 +74,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-106",
     name: "Kavita Rao",
-    email: "kavita.rao@cognixhr.co",
+    email: "kavita.rao@saartech.in",
     avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=150&auto=format&fit=crop",
     role: "Chief Of HR / VP People Services",
     department: "HR",
@@ -88,7 +88,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-107",
     name: "Siddharth Verma",
-    email: "siddharth.v@cognixhr.co",
+    email: "siddharth.v@saartech.in",
     avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=150&auto=format&fit=crop",
     role: "Senior Sales Executive",
     department: "Sales",
@@ -102,7 +102,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: "EMP-108",
     name: "Meera Fernandez",
-    email: "meera.f@cognixhr.co",
+    email: "meera.f@saartech.in",
     avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=150&auto=format&fit=crop",
     role: "Senior Finance Controller",
     department: "Finance",

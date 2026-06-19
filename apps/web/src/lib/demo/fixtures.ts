@@ -725,6 +725,150 @@ export function demoMuster(month: string) {
   return { month, employees }
 }
 
+// ── Payroll run slips (summary list for admin slip-list panel) ──────────────
+
+export function demoPayrollRunSlips(runId: string) {
+  const runs = demoPayrollRuns()
+  const runIdx = runs.findIndex(r => r.id === runId)
+  const run = runs[runIdx] ?? runs[0]
+  const month = String(run.month)
+  return SEEDS.map(s => {
+    const { monthlyCtc, components } = demoCompensation(s.ctc)
+    const gross = Math.round(monthlyCtc * 0.92)
+    const deductions = Math.round(gross * 0.18)
+    const empContribs = Math.round(monthlyCtc * 0.135)
+    return {
+      slip_id: `slip-${s.id}-${month}`,
+      employee_id: s.id,
+      employee_name: `${s.first} ${s.last}`,
+      employee_code: s.code,
+      month,
+      total_working_days: 26,
+      payable_days: 26,
+      lop_days: 0,
+      overtime_hours: 0,
+      ctc_monthly: monthlyCtc,
+      gross_pay: gross,
+      lop_amount: 0,
+      total_deductions: deductions,
+      net_pay: gross - deductions,
+      employer_contributions: empContribs,
+      status: run.status === 'draft' ? 'draft' : 'finalized',
+      held_reason: null,
+      warning: null,
+      component_breakdown: components.map((c, idx) => ({
+        salary_component_id: `sc-${c.code}-${s.id}`,
+        name: c.name,
+        code: c.code,
+        component_type: c.type,
+        calc_type: c.calculation_type,
+        value: c.value,
+        monthly_amount: c.monthly_amount,
+        annual_amount: c.annual_amount,
+        sequence: idx + 1,
+      })),
+    }
+  })
+}
+
+/** Full payslip detail for a specific slip ID. */
+export function demoPayrollSlipDetail(slipId: string) {
+  // Parse emp ID from slip ID pattern slip-emp-XXXX-YYYY-MM
+  const empMatch = slipId.match(/slip-(emp-\d+)-(\d{4}-\d{2})/)
+  const empId = empMatch?.[1] ?? 'emp-0001'
+  const month = empMatch?.[2] ?? new Date().toISOString().slice(0, 7)
+  const s = SEEDS.find(e => e.id === empId) ?? SEEDS[0]
+  const { monthlyCtc, components } = demoCompensation(s.ctc)
+  const gross = Math.round(monthlyCtc * 0.92)
+  const deductions = Math.round(gross * 0.18)
+  const empContribs = Math.round(monthlyCtc * 0.135)
+  return {
+    slip_id: slipId,
+    employee_id: s.id,
+    employee_name: `${s.first} ${s.last}`,
+    employee_code: s.code,
+    month,
+    total_working_days: 26,
+    payable_days: 26,
+    lop_days: 0,
+    overtime_hours: 0,
+    ctc_monthly: monthlyCtc,
+    gross_pay: gross,
+    lop_amount: 0,
+    total_deductions: deductions,
+    net_pay: gross - deductions,
+    employer_contributions: empContribs,
+    status: 'finalized',
+    held_reason: null,
+    warning: null,
+    credit_date: `${month}-28`,
+    component_breakdown: components.map((c, idx) => ({
+      salary_component_id: `sc-${c.code}-${s.id}`,
+      name: c.name,
+      code: c.code,
+      component_type: c.type,
+      calc_type: c.calculation_type,
+      value: c.value,
+      monthly_amount: c.monthly_amount,
+      annual_amount: c.annual_amount,
+      sequence: idx + 1,
+    })),
+  }
+}
+
+/** Month-over-month variance report for a payroll run. */
+export function demoVarianceReport(runId: string) {
+  const runs = demoPayrollRuns()
+  const idx = runs.findIndex(r => r.id === runId)
+  const curr = runs[idx] ?? runs[0]
+  const prev = runs[idx + 1] ?? runs[1]
+  const grossChange = Number(curr.total_gross) - Number(prev.total_gross)
+  const netChange   = Number(curr.total_net)   - Number(prev.total_net)
+  return {
+    has_previous: true,
+    current_month: String(curr.month),
+    previous_month: String(prev.month),
+    summary: {
+      gross_change:       grossChange,
+      gross_change_pct:   Math.round((grossChange / Number(prev.total_gross)) * 1000) / 10,
+      net_change:         netChange,
+      net_change_pct:     Math.round((netChange / Number(prev.total_net)) * 1000) / 10,
+      employees_changed:  3,
+      total_employees:    SEEDS.length,
+      total_current_net:  Number(curr.total_net),
+      total_prev_net:     Number(prev.total_net),
+    },
+    employees: SEEDS.slice(0, 5).map(s => {
+      const { monthlyCtc, components } = demoCompensation(s.ctc)
+      const gross = Math.round(monthlyCtc * 0.92)
+      const ded   = Math.round(gross * 0.18)
+      const net   = gross - ded
+      return {
+        employee_id:   s.id,
+        employee_name: `${s.first} ${s.last}`,
+        employee_code: s.code,
+        is_new: false,
+        current:  { gross_pay: gross,   net_pay: net,   lop_days: 0, lop_amount: 0, payable_days: 26, total_deductions: ded },
+        previous: { gross_pay: gross - 2000, net_pay: net - 1600, lop_days: 0, lop_amount: 0, payable_days: 26, total_deductions: ded - 400 },
+        diff: { gross_pay: 2000, net_pay: 1600, lop_days: 0 },
+        component_breakdown: components.map(c => ({ code: c.code, name: c.name, component_type: c.type })),
+      }
+    }),
+  }
+}
+
+/** Payroll run detail (single run). */
+export function demoPayrollRunDetail(runId: string) {
+  const runs = demoPayrollRuns()
+  return runs.find(r => r.id === runId) ?? runs[0]
+}
+
+export const demoShifts = [
+  { id: 'shift-gen', tenant_id: DEMO_TENANT_ID, name: 'General Shift', code: 'GEN', start_time: '09:00', end_time: '18:00', duration_hours: 9, is_active: true, created_at: ISO(daysAgo(800)) },
+  { id: 'shift-early', tenant_id: DEMO_TENANT_ID, name: 'Early Shift', code: 'EARLY', start_time: '07:00', end_time: '16:00', duration_hours: 9, is_active: true, created_at: ISO(daysAgo(800)) },
+  { id: 'shift-night', tenant_id: DEMO_TENANT_ID, name: 'Night Shift', code: 'NIGHT', start_time: '22:00', end_time: '07:00', duration_hours: 9, is_active: true, created_at: ISO(daysAgo(800)) },
+]
+
 // ── Generic master list helpers ─────────────────────────────────────────────
 
 export const demoIdentityTypes = [
