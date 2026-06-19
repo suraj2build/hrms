@@ -22,9 +22,9 @@ import { useState } from 'react'
 import {
   User, UserCircle, History, LayoutGrid, CalendarClock, DollarSign,
   Landmark, Files, Users, Camera, Edit2, Check, X, Globe,
-  MapPin, Building2, Briefcase, GraduationCap, Phone, Mail,
+  MapPin, Building2, GraduationCap, Phone, Mail,
   BadgeCheck, Clock, FileText, ShieldCheck, AlertTriangle,
-  ChevronRight, Star, TrendingUp, Calendar, CreditCard,
+  ChevronRight, Star, TrendingUp, Calendar,
 } from 'lucide-react'
 
 // ── Minimal shadcn-compatible stubs (works in any shadcn/tailwind project) ─────

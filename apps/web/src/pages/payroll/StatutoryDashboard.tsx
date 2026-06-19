@@ -85,26 +85,6 @@ const SEV = {
   success:  { dot: 'bg-success',     text: 'text-success',     bg: 'bg-success/10',     ring: 'ring-success/25' },
 } as const
 
-// ── KPI card ─────────────────────────────────────────────────────────────────
-
-function Kpi({ label, value, sub, icon: Icon, tone }: {
-  label: string; value: string; sub?: string
-  icon: React.ElementType; tone?: Sev
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <span className={cn('flex h-7 w-7 items-center justify-center rounded-lg', tone ? SEV[tone].bg : 'bg-muted')}>
-          <Icon className={cn('h-3.5 w-3.5', tone ? SEV[tone].text : 'text-muted-foreground')} />
-        </span>
-      </div>
-      <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
-    </div>
-  )
-}
-
 // ── Module liability card ──────────────────────────────────────────────────────
 
 function ModuleCard({ label, icon: Icon, amount, covered, ready, onOpen }: {

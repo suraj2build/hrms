@@ -757,6 +757,16 @@ export function Attendance() {
     ? (opsStats?.active_period_summary ?? teamData?.today_summary)
     : teamData?.today_summary
 
+  // Field-name normaliser: active_period_summary and today_summary share core
+  // fields but each carries view-specific extras (and a legacy `on_leave`).
+  const summaryFields = todaySummary as (typeof todaySummary & {
+    leave?:           number
+    on_leave?:        number
+    payable_days?:    number
+    not_marked?:      number
+    total_employees?: number
+  })
+
   // Label for the KPI summary period — always the active month name (e.g. "May 2025")
   // Derives from attendance-period-context — no inline new Date() formatting
   const todaySummaryLabel = isAdmin && opsStats?.active_period_summary
@@ -1289,11 +1299,11 @@ export function Attendance() {
               <KpiChip label="Present"    value={todaySummary.present}    colorClass="text-success" />
               <KpiChip label="Late"       value={todaySummary.late}       colorClass="text-warning" />
               <KpiChip label="Absent"     value={todaySummary.absent}     colorClass="text-destructive" />
-              <KpiChip label="On Leave"   value={(todaySummary as any).leave ?? (todaySummary as any).on_leave ?? 0} colorClass="text-info" />
+              <KpiChip label="On Leave"   value={summaryFields.leave ?? summaryFields.on_leave ?? 0} colorClass="text-info" />
               {/* Payable days always available from active_period_summary; not_marked for manager view */}
               {'payable_days' in todaySummary
-                ? <KpiChip label="Payable Days" value={(todaySummary as any).payable_days} colorClass="text-success" />
-                : <KpiChip label="Not Marked"   value={(todaySummary as any).not_marked ?? 0} colorClass="text-muted-foreground" />
+                ? <KpiChip label="Payable Days" value={summaryFields.payable_days ?? 0} colorClass="text-success" />
+                : <KpiChip label="Not Marked"   value={summaryFields.not_marked ?? 0} colorClass="text-muted-foreground" />
               }
               <KpiChip
                 label="Anomalies"
@@ -1366,12 +1376,12 @@ export function Attendance() {
             <SectionCard
               title={`${todaySummaryLabel} Distribution`}
               icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
-              description={`Month total · ${todaySummaryLabel}${'total_employees' in todaySummary ? ` · ${(todaySummary as any).total_employees} employees` : ''}`}
+              description={`Month total · ${todaySummaryLabel}${'total_employees' in todaySummary ? ` · ${summaryFields.total_employees} employees` : ''}`}
             >
               {(() => {
                 // Normalise field names: active_period_summary uses 'leave',
                 // manager teamData.today_summary also uses 'leave'
-                const leaveVal  = (todaySummary as any).leave ?? (todaySummary as any).on_leave ?? 0
+                const leaveVal  = summaryFields.leave ?? summaryFields.on_leave ?? 0
                 const totalBase = Math.max(
                   1,
                   todaySummary.present + todaySummary.late + todaySummary.absent + leaveVal,
@@ -1382,8 +1392,8 @@ export function Attendance() {
                   { label: 'Absent',     value: todaySummary.absent,     barClass: 'bg-destructive' },
                   { label: 'On Leave',   value: leaveVal,                barClass: 'bg-info' },
                   'payable_days' in todaySummary
-                    ? { label: 'Payable Days', value: (todaySummary as any).payable_days, barClass: 'bg-success/60' }
-                    : { label: 'Not Marked',   value: (todaySummary as any).not_marked ?? 0, barClass: 'bg-muted-foreground/50' },
+                    ? { label: 'Payable Days', value: summaryFields.payable_days ?? 0, barClass: 'bg-success/60' }
+                    : { label: 'Not Marked',   value: summaryFields.not_marked ?? 0, barClass: 'bg-muted-foreground/50' },
                 ]
                 return (
                   <div className="space-y-2.5 mt-1">
@@ -2194,7 +2204,7 @@ export function Attendance() {
 
             {recomputeMutation.isError && (
               recomputeMutation.error instanceof ApiError && recomputeMutation.error.error === 'PERIOD_LOCKED' ? (
-                <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                <div className="flex items-start gap-2 text-xs text-warning p-3 rounded-md bg-warning/10 border border-warning/30">
                   <span>
                     Attendance cannot be recomputed because this period is locked for payroll.
                     Reopen the period before making attendance changes.

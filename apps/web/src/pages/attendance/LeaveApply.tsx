@@ -1588,24 +1588,24 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
     return (
       <div className="space-y-4">
         {/* DAYS REQUESTED — dark card */}
-        <div className="rounded-2xl bg-slate-900 dark:bg-slate-950 p-4 space-y-3">
+        <div className="rounded-2xl bg-card dark:bg-card p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
               Days Requested
             </span>
-            <span className="text-[9px] font-bold uppercase tracking-wide bg-slate-700/60 text-slate-300 px-2 py-0.5 rounded">
+            <span className="text-[9px] font-bold uppercase tracking-wide bg-muted text-muted-foreground px-2 py-0.5 rounded">
               {selectedLt?.name?.toUpperCase() ?? 'SELECT TYPE'}
             </span>
           </div>
           <div className="flex items-end gap-2">
             {durationFetching ? (
-              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             ) : (
               <span className="text-5xl font-bold font-display text-white/90 leading-none tabular-nums">
                 {computedDays > 0 ? computedDays : 0}
               </span>
             )}
-            <span className="text-sm text-slate-400 mb-1.5">days</span>
+            <span className="text-sm text-muted-foreground mb-1.5">days</span>
           </div>
           {/* Working / Holiday / Weekend / Sandwich stats */}
           <div className="grid grid-cols-4 gap-1.5">
@@ -1615,15 +1615,15 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
               { label: 'Weekend',  value: durationResult?.breakdown.weekend  ?? 0, cls: 'text-slate-400'   },
               { label: 'Sandwich', value: durationResult?.breakdown.sandwich ?? 0, cls: 'text-amber-400'   },
             ].map(({ label, value, cls }) => (
-              <div key={label} className="bg-slate-800/70 rounded-lg p-2 text-center">
+              <div key={label} className="bg-muted rounded-lg p-2 text-center">
                 <p className={cn('text-sm font-bold tabular-nums', cls)}>{value}</p>
-                <p className="text-[8px] text-slate-500 font-medium mt-0.5">{label}</p>
+                <p className="text-[8px] text-muted-foreground font-medium mt-0.5">{label}</p>
               </div>
             ))}
           </div>
           {/* Per-day breakdown table */}
           {durationResult?.breakdown?.per_day?.length ? (
-            <div className="border-t border-slate-700/60 pt-3">
+            <div className="border-t border-border pt-3">
               {renderEngineBreakdown()}
             </div>
           ) : null}
@@ -1875,7 +1875,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
                 type="button"
                 onClick={handleSubmit}
                 disabled={isPending || (!!fromDate && periodLocked)}
-                className="flex-1 bg-gradient-to-r from-primary to-violet-600 text-primary-foreground font-semibold gap-2"
+                className="flex-1 bg-gradient-to-r from-primary to-accent-violet text-primary-foreground font-semibold gap-2"
               >
                 {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
                 Submit Leave Request
@@ -1934,7 +1934,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
               type="button"
               onClick={handleSubmit}
               disabled={isPending || (!!fromDate && periodLocked)}
-              className="bg-gradient-to-r from-primary to-violet-600 text-primary-foreground font-semibold gap-2"
+              className="bg-gradient-to-r from-primary to-accent-violet text-primary-foreground font-semibold gap-2"
             >
               {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
               Submit Leave Request

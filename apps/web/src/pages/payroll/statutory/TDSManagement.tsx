@@ -19,7 +19,8 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
-import { Badge }         from '@/components/ui/badge'
+import { Badge, badgeVariants } from '@/components/ui/badge'
+import type { VariantProps } from 'class-variance-authority'
 import { Input }         from '@/components/ui/input'
 import {
   Dialog,
@@ -122,7 +123,9 @@ function currentFY(): string {
   return `${year}-${String(year + 1).slice(2)}`
 }
 
-const DECLARATION_STATUS_BADGE: Record<DeclarationStatus, string> = {
+type BadgeVariant = VariantProps<typeof badgeVariants>['variant']
+
+const DECLARATION_STATUS_BADGE: Record<DeclarationStatus, BadgeVariant> = {
   draft:              'outline',
   declared:           'outline',
   submitted:          'secondary',
@@ -135,7 +138,7 @@ const DECLARATION_STATUS_BADGE: Record<DeclarationStatus, string> = {
   archived:           'outline',
 }
 
-const DOCUMENT_STATE_BADGE: Record<DocumentState, string> = {
+const DOCUMENT_STATE_BADGE: Record<DocumentState, BadgeVariant> = {
   uploaded:     'outline',
   under_review: 'secondary',
   verified:     'success',
@@ -296,8 +299,8 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
     queryFn:   () => {
       const params = new URLSearchParams({ financial_year: financialYear })
       if (statusFilter) params.set('status', statusFilter)
-      return api.get(`/payroll/statutory/tds/declarations?${params}`)
-        .then((r: any) => Array.isArray(r?.data) ? r.data : [])
+      return api.get<{ data?: TaxDeclarationItem[] }>(`/payroll/statutory/tds/declarations?${params}`)
+        .then((r) => Array.isArray(r?.data) ? r.data : [])
     },
     staleTime: 30_000,
   })
@@ -310,7 +313,7 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
       qc.invalidateQueries({ queryKey: ['tds-declarations', financialYear] })
       toast.success('Declaration approved')
     },
-    onError: (e: any) => toast.error('Approval failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Approval failed', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   const rejectMutation = useMutation({
@@ -321,7 +324,7 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
       qc.invalidateQueries({ queryKey: ['tds-declarations', financialYear] })
       toast.success('Declaration rejected')
     },
-    onError: (e: any) => toast.error('Rejection failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Rejection failed', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   const revisionMutation = useMutation({
@@ -331,7 +334,7 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
       qc.invalidateQueries({ queryKey: ['tds-declarations', financialYear] })
       toast.success('Revision requested — employee notified')
     },
-    onError: (e: any) => toast.error('Failed to request revision', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed to request revision', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   if (isLoading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
@@ -403,7 +406,7 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
                   </td>
                   <td className="px-3 py-2">
                     <Badge
-                      variant={(DECLARATION_STATUS_BADGE[d.status] ?? 'secondary') as any}
+                      variant={DECLARATION_STATUS_BADGE[d.status] ?? 'secondary'}
                       className="rounded-full text-[10px] capitalize"
                     >
                       {d.status.replace('_', ' ')}
@@ -496,8 +499,8 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
     queryFn:   () => {
       const params = new URLSearchParams({ financial_year: financialYear })
       if (stateFilter) params.set('document_state', stateFilter)
-      return api.get(`/payroll/statutory/tds/proofs?${params}`)
-        .then((r: any) => Array.isArray(r?.data) ? r.data : [])
+      return api.get<{ data?: ProofRow[] }>(`/payroll/statutory/tds/proofs?${params}`)
+        .then((r) => Array.isArray(r?.data) ? r.data : [])
     },
     staleTime: 30_000,
   })
@@ -509,7 +512,7 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
       qc.invalidateQueries({ queryKey: ['tds-proofs', financialYear] })
       toast.success('Proof verified')
     },
-    onError: (e: any) => toast.error('Verification failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Verification failed', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   const rejectMutation = useMutation({
@@ -520,7 +523,7 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
       qc.invalidateQueries({ queryKey: ['tds-proofs', financialYear] })
       toast.success('Proof rejected')
     },
-    onError: (e: any) => toast.error('Rejection failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Rejection failed', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   if (isLoading) return <div className="flex items-center gap-2 py-8 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm">Loading…</span></div>
@@ -585,7 +588,7 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
                   </td>
                   <td className="px-3 py-2">
                     <Badge
-                      variant={(DOCUMENT_STATE_BADGE[p.document_state] ?? 'secondary') as any}
+                      variant={DOCUMENT_STATE_BADGE[p.document_state] ?? 'secondary'}
                       className="rounded-full text-[10px] capitalize"
                     >
                       {p.document_state.replace('_', ' ')}
@@ -646,8 +649,8 @@ function ProofSubmissionsTab({ financialYear }: { financialYear: string }) {
 function TDSProjectionsTab({ selectedMonth }: { selectedMonth: string }) {
   const { data: projections, isLoading, isError } = useQuery<TDSProjectionRow[]>({
     queryKey:  ['tds-projections', selectedMonth],
-    queryFn:   () => api.get(`/payroll/statutory/tds/projections?month=${selectedMonth}`)
-      .then((r: any) => Array.isArray(r?.data) ? r.data : []),
+    queryFn:   () => api.get<{ data?: TDSProjectionRow[] }>(`/payroll/statutory/tds/projections?month=${selectedMonth}`)
+      .then((r) => Array.isArray(r?.data) ? r.data : []),
     staleTime: 30_000,
   })
 
@@ -727,7 +730,6 @@ export function TDSManagement() {
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc          = useQueryClient()
 
-  const todayYM         = new Date().toISOString().slice(0, 7)
   const [activeTab,      setActiveTab]       = useState<TabId>('declarations')
   const [financialYear,  setFinancialYear]   = useState(currentFY())
   const [selectedMonth,  setSelectedMonth]   = useStatutoryMonth()   // shared across Compliance tabs

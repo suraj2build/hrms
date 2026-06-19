@@ -226,11 +226,11 @@ function MakerCheckerTab() {
 
   const { data: logs, isLoading } = useQuery<MakerCheckerLog[]>({
     queryKey: ['maker-checker-logs'],
-    queryFn: () => api.get('/payroll/governance/maker-checker').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: MakerCheckerLog[] }>('/payroll/governance/maker-checker').then(r => r.data),
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/payroll/governance/maker-checker/${id}/approve`).then((r: any) => r.data),
+    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/maker-checker/${id}/approve`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
       // Approval changes run status/stats — keep ops pages in sync
@@ -248,7 +248,7 @@ function MakerCheckerTab() {
 
   const rejectMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.post(`/payroll/governance/maker-checker/${id}/reject`, { reason }).then((r: any) => r.data),
+      api.post<{ data: unknown }>(`/payroll/governance/maker-checker/${id}/reject`, { reason }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
@@ -355,18 +355,18 @@ function PayrollFreezeTab() {
 
   const { data: freezeStatus, isLoading: loadingStatus } = useQuery<FreezeStatus>({
     queryKey: ['freeze-status', appliedMonth],
-    queryFn: () => api.get(`/payroll/governance/freeze?month=${appliedMonth}`).then((r: any) => r.data),
+    queryFn: () => api.get<{ data: FreezeStatus }>(`/payroll/governance/freeze?month=${appliedMonth}`).then(r => r.data),
     enabled: !!appliedMonth,
   })
 
   const { data: freezeLogs, isLoading: loadingLogs } = useQuery<PayrollFreezeLog[]>({
     queryKey: ['freeze-logs'],
-    queryFn: () => api.get('/payroll/governance/freeze').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: PayrollFreezeLog[] }>('/payroll/governance/freeze').then(r => r.data),
   })
 
   const freezeMutation = useMutation({
     mutationFn: ({ month, reason }: { month: string; reason: string }) =>
-      api.post('/payroll/governance/freeze', { month, reason }).then((r: any) => r.data),
+      api.post<{ data: unknown }>('/payroll/governance/freeze', { month, reason }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['freeze-status'] })
       queryClient.invalidateQueries({ queryKey: ['freeze-logs'] })
@@ -378,7 +378,7 @@ function PayrollFreezeTab() {
 
   const unfreezeMutation = useMutation({
     mutationFn: ({ month, reason }: { month: string; reason: string }) =>
-      api.post('/payroll/governance/unfreeze', { month, reason }).then((r: any) => r.data),
+      api.post<{ data: unknown }>('/payroll/governance/unfreeze', { month, reason }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['freeze-status'] })
       queryClient.invalidateQueries({ queryKey: ['freeze-logs'] })
@@ -511,12 +511,12 @@ function VarianceApprovalsTab() {
 
   const { data: variances, isLoading } = useQuery<VarianceApproval[]>({
     queryKey: ['variance-approvals', appliedMonth],
-    queryFn: () => api.get(`/payroll/governance/variances?month=${appliedMonth}`).then((r: any) => r.data),
+    queryFn: () => api.get<{ data: VarianceApproval[] }>(`/payroll/governance/variances?month=${appliedMonth}`).then(r => r.data),
     enabled: !!appliedMonth,
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/payroll/governance/variances/${id}/approve`).then((r: any) => r.data),
+    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variances/${id}/approve`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
@@ -530,7 +530,7 @@ function VarianceApprovalsTab() {
   })
 
   const rejectMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/payroll/governance/variances/${id}/reject`).then((r: any) => r.data),
+    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variances/${id}/reject`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })

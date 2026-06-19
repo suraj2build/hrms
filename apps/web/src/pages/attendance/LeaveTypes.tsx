@@ -167,7 +167,7 @@ export function LeaveTypes() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/masters/leave-types/${id}`),
-    onSuccess: (resp: any) => {
+    onSuccess: (resp: { deactivated?: boolean }) => {
       qc.invalidateQueries({ queryKey: ['leave-types'] })
       if (resp?.deactivated) {
         setSuccess('Leave type deactivated (existing applications reference it).')
@@ -176,7 +176,7 @@ export function LeaveTypes() {
         toast.success('Leave type deleted')
       }
     },
-    onError: (e: any) => toast.error('Delete failed', { description: (e as Error)?.message }),
+    onError: (e: unknown) => toast.error('Delete failed', { description: (e as Error)?.message }),
   })
 
   // ── Balance query + mutation ───────────────────────────────────────────────
@@ -195,7 +195,7 @@ export function LeaveTypes() {
       qc.invalidateQueries({ queryKey: ['leave-balance'] })
       toast.success('Balance updated')
     },
-    onError: (e: any) => toast.error('Failed to update balance', { description: (e as Error)?.message }),
+    onError: (e: unknown) => toast.error('Failed to update balance', { description: (e as Error)?.message }),
   })
 
   // ── Helpers ───────────────────────────────────────────────────────────────

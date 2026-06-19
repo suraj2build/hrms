@@ -164,7 +164,7 @@ function ESIRateBar({ config }: { config: ESIConfig }) {
       </p>
       <div className="h-3.5 w-full bg-muted rounded-full overflow-hidden flex">
         <div
-          className="bg-emerald-500 h-full hover:opacity-80 transition-opacity cursor-help"
+          className="bg-success h-full hover:opacity-80 transition-opacity cursor-help"
           style={{ width: `${(emp / total) * 100}%` }}
           title={`Employee Share: ${emp}%`}
         />
@@ -177,7 +177,7 @@ function ESIRateBar({ config }: { config: ESIConfig }) {
       <div className="grid grid-cols-2 gap-4 text-xs pt-1">
         <div>
           <div className="flex items-center gap-1.5 mb-1 text-[11px] text-muted-foreground">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+            <span className="h-2 w-2 rounded-full bg-success shrink-0" />
             <span>Employee Share</span>
           </div>
           <strong className="text-base text-foreground font-black font-mono">{emp}%</strong>
@@ -318,7 +318,7 @@ function EligibilityChecker() {
 
   const { data: eligibility, isLoading, isError, refetch } = useQuery<ESIEligibility>({
     queryKey: ['esi-eligibility-check', employeeId],
-    queryFn:  () => api.get(`/payroll/statutory/esi/eligibility?employee_id=${employeeId}`).then((r: any) => {
+    queryFn:  () => api.get<{ data?: { is_esi_applicable?: boolean; gross_wages?: number; reason?: string }[] }>(`/payroll/statutory/esi/eligibility?employee_id=${employeeId}`).then((r) => {
       const rows   = Array.isArray(r?.data) ? r.data : []
       const latest = rows[0]
       if (!latest) return { is_eligible: false, gross_wages: 0, reason: 'No eligibility record found' }
@@ -415,7 +415,7 @@ export function ESIManagement() {
     refetch: refetchConfig,
   } = useQuery<ESIConfig>({
     queryKey: ['esi-config'],
-    queryFn:  () => api.get('/payroll/statutory/esi/config').then((r: any) => r?.data ?? r),
+    queryFn:  () => api.get<{ data?: ESIConfig } & ESIConfig>('/payroll/statutory/esi/config').then((r) => r?.data ?? r),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -426,7 +426,7 @@ export function ESIManagement() {
     isLoading: registrationsLoading,
   } = useQuery<ESIRegistration[]>({
     queryKey: ['esi-registrations'],
-    queryFn:  () => api.get('/payroll/statutory/esi/registrations').then((r: any) => r?.data ?? []),
+    queryFn:  () => api.get<{ data?: ESIRegistration[] }>('/payroll/statutory/esi/registrations').then((r) => r?.data ?? []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -478,7 +478,7 @@ export function ESIManagement() {
   } = useQuery<ESIContribution[]>({
     queryKey: ['esi-contributions', viewMonth],
     queryFn:  () => api.get(`/payroll/statutory/esi/contributions?month=${viewMonth}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+      .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: ESIContribution[] }).data : []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -491,7 +491,10 @@ export function ESIManagement() {
       refetchContrib()
       toast.success('ESI contributions computed', { description: `Month ${month}` })
     },
-    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
+    onError: (e: unknown) => {
+      const err = e as { response?: { data?: { message?: string } }; message?: string }
+      toast.error('Compute failed', { description: err?.response?.data?.message ?? err?.message ?? 'Finalize the payroll run for this month first.' })
+    },
   })
 
   // ── Last 6 months (history table) ─────────────────────────────────────────────
@@ -499,7 +502,7 @@ export function ESIManagement() {
     queries: last6.map(ym => ({
       queryKey: ['esi-contributions', ym],
       queryFn:  () => api.get(`/payroll/statutory/esi/contributions?month=${ym}`)
-        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as Promise<ESIContribution[]>,
+        .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: ESIContribution[] }).data : []) as Promise<ESIContribution[]>,
       enabled:  isAdmin,
       staleTime: 120_000,
     })),
@@ -869,7 +872,7 @@ export function ESIManagement() {
                     <td className="px-3 py-2.5 text-xs font-mono">
                       {row.loading ? <span className="inline-block h-3 w-16 bg-muted rounded animate-pulse" /> : row.total === 0 ? <span className="text-muted-foreground">—</span> : fmtCurrency(row.wages)}
                     </td>
-                    <td className="px-3 py-2.5 text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <td className="px-3 py-2.5 text-xs font-mono text-success font-semibold">
                       {row.loading ? <span className="inline-block h-3 w-16 bg-muted rounded animate-pulse" /> : row.total === 0 ? <span className="text-muted-foreground">—</span> : fmtCurrency(row.empESI)}
                     </td>
                     <td className="px-3 py-2.5 text-xs font-mono text-primary font-semibold">

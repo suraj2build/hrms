@@ -144,7 +144,7 @@ export default function AttendanceAnomalies() {
   // (e.g. stale "no punch" after attendance was recomputed to present/leave).
   const reconcileMut = useMutation<{ scanned: number; auto_resolved: number }, Error>({
     mutationFn: () => api.post('/attendance/anomalies/reconcile', {}),
-    onSuccess: (res: any) => {
+    onSuccess: (res: { auto_resolved?: number; data?: { auto_resolved?: number } }) => {
       const r = res?.auto_resolved ?? res?.data?.auto_resolved ?? 0
       toast.success('Anomalies reconciled', {
         description: `${r} stale anomal${r === 1 ? 'y' : 'ies'} auto-resolved against current attendance.`,

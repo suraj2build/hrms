@@ -200,7 +200,7 @@ function EventRow({ event }: { event: ForensicEvent }) {
         <button className="w-full text-left" onClick={() => setExpanded(v => !v)}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge variant={cfg.variant as any} className="rounded-full text-[9px] gap-1">{cfg.icon}{cfg.label}</Badge>
+              <Badge variant={cfg.variant} className="rounded-full text-[9px] gap-1">{cfg.icon}{cfg.label}</Badge>
               {runMonth && <span className="text-xs text-muted-foreground">{fmtMonth(runMonth)}</span>}
               {empName  && <span className="text-xs text-foreground font-medium">{empName}</span>}
               {empCode  && <span className="text-[10px] text-muted-foreground font-mono">{empCode}</span>}
@@ -349,7 +349,7 @@ export function PayrollForensics() {
     staleTime: 30_000,
     enabled: activeTab === 'timeline',
   })
-  const allEvents = eventsRaw?.data ?? []
+  const allEvents = useMemo(() => eventsRaw?.data ?? [], [eventsRaw])
   const total     = eventsRaw?.total ?? 0
 
   // ── Snapshot for selected run ──────────────────────────────────────────────
@@ -402,8 +402,8 @@ export function PayrollForensics() {
   // ── Mutations ──────────────────────────────────────────────────────────────
   const replayMutation = useMutation({
     mutationFn: ({ runId, type }: { runId: string; type: string }) =>
-      api.post(`/payroll/runs/${runId}/replay`, { replay_type: type }),
-    onSuccess: (res: any) => {
+      api.post<{ data: ReplayResult & { variance_detected: boolean } }>(`/payroll/runs/${runId}/replay`, { replay_type: type }),
+    onSuccess: (res) => {
       setReplayResult(res.data)
       queryClient.invalidateQueries({ queryKey: ['replay-sessions', selectedRunId] })
       if (res.data?.variance_detected) {
@@ -416,8 +416,8 @@ export function PayrollForensics() {
   })
 
   const verifyMutation = useMutation({
-    mutationFn: (runId: string) => api.post(`/payroll/runs/${runId}/verify-integrity`, {}),
-    onSuccess: (res: any) => {
+    mutationFn: (runId: string) => api.post<{ data: { valid: boolean; stored_hash: string; computed_hash: string; employee_count: number } }>(`/payroll/runs/${runId}/verify-integrity`, {}),
+    onSuccess: (res) => {
       setIntegrityResult(res.data)
       if (res.data?.valid) {
         toast.success('Integrity verified — snapshot is intact')

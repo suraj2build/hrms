@@ -374,7 +374,7 @@ export function PayrollExplainabilityPanel() {
     enabled:  !!runId && !!snapshot,
     staleTime: 120_000,
   })
-  const allEmps  = empRaw?.data ?? []
+  const allEmps  = useMemo(() => empRaw?.data ?? [], [empRaw])
   const totalEmp = empRaw?.total ?? 0
 
   const isLoading = snapLoading || empLoading

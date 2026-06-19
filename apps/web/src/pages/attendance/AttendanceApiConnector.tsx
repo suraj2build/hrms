@@ -9,7 +9,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Link2, Wifi, WifiOff, Play, Settings2, Trash2,
+  Plus, Link2, Wifi, Play, Settings2, Trash2,
   RefreshCw, ChevronRight, ChevronDown, Eye, EyeOff,
   CheckCircle2, XCircle, Clock, Zap, AlertTriangle,
 } from 'lucide-react'
@@ -213,7 +213,7 @@ function SourceCard({
         <span className="flex items-center gap-1">
           {source.last_fetch_status === 'success' && <CheckCircle2 className="h-3 w-3 text-success" />}
           {source.last_fetch_status === 'error'   && <XCircle      className="h-3 w-3 text-destructive" />}
-          {source.last_fetch_status === 'running' && <RefreshCw    className="h-3 w-3 text-blue-500 animate-spin" />}
+          {source.last_fetch_status === 'running' && <RefreshCw    className="h-3 w-3 text-primary animate-spin" />}
           {(!source.last_fetch_status || source.last_fetch_status === 'never_run') && <Zap className="h-3 w-3" />}
           <span className={statusColor}>
             {source.last_fetch_status === 'success' && `${source.last_fetch_count ?? 0} records · ${timeSince(source.last_fetched_at)}`}
@@ -516,8 +516,8 @@ export function AttendanceApiConnector() {
         response_path: form.response_path || undefined,
       })
       setTestResult(res as TestResult)
-    } catch (e: any) {
-      setTestResult({ success: false, status: 0, latency_ms: 0, sample: [], total: 0, error: e?.message ?? 'Request failed' })
+    } catch (e: unknown) {
+      setTestResult({ success: false, status: 0, latency_ms: 0, sample: [], total: 0, error: e instanceof Error ? e.message : 'Request failed' })
     } finally {
       setTestLoading(false)
     }
@@ -538,11 +538,11 @@ export function AttendanceApiConnector() {
     setFetchingId(id)
     setFetchResult(null)
     try {
-      const res = await api.post(`/attendance/api-sources/${id}/fetch`) as any
+      const res = await api.post(`/attendance/api-sources/${id}/fetch`) as { ingested?: number }
       setFetchResult({ id, message: `${res.ingested} records ingested`, ok: true })
       qc.invalidateQueries({ queryKey: ['attendance-api-sources'] })
-    } catch (e: any) {
-      setFetchResult({ id, message: e?.message ?? 'Fetch failed', ok: false })
+    } catch (e: unknown) {
+      setFetchResult({ id, message: e instanceof Error ? e.message : 'Fetch failed', ok: false })
     } finally {
       setFetchingId(null)
     }
@@ -663,7 +663,7 @@ export function AttendanceApiConnector() {
                 </div>
 
                 {saveMutation.isError && (
-                  <p className="text-xs text-destructive">{(saveMutation.error as any)?.message ?? 'Save failed'}</p>
+                  <p className="text-xs text-destructive">{saveMutation.error instanceof Error ? saveMutation.error.message : 'Save failed'}</p>
                 )}
               </div>
             </SectionCard>

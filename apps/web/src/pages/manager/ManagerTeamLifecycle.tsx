@@ -12,7 +12,6 @@
  * Manager clearance reuses the existing PATCH separation-clearances endpoint.
  */
 
-import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -101,7 +100,7 @@ export function ManagerTeamLifecycle() {
     mutationFn: (employeeId: string) =>
       api.post('/manager/team/lifecycle/confirmation-recommend', { employee_id: employeeId }),
     onSuccess: () => toast.success('Confirmation recommended — sent to HR for review'),
-    onError:   (e: any) => toast.error(e?.message ?? 'Failed to send recommendation'),
+    onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to send recommendation'),
   })
 
   // Manager clearance action (reuses existing separation-clearances endpoint)
@@ -109,7 +108,7 @@ export function ManagerTeamLifecycle() {
     mutationFn: (p: { employeeId: string; clearanceId: string; status: 'cleared' | 'rejected' }) =>
       api.patch(`/employees/${p.employeeId}/separation-clearances/${p.clearanceId}`, { status: p.status }),
     onSuccess: (_d, p) => { toast.success(`Manager clearance ${p.status}`); invalidate() },
-    onError:   (e: any) => toast.error(e?.message ?? 'Failed to update clearance'),
+    onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update clearance'),
   })
 
   if (isLoading) {

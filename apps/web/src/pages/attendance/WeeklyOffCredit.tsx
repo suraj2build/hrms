@@ -68,12 +68,12 @@ export function WeeklyOffCredit() {
 
   const { data: structures = [] } = useQuery<WoStructure[]>({
     queryKey: ['wo-credit', 'structures'],
-    queryFn: () => api.get('/attendance/wo-credit/structures').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: WoStructure[] }>('/attendance/wo-credit/structures').then(r => r.data),
   })
 
   const { data: rosters = [] } = useQuery<Roster[]>({
     queryKey: ['rosters'],
-    queryFn: () => api.get('/masters/rosters').then((r: any) => r.data ?? r),
+    queryFn: () => api.get<{ data?: Roster[] }>('/masters/rosters').then(r => r.data ?? (r as unknown as Roster[])),
   })
 
   const { data: review } = useQuery<{ data: ReviewRow[] }>({
@@ -86,8 +86,8 @@ export function WeeklyOffCredit() {
   const { data: periodLock } = useQuery<{ state: string } | null>({
     queryKey: ['period-lock', monthKey],
     queryFn: () =>
-      api.get(`/attendance/period-locks/${monthKey}`)
-        .then((r: any) => r?.data ?? r ?? null)
+      api.get<{ data?: { state: string }; state?: string } | null>(`/attendance/period-locks/${monthKey}`)
+        .then(r => (r?.data ?? r ?? null) as { state: string } | null)
         .catch(() => null),
     enabled: tab === 'review',
     staleTime: 30_000,
@@ -117,7 +117,7 @@ export function WeeklyOffCredit() {
 
   const reconcile = useMutation({
     mutationFn: () => api.post('/attendance/wo-credit/reconcile', { year, month }),
-    onSuccess: (r: any) => {
+    onSuccess: (r: { data?: { applied: number; pending: number; carried: number } }) => {
       qc.invalidateQueries({ queryKey: ['wo-credit', 'review'] })
       const d = r?.data
       toast.success('Reconciliation complete', { description: d ? `${d.applied} applied · ${d.pending} pending · ${d.carried} carried` : undefined })
@@ -133,7 +133,7 @@ export function WeeklyOffCredit() {
 
   const finalize = useMutation({
     mutationFn: () => api.post('/attendance/wo-credit/finalize', { year, month }),
-    onSuccess: (r: any) => {
+    onSuccess: (r: { data?: { credited: number; lop: number } }) => {
       qc.invalidateQueries({ queryKey: ['wo-credit', 'review'] })
       const d = r?.data
       toast.success('Month finalised', { description: d ? `${d.credited} carried-over · ${d.lop} LOP day(s)` : undefined })
@@ -249,7 +249,7 @@ export function WeeklyOffCredit() {
           }
         >
           {periodLocked && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-300 mb-4">
+            <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-warning mb-4">
               <Lock className="h-4 w-4 shrink-0 mt-0.5" />
               <div>
                 <span className="font-medium">Locked for Payroll</span>
@@ -289,7 +289,7 @@ export function WeeklyOffCredit() {
                       <td className="py-2 px-2 text-right">{r.holiday_worked_days}</td>
                       <td className="py-2 px-2 text-right font-semibold">{r.earned_credit}</td>
                       <td className="py-2 px-2 text-right text-success">{r.auto_applied}</td>
-                      <td className="py-2 px-2 text-right text-amber-600">{r.pending_absent_days}</td>
+                      <td className="py-2 px-2 text-right text-warning">{r.pending_absent_days}</td>
                       <td className="py-2 px-2 text-right">{r.carried_out}</td>
                       <td className="py-2 px-2 text-right text-destructive">{r.lop_days}</td>
                       <td className="py-2 px-2 text-right">{r.extra_pay_days}</td>
@@ -333,7 +333,7 @@ function StructureEditor({ value, onChange, onSave, onCancel, saving }: {
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1 block">Monthly cap</label>
-          <select value={value.monthly_cap ?? 'sundays'} onChange={e => onChange({ ...value, monthly_cap: e.target.value as any })}
+          <select value={value.monthly_cap ?? 'sundays'} onChange={e => onChange({ ...value, monthly_cap: e.target.value as WoStructure['monthly_cap'] })}
             className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground">
             <option value="sundays">Number of Sundays</option>
             <option value="none">No cap</option>
@@ -341,7 +341,7 @@ function StructureEditor({ value, onChange, onSave, onCancel, saving }: {
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1 block">Working a holiday earns</label>
-          <select value={value.holiday_work_reward ?? 'wo_credit'} onChange={e => onChange({ ...value, holiday_work_reward: e.target.value as any })}
+          <select value={value.holiday_work_reward ?? 'wo_credit'} onChange={e => onChange({ ...value, holiday_work_reward: e.target.value as WoStructure['holiday_work_reward'] })}
             className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground">
             <option value="wo_credit">Extra WO credit</option>
             <option value="extra_pay">Extra pay day</option>

@@ -71,7 +71,7 @@ export function ManagerTeamHelpdesk() {
     staleTime: 60_000,
   })
 
-  const tickets = data?.data ?? []
+  const tickets = useMemo(() => data?.data ?? [], [data])
   const summary = data?.summary
 
   const filtered = useMemo(() => {

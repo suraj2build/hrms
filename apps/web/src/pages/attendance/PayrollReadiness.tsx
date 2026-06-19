@@ -69,7 +69,6 @@ function statusIcon(status: ChecklistItem['status'], count: number | null) {
 }
 
 function monthLabel(m: string): string {
-  const [y, mo] = m.split('-').map(Number)
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   if (isNaN(d.getTime())) return '—'
@@ -204,7 +203,7 @@ export function PayrollReadiness() {
 
   // ── Build checklist ──────────────────────────────────────────────────────────
 
-  const pendingLeavesCount = (pendingLeavesData?.total ?? (pendingLeavesData as any)?.data?.length) as number | undefined
+  const pendingLeavesCount = (pendingLeavesData?.total ?? (pendingLeavesData as { data?: unknown[] })?.data?.length) as number | undefined
   const pendingRegCount    = Array.isArray(pendingRegData?.data) ? pendingRegData!.data.length : (pendingRegData?.total ?? 0)
   const pendingOtCount     = Array.isArray(pendingOtData?.data)  ? pendingOtData!.data.length  : (pendingOtData?.total  ?? 0)
   const pendingCoCount     = Array.isArray(pendingCoData?.data)  ? pendingCoData!.data.length  : (pendingCoData?.total  ?? 0)

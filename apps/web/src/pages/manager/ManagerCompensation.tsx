@@ -114,7 +114,7 @@ function RecommendDialog({ member, onClose }: { member: TeamComp; onClose: () =>
       toast.success('Recommendation submitted to HR for approval')
       onClose()
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Could not submit recommendation'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not submit recommendation'),
   })
 
   const canSubmit = newCtc != null && newCtc > 0 && !!effective && reason.trim().length >= 5 && !submit.isPending
@@ -256,7 +256,7 @@ export function ManagerCompensation() {
     staleTime: 120_000,
   })
 
-  const team: TeamComp[] = data?.data ?? []
+  const team: TeamComp[] = useMemo(() => data?.data ?? [], [data])
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
     if (!s) return team

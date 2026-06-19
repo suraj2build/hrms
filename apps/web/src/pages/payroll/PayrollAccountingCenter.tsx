@@ -30,7 +30,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
-import { api }           from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -88,6 +88,17 @@ interface PayrollRun {
   id:    string
   month: string
   status: string
+}
+
+interface GLMapping {
+  id:             string
+  component_code: string | null
+  component_type: string
+  debit_gl_code:  string
+  debit_gl_name:  string
+  credit_gl_code: string
+  credit_gl_name: string
+  is_active:      boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -286,9 +297,9 @@ export function PayrollAccountingCenter() {
     enabled:  !!selectedRunId && activeTab === 'cost-centers',
     staleTime: 60_000,
   })
-  const costRows = costAllRaw?.data ?? []
+  const costRows = useMemo(() => costAllRaw?.data ?? [], [costAllRaw])
 
-  const { data: glMappingsRaw } = useQuery<{ data: any[] }>({
+  const { data: glMappingsRaw } = useQuery<{ data: GLMapping[] }>({
     queryKey: ['gl-mappings'],
     queryFn:  () => api.get('/payroll/gl-mappings'),
     staleTime: 300_000,
@@ -304,17 +315,17 @@ export function PayrollAccountingCenter() {
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
       queryClient.invalidateQueries({ queryKey: ['accounting-summary'] })
     },
-    onError: (e: any) => {
+    onError: (e: unknown) => {
       // 409 SNAPSHOT_REQUIRED is actionable: the run has no immutable snapshot to
       // derive accounting from (usually because it isn't finalized). Show the
       // precise backend guidance instead of a generic failure.
-      if (e?.statusCode === 409 && e?.error === 'SNAPSHOT_REQUIRED') {
+      if (e instanceof ApiError && e.statusCode === 409 && e.error === 'SNAPSHOT_REQUIRED') {
         toast.error(e.message ?? 'Generate the payroll snapshot first', {
           description: 'Finalize the run, then use “Generate Snapshot”.',
         })
         return
       }
-      toast.error(e?.message ?? 'Failed to generate ledger')
+      toast.error(e instanceof Error ? e.message : 'Failed to generate ledger')
     },
   })
 
@@ -324,7 +335,7 @@ export function PayrollAccountingCenter() {
       toast.success('Payroll snapshot generated')
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Could not generate snapshot — finalize the run first'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not generate snapshot — finalize the run first'),
   })
 
   const postLedgerMutation = useMutation({
@@ -333,7 +344,7 @@ export function PayrollAccountingCenter() {
       toast.success('Ledger posted')
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Post failed'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Post failed'),
   })
 
   const reverseMutation = useMutation({
@@ -344,7 +355,7 @@ export function PayrollAccountingCenter() {
       setReverseReason('')
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Reversal failed'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Reversal failed'),
   })
 
   const seedMappingsMutation = useMutation({
@@ -686,7 +697,7 @@ export function PayrollAccountingCenter() {
                   </tr>
                 </thead>
                 <tbody>
-                  {glMappings.map((m: any) => (
+                  {glMappings.map((m) => (
                     <tr key={m.id} className="border-b border-border/50 hover:bg-muted/20">
                       <td className="px-4 py-2 font-mono text-[10px]">{m.component_code ?? <span className="text-muted-foreground italic">default</span>}</td>
                       <td className="px-4 py-2"><Badge variant="outline" className="text-[9px] rounded-full">{m.component_type}</Badge></td>

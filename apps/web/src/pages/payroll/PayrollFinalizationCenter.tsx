@@ -88,7 +88,29 @@ interface SlipSummary {
   status:        string
 }
 
+// EPF/ESI operational rows used by the statutory intel strip. The backend
+// shapes differ slightly per source, so fields are optional.
+interface StatutoryRow {
+  employee_id?:       string
+  employee_code?:     string
+  employee_name?:     string
+  employees?:         { first_name?: string; last_name?: string; employee_code?: string }
+  is_capped?:         boolean
+  continuation_until?: string
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Extract a human-readable message from a thrown API/mutation error. */
+function errMessage(e: unknown, fallback: string): string {
+  if (e && typeof e === 'object') {
+    const resp = (e as { response?: { data?: { message?: unknown } } }).response
+    if (typeof resp?.data?.message === 'string') return resp.data.message
+    const msg = (e as { message?: unknown }).message
+    if (typeof msg === 'string') return msg
+  }
+  return fallback
+}
 
 function fmtCurrency(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
@@ -157,16 +179,6 @@ export function PayrollFinalizationCenter() {
   const isAdmin      = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const isSuperAdmin = profile?.role === 'super_admin'
 
-  // Guard: this page must never render for non-admin roles
-  if (!isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <ShieldAlert className="h-10 w-10 text-destructive/40" />
-        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
-      </div>
-    )
-  }
-
   const [finalizeOpen,  setFinalizeOpen]  = useState(false)
   const [rollbackOpen,  setRollbackOpen]  = useState(false)
   const [deleteRunOpen, setDeleteRunOpen] = useState(false)
@@ -224,7 +236,7 @@ export function PayrollFinalizationCenter() {
   const zeroNetSlips = slips.filter(s => s.net_pay <= 0)
 
   // Freeze log
-  const { data: freezeLogRaw } = useQuery<{ data: any[] }>({
+  const { data: freezeLogRaw } = useQuery<{ data: Array<{ action?: string; freeze_month?: string }> }>({
     queryKey: ['freeze-log'],
     queryFn:  () => api.get('/payroll/freeze-log'),
     staleTime: 60_000,
@@ -234,13 +246,13 @@ export function PayrollFinalizationCenter() {
 
   // ── Statutory intel — EPF & ESI operational counters ──────────────────────
   // Loaded lazily once we have a run; used in the statutory intel strip.
-  const { data: epfContribRaw } = useQuery<{ data: any[] }>({
+  const { data: epfContribRaw } = useQuery<{ data: StatutoryRow[] }>({
     queryKey: ['epf-contrib-finalize', run?.month],
     queryFn:  () => api.get(`/payroll/statutory/epf/contributions?month=${run!.month}`),
     enabled:  !!run?.month,
     staleTime: 120_000,
   })
-  const { data: esiEligRaw } = useQuery<{ data: any[] }>({
+  const { data: esiEligRaw } = useQuery<{ data: StatutoryRow[] }>({
     queryKey: ['esi-elig-finalize', run?.month],
     queryFn:  () => api.get('/payroll/statutory/esi/eligibility?active_only=true'),
     enabled:  !!run?.month,
@@ -250,13 +262,13 @@ export function PayrollFinalizationCenter() {
   const epfContribs = epfContribRaw?.data ?? []
   const esiEligRows = esiEligRaw?.data ?? []
 
-  const pfCappedCount   = epfContribs.filter((r: any) => r.is_capped === true).length
-  const pfActualCount   = epfContribs.filter((r: any) => r.is_capped === false).length
+  const pfCappedCount   = epfContribs.filter(r => r.is_capped === true).length
+  const pfActualCount   = epfContribs.filter(r => r.is_capped === false).length
 
   // ESI continuation: rows where continuation_until is set and >= today
   const today = new Date().toISOString().slice(0, 10)
   const esiContinuationCount = esiEligRows.filter(
-    (r: any) => r.continuation_until && r.continuation_until >= today,
+    r => r.continuation_until && r.continuation_until >= today,
   ).length
 
   const hasStatutoryIntel = epfContribs.length > 0 || esiEligRows.length > 0
@@ -278,10 +290,10 @@ export function PayrollFinalizationCenter() {
   // Clickable chip: expanded employee list
   const [expandedChip, setExpandedChip] = useState<'capped' | 'actual' | 'continuation' | null>(null)
 
-  const cappedEmployees    = epfContribs.filter((r: any) => r.is_capped === true)
-  const actualEmployees    = epfContribs.filter((r: any) => r.is_capped === false)
+  const cappedEmployees    = epfContribs.filter(r => r.is_capped === true)
+  const actualEmployees    = epfContribs.filter(r => r.is_capped === false)
   const continuationEmps   = esiEligRows.filter(
-    (r: any) => r.continuation_until && r.continuation_until >= today,
+    r => r.continuation_until && r.continuation_until >= today,
   )
 
   // ── Checklist computation ──────────────────────────────────────────────────
@@ -341,7 +353,7 @@ export function PayrollFinalizationCenter() {
       queryClient.invalidateQueries({ queryKey: ['payroll-runs-finalize'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Finalization failed'),
+    onError: (e: unknown) => toast.error(errMessage(e, 'Finalization failed')),
   })
 
   const rollbackMutation = useMutation({
@@ -353,7 +365,7 @@ export function PayrollFinalizationCenter() {
       queryClient.invalidateQueries({ queryKey: ['payroll-runs-finalize'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Rollback failed'),
+    onError: (e: unknown) => toast.error(errMessage(e, 'Rollback failed')),
   })
 
   const deleteRunMutation = useMutation({
@@ -365,7 +377,7 @@ export function PayrollFinalizationCenter() {
       queryClient.invalidateQueries({ queryKey: ['payroll-runs-finalize'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? e?.message ?? 'Delete failed'),
+    onError: (e: unknown) => toast.error(errMessage(e, 'Delete failed')),
   })
 
   const freezeMutation = useMutation({
@@ -376,7 +388,7 @@ export function PayrollFinalizationCenter() {
       setFreezeReason('')
       queryClient.invalidateQueries({ queryKey: ['freeze-log'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Freeze failed'),
+    onError: (e: unknown) => toast.error(errMessage(e, 'Freeze failed')),
   })
 
   const unfreezeMutation = useMutation({
@@ -387,12 +399,12 @@ export function PayrollFinalizationCenter() {
       setUnfreezeReason('')
       queryClient.invalidateQueries({ queryKey: ['freeze-log'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Unfreeze failed'),
+    onError: (e: unknown) => toast.error(errMessage(e, 'Unfreeze failed')),
   })
 
   const exportMutation = useMutation({
     mutationFn: () => api.get(`/payroll/runs/${run!.id}/export`),
-    onSuccess: (data: any) => {
+    onSuccess: (data: { data?: Array<{ employee_code?: string; employee_name?: string; account_number_masked?: string; ifsc_code?: string; net_pay?: number }> }) => {
       // Build CSV from export data
       const rows: string[][] = [['Employee Code', 'Employee Name', 'Account (Masked)', 'IFSC', 'Net Pay']]
       for (const s of (data?.data ?? [])) {
@@ -410,6 +422,16 @@ export function PayrollFinalizationCenter() {
     },
     onError: () => toast.error('Export failed'),
   })
+
+  // Guard: this page must never render for non-admin roles
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <ShieldAlert className="h-10 w-10 text-destructive/40" />
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
 
   if (runsLoading) {
     return (
@@ -724,7 +746,7 @@ export function PayrollFinalizationCenter() {
                         <p className="px-3 py-2 text-xs text-muted-foreground">{emptyMsg}</p>
                       ) : (
                         <div className="max-h-40 overflow-y-auto">
-                          {rows.map((r: any, i: number) => (
+                          {rows.map((r, i) => (
                             <div key={i} className="flex items-center justify-between px-3 py-1.5 border-b border-border/40 last:border-0">
                               <span className="text-xs font-medium">
                                 {r.employees

@@ -93,17 +93,17 @@ export function IncrementCycle() {
 
   const previewMut = useMutation({
     mutationFn: () => api.post<BulkResult>('/compensation/revisions/bulk', { ...basePayload, dry_run: true }),
-    onSuccess: (res: any) => setPreview(res),
-    onError: (e: any) => toast.error(e?.message ?? 'Preview failed'),
+    onSuccess: (res) => setPreview(res),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Preview failed'),
   })
 
   const commitMut = useMutation({
     mutationFn: () => api.post<BulkResult>('/compensation/revisions/bulk', { ...basePayload, dry_run: false }),
-    onSuccess: (res: any) => {
+    onSuccess: (res) => {
       toast.success(`${res.created_count} revision${res.created_count === 1 ? '' : 's'} created — pending HR approval`)
       navigate('/admin/payroll/compensation-revisions')
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to generate revisions'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to generate revisions'),
   })
 
   const totalUplift = (preview?.created ?? []).reduce((s, r) => s + r.delta_amount, 0)

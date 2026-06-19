@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   CalendarClock, AlertTriangle, Clock, CheckCircle2, Loader2, AlertCircle, Landmark,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -41,7 +42,7 @@ interface CalendarResp {
 const fmtDate = (iso: string) =>
   new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
-const STATUS_META: Record<Status, { label: string; icon: any; cls: string; chip: string }> = {
+const STATUS_META: Record<Status, { label: string; icon: LucideIcon; cls: string; chip: string }> = {
   overdue:   { label: 'Overdue',   icon: AlertTriangle, cls: 'text-red-600',     chip: 'bg-red-50 text-red-700 border-red-200' },
   due_soon:  { label: 'Due Soon',  icon: Clock,         cls: 'text-amber-600',   chip: 'bg-amber-50 text-amber-700 border-amber-200' },
   upcoming:  { label: 'Upcoming',  icon: CalendarClock, cls: 'text-blue-600',    chip: 'bg-blue-50 text-blue-700 border-blue-200' },

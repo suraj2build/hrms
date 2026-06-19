@@ -291,13 +291,13 @@ export function Reimbursements() {
     queryKey: ['reimbursements', statusFilter],
     queryFn:  () => {
       const qs = statusFilter !== 'All' ? `?status=${statusFilter}` : ''
-      return api.get(`/payroll/reimbursements${qs}`).then((r: any) => r.data)
+      return api.get<{ data: ReimbClaim[] }>(`/payroll/reimbursements${qs}`).then((r) => r.data)
     },
   })
 
   const { data: categories = [], isLoading: catsLoading } = useQuery<ReimbCategory[]>({
     queryKey: ['reimb-categories'],
-    queryFn:  () => api.get('/payroll/reimbursements/categories').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: ReimbCategory[] }>('/payroll/reimbursements/categories').then((r) => r.data),
     staleTime: 60_000,
   })
 

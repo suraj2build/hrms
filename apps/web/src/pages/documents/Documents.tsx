@@ -38,13 +38,6 @@ function formatBytes(bytes?: number) {
 export function Documents() {
   const { tenant, profile } = useAuthStore()
 
-  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
-      </div>
-    )
-  }
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -140,6 +133,13 @@ export function Documents() {
     (d) => d.expires_at && new Date(d.expires_at) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
   )
 
+  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">

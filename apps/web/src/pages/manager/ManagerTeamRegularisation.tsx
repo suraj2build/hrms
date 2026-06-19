@@ -27,7 +27,6 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
-import { Badge }         from '@/components/ui/badge'
 import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -103,7 +102,7 @@ export function ManagerTeamRegularisation() {
       setSelected(new Set())
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
     },
-    onError: (err: any) => toast.error(err?.message ?? 'Bulk approve failed'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk approve failed'),
   })
 
   const bulkRejectMut = useMutation({
@@ -116,7 +115,7 @@ export function ManagerTeamRegularisation() {
       setRejectReason('')
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
     },
-    onError: (err: any) => toast.error(err?.message ?? 'Bulk reject failed'),
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk reject failed'),
   })
 
   const selectedIds = Array.from(selected)
@@ -155,7 +154,7 @@ export function ManagerTeamRegularisation() {
               <div className="h-4 w-px bg-border" />
               <Button
                 size="sm"
-                className="h-8 gap-1.5 bg-green-600 hover:bg-green-700"
+                className="h-8 gap-1.5 bg-success hover:bg-success/90"
                 disabled={isBusy}
                 onClick={() => bulkApproveMut.mutate(selectedIds)}
               >

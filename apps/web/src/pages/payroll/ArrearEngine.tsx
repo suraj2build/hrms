@@ -192,7 +192,7 @@ function RecordsDialog({
   const { data: records = [], isLoading } = useQuery<ArrearRecord[]>({
     queryKey: ['arrear-records', batch?.id],
     queryFn:  () =>
-      api.get(`/payroll/arrears/batches/${batch!.id}/records`).then((r: any) => r.data),
+      api.get<{ data: ArrearRecord[] }>(`/payroll/arrears/batches/${batch!.id}/records`).then((r) => r.data),
     enabled:  open && !!batch,
   })
 
@@ -279,7 +279,7 @@ export function ArrearEngine() {
 
   const { data: batches = [], isLoading, refetch } = useQuery<ArrearBatch[]>({
     queryKey: ['arrear-batches'],
-    queryFn:  () => api.get('/payroll/arrears/batches').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: ArrearBatch[] }>('/payroll/arrears/batches').then((r) => r.data),
   })
 
   const calculateMutation = useMutation({

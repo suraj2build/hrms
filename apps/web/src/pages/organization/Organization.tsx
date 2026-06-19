@@ -118,14 +118,6 @@ export function Organization() {
   const { profile } = useAuthStore()
   const queryClient = useQueryClient()
 
-  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
-      </div>
-    )
-  }
-
   // Dialog states
   const [deptAddOpen, setDeptAddOpen] = useState(false)
   const [editingDept, setEditingDept] = useState<Department | null>(null)
@@ -276,6 +268,14 @@ export function Organization() {
           {desigAddForm.formState.errors.name && <p className="text-xs text-destructive">{desigAddForm.formState.errors.name.message}</p>}
         </div>
       </>
+    )
+  }
+
+  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
     )
   }
 

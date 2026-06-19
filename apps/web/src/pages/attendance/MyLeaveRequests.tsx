@@ -15,7 +15,7 @@
 
 import { useState }                                      from 'react'
 import { Link }                                          from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   CalendarDays, Plus, Loader2, SearchX, AlertTriangle,
   ChevronLeft, ChevronRight, XCircle,
@@ -144,8 +144,8 @@ export function MyLeaveRequests() {
     queryFn:  () => api.get(`/leave/my-requests?${params}`),
     enabled:  !!employeeId,
     staleTime: 30_000,
-    keepPreviousData: true,
-  } as any)
+    placeholderData: keepPreviousData,
+  })
 
   const requests = data?.data ?? []
   const hasMore  = data?.pagination.has_more ?? false

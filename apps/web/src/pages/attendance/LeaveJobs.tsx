@@ -312,7 +312,7 @@ function AdvancedRecoveryPanel() {
   const triggerMutation = useMutation({
     mutationFn: ({ endpoint, body }: { endpoint: string; body: Record<string, unknown> }) =>
       api.post<{ message: string; dry_run: boolean }>(endpoint, body),
-    onSuccess: (res: any) => {
+    onSuccess: (res: { message: string; dry_run: boolean }) => {
       setResultMsg({ ok: true, text: res.message ?? 'Recovery job completed.' })
       setConfirmed(false)
       qc.invalidateQueries({ queryKey: ['scheduler-history'] })
@@ -390,7 +390,7 @@ function AdvancedRecoveryPanel() {
             <label className="text-xs font-medium text-muted-foreground">Operation</label>
             <select
               value={selectedJob}
-              onChange={e => { setSelectedJob(e.target.value as any); setFieldValues({}) }}
+              onChange={e => { setSelectedJob(e.target.value as typeof RECOVERY_JOBS[number]['id']); setFieldValues({}) }}
               className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
             >
               {RECOVERY_JOBS.map(j => (

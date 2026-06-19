@@ -121,9 +121,9 @@ export function SalaryComponents() {
   // (hooks.ts uses ['salary-components'] and stores { data: [...] }, not a plain array)
   const { data: components, isLoading } = useQuery<SalaryComponent[]>({
     queryKey: ['salary-components-mgmt'],
-    queryFn:  () => api.get('/masters/salary-components').then((r: any) => {
-      const raw = r?.data ?? r
-      return Array.isArray(raw) ? raw : (raw?.data ?? [])
+    queryFn:  () => api.get<unknown>('/masters/salary-components').then((r) => {
+      const raw = (r as { data?: unknown })?.data ?? r
+      return (Array.isArray(raw) ? raw : ((raw as { data?: SalaryComponent[] })?.data ?? [])) as SalaryComponent[]
     }),
     staleTime: 60_000,
   })

@@ -120,7 +120,7 @@ export function PayrollPayoutCenter() {
     enabled:  !!activeBatch?.run_id,
     staleTime: 30_000,
   })
-  const employees = employeesRaw?.data ?? []
+  const employees = useMemo(() => employeesRaw?.data ?? [], [employeesRaw])
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {

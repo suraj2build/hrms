@@ -31,7 +31,7 @@ import {
   Clock, Loader2, RefreshCw, ShieldAlert, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 
-import { Badge }   from '@/components/ui/badge'
+import { Badge, type BadgeProps }   from '@/components/ui/badge'
 import { Button }  from '@/components/ui/button'
 import { api }     from '@/lib/api/client'
 import { cn }      from '@/lib/utils'
@@ -133,7 +133,7 @@ function fmtDate(dateStr: string): string {
   return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
 }
 
-const STATUS_BADGE: Record<string, string> = {
+const STATUS_BADGE: Record<string, BadgeProps['variant']> = {
   present:    'success',
   late:       'warning',
   absent:     'destructive',
@@ -365,7 +365,7 @@ export function EmployeeDrawer({
                       label: 'Status',
                       node: (
                         <Badge
-                          variant={(STATUS_BADGE[employee.status] ?? 'outline') as any}
+                          variant={STATUS_BADGE[employee.status] ?? 'outline'}
                           className="rounded-full text-[10px]"
                         >
                           {STATUS_LABEL[employee.status] ?? employee.status}
@@ -516,7 +516,7 @@ export function EmployeeDrawer({
                               </span>
                             )}
                             <Badge
-                              variant={(STATUS_BADGE[day.status] ?? 'outline') as any}
+                              variant={STATUS_BADGE[day.status] ?? 'outline'}
                               className="rounded-full text-[9px] px-1.5 py-0.5"
                             >
                               {STATUS_LABEL[day.status] ?? day.status}

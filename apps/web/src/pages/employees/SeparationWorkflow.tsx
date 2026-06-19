@@ -45,6 +45,15 @@ interface FnF {
   status: 'draft' | 'approved' | 'paid'
 }
 
+interface FfBreakdown {
+  leave_encashment_amount?: number | null
+  gratuity_amount?: number | null
+  notice_period_deduction?: number | null
+  gratuity_eligible?: boolean
+  gratuity_years?: number
+  leave_encashment_days?: number
+}
+
 interface SeparationRow {
   id: string
   employee_id: string
@@ -268,7 +277,7 @@ function LifecycleActions({ row }: { row: SeparationRow }) {
 
 // ── Clearance Panel ───────────────────────────────────────────────────────────
 
-function ClearancePanel({ row, onClose }: { row: SeparationRow; onClose: () => void }) {
+function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClose: () => void }) {
   const qc = useQueryClient()
   const [remarkMap, setRemarkMap] = useState<Record<string, string>>({})
   const cleared = clearanceCount(row.clearances)
@@ -409,7 +418,7 @@ function FnFSection({ row }: { row: SeparationRow }) {
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
-  const computeMutation = useMutation<{ breakdown?: any }, any>({
+  const computeMutation = useMutation<{ breakdown?: FfBreakdown }, unknown>({
     mutationFn: () => api.post(`/employees/${row.employee_id}/separation-ff/compute`, {}),
     onSuccess: (res) => {
       const b = res?.breakdown
@@ -426,7 +435,7 @@ function FnFSection({ row }: { row: SeparationRow }) {
       }
       qc.invalidateQueries({ queryKey: ['separations'] })
     },
-    onError: (e: any) => toast.error('Auto-calculate failed', { description: e?.message ?? 'Check separation dates and last payroll' }),
+    onError: (e: unknown) => toast.error('Auto-calculate failed', { description: (e instanceof Error ? e.message : undefined) ?? 'Check separation dates and last payroll' }),
   })
 
   const f = row.fnf

@@ -254,7 +254,7 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     staleTime: 300_000,
   })
 
-  const employees  = musterData?.employees ?? []
+  const employees  = useMemo(() => musterData?.employees ?? [], [musterData])
   const payrollSum = payrollData?.summary
   const anomalyCount = Array.isArray(anomalyData?.data) ? anomalyData!.data.length : 0
 
@@ -266,7 +266,6 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     // Status distribution across all employees × days
     const statusCounts: Record<string, number> = {}
     let   totalLateMinutes = 0
-    let   totalWorkHours   = 0
     let   totalDaysWithData = 0
 
     for (const emp of employees) {
@@ -274,7 +273,6 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
         if (!d.status) continue
         statusCounts[d.status] = (statusCounts[d.status] ?? 0) + 1
         totalLateMinutes += d.late_minutes ?? 0
-        totalWorkHours   += d.work_hours   ?? 0
         totalDaysWithData++
       }
     }

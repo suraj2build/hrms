@@ -33,7 +33,7 @@ import {
   type SavedView, type DrillStep,
   DATASET_CATALOG, TIME_RANGES, DEFAULT_QUERY, DRILL_NEXT,
 } from '@/lib/analytics/types'
-import { resolveQuery, exportToCSV, fmtMonthLabel } from '@/lib/analytics/resolver'
+import { resolveQuery, exportToCSV } from '@/lib/analytics/resolver'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -47,9 +47,9 @@ function fmtVal(v: number, format: 'currency' | 'percent' | 'number'): string {
   return v.toLocaleString('en-IN', { maximumFractionDigits: 0 })
 }
 
-function toRechartsRows(data: ChartData): Record<string, any>[] {
+function toRechartsRows(data: ChartData): Record<string, string | number>[] {
   return data.labels.map((label, i) => {
-    const row: Record<string, any> = { label }
+    const row: Record<string, string | number> = { label }
     for (const s of data.series) row[s.name] = s.values[i] ?? 0
     return row
   })
@@ -95,7 +95,7 @@ function useSavedViews() {
 
 // ── Chart type picker icon ─────────────────────────────────────────────────────
 
-const CHART_TYPES: Array<{ id: ChartTypeId; Icon: React.ComponentType<any>; label: string }> = [
+const CHART_TYPES: Array<{ id: ChartTypeId; Icon: React.ComponentType<{ className?: string }>; label: string }> = [
   { id: 'trend',   Icon: LineIcon,  label: 'Trend'   },
   { id: 'bar',     Icon: BarChart3, label: 'Bar'     },
   { id: 'donut',   Icon: PieIcon,   label: 'Donut'   },
@@ -160,7 +160,7 @@ function BarChartView({ data, onDrill }: { data: ChartData; onDrill?: DrillHandl
 
   const isGrouped = data.series.length > 1
 
-  function handleBarClick(barData: any, index: number) {
+  function handleBarClick(barData: { label?: string | number }, index: number) {
     if (!onDrill) return
     const label = String(barData?.label ?? '')
     const id    = data.labelIds?.[index] ?? label
@@ -236,7 +236,7 @@ function DonutChart({ data, onDrill }: { data: ChartData; onDrill?: DrillHandler
             outerRadius={110}
             paddingAngle={2}
             dataKey="value"
-            onClick={(seg: any) => onDrill && onDrill(seg.name, seg.id)}
+            onClick={(seg: { name: string; id: string }) => onDrill && onDrill(seg.name, seg.id)}
             style={onDrill ? { cursor: 'pointer' } : undefined}
           >
             {segments.map((_, i) => (

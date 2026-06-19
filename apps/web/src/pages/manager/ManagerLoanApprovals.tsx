@@ -19,7 +19,6 @@ import {
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
-import { cn }            from '@/lib/utils'
 import { api }           from '@/lib/api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -92,14 +91,14 @@ export function ManagerLoanApprovals({ embedded = false }: { embedded?: boolean 
     mutationFn: ({ kind, id }: { kind: 'advances' | 'loans'; id: string }) =>
       api.post(`/payroll/ess/manager/${kind}/${id}/approve`),
     onSuccess: () => { toast.success('Approved — forwarded to HR'); invalidate() },
-    onError:   (e: any) => toast.error(e?.message ?? 'Approval failed'),
+    onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Approval failed'),
   })
 
   const reject = useMutation({
     mutationFn: ({ kind, id }: { kind: 'advances' | 'loans'; id: string }) =>
       api.post(`/payroll/ess/manager/${kind}/${id}/reject`, { reason: reason.trim() }),
     onSuccess: () => { toast.success('Request rejected'); setRejectId(null); setReason(''); invalidate() },
-    onError:   (e: any) => toast.error(e?.message ?? 'Rejection failed'),
+    onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Rejection failed'),
   })
 
   const busy = approve.isPending || reject.isPending

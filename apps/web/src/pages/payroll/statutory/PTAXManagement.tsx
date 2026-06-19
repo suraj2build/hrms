@@ -74,6 +74,32 @@ function fmtMonth(ym: string): string {
   return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
+/** Extract a human-readable message from a thrown API error. */
+function errMessage(e: unknown): string | undefined {
+  if (e && typeof e === 'object') {
+    const resp = (e as { response?: { data?: { message?: unknown } } }).response
+    if (typeof resp?.data?.message === 'string') return resp.data.message
+    const msg = (e as { message?: unknown }).message
+    if (typeof msg === 'string') return msg
+  }
+  return undefined
+}
+
+// Diagnostic payload returned by the P-Tax compute endpoint.
+interface PTaxComputeResult {
+  data?:              PTaxComputeResult
+  computed_nonzero?:  number
+  computed_count?:    number
+  computed_zero?:     number
+  skipped_no_state?:  number
+  skipped_no_slabs?:  number
+  skipped_exempt?:    number
+  no_slab_states?:    string[]
+  financial_year?:    string
+  sample_trace?:      unknown
+  state_diagnostics?: Array<{ code: string; state: string | null; source: string }>
+}
+
 const CURRENT_FY = (() => {
   const now  = new Date()
   const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
@@ -94,7 +120,7 @@ export function PTAXManagement() {
   // ── Manual contribution compute (FY auto-derived from month server-side) ──────
   const computeMutation = useMutation({
     mutationFn: (month: string) => api.post('/payroll/statutory/ptax/contributions/compute', { month }),
-    onSuccess: (res: any, month) => {
+    onSuccess: (res: PTaxComputeResult, month) => {
       qc.invalidateQueries({ queryKey: ['ptax-contributions'] })
       const d = res?.data ?? res ?? {}
       const nonZero = d.computed_nonzero ?? d.computed_count ?? 0
@@ -128,7 +154,7 @@ export function PTAXManagement() {
         })
       }
     },
-    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
+    onError: (e: unknown) => toast.error('Compute failed', { description: errMessage(e) ?? 'Finalize the payroll run for this month first.' }),
   })
 
   // UI state
@@ -149,7 +175,7 @@ export function PTAXManagement() {
       toast.success('State added', { description: `${newStateCode.toUpperCase()} enabled for PT` })
       setNewStateCode(''); setNewStateName(''); setShowAddState(false)
     },
-    onError: (e: any) => toast.error('Failed to add state', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed to add state', { description: errMessage(e) }),
   })
   const [showAddSlabForm, setShowAddSlabForm]      = useState(false)
 
@@ -176,7 +202,7 @@ export function PTAXManagement() {
   } = useQuery<PTaxStateConfig[]>({
     queryKey: ['ptax-states'],
     queryFn:  () => api.get('/payroll/statutory/ptax/states')
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+      .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown }).data) ? (r as { data: unknown[] }).data : []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -200,8 +226,8 @@ export function PTAXManagement() {
       qc.invalidateQueries({ queryKey: ['ptax-states'] })
       toast.success(`P-Tax ${enabled ? 'enabled' : 'disabled'} for ${stateCode}`)
     },
-    onError: (e: any) => {
-      toast.error('Failed to update state configuration', { description: (e as any)?.message })
+    onError: (e: unknown) => {
+      toast.error('Failed to update state configuration', { description: errMessage(e) })
     },
   })
 
@@ -239,7 +265,7 @@ export function PTAXManagement() {
       const params = new URLSearchParams({ financial_year: CURRENT_FY })
       if (selectedStateCode) params.set('state_code', selectedStateCode)
       return api.get(`/payroll/statutory/ptax/slabs?${params.toString()}`)
-        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : [])
+        .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown }).data) ? (r as { data: unknown[] }).data : [])
     },
     enabled:  isAdmin && !!selectedStateCode,
     staleTime: 30_000,
@@ -250,7 +276,7 @@ export function PTAXManagement() {
     queries: last6.map(ym => ({
       queryKey: ['ptax-contributions', ym],
       queryFn:  () => api.get(`/payroll/statutory/ptax/contributions?month=${ym}`)
-        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as Promise<Array<{ state_code: string; ptax_amount: number }>>,
+        .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown }).data) ? (r as { data: unknown[] }).data : []) as Promise<Array<{ state_code: string; ptax_amount: number }>>,
       enabled:  isAdmin,
       staleTime: 120_000,
     })),
@@ -273,24 +299,12 @@ export function PTAXManagement() {
       setSlabForm({ monthly_income_from: 0, monthly_income_to: '', monthly_tax: 0, gender: 'all' })
       setSlabError('')
     },
-    onError: (e: any) => {
-      const msg = e?.message ?? 'Failed to add slab'
+    onError: (e: unknown) => {
+      const msg = errMessage(e) ?? 'Failed to add slab'
       setSlabError(msg)
       toast.error('Failed to add P-Tax slab', { description: msg })
     },
   })
-
-  // ── Guard ─────────────────────────────────────────────────────────────────────
-  if (!isAdmin) {
-    return (
-      <PageContainer>
-        <div className="p-6 rounded-lg border border-border bg-card flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
-          <ShieldAlert className="h-10 w-10 opacity-40" />
-          <p className="text-sm">Only HR admins can access P-Tax management.</p>
-        </div>
-      </PageContainer>
-    )
-  }
 
   // ── Derived data ──────────────────────────────────────────────────────────────
   const filteredStates = useMemo(() => stateList.filter(s => {
@@ -311,6 +325,18 @@ export function PTAXManagement() {
     return { ym, headcount, states, total, loading: historyResults[i]?.isLoading }
   })
   const historyLoading = historyResults.some(r => r.isLoading)
+
+  // ── Guard ─────────────────────────────────────────────────────────────────────
+  if (!isAdmin) {
+    return (
+      <PageContainer>
+        <div className="p-6 rounded-lg border border-border bg-card flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+          <ShieldAlert className="h-10 w-10 opacity-40" />
+          <p className="text-sm">Only HR admins can access P-Tax management.</p>
+        </div>
+      </PageContainer>
+    )
+  }
 
   return (
     <PageContainer>
@@ -395,7 +421,7 @@ export function PTAXManagement() {
 
         {/* Filing contributors */}
         <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4 hover:border-border/80 transition-all">
-          <div className="h-10 w-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-600 shrink-0 dark:bg-orange-950/40 dark:border-orange-800 dark:text-orange-400">
+          <div className="h-10 w-10 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center text-warning shrink-0">
             <UserCheck className="h-5 w-5" />
           </div>
           <div>
@@ -409,7 +435,7 @@ export function PTAXManagement() {
 
         {/* Selected state status */}
         <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4 hover:border-border/80 transition-all">
-          <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400">
+          <div className="h-10 w-10 rounded-xl bg-success/10 border border-success/30 flex items-center justify-center text-success shrink-0">
             <BadgeIndianRupee className="h-5 w-5" />
           </div>
           <div>

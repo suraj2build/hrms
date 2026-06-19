@@ -303,8 +303,8 @@ async function downloadXlsx(
     a.href = url; a.download = filename; a.click()
     URL.revokeObjectURL(url)
     toast.success('Excel downloaded', { description: filename })
-  } catch (e: any) {
-    toast.error('Export failed', { description: e?.message ?? String(e) })
+  } catch (e: unknown) {
+    toast.error('Export failed', { description: e instanceof Error ? e.message : String(e) })
   } finally {
     setLoading(false)
   }
@@ -1333,7 +1333,7 @@ function MusterRollReport({ departments, basePath }: { departments: Department[]
   })
 
   // Preview: compact employee × day summary (not the full grid — too wide for browser)
-  const employees = data?.employees ?? []
+  const employees = useMemo(() => data?.employees ?? [], [data])
   const filtered  = useMemo(() =>
     employees.filter(e => matchSearch(search, e.employee_code, e.name)),
     [employees, search],
@@ -1626,6 +1626,20 @@ function SalarySheetReport({ departments, basePath }: { departments: Department[
 // 7. LEAVE REGISTER (server-generated .xlsx)
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface LeaveRegisterRow {
+  id?:              string
+  employee?:        { employee_code?: string; first_name?: string; last_name?: string } | null
+  employees?:       { employee_code?: string; first_name?: string; last_name?: string } | null
+  leave_types?:     { name?: string } | Array<{ name?: string }> | null
+  leave_type_name?: string
+  from_date?:       string
+  to_date?:         string
+  computed_days?:   number | string
+  session?:         string
+  status?:          string
+  created_at?:      string
+}
+
 function LeaveRegisterReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
   const [from,        setFrom]        = useState(firstOfMonth())
   const [to,          setTo]          = useState(today())
@@ -1652,21 +1666,21 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
     ...(leaveStatus !== 'ALL' ? { status: leaveStatus } : {}),
   })
 
-  const { data: previewData, isLoading, isFetching, refetch } = useQuery<{ data: any[] }>({
+  const { data: previewData, isLoading, isFetching, refetch } = useQuery<{ data: LeaveRegisterRow[] }>({
     queryKey: ['report-leave-register', from, to, deptId, leaveStatus],
     queryFn:  async () => {
-      const r = await api.get<{ data: any[] }>(`/leave-requests?${previewParams}`)
+      const r = await api.get<{ data: LeaveRegisterRow[] }>(`/leave-requests?${previewParams}`)
       setGenAt(new Date())
       return r
     },
     staleTime: 60_000,
   })
 
-  const allRows = previewData?.data ?? []
+  const allRows = useMemo(() => previewData?.data ?? [], [previewData])
 
   // Client-side dept + name filter for preview
   const filtered = useMemo(() =>
-    allRows.filter((r: any) => {
+    allRows.filter((r) => {
       if (search && !matchSearch(search, r.employee?.employee_code, r.employee?.first_name, r.employee?.last_name)) return false
       return true
     }),
@@ -1674,7 +1688,7 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
   )
 
   const totalDays = useMemo(() =>
-    filtered.reduce((s: number, r: any) => s + Number(r.computed_days ?? 0), 0),
+    filtered.reduce((s: number, r) => s + Number(r.computed_days ?? 0), 0),
     [filtered],
   )
 
@@ -1759,8 +1773,8 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
         <div className="flex flex-wrap gap-2">
           <MetricChip label="Total Requests" value={fmt(filtered.length)} />
           <MetricChip label="Total Days"     value={totalDays.toFixed(1)} />
-          <MetricChip label="Approved"       value={fmt(filtered.filter((r: any) => r.status === 'APPROVED').length)} highlight="success" />
-          <MetricChip label="Pending"        value={fmt(filtered.filter((r: any) => r.status === 'PENDING').length)} highlight={filtered.filter((r: any) => r.status === 'PENDING').length > 0 ? 'warning' : 'none'} />
+          <MetricChip label="Approved"       value={fmt(filtered.filter((r) => r.status === 'APPROVED').length)} highlight="success" />
+          <MetricChip label="Pending"        value={fmt(filtered.filter((r) => r.status === 'PENDING').length)} highlight={filtered.filter((r) => r.status === 'PENDING').length > 0 ? 'warning' : 'none'} />
         </div>
       )}
 
@@ -1797,7 +1811,7 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
             </tr>
           </StickyThead>
           <tbody>
-            {filtered.map((r: any, i: number) => {
+            {filtered.map((r, i: number) => {
               const emp = r.employee ?? r.employees
               const lt  = Array.isArray(r.leave_types) ? r.leave_types[0] : r.leave_types
               return (
@@ -1895,7 +1909,7 @@ function PayrollRegisterReport({ departments, basePath }: { departments: Departm
     staleTime: 60_000,
   })
 
-  const allRows = data?.rows ?? []
+  const allRows = useMemo(() => data?.rows ?? [], [data])
 
   const filtered = useMemo(() => {
     let rows = allRows
@@ -2221,7 +2235,7 @@ function AttendancePayrollReport({ departments, basePath }: { departments: Depar
     staleTime: 60_000,
   })
 
-  const allRows = data?.rows ?? []
+  const allRows = useMemo(() => data?.rows ?? [], [data])
 
   const filtered = useMemo(() => {
     let rows = allRows
@@ -2643,15 +2657,6 @@ export function Reports() {
   const isAdmin = ['super_admin', 'hr_admin'].includes(role)
   const isMgr   = role === 'manager'
 
-  // Neither admin nor manager — fully blocked
-  if (!isAdmin && !isMgr) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
-      </div>
-    )
-  }
-
   // Departments list — shared across all tabs
   const { data: deptData } = useQuery<{ data: Department[] }>({
     queryKey: ['departments'],
@@ -2673,6 +2678,15 @@ export function Reports() {
     { icon: CreditCard,     label: 'Payroll Register',            desc: 'Bank disbursement register · masked preview · full .xlsx', tab: 'payroll-register'   },
   ]
   const catalog = isAdmin ? ALL_CATALOG : ALL_CATALOG.filter(c => MANAGER_TABS.has(c.tab))
+
+  // Neither admin nor manager — fully blocked
+  if (!isAdmin && !isMgr) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
 
   return (
     <PageContainer>

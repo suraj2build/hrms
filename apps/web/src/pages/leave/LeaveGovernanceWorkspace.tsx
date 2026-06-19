@@ -61,6 +61,14 @@ import { EmployeeLabel }  from '@/components/employee/EmployeeLabel'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Extract a backend error message from an unknown thrown error, falling back. */
+function errMessage(err: unknown, fallback: string): string {
+  const e = err as { response?: { data?: { message?: string } } } | null
+  return e?.response?.data?.message ?? fallback
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface DateType {
@@ -193,7 +201,7 @@ interface HeldCreditSummary {
 
 function LifecycleAnalyticsTab() {
   const { profile } = useAuthStore()
-  const tenantId    = (profile as any)?.tenant_id ?? ''
+  const tenantId    = profile?.tenant_id ?? ''
 
   // Active freezes across tenant
   const { data: freezeData, isLoading: freezeLoading } = useQuery<{ data: ActiveFreezeItem[] }>({
@@ -204,7 +212,7 @@ function LifecycleAnalyticsTab() {
   })
 
   // Held credits summary — use the ledger query with held filter
-  const { data: heldData, isLoading: heldLoading } = useQuery({
+  const { data: heldData, isLoading: heldLoading } = useQuery<{ data: HeldCreditSummary[] }>({
     queryKey:  ['lifecycle-held-credits', tenantId],
     queryFn:   () => api.get('/leave/lifecycle/held-credits-summary'),
     staleTime: 60_000,
@@ -212,9 +220,9 @@ function LifecycleAnalyticsTab() {
   })
 
   const activeFreezes = (freezeData?.data ?? []).filter(f => f.status === 'active')
-  const heldCredits   = (heldData as any)?.data ?? []
+  const heldCredits   = heldData?.data ?? []
   const totalFrozen   = activeFreezes.length
-  const totalHeld     = (heldCredits as HeldCreditSummary[]).reduce((s: number, r: HeldCreditSummary) => s + (r.total_held_days ?? 0), 0)
+  const totalHeld     = heldCredits.reduce((s: number, r: HeldCreditSummary) => s + (r.total_held_days ?? 0), 0)
 
   return (
     <div className="space-y-4">
@@ -491,19 +499,23 @@ export default function LeaveGovernanceWorkspace() {
   const { data: dtData, isLoading: dtLoading } = useQuery({
     queryKey: ['important-date-types'],
     queryFn:  () =>
-      api.get('/masters/important-date-types?include_inactive=true').then((r: any) => r.data as DateType[]),
+      api.get<{ data: DateType[] }>('/masters/important-date-types?include_inactive=true').then(r => r.data),
   })
 
   const { data: grantsData, isLoading: grantsLoading } = useQuery({
     queryKey: ['leave-event-grants'],
     queryFn:  () =>
-      api.get('/leave/event-grants').then((r: any) => (r.data?.data ?? r.data ?? []) as EventGrant[]),
+      api.get<{ data?: EventGrant[] | { data?: EventGrant[] } }>('/leave/event-grants').then(r => {
+        const d = r.data
+        if (Array.isArray(d)) return d
+        return d?.data ?? []
+      }),
     // Gracefully handle 404 if the endpoint isn't wired yet
     retry: false,
   })
 
   const dateTypes = dtData ?? []
-  const grants    = grantsData ?? []
+  const grants    = useMemo(() => grantsData ?? [], [grantsData])
 
   // ── Dialog state ──────────────────────────────────────────────────────────
 
@@ -552,8 +564,8 @@ export default function LeaveGovernanceWorkspace() {
       qc.invalidateQueries({ queryKey: ['important-date-types'] })
       setDialog(null)
     },
-    onError: (err: any) =>
-      toast.error(err?.response?.data?.message ?? 'Failed to create date type'),
+    onError: (err) =>
+      toast.error(errMessage(err, 'Failed to create date type')),
   })
 
   const updateMut = useMutation({
@@ -568,8 +580,8 @@ export default function LeaveGovernanceWorkspace() {
       qc.invalidateQueries({ queryKey: ['important-date-types'] })
       setDialog(null)
     },
-    onError: (err: any) =>
-      toast.error(err?.response?.data?.message ?? 'Failed to update date type'),
+    onError: (err) =>
+      toast.error(errMessage(err, 'Failed to update date type')),
   })
 
   const deleteMut = useMutation({
@@ -579,8 +591,8 @@ export default function LeaveGovernanceWorkspace() {
       toast.success('Date type deleted')
       qc.invalidateQueries({ queryKey: ['important-date-types'] })
     },
-    onError: (err: any) =>
-      toast.error(err?.response?.data?.message ?? 'Failed to delete date type'),
+    onError: (err) =>
+      toast.error(errMessage(err, 'Failed to delete date type')),
   })
 
   const toggleMut = useMutation({
@@ -620,7 +632,8 @@ export default function LeaveGovernanceWorkspace() {
   const { data: analyticsData, isLoading: analyticsLoading, isError: analyticsError } = useQuery<SessionAnalyticsSummary>({
     queryKey: ['leave-session-analytics'],
     queryFn:  () =>
-      api.get('/leave/governance/session-analytics').then((r: any) => (r.data?.data ?? r.data) as SessionAnalyticsSummary),
+      api.get<{ data?: { data?: SessionAnalyticsSummary } & SessionAnalyticsSummary }>('/leave/governance/session-analytics')
+        .then(r => (r.data?.data ?? r.data) as SessionAnalyticsSummary),
     retry: false,
   })
 
@@ -635,8 +648,8 @@ export default function LeaveGovernanceWorkspace() {
   const { data: empSearchData, isLoading: empSearchLoading } = useQuery<Array<{ id: string; first_name: string; last_name: string; employee_code: string }>>({
     queryKey: ['employee-search-ledger', debouncedSearch],
     queryFn:  () =>
-      api.get(`/employees?search=${encodeURIComponent(debouncedSearch)}&limit=10`)
-        .then((r: any) => r.data.data),
+      api.get<{ data: { data: Array<{ id: string; first_name: string; last_name: string; employee_code: string }> } }>(`/employees?search=${encodeURIComponent(debouncedSearch)}&limit=10`)
+        .then(r => r.data.data),
     enabled: debouncedSearch.length >= 2 && !selectedEmployee,
     retry:   false,
   })
@@ -646,8 +659,8 @@ export default function LeaveGovernanceWorkspace() {
     queryFn:  () => {
       const params = new URLSearchParams()
       if (txnTypeFilter) params.set('txn_type', txnTypeFilter)
-      return api.get(`/attendance/leave/ledger/${selectedEmployee!.id}?${params.toString()}`)
-        .then((r: any) => r.data.data as LedgerEntry[])
+      return api.get<{ data: { data: LedgerEntry[] } }>(`/attendance/leave/ledger/${selectedEmployee!.id}?${params.toString()}`)
+        .then(r => r.data.data)
     },
     enabled: !!selectedEmployee,
     retry:   false,
@@ -667,8 +680,12 @@ export default function LeaveGovernanceWorkspace() {
   const { data: reconcData, isLoading: reconcLoading } = useQuery<ReconciliationRun[]>({
     queryKey: ['leave-reconciliation'],
     queryFn:  () =>
-      api.get('/leave/scheduler/reconciliation?limit=30')
-        .then((r: any) => (r.data?.data ?? r.data ?? []) as ReconciliationRun[]),
+      api.get<{ data?: ReconciliationRun[] | { data?: ReconciliationRun[] } }>('/leave/scheduler/reconciliation?limit=30')
+        .then(r => {
+          const d = r.data
+          if (Array.isArray(d)) return d
+          return d?.data ?? []
+        }),
     retry: false,
   })
   const reconcRuns = reconcData ?? []
@@ -1239,13 +1256,13 @@ export default function LeaveGovernanceWorkspace() {
                                         <span className="text-[10px] font-medium text-destructive">{breakdown.critical}×C</span>
                                       ) : null}
                                       {breakdown.high ? (
-                                        <span className="text-[10px] font-medium text-orange-600">{breakdown.high}×H</span>
+                                        <span className="text-[10px] font-medium text-warning">{breakdown.high}×H</span>
                                       ) : null}
                                       {breakdown.medium ? (
                                         <span className="text-[10px] font-medium text-warning">{breakdown.medium}×M</span>
                                       ) : null}
                                       {breakdown.low ? (
-                                        <span className="text-[10px] font-medium text-blue-600">{breakdown.low}×L</span>
+                                        <span className="text-[10px] font-medium text-primary">{breakdown.low}×L</span>
                                       ) : null}
                                     </div>
                                   )}

@@ -25,7 +25,6 @@ import { useAuthStore }          from '@/stores/authStore'
 import { PageContainer }         from '@/components/layout/PageContainer'
 import { PageHeader }            from '@/components/layout/PageHeader'
 import { Button }                from '@/components/ui/button'
-import { Badge }                 from '@/components/ui/badge'
 import { Input }                 from '@/components/ui/input'
 import { DateInput }             from '@/components/ui/date-input'
 import { EmployeeSelector }      from '@/components/filters/EmployeeSelector'
@@ -258,9 +257,9 @@ function ApproveAdvanceDialog({
             </div>
           </div>
           {monthly && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
-              <Calculator className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
-              Monthly deduction from salary: <span className="font-semibold text-blue-700 dark:text-blue-400 ml-1">{monthly}</span>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+              <Calculator className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+              Monthly deduction from salary: <span className="font-semibold text-primary ml-1">{monthly}</span>
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2">
@@ -444,10 +443,10 @@ function NewAdvanceDialog({ open, onClose }: { open: boolean; onClose: () => voi
             <Input value={purpose} onChange={e => setPurpose(e.target.value)} placeholder="Medical emergency, travel…" />
           </div>
           {monthly && (
-            <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
-              <Calculator className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+            <div className="flex items-center gap-2 text-sm bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+              <Calculator className="h-3.5 w-3.5 text-primary flex-shrink-0" />
               <span className="text-muted-foreground">Monthly deduction:</span>
-              <span className="font-semibold text-blue-700 dark:text-blue-400">{monthly}</span>
+              <span className="font-semibold text-primary">{monthly}</span>
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2">
@@ -547,8 +546,8 @@ function NewLoanDialog({ open, onClose }: { open: boolean; onClose: () => void }
 
           {/* Live EMI calculator */}
           {emi !== null && (
-            <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-3 space-y-2">
-              <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
+            <div className="rounded-lg border border-primary/20 bg-primary/10 p-3 space-y-2">
+              <p className="text-xs font-semibold text-primary flex items-center gap-1.5">
                 <Calculator className="h-3.5 w-3.5" /> Loan Calculator
               </p>
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -679,9 +678,9 @@ function ForecloseDialog({
         <DialogHeader><DialogTitle>Foreclose Loan</DialogTitle></DialogHeader>
         <div className="space-y-4 pt-2">
           {loan && (
-            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm">
-              <p className="font-medium text-amber-900 dark:text-amber-100">{empName(loan)}</p>
-              <p className="text-amber-700 dark:text-amber-300 mt-0.5">Outstanding: {fmtINR(loan.outstanding_balance)}</p>
+            <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm">
+              <p className="font-medium text-foreground">{empName(loan)}</p>
+              <p className="text-warning mt-0.5">Outstanding: {fmtINR(loan.outstanding_balance)}</p>
             </div>
           )}
           <div className="space-y-1.5">
@@ -709,7 +708,7 @@ function ForecloseDialog({
 
 // ── Advance Schedule Drawer ────────────────────────────────────────────────────
 
-function AdvanceScheduleRow({ advanceId, tenantId }: { advanceId: string; tenantId?: string }) {
+function AdvanceScheduleRow({ advanceId }: { advanceId: string }) {
   const { data, isLoading } = useQuery<{ data: RecoverySchedule[] }>({
     queryKey: ['advance-schedule', advanceId],
     queryFn: () => api.get(`/payroll/advances/${advanceId}/schedule`),
@@ -826,7 +825,7 @@ function LoanScheduleRow({ loanId }: { loanId: string }) {
                       <td className="px-3 py-2 text-foreground font-medium">{row.due_month}</td>
                       <td className="px-3 py-2 text-right text-foreground">{fmtINR(row.emi_amount)}</td>
                       <td className="px-3 py-2 text-right text-foreground">{fmtINR(row.principal_component)}</td>
-                      <td className="px-3 py-2 text-right text-amber-600">{fmtINR(row.interest_component)}</td>
+                      <td className="px-3 py-2 text-right text-warning">{fmtINR(row.interest_component)}</td>
                       <td className="px-3 py-2 text-right text-foreground">{fmtINR(row.outstanding_balance)}</td>
                       <td className="px-3 py-2">
                         <StatusPill status={row.status} map={SCHED_STATUS_BADGE} />
@@ -1005,7 +1004,7 @@ function AdvancesTab({ isAdmin }: { isAdmin: boolean }) {
                       <div className="flex flex-col gap-1">
                         <StatusPill status={adv.status} map={ADV_STATUS_BADGE} />
                         {adv.is_recovery_paused && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-amber-600">
+                          <span className="inline-flex items-center gap-1 text-[10px] text-warning">
                             <Pause className="h-2.5 w-2.5" /> Paused
                           </span>
                         )}
@@ -1020,7 +1019,7 @@ function AdvancesTab({ isAdmin }: { isAdmin: boolean }) {
                           {adv.status === 'pending' && (
                             <>
                               <Button size="sm" variant="outline"
-                                className="h-7 text-xs gap-1 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                                className="h-7 text-xs gap-1 text-success border-success/30 hover:bg-success/10"
                                 onClick={() => setApproveTarget(adv)}>
                                 <CheckCircle2 className="h-3 w-3" /> Approve
                               </Button>
@@ -1042,8 +1041,8 @@ function AdvancesTab({ isAdmin }: { isAdmin: boolean }) {
                             <Button size="sm" variant="outline"
                               className={cn('h-7 text-xs gap-1',
                                 adv.is_recovery_paused
-                                  ? 'text-emerald-700 border-emerald-200'
-                                  : 'text-amber-700 border-amber-200')}
+                                  ? 'text-success border-success/30'
+                                  : 'text-warning border-warning/30')}
                               onClick={() => pauseMutation.mutate({ id: adv.id, pause: !adv.is_recovery_paused })}>
                               {adv.is_recovery_paused
                                 ? <><Play className="h-3 w-3" /> Resume</>
@@ -1284,7 +1283,7 @@ function LoansTab({ isAdmin }: { isAdmin: boolean }) {
                       <div className="flex flex-col gap-1">
                         <StatusPill status={loan.status} map={LOAN_STATUS_BADGE} />
                         {loan.is_emi_paused && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-amber-600">
+                          <span className="inline-flex items-center gap-1 text-[10px] text-warning">
                             <Pause className="h-2.5 w-2.5" /> EMI Paused
                           </span>
                         )}
@@ -1299,7 +1298,7 @@ function LoansTab({ isAdmin }: { isAdmin: boolean }) {
                           {loan.status === 'pending' && (
                             <>
                               <Button size="sm" variant="outline"
-                                className="h-7 text-xs gap-1 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                                className="h-7 text-xs gap-1 text-success border-success/30 hover:bg-success/10"
                                 onClick={() => setApproveTarget(loan)}>
                                 <CheckCircle2 className="h-3 w-3" /> Approve
                               </Button>
@@ -1322,15 +1321,15 @@ function LoansTab({ isAdmin }: { isAdmin: boolean }) {
                               <Button size="sm" variant="outline"
                                 className={cn('h-7 text-xs gap-1',
                                   loan.is_emi_paused
-                                    ? 'text-emerald-700 border-emerald-200'
-                                    : 'text-amber-700 border-amber-200')}
+                                    ? 'text-success border-success/30'
+                                    : 'text-warning border-warning/30')}
                                 onClick={() => pauseMutation.mutate({ id: loan.id, pause: !loan.is_emi_paused })}>
                                 {loan.is_emi_paused
                                   ? <><Play className="h-3 w-3" /> Resume EMI</>
                                   : <><Pause className="h-3 w-3" /> Pause EMI</>}
                               </Button>
                               <Button size="sm" variant="outline"
-                                className="h-7 text-xs gap-1 text-orange-700 border-orange-200 hover:bg-orange-50"
+                                className="h-7 text-xs gap-1 text-warning border-warning/30 hover:bg-warning/10"
                                 onClick={() => setForecloseTarget(loan)}>
                                 <AlertTriangle className="h-3 w-3" /> Foreclose
                               </Button>
@@ -1362,23 +1361,36 @@ function LoansTab({ isAdmin }: { isAdmin: boolean }) {
 
 // ── Recovery Calendar Tab ──────────────────────────────────────────────────────
 
+interface PendingRecoveryAdvance {
+  employee_id: string
+  employees?: { first_name: string; last_name: string; employee_code?: string } | null
+  pending_schedules?: Array<{ scheduled_amount: number; status: string; payroll_run_id: string | null }>
+}
+
+interface ActiveEmiLoan {
+  employee_id: string
+  loan_type?: string
+  employees?: { first_name: string; last_name: string; employee_code?: string } | null
+  pending_emis?: Array<{ installment_number: number; emi_amount: number; status: string; payroll_run_id: string | null }>
+}
+
 function RecoveryCalendarTab() {
   const [month, setMonth] = useState(currentMonth())
 
-  const { data: advData, isLoading: advLoading } = useQuery<{ data: any[]; month: string }>({
+  const { data: advData, isLoading: advLoading } = useQuery<{ data: PendingRecoveryAdvance[]; month: string }>({
     queryKey: ['pending-recoveries', month],
     queryFn: () => api.get(`/payroll/advances/pending-recoveries/${month}`),
     enabled: !!month,
   })
 
-  const { data: loanData, isLoading: loanLoading } = useQuery<{ data: any[]; month: string }>({
+  const { data: loanData, isLoading: loanLoading } = useQuery<{ data: ActiveEmiLoan[]; month: string }>({
     queryKey: ['active-emis', month],
     queryFn: () => api.get(`/payroll/loans/active-emis/${month}`),
     enabled: !!month,
   })
 
-  const advancesWithSchedules = (advData?.data ?? []).flatMap((adv: any) =>
-    (adv.pending_schedules ?? []).map((s: any) => ({
+  const advancesWithSchedules = (advData?.data ?? []).flatMap((adv) =>
+    (adv.pending_schedules ?? []).map((s) => ({
       type: 'advance' as const,
       employee: adv.employees
         ? `${adv.employees.first_name} ${adv.employees.last_name}`
@@ -1391,8 +1403,8 @@ function RecoveryCalendarTab() {
     })),
   )
 
-  const loansWithEmis = (loanData?.data ?? []).flatMap((loan: any) =>
-    (loan.pending_emis ?? []).map((s: any) => ({
+  const loansWithEmis = (loanData?.data ?? []).flatMap((loan) =>
+    (loan.pending_emis ?? []).map((s) => ({
       type: 'loan' as const,
       employee: loan.employees
         ? `${loan.employees.first_name} ${loan.employees.last_name}`
@@ -1461,11 +1473,11 @@ function RecoveryCalendarTab() {
                   </td>
                   <td className="px-4 py-3">
                     {item.type === 'advance' ? (
-                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-warning/15 text-warning border border-warning/30">
                         <DollarSign className="h-2.5 w-2.5" /> Advance
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
                         <Landmark className="h-2.5 w-2.5" /> Loan
                       </span>
                     )}
@@ -1474,11 +1486,11 @@ function RecoveryCalendarTab() {
                   <td className="px-4 py-3 text-right font-semibold text-foreground">{fmtINR(item.amount)}</td>
                   <td className="px-4 py-3">
                     {item.payroll_run_id ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
+                      <span className="inline-flex items-center gap-1 text-xs text-success">
                         <CheckCircle2 className="h-3 w-3" /> Deducted via payroll
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs text-blue-700">
+                      <span className="inline-flex items-center gap-1 text-xs text-primary">
                         <CalendarClock className="h-3 w-3" /> Pending payroll run
                       </span>
                     )}

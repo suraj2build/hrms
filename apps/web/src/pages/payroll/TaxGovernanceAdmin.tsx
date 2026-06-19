@@ -282,7 +282,7 @@ function PrevEmployerTab({ fy }: { fy: string }) {
                     <div className="flex flex-col gap-1">
                       <StatusBadge status={r.status} />
                       {r.status === 'rejected' && r.rejection_reason && (
-                        <p className="text-xs text-red-600 max-w-[160px] truncate" title={r.rejection_reason}>
+                        <p className="text-xs text-destructive max-w-[160px] truncate" title={r.rejection_reason}>
                           {r.rejection_reason}
                         </p>
                       )}
@@ -294,7 +294,7 @@ function PrevEmployerTab({ fy }: { fy: string }) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 px-2 text-green-700 hover:text-green-700 hover:bg-green-50 gap-1"
+                          className="h-8 px-2 text-success hover:text-success hover:bg-success/10 gap-1"
                           onClick={() => handleVerify(r.id)}
                           disabled={verifyMutation.isPending}
                           title="Verify"
@@ -305,7 +305,7 @@ function PrevEmployerTab({ fy }: { fy: string }) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 px-2 text-red-700 hover:text-red-700 hover:bg-red-50 gap-1"
+                          className="h-8 px-2 text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
                           onClick={() => setRejectTarget({ id: r.id, type: 'prev-employer' })}
                           disabled={verifyMutation.isPending}
                           title="Reject"
@@ -442,7 +442,7 @@ function HRATab({ fy }: { fy: string }) {
                       <div className="flex flex-col gap-1">
                         <StatusBadge status={r.status} />
                         {r.status === 'rejected' && r.rejection_reason && (
-                          <p className="text-xs text-red-600 max-w-[160px] truncate" title={r.rejection_reason}>
+                          <p className="text-xs text-destructive max-w-[160px] truncate" title={r.rejection_reason}>
                             {r.rejection_reason}
                           </p>
                         )}
@@ -454,7 +454,7 @@ function HRATab({ fy }: { fy: string }) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 px-2 text-green-700 hover:text-green-700 hover:bg-green-50 gap-1"
+                            className="h-8 px-2 text-success hover:text-success hover:bg-success/10 gap-1"
                             onClick={() => handleVerify(r.id)}
                             disabled={verifyMutation.isPending}
                             title="Verify"
@@ -465,7 +465,7 @@ function HRATab({ fy }: { fy: string }) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 px-2 text-red-700 hover:text-red-700 hover:bg-red-50 gap-1"
+                            className="h-8 px-2 text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
                             onClick={() => setRejectTarget({ id: r.id, type: 'hra' })}
                             disabled={verifyMutation.isPending}
                             title="Reject"

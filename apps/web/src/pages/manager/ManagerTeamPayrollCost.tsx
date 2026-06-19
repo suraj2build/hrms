@@ -174,9 +174,9 @@ export function ManagerTeamPayrollCost() {
                       <p className="text-xs text-muted-foreground">{r.employee_code}{r.designation ? ` · ${r.designation}` : ''}</p>
                     </td>
                     <td className="py-2.5 px-3 text-right tabular-nums">{fmtINR(r.gross_pay)}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-green-700">{fmtINR(r.net_pay)}</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums text-success">{fmtINR(r.net_pay)}</td>
                     <td className="py-2.5 px-3 text-right tabular-nums">
-                      {r.ot_cost > 0 ? <span className="text-amber-700">{fmtINR(r.ot_cost)}</span> : <span className="text-muted-foreground">—</span>}
+                      {r.ot_cost > 0 ? <span className="text-warning">{fmtINR(r.ot_cost)}</span> : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="py-2.5 px-3 text-right tabular-nums">
                       {r.lop_deduction > 0 ? <span className="text-destructive">{fmtINR(r.lop_deduction)}</span> : <span className="text-muted-foreground">—</span>}
@@ -192,9 +192,9 @@ export function ManagerTeamPayrollCost() {
                   <tr className="border-t-2 border-border font-semibold bg-muted/20">
                     <td className="py-2 px-4 text-sm">Team Total</td>
                     <td className="py-2 px-3 text-right tabular-nums">{fmtINR(total.gross_pay)}</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-green-700">{fmtINR(total.net_pay)}</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-success">{fmtINR(total.net_pay)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">
-                      {total.ot_cost > 0 ? <span className="text-amber-700">{fmtINR(total.ot_cost)}</span> : <span className="text-muted-foreground">—</span>}
+                      {total.ot_cost > 0 ? <span className="text-warning">{fmtINR(total.ot_cost)}</span> : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="py-2 px-3 text-right tabular-nums">
                       {total.lop_deduction > 0 ? <span className="text-destructive">{fmtINR(total.lop_deduction)}</span> : <span className="text-muted-foreground">—</span>}

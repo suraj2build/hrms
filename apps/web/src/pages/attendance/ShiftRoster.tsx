@@ -32,7 +32,6 @@ import { SectionCard }      from '@/components/layout/SectionCard'
 import { PeriodLockBanner } from '@/components/layout/PeriodLockBanner'
 import { Badge }            from '@/components/ui/badge'
 import { Button }           from '@/components/ui/button'
-import { Input }            from '@/components/ui/input'
 import { DateInput }        from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -567,7 +566,7 @@ export function ShiftRoster() {
         },
       )
       queryClient.invalidateQueries({ queryKey: ['roster', monthStr] })
-      if ((result as any).rows_copied === 0) {
+      if (result.rows_copied === 0) {
         setBulkError('No roster overrides found in the previous week to copy.')
       }
     } catch (e: unknown) {

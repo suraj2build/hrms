@@ -99,23 +99,23 @@ export function FbpReconciliation() {
     onError: (e: Error) => toast.error('Reject failed', { description: e.message }),
   })
   const lock = useMutation({
-    mutationFn: () => api.post('/payroll/fbp/reconciliation/lock', { financial_year: fy, quarter }),
-    onSuccess: (res: any) => { toast.success(`Quarter locked (${res?.data?.locked ?? 0} rows). Taxable now flows to TDS.`); refresh() },
+    mutationFn: () => api.post<{ data: { locked: number } }>('/payroll/fbp/reconciliation/lock', { financial_year: fy, quarter }),
+    onSuccess: (res) => { toast.success(`Quarter locked (${res?.data?.locked ?? 0} rows). Taxable now flows to TDS.`); refresh() },
     onError: (e: Error) => toast.error('Lock failed', { description: e.message }),
   })
 
   // Open each uploaded bill for a submission in a new tab via a short-lived signed URL.
   async function viewBills(submissionId: string) {
     try {
-      const res: any = await api.get(`/payroll/fbp/submissions/${submissionId}/attachments`)
+      const res = await api.get<{ data: Array<{ storage_path: string }> }>(`/payroll/fbp/submissions/${submissionId}/attachments`)
       const atts = res?.data ?? []
       if (atts.length === 0) { toast.info('No bills attached to this submission'); return }
       for (const a of atts) {
         const url = await getSignedUrl(a.storage_path)
         window.open(url, '_blank', 'noopener')
       }
-    } catch (e: any) {
-      toast.error('Could not open bills', { description: e?.message })
+    } catch (e: unknown) {
+      toast.error('Could not open bills', { description: e instanceof Error ? e.message : String(e) })
     }
   }
 

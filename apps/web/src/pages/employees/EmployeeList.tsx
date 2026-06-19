@@ -242,7 +242,7 @@ export function EmployeeList() {
     staleTime: 120_000,
   })
 
-  const allEmployees = data?.data ?? []
+  const allEmployees = useMemo(() => data?.data ?? [], [data])
   const sites        = sitesData?.data ?? []
 
   // Unique departments + locations for filter dropdowns

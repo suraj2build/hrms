@@ -20,7 +20,6 @@ import { cn } from '@/lib/utils'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -77,13 +76,6 @@ function fmtMonth(ym: string): string {
   const [y, m] = ym.split('-')
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   return `${months[Number(m) - 1]} ${y}`
-}
-
-// Current Indian financial year "YYYY-YY"
-function currentFY(): string {
-  const d = new Date()
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1
-  return `${y}-${String(y + 1).slice(2)}`
 }
 
 // Which quarter does a given month fall into?
@@ -152,8 +144,8 @@ function ReadinessCard({ label, icon: Icon, check, loading }: ReadinessCardProps
             {loading
               ? <div className="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
               : check?.ready
-                ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                : <XCircle className="h-4 w-4 text-rose-500" />
+                ? <CheckCircle2 className="h-4 w-4 text-success" />
+                : <XCircle className="h-4 w-4 text-destructive" />
             }
           </div>
           {!loading && check && (
@@ -176,7 +168,7 @@ function ReadinessCard({ label, icon: Icon, check, loading }: ReadinessCardProps
           {open && check && (
             <ul className="mt-1.5 space-y-0.5">
               {check.issues.slice(1).map((iss, i) => (
-                <li key={i} className="text-[11px] text-rose-600 flex items-start gap-1">
+                <li key={i} className="text-[11px] text-destructive flex items-start gap-1">
                   <span className="mt-0.5 flex-shrink-0">·</span>{iss}
                 </li>
               ))}
@@ -292,7 +284,7 @@ export function FilingPackCenter() {
       qc.invalidateQueries({ queryKey: ['filing-pack-deductor'] })
       qc.invalidateQueries({ queryKey: ['filing-pack-24q-readiness'] })
     },
-    onError: (e: any) => toast.error('Save failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Save failed', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   // ── Form 24Q readiness + validation (P2.4) ───────────────────────────────────
@@ -343,8 +335,8 @@ export function FilingPackCenter() {
     const token = (await import('@/stores/authStore')).useAuthStore.getState().accessToken
     const res   = await fetch(url, { headers: { Authorization: `Bearer ${token ?? ''}` } })
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error((body as any)?.message ?? 'Download failed')
+      const body = await res.json().catch(() => ({})) as { message?: string }
+      throw new Error(body?.message ?? 'Download failed')
     }
     const blob = await res.blob()
     const href = URL.createObjectURL(blob)
@@ -358,7 +350,7 @@ export function FilingPackCenter() {
   async function handleGenerate(type: 'ecr' | '24q' | 'challan') {
     setGenerating(type)
     try {
-      const apiBase = (import.meta as any).env?.VITE_API_URL ?? ''
+      const apiBase = (import.meta as ImportMeta & { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? ''
       if (type === 'ecr') {
         const fileName = `ECR2_${month}.txt`
         await downloadFile(`${apiBase}/payroll/filing-pack/ecr?month=${month}`, fileName)
@@ -375,8 +367,8 @@ export function FilingPackCenter() {
         await recordArtifact('challan_all', fileName)
         toast.success('Challan data sheet downloaded')
       }
-    } catch (err: any) {
-      toast.error(err.message ?? 'Download failed')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Download failed')
     } finally {
       setGenerating(null)
     }
@@ -470,7 +462,7 @@ export function FilingPackCenter() {
             {/* ECR 2.0 */}
             <div className="rounded-xl border border-border p-4 bg-card space-y-3">
               <div className="flex items-start gap-3">
-                <span className="flex items-center justify-center h-9 w-9 rounded-lg bg-indigo-50 text-indigo-600 flex-shrink-0">
+                <span className="flex items-center justify-center h-9 w-9 rounded-lg bg-primary/10 text-primary flex-shrink-0">
                   <Building2 className="h-5 w-5" />
                 </span>
                 <div>
@@ -496,7 +488,7 @@ export function FilingPackCenter() {
             {/* Form 24Q */}
             <div className="rounded-xl border border-border p-4 bg-card space-y-3">
               <div className="flex items-start gap-3">
-                <span className="flex items-center justify-center h-9 w-9 rounded-lg bg-violet-50 text-violet-600 flex-shrink-0">
+                <span className="flex items-center justify-center h-9 w-9 rounded-lg bg-primary/10 text-primary flex-shrink-0">
                   <Landmark className="h-5 w-5" />
                 </span>
                 <div>
@@ -578,7 +570,7 @@ export function FilingPackCenter() {
             {/* Challan Sheet */}
             <div className="rounded-xl border border-border p-4 bg-card space-y-3">
               <div className="flex items-start gap-3">
-                <span className="flex items-center justify-center h-9 w-9 rounded-lg bg-amber-50 text-amber-600 flex-shrink-0">
+                <span className="flex items-center justify-center h-9 w-9 rounded-lg bg-warning/10 text-warning flex-shrink-0">
                   <FileText className="h-5 w-5" />
                 </span>
                 <div>

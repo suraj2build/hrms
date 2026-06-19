@@ -27,7 +27,6 @@ import {
 } from '@/components/ui/dialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
 import { toast }          from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -187,7 +186,7 @@ function PayoutsDialog({
 
   const { data: payouts = [], isLoading } = useQuery<VariablePayout[]>({
     queryKey: ['vp-payouts', batch?.id],
-    queryFn:  () => api.get(`/payroll/variable-pay/batches/${batch!.id}/payouts`).then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: VariablePayout[] }>(`/payroll/variable-pay/batches/${batch!.id}/payouts`).then(r => r.data),
     enabled:  open && !!batch,
   })
 
@@ -355,12 +354,12 @@ export function VariablePay() {
 
   const { data: batches = [], isLoading: batchesLoading, refetch } = useQuery<VariableBatch[]>({
     queryKey: ['vp-batches'],
-    queryFn:  () => api.get('/payroll/variable-pay/batches').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: VariableBatch[] }>('/payroll/variable-pay/batches').then(r => r.data),
   })
 
   const { data: templates = [], isLoading: tplLoading } = useQuery<IncentiveTemplate[]>({
     queryKey: ['vp-templates'],
-    queryFn:  () => api.get('/payroll/variable-pay/templates').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: IncentiveTemplate[] }>('/payroll/variable-pay/templates').then(r => r.data),
   })
 
   const tabs = [

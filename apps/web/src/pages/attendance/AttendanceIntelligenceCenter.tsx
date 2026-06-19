@@ -142,7 +142,6 @@ function todayMonth(): string {
 }
 
 function fmtMonth(m: string): string {
-  const [y, mo] = m.split('-')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   if (isNaN(d.getTime())) return '—'
@@ -406,7 +405,7 @@ function TabSessions({
                           {fmtTime(s.session_end)}
                         </span>
                         {s.is_cross_midnight && (
-                          <Badge className="ml-1.5 text-[10px] bg-indigo-100 text-indigo-700 border-indigo-200">
+                          <Badge className="ml-1.5 text-[10px] bg-primary/15 text-primary border-primary/30">
                             <Moon className="h-2.5 w-2.5 mr-0.5" />+1
                           </Badge>
                         )}
@@ -414,7 +413,7 @@ function TabSessions({
                       <td className="px-3 py-2 tabular-nums whitespace-nowrap">
                         <span className="font-medium">{fmtMins(s.work_minutes)}</span>
                         {s.overtime_minutes > 0 && (
-                          <span className="text-amber-600 ml-1.5 text-[10px]">+{fmtMins(s.overtime_minutes)} OT</span>
+                          <span className="text-warning ml-1.5 text-[10px]">+{fmtMins(s.overtime_minutes)} OT</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-base" title={s.source}>
@@ -432,7 +431,7 @@ function TabSessions({
                           {s.approval_status}
                         </Badge>
                         {s.payroll_locked && (
-                          <Badge className="ml-1 text-[10px] bg-slate-100 text-slate-700 border-slate-200">
+                          <Badge className="ml-1 text-[10px] bg-muted text-muted-foreground border-border">
                             <Lock className="h-2.5 w-2.5 mr-0.5" />Locked
                           </Badge>
                         )}
@@ -506,12 +505,12 @@ function TabMissingPunches({
           <MonthNav month={month} onChange={onMonthChange} />
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
-              <XCircle className="h-4 w-4 text-red-500" />
-              <span className="text-xs font-semibold text-red-600">{missingIn} missing IN</span>
+              <XCircle className="h-4 w-4 text-destructive" />
+              <span className="text-xs font-semibold text-destructive">{missingIn} missing IN</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <XCircle className="h-4 w-4 text-amber-500" />
-              <span className="text-xs font-semibold text-amber-600">{missingOut} missing OUT</span>
+              <XCircle className="h-4 w-4 text-warning" />
+              <span className="text-xs font-semibold text-warning">{missingOut} missing OUT</span>
             </div>
             {(entries?.length ?? 0) > 0 && (
               <Button
@@ -550,7 +549,7 @@ function TabMissingPunches({
                     key={i}
                     className={cn(
                       'border-b border-border/50',
-                      !e.in_punch  ? 'bg-red-50/60' : !e.out_punch ? 'bg-amber-50/60' : '',
+                      !e.in_punch  ? 'bg-destructive/10' : !e.out_punch ? 'bg-warning/10' : '',
                     )}
                   >
                     <td className="px-3 py-2 font-medium">{e.employee_name}</td>
@@ -558,18 +557,18 @@ function TabMissingPunches({
                     <td className="px-3 py-2 font-mono text-muted-foreground">{e.date}</td>
                     <td className="px-3 py-2">
                       {e.in_punch ? (
-                        <span className="text-green-700 font-medium">{fmtTime(e.in_punch)}</span>
+                        <span className="text-success font-medium">{fmtTime(e.in_punch)}</span>
                       ) : (
-                        <span className="flex items-center gap-1 text-red-600 font-semibold">
+                        <span className="flex items-center gap-1 text-destructive font-semibold">
                           <XCircle className="h-3 w-3" />Missing
                         </span>
                       )}
                     </td>
                     <td className="px-3 py-2">
                       {e.out_punch ? (
-                        <span className="text-green-700 font-medium">{fmtTime(e.out_punch)}</span>
+                        <span className="text-success font-medium">{fmtTime(e.out_punch)}</span>
                       ) : (
-                        <span className="flex items-center gap-1 text-amber-600 font-semibold">
+                        <span className="flex items-center gap-1 text-warning font-semibold">
                           <XCircle className="h-3 w-3" />Missing
                         </span>
                       )}
@@ -647,8 +646,8 @@ function TabCrossMidnight({
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5">
-                        <Moon className="h-3 w-3 text-indigo-500" />
-                        <span className="font-semibold text-indigo-700">{s.attendance_date}</span>
+                        <Moon className="h-3 w-3 text-primary" />
+                        <span className="font-semibold text-primary">{s.attendance_date}</span>
                       </div>
                       <p className="text-[10px] text-muted-foreground mt-0.5">Business Date: {s.attendance_date}</p>
                     </td>
@@ -778,7 +777,7 @@ function TabAnomalies({
                       {a.severity}
                     </Badge>
                     {a.resolved && (
-                      <Badge variant="outline" className="text-[10px] text-green-700 border-green-200">
+                      <Badge variant="outline" className="text-[10px] text-success border-success/30">
                         <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Resolved
                       </Badge>
                     )}
@@ -962,16 +961,16 @@ function TabReplay({
             <div className="space-y-2">
               {report.pairing_decisions.map((pd, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs py-1.5 border-b border-border/40 last:border-0">
-                  <span className="font-mono text-green-700 text-[10px]">{pd.in_punch_id.slice(0, 8)}…</span>
+                  <span className="font-mono text-success text-[10px]">{pd.in_punch_id.slice(0, 8)}…</span>
                   <span className="text-muted-foreground">→</span>
                   {pd.out_punch_id ? (
-                    <span className="font-mono text-red-700 text-[10px]">{pd.out_punch_id.slice(0, 8)}…</span>
+                    <span className="font-mono text-destructive text-[10px]">{pd.out_punch_id.slice(0, 8)}…</span>
                   ) : (
                     <span className="text-muted-foreground/50 text-[10px]">unpaired</span>
                   )}
                   <span className="text-muted-foreground ml-2">{pd.decision}</span>
                   {pd.is_cross_midnight && (
-                    <Badge className="text-[10px] bg-indigo-100 text-indigo-700 border-indigo-200 ml-auto">
+                    <Badge className="text-[10px] bg-primary/15 text-primary border-primary/30 ml-auto">
                       <Moon className="h-2.5 w-2.5 mr-0.5" />cross-midnight
                     </Badge>
                   )}
@@ -1021,7 +1020,7 @@ function TabReplay({
                     {s.is_complete ? 'complete' : 'incomplete'}
                   </Badge>
                   {s.is_cross_midnight && (
-                    <Badge className="text-[10px] bg-indigo-100 text-indigo-700 border-indigo-200">
+                    <Badge className="text-[10px] bg-primary/15 text-primary border-primary/30">
                       <Moon className="h-2.5 w-2.5 mr-0.5" />+1
                     </Badge>
                   )}
@@ -1128,7 +1127,7 @@ function TabLocks({
       </SectionCard>
 
       {/* Warning banner */}
-      <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+      <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-xs text-warning">
         <AlertTriangle className="h-4 w-4 shrink-0" />
         <span>Payroll-locked sessions cannot be recalculated. Contact payroll admin to unlock.</span>
       </div>
@@ -1161,7 +1160,7 @@ function TabLocks({
                     <td className="px-3 py-2 font-mono text-muted-foreground">{s.attendance_date}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5">
-                        <Lock className="h-3 w-3 text-slate-500" />
+                        <Lock className="h-3 w-3 text-muted-foreground" />
                         <span>{s.payroll_locked_at ? fmtTime(s.payroll_locked_at) : '—'}</span>
                       </div>
                     </td>
@@ -1257,11 +1256,11 @@ function TabOtHeatmap({
                     </div>
                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                       <div
-                        className={cn('h-full rounded-full', r.total_ot_minutes > 480 ? 'bg-red-500' : r.total_ot_minutes > 240 ? 'bg-amber-500' : 'bg-amber-300')}
+                        className={cn('h-full rounded-full', r.total_ot_minutes > 480 ? 'bg-destructive' : r.total_ot_minutes > 240 ? 'bg-warning' : 'bg-warning/70')}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <span className="tabular-nums font-semibold text-amber-700 shrink-0">
+                    <span className="tabular-nums font-semibold text-warning shrink-0">
                       {fmtMins(r.total_ot_minutes)}
                     </span>
                   </div>
@@ -1427,7 +1426,7 @@ function TabCompliance({
                   <p className="text-sm font-semibold">{entry.employee_name}</p>
                   <div className="flex items-center gap-1.5">
                     {hasCritical && (
-                      <Badge className="text-[10px] bg-red-100 text-red-700 border-red-200">
+                      <Badge className="text-[10px] bg-destructive/15 text-destructive border-destructive/30">
                         <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />Critical
                       </Badge>
                     )}

@@ -1018,7 +1018,7 @@ export function MyAttendance() {
               if (first) { setRegForm({ regType: '', checkIn: '', checkOut: '', reason: '' }); setRegError(''); setSelectedDay(first.date) }
               else setActiveTab('requests')
             }}
-            className="bg-gradient-to-r from-primary to-violet-600 hover:brightness-105 text-primary-foreground font-semibold text-[11px] py-[7px] px-3.5 rounded-xl shadow-md transition-all flex items-center gap-1.5"
+            className="bg-gradient-to-r from-primary to-accent-violet hover:brightness-105 text-primary-foreground font-semibold text-[11px] py-[7px] px-3.5 rounded-xl shadow-md transition-all flex items-center gap-1.5"
           >
             <FileEdit className="h-3.5 w-3.5" />
             Request Regularisation

@@ -43,7 +43,7 @@ interface PayrollRun {
   held_count:       number
   warning_count:    number
   error_message:    string | null
-  failure_summary:  any | null
+  failure_summary:  unknown | null
   notes:            string | null
   created_at:       string
   finalized_at:     string | null
@@ -372,7 +372,7 @@ function PayrollExceptionsDrawer({ run, onClose }: PayrollExceptionsDrawerProps)
                       <tr key={slip.slip_id} className="border-b last:border-0 hover:bg-muted/30">
                         <td className="py-1.5 pr-3 font-mono text-muted-foreground">{slip.employee_code ?? '—'}</td>
                         <td className="py-1.5 pr-3">{slip.employee_name ?? '—'}</td>
-                        <td className="py-1.5 text-amber-700 dark:text-amber-400">{slip.warning ?? '—'}</td>
+                        <td className="py-1.5 text-warning">{slip.warning ?? '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -473,7 +473,7 @@ function RunDetailPanel({ run }: { run: PayrollRun }) {
                   <tr key={slip.slip_id} className="border-b last:border-0">
                     <td className="py-1 pr-3 font-mono text-muted-foreground">{slip.employee_code ?? '—'}</td>
                     <td className="py-1 pr-3">{slip.employee_name ?? '—'}</td>
-                    <td className="py-1 text-red-700 dark:text-red-400 text-[10px]">
+                    <td className="py-1 text-destructive text-[10px]">
                       {slip.held_reason ?? '—'}
                     </td>
                   </tr>
@@ -542,9 +542,9 @@ export default function PayrollRunConsole() {
         <div className="space-y-4">
           {/* SLA Signal Banner */}
           {slaAlert !== null && (
-            <div className="rounded-md border border-amber-300/40 bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2 flex items-center gap-2 text-xs">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-              <span className="text-amber-800 dark:text-amber-300">
+            <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 flex items-center gap-2 text-xs">
+              <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+              <span className="text-warning">
                 Payroll run in progress for {slaAlert} hours — review pending
               </span>
             </div>
@@ -614,7 +614,7 @@ export default function PayrollRunConsole() {
                           </td>
                           <td className="px-3 py-1.5 text-right">
                             {run.held_count > 0 ? (
-                              <span className="inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                              <span className="inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-destructive/15 text-destructive">
                                 {run.held_count}
                               </span>
                             ) : (
@@ -623,7 +623,7 @@ export default function PayrollRunConsole() {
                           </td>
                           <td className="px-3 py-1.5 text-right">
                             {run.warning_count > 0 ? (
-                              <span className="inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                              <span className="inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-warning/15 text-warning">
                                 {run.warning_count}
                               </span>
                             ) : (

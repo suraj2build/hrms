@@ -112,12 +112,12 @@ export function CompOff() {
   })
   const requests = data?.data ?? []
 
-  const { data: leaveTypesData } = useQuery<{ data: Array<{ id: string; name: string }> }>({
+  const { data: leaveTypesData } = useQuery<{ data: Array<{ id: string; name: string; is_active?: boolean }> }>({
     queryKey: ['leave-types-active'],
     queryFn:  () => api.get('/masters/leave-types'),
     staleTime: 120_000,
   })
-  const leaveTypes = (leaveTypesData?.data ?? []).filter((lt: any) => lt.is_active)
+  const leaveTypes = (leaveTypesData?.data ?? []).filter((lt) => lt.is_active)
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () => qc.invalidateQueries({ queryKey: ['comp-off'] })
@@ -159,7 +159,7 @@ export function CompOff() {
       ...(genEmpId   ? { employee_id:   genEmpId }   : {}),
       ...(genLeaveId ? { leave_type_id: genLeaveId } : {}),
     }),
-    onSuccess: (res: any) => {
+    onSuccess: (res: GenerateResult) => {
       invalidate()
       const r = res.data
       setGenResult(`Generated ${r.created} new request(s). ${r.skipped > 0 ? `${r.skipped} already existed.` : ''}`)

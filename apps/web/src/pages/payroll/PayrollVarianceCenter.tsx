@@ -125,7 +125,7 @@ export function PayrollVarianceCenter() {
     enabled:  !!activeRunId,
     staleTime: 60_000,
   })
-  const allRows: VarianceRow[] = varianceRaw?.data ?? []
+  const allRows: VarianceRow[] = useMemo(() => varianceRaw?.data ?? [], [varianceRaw])
 
   // ── Derived stats ──────────────────────────────────────────────────────────
   const stats = useMemo(() => {

@@ -202,8 +202,8 @@ export function AttendancePolicy() {
   }
 
   const createMutation = useMutation({
-    mutationFn: (body: typeof EMPTY_FORM) => api.post('/masters/attendance-policies', body),
-    onSuccess: (res: any) => {
+    mutationFn: (body: typeof EMPTY_FORM) => api.post<{ data: { id: string } }>('/masters/attendance-policies', body),
+    onSuccess: (res) => {
       invalidate()
       setShowCreate(false)
       setSelectedId(res.data.id)

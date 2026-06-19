@@ -19,7 +19,7 @@ import {
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
-import { Badge }          from '@/components/ui/badge'
+import { Badge, type BadgeProps }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
@@ -69,22 +69,22 @@ const RESOLUTION_LABEL: Record<string, string> = {
 
 function collisionTypeBadge(type: string) {
   const label = COLLISION_TYPE_LABEL[type] ?? type
-  const variant =
+  const variant: BadgeProps['variant'] =
     type === 'leave_on_restricted'      ? 'destructive' :
     type === 'sandwich_auto_applied'    ? 'warning' :
     type === 'leave_on_holiday'         ? 'secondary' :
                                           'outline'
-  return <Badge variant={variant as any} className="rounded-full text-[10px] whitespace-nowrap">{label}</Badge>
+  return <Badge variant={variant} className="rounded-full text-[10px] whitespace-nowrap">{label}</Badge>
 }
 
 function resolutionBadge(resolution: string) {
   const label = RESOLUTION_LABEL[resolution] ?? resolution
-  const variant =
+  const variant: BadgeProps['variant'] =
     resolution === 'auto_approved'  ? 'success' :
     resolution === 'auto_rejected'  ? 'destructive' :
     resolution === 'manual_override'? 'warning' :
                                       'secondary'
-  return <Badge variant={variant as any} className="rounded-full text-[10px] whitespace-nowrap">{label}</Badge>
+  return <Badge variant={variant} className="rounded-full text-[10px] whitespace-nowrap">{label}</Badge>
 }
 
 function fmtDate(iso: string) {

@@ -22,7 +22,6 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
-import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
 import {
   Select,
@@ -344,7 +343,7 @@ function FairnessTab() {
               {data.hints.map(hint => (
                 <div key={hint.id} className="rounded-lg border border-border bg-card p-3 space-y-1">
                   <div className="flex items-center gap-2">
-                    <Badge variant={severityVariant(hint.severity) as any} className="rounded-full text-[10px]">
+                    <Badge variant={severityVariant(hint.severity)} className="rounded-full text-[10px]">
                       {hint.severity}
                     </Badge>
                     <span className="text-xs font-medium text-foreground">{hint.title}</span>
@@ -405,7 +404,7 @@ function ConsecutiveTab() {
                     {v.violation_dates.map(fmtDate).join(', ')}
                   </td>
                   <td className="px-3 py-2">
-                    <Badge variant={severityVariant(v.severity) as any} className="rounded-full text-[10px]">
+                    <Badge variant={severityVariant(v.severity)} className="rounded-full text-[10px]">
                       {v.severity}
                     </Badge>
                   </td>
@@ -633,7 +632,7 @@ function StaffingHintsTab() {
                   <td className="px-3 py-2 font-medium text-foreground">{row.department}</td>
                   <td className="px-3 py-2 tabular-nums">{((row.coverage_ratio ?? 0) * 100).toFixed(1)}%</td>
                   <td className="px-3 py-2">
-                    <Badge variant={pressureVariant(row.staffing_pressure) as any} className="rounded-full text-[10px]">
+                    <Badge variant={pressureVariant(row.staffing_pressure)} className="rounded-full text-[10px]">
                       {row.staffing_pressure}
                     </Badge>
                   </td>
@@ -727,7 +726,7 @@ function HintsTab() {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant="outline" className="rounded-full text-[10px]">{hint.hint_type}</Badge>
-                  <Badge variant={severityVariant(hint.severity) as any} className="rounded-full text-[10px]">
+                  <Badge variant={severityVariant(hint.severity)} className="rounded-full text-[10px]">
                     {hint.severity}
                   </Badge>
                   {hint.resolved && (

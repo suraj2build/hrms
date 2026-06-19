@@ -123,6 +123,7 @@ interface DailyRecord {
   work_hours:      number
   late_minutes:    number
   overtime_minutes: number
+  is_payable?:     boolean | null
 }
 
 interface AttendanceResp {
@@ -429,7 +430,7 @@ export function RegularisationApproval() {
   const bulkLeaveMutation = useMutation({
     mutationFn: (body: { employee_ids: string[]; leave_type_id: string; from_date: string; to_date: string }) =>
       api.post('/attendance/leave/bulk-assign', body),
-    onSuccess: (r: any) => {
+    onSuccess: (r: { employees_count: number; days_count: number }) => {
       toast.success(`Leave assigned to ${r.employees_count} employee${r.employees_count !== 1 ? 's' : ''}`, {
         description: `${r.days_count} day${r.days_count !== 1 ? 's' : ''} of leave applied.`,
       })
@@ -1377,7 +1378,7 @@ export function RegularisationApproval() {
                       work_hours:       currentDailyRecord.work_hours,
                       late_minutes:     currentDailyRecord.late_minutes,
                       overtime_minutes: currentDailyRecord.overtime_minutes,
-                      is_payable:       (currentDailyRecord as any).is_payable ?? null,
+                      is_payable:       currentDailyRecord.is_payable ?? null,
                     }
                   : {}
 

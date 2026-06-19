@@ -153,7 +153,7 @@ function SingleEntry({ leaveTypes, year, onSaved }: { leaveTypes: LeaveType[]; y
       setEdits({})
       onSaved()
     },
-    onError: (e: any) => toast.error('Save failed', { description: (e as Error)?.message }),
+    onError: (e: unknown) => toast.error('Save failed', { description: (e as Error)?.message }),
   })
 
   return (
@@ -278,7 +278,7 @@ function BulkUpload({ leaveTypes, year, onCommitted }: { leaveTypes: LeaveType[]
       else toast.success(`Opening balances applied (${res.data.succeeded})`)
       onCommitted()
     },
-    onError: (e: any) => toast.error('Upload failed', { description: (e as Error)?.message }),
+    onError: (e: unknown) => toast.error('Upload failed', { description: (e as Error)?.message }),
   })
 
   return (

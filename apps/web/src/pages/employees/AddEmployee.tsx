@@ -61,14 +61,6 @@ export function AddEmployee() {
   const basePath     = useBasePath()
   const { profile }  = useAuthStore()
 
-  // HR admin-only page — employees and managers cannot create new employees
-  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
-      </div>
-    )
-  }
   const [step, setStep]           = useState(1)
   const [step1Data, setStep1Data] = useState<Step1 | null>(null)
   const [step2Data, setStep2Data] = useState<Step2 | null>(null)
@@ -120,6 +112,15 @@ export function AddEmployee() {
     },
     onError: (e: Error) => toast.error('Failed to add employee', { description: e.message }),
   })
+
+  // HR admin-only page — employees and managers cannot create new employees
+  if (!['super_admin', 'hr_admin'].includes(profile?.role ?? '')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <p className="text-sm text-muted-foreground font-medium">Access restricted to HR administrators.</p>
+      </div>
+    )
+  }
 
   return (
     <PageContainer size="narrow">

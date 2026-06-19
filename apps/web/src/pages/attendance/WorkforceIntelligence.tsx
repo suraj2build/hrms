@@ -474,7 +474,7 @@ export function WorkforceIntelligence() {
                       >
                         {/* Risk score badge */}
                         <Badge
-                          variant={riskVariant(emp.risk_score) as any}
+                          variant={riskVariant(emp.risk_score)}
                           className="rounded-full text-[10px] w-16 justify-center flex-shrink-0"
                         >
                           {riskLabel(emp.risk_score)}

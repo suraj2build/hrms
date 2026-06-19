@@ -23,7 +23,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
-import { Badge }         from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import {
   Dialog,
@@ -266,7 +266,7 @@ function nextMonthStr(m: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-const STATUS_BADGE: Record<string, string> = {
+const STATUS_BADGE: Record<string, BadgeProps['variant']> = {
   draft:          'secondary',
   partial_failed: 'warning',
   processing:     'warning',
@@ -287,7 +287,7 @@ const STATUS_LABEL: Record<string, string> = {
   reopened:       'Reopened',
 }
 
-const SLIP_STATUS_BADGE: Record<string, string> = {
+const SLIP_STATUS_BADGE: Record<string, BadgeProps['variant']> = {
   draft:      'secondary',
   finalized:  'success',
   held:       'warning',
@@ -910,7 +910,7 @@ function SlipsPanel({
                     <td className="px-3 py-2 text-xs font-mono text-destructive">{fmtCurrency(slip.total_deductions)}</td>
                     <td className="px-3 py-2 text-xs font-mono font-semibold text-success">{fmtCurrency(slip.net_pay)}</td>
                     <td className="px-3 py-2">
-                      <Badge variant={SLIP_STATUS_BADGE[slip.status] as any} className="rounded-full text-[10px]">
+                      <Badge variant={SLIP_STATUS_BADGE[slip.status]} className="rounded-full text-[10px]">
                         {slip.status}
                       </Badge>
                     </td>
@@ -1480,7 +1480,7 @@ function RunCard({
               {warningCount} warn
             </span>
           )}
-          <Badge variant={STATUS_BADGE[run.status] as any} className="rounded-full text-xs capitalize">
+          <Badge variant={STATUS_BADGE[run.status]} className="rounded-full text-xs capitalize">
             {STATUS_LABEL[run.status] ?? run.status}
           </Badge>
         </div>
@@ -1943,7 +1943,7 @@ export function PayrollRuns() {
       setDryRunOpen(true)
     },
     onError: (e: unknown) => toast.error(
-      (e instanceof ApiError ? e.message : (e as any)?.message) ?? 'Dry run failed',
+      (e instanceof Error ? e.message : undefined) ?? 'Dry run failed',
     ),
   })
 
@@ -1971,7 +1971,7 @@ export function PayrollRuns() {
       qc.invalidateQueries({ queryKey: ['payroll-runs'] })
       toast.success('Payroll run triggered', { description: fmtMonth(runMonth) })
     },
-    onError: (e: any) => setRunError(e?.message ?? 'Failed to trigger payroll run'),
+    onError: (e: unknown) => setRunError(e instanceof Error ? e.message : 'Failed to trigger payroll run'),
   })
 
   // ── Finalize run ─────────────────────────────────────────────────────────────
@@ -1991,12 +1991,12 @@ export function PayrollRuns() {
           : []
         setMissingEmployees(employees)
         setOverrideReason('')
-        setForceOverrideCode(code as any)
+        setForceOverrideCode(code as 'MISSING_ATTENDANCE_DATA' | 'ATTENDANCE_NOT_LOCKED' | 'OPEN_BLOCKERS')
         setForceOverrideRun(activeFinalizeRun)
         setActiveFinalizeRun(null)
         setRunError('')
       } else {
-        setRunError((e as any)?.message ?? 'Failed to finalize run')
+        setRunError(e instanceof Error ? e.message : 'Failed to finalize run')
       }
     },
   })
@@ -2018,7 +2018,7 @@ export function PayrollRuns() {
       })
     },
     onError: (e: unknown) => {
-      toast.error((e as any)?.message ?? 'Force-finalize failed — please retry')
+      toast.error(e instanceof Error ? e.message : 'Force-finalize failed — please retry')
     },
   })
 
@@ -2031,7 +2031,7 @@ export function PayrollRuns() {
       toast.success('Period frozen — payroll is now immutably sealed')
     },
     onError: (e: unknown) => {
-      toast.error((e as any)?.message ?? 'Failed to freeze period')
+      toast.error(e instanceof Error ? e.message : 'Failed to freeze period')
     },
   })
 
@@ -2048,7 +2048,7 @@ export function PayrollRuns() {
       })
     },
     onError: (e: unknown) => {
-      toast.error((e as any)?.message ?? 'Failed to reopen period')
+      toast.error(e instanceof Error ? e.message : 'Failed to reopen period')
     },
   })
 
@@ -2318,7 +2318,7 @@ export function PayrollRuns() {
                     onReopenRequest={(run) => { setReopenReason(''); setActiveReopenRun(run) }}
                     finalizePending={finalizeMutation.isPending && finalizeMutation.variables === run.id}
                     freezePending={freezeMutation.isPending && freezeMutation.variables === run.id}
-                    reopenPending={reopenMutation.isPending && (reopenMutation.variables as any)?.runId === run.id}
+                    reopenPending={reopenMutation.isPending && reopenMutation.variables?.runId === run.id}
                   />
                 ))}
               </div>

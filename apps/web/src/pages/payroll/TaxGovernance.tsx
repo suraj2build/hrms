@@ -310,7 +310,7 @@ export function TaxGovernance() {
                   helpText="After this date, no changes are allowed"
                 />
               </div>
-              <div className="mt-4 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2">
+              <div className="mt-4 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>
                   Lock Date must be after Window Close Date. After locking, all declarations are frozen for payroll processing.
@@ -451,7 +451,7 @@ export function TaxGovernance() {
                 <SectionCard title="High-Risk Declarations">
                   {complianceData.risk_items.length === 0 ? (
                     <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                      <ShieldCheck className="h-4 w-4 text-green-500" />
+                      <ShieldCheck className="h-4 w-4 text-success" />
                       No high-risk declarations flagged for this period.
                     </div>
                   ) : (

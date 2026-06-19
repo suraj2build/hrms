@@ -84,7 +84,7 @@ export function TeamLeaveBalances() {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
   }
 
-  const rows       = data?.data ?? []
+  const rows       = useMemo(() => data?.data ?? [], [data])
   const year       = data?.year ?? new Date().getFullYear()
 
   // Collect all unique leave types across the team (for column headers)
@@ -316,7 +316,7 @@ export function TeamLeaveBalances() {
                 })}
                 {hasLiability && (
                   <td className="px-3 py-2.5 text-right">
-                    <span className="text-xs font-semibold tabular-nums text-amber-700">
+                    <span className="text-xs font-semibold tabular-nums text-warning">
                       {fmtINR(filtered.reduce((s, e) => s + (e.total_liability ?? 0), 0))}
                     </span>
                   </td>

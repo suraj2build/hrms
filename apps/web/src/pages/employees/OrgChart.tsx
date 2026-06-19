@@ -237,9 +237,12 @@ function ChangeManagerDialog({
       )
       handleClose()
     },
-    onError: (e: any) => toast.error('Could not update manager', {
-      description: e?.body?.message ?? e?.message ?? 'Check for circular reporting chains',
-    }),
+    onError: (e: unknown) => {
+      const err = e as { body?: { message?: string }; message?: string } | null
+      toast.error('Could not update manager', {
+        description: err?.body?.message ?? err?.message ?? 'Check for circular reporting chains',
+      })
+    },
   })
 
   function handleClose() {
@@ -371,7 +374,7 @@ export function OrgChart() {
     enabled:  isAdmin,
   })
 
-  const roots = data?.data.roots ?? []
+  const roots = useMemo(() => data?.data.roots ?? [], [data])
   const total = data?.data.total ?? 0
   const departments = useMemo(() => collectDepartments(roots), [roots])
 

@@ -44,7 +44,7 @@ export function ManagerTeamAssets() {
     staleTime: 5 * 60_000,
   })
 
-  const rows = data?.data ?? []
+  const rows = useMemo(() => data?.data ?? [], [data])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return rows

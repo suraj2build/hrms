@@ -172,8 +172,8 @@ export function StatutoryReconciliationCenter() {
       }
       refetch()
     },
-    onError: (e: any) => {
-      toast.error('Compute failed', { description: e?.message ?? 'Unable to compute statutory filings' })
+    onError: (e: unknown) => {
+      toast.error('Compute failed', { description: e instanceof Error ? e.message : 'Unable to compute statutory filings' })
     },
   })
 

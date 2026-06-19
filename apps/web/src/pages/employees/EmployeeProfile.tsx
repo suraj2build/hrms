@@ -124,6 +124,109 @@ interface FullProfile {
   } | null
 }
 
+// Loosely-typed API row shapes (fields accessed in this view). These mirror the
+// backend payloads without being exhaustive — unaccessed columns are omitted.
+interface AddressRow {
+  id: string; address_type?: string | null; line1?: string | null; line2?: string | null
+  city?: string | null; state?: string | null; pincode?: string | null; country?: string | null
+}
+interface EmergencyContactRow {
+  id: string; name?: string | null; relationship?: string | null; phone?: string | null
+  alternate_phone?: string | null; email?: string | null; is_primary?: boolean
+}
+interface DocumentRow {
+  id: string; name?: string | null; doc_type?: string | null; storage_path?: string | null
+  created_at?: string | null
+}
+interface IdentityRow {
+  id: string; identity_number?: string | null; issued_by?: string | null
+  expiry_date?: string | null; identity_types?: { name?: string | null } | null
+}
+interface OnboardingDocItem {
+  id: string; document_type?: string | null; extraction_status?: string | null; uploaded_at?: string | null
+}
+interface VerificationRow {
+  verification_type: string; status: string; verified_at?: string | null; explanation?: string | null
+}
+interface JobHistoryRow {
+  id: string; effective_from: string; effective_to?: string | null; is_current?: boolean
+  employment_type?: string | null
+  departments?: { name?: string | null } | null
+  designations?: { name?: string | null } | null
+  grades?: { name?: string | null; code?: string | null } | null
+  manager?: { first_name?: string | null; last_name?: string | null } | null
+  work_locations?: { name?: string | null } | null
+  cost_centers?: { name?: string | null } | null
+  shifts?: { name?: string | null } | null
+}
+interface PrevEmploymentRow {
+  id: string; company_name?: string | null; designation?: string | null
+  from_date?: string | null; to_date?: string | null
+}
+interface ClearanceRow { id: string; department?: string | null; status?: string | null; sequence?: number | null }
+interface SeparationData {
+  separation_type?: string | null; initiated_by?: string | null
+  notice_date?: string | null; last_working_date?: string | null
+  exit_reason?: string | null; exit_interview_done?: boolean; clearance_done?: boolean
+  remarks?: string | null; clearances?: ClearanceRow[]
+}
+interface RevisionRow {
+  id: string; status?: string | null; revision_type?: string | null
+  before_ctc_annual?: number | null; new_ctc_annual?: number | null; effective_date?: string | null
+  reason?: string | null; notes?: string | null
+}
+interface CompComponentRow {
+  salary_component_id?: string | null; component_type?: string | null; sequence?: number | null
+  calculation_type?: string | null; value?: number | null; name?: string | null; code?: string | null
+  monthly_amount?: number | null; annual_amount?: number | null
+}
+interface CompHistoryRow {
+  id: string; ctc_annual?: number | null; ctc_monthly?: number | null
+  effective_from?: string | null; effective_to?: string | null; is_active?: boolean
+}
+interface ContractRow {
+  id: string; contract_type?: string | null; start_date?: string | null; end_date?: string | null
+  status?: string | null; notes?: string | null
+}
+interface PassportVisaRow {
+  id: string; record_type?: string | null; doc_number?: string | null; country?: string | null
+  visa_type?: string | null; place_of_issue?: string | null; issue_date?: string | null; expiry_date?: string | null
+}
+interface FamilyRow {
+  id: string; name?: string | null; dob?: string | null; gender?: string | null
+  occupation?: string | null; is_dependent?: boolean; relationship_type_id?: string | null
+  relationship_types?: { name?: string | null } | null
+}
+interface NominationRow { id: string; scheme?: string | null; share_percentage?: number | string | null; nominee_name?: string | null }
+interface AccessCardRow {
+  id: string; card_number?: string | null; status?: string | null
+  issued_date?: string | null; returned_date?: string | null
+}
+interface AssetRow { id: string; [k: string]: unknown }
+interface AssetHistoryRow { id: string; asset_id?: string | null; action?: string | null; [k: string]: unknown }
+interface ShiftHistoryRow {
+  id: string; effective_from?: string | null; effective_to?: string | null
+  shifts?: { name?: string | null } | null; [k: string]: unknown
+}
+interface MasterOption { id: string; name: string; code?: string; city?: string; start_time?: string; end_time?: string }
+interface ManagerOption { id: string; first_name: string; last_name: string; employee_code: string }
+interface HolidayGroupRow { id: string; name?: string | null; is_active?: boolean }
+interface StateRow { state_code: string; state_name: string; enabled: boolean }
+
+type BadgeVariant = React.ComponentProps<typeof Badge>['variant']
+
+// Generic form-state bag for dynamically-keyed text forms (profile/personal/etc.).
+// Values are text/nullable so they bind cleanly to <input value> and to null-able selects.
+type FormBag = Record<string, string | null | undefined>
+interface EmergencyContactForm {
+  id?: string; name?: string; relationship?: string; phone?: string
+  alternate_phone?: string; email?: string; is_primary?: boolean
+}
+interface FamilyForm {
+  id?: string; name?: string; relationship_type_id?: string; dob?: string
+  gender?: string; occupation?: string; is_dependent?: boolean
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmt(val?: string | null) { return val ?? '—' }
@@ -231,7 +334,7 @@ function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmi
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerItem, setDrawerItem] = useState<any>(null)
+  const [drawerItem, setDrawerItem] = useState<{ explainability?: unknown } | null>(null)
 
   const { data: trustData, isLoading: trustLoading } = useQuery({
     queryKey: ['employee-trust-score', employeeId],
@@ -256,9 +359,9 @@ function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmi
     onError: () => toast.error('Retry failed'),
   })
 
-  const verifications: any[] = (verData as any)?.verifications ?? []
+  const verifications: VerificationRow[] = (verData as { verifications?: VerificationRow[] } | undefined)?.verifications ?? []
 
-  const hasCritical = verifications.some((v: any) => v.status === 'failed')
+  const hasCritical = verifications.some((v) => v.status === 'failed')
 
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -283,11 +386,11 @@ function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmi
           {/* Section A: Trust Score */}
           {trustLoading
             ? <IntelligenceLoadingSkeleton rows={1} cardHeight="h-8" />
-            : (trustData as any)?.score != null
+            : (trustData as { score?: number } | undefined)?.score != null
               ? (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Trust Score</span>
-                  <RiskIndicator score={(trustData as any).score} />
+                  <RiskIndicator score={(trustData as { score: number }).score} />
                 </div>
               )
               : null}
@@ -298,7 +401,7 @@ function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmi
             : verifications.length > 0
               ? (
                 <div className="space-y-1.5">
-                  {verifications.map((v: any) => (
+                  {verifications.map((v) => (
                     <div key={v.verification_type} className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground capitalize">
                         {v.verification_type === 'bank_account' ? 'Bank Account' : v.verification_type.toUpperCase()}
@@ -325,14 +428,14 @@ function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmi
               )}
 
           {/* Section C: Explainability text */}
-          {verifications.filter((v: any) => v.explanation).slice(0, 1).map((v: any) => (
+          {verifications.filter((v) => v.explanation).slice(0, 1).map((v) => (
             <p key={v.verification_type} className="text-[11px] text-muted-foreground bg-muted/20 rounded px-2 py-1.5 leading-relaxed">
               {v.explanation}
             </p>
           ))}
 
           {/* Section D: Admin Retry Button */}
-          {isAdmin && verifications.some((v: any) => ['degraded', 'failed', 'pending'].includes(v.status)) && (
+          {isAdmin && verifications.some((v) => ['degraded', 'failed', 'pending'].includes(v.status)) && (
             <Button
               size="sm"
               variant="outline"
@@ -362,7 +465,7 @@ function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmi
 // ── Compensation Revision Drawer ──────────────────────────────────────────────
 
 interface CompensationRevisionDrawerProps {
-  revision:   any | null
+  revision:   RevisionRow | null
   currentCTC: number
   onClose:    () => void
   isAdmin:    boolean
@@ -422,7 +525,7 @@ function CompensationRevisionDrawer({
             <Badge variant="outline" className="rounded-full text-[10px] capitalize">
               {revision.revision_type ?? '—'}
             </Badge>
-            <Badge variant={statusVariant as any} className="rounded-full text-[10px] capitalize">
+            <Badge variant={statusVariant as BadgeVariant} className="rounded-full text-[10px] capitalize">
               {revision.status ?? '—'}
             </Badge>
           </div>
@@ -559,7 +662,7 @@ export function EmployeeProfile() {
   const qc           = useQueryClient()
   const { profile: authProfile } = useAuthStore()
   const basePath     = useBasePath()
-  const tenantId     = (authProfile as any)?.tenant_id ?? ''
+  const tenantId     = (authProfile as { tenant_id?: string } | null)?.tenant_id ?? ''
   const isAdmin      = ['super_admin', 'hr_admin'].includes(authProfile?.role ?? '')
 
   const [section,  setSection]  = useState<Section>('core')
@@ -584,31 +687,32 @@ export function EmployeeProfile() {
   const job  = fpData?.job_info
   const comp = fpData?.compensation
   const bs   = fpData?.bank_statutory
-  const addresses: any[]          = (fpData as any)?.addresses ?? []
-  const emergencyContacts: any[]  = (fpData as any)?.emergency_contacts ?? []
+  const addresses: AddressRow[]          = (fpData as { addresses?: AddressRow[] } | undefined)?.addresses ?? []
+  const emergencyContacts: EmergencyContactRow[]  = (fpData as { emergency_contacts?: EmergencyContactRow[] } | undefined)?.emergency_contacts ?? []
 
   // ── Lazy queries ───────────────────────────────────────────────────────────
-  const { data: jobHistoryData } = useQuery<{ data: any[] }>({
+  const { data: jobHistoryData } = useQuery<{ data: JobHistoryRow[] }>({
     queryKey: ['job-history-all', id], queryFn: () => api.get(`/employees/${id}/job-history`),
     enabled: !!id, staleTime: 30_000,
   })
-  const { data: prevEmpData } = useQuery<{ data: any[] }>({
+  const { data: prevEmpData } = useQuery<{ data: PrevEmploymentRow[] }>({
     queryKey: ['prev-employment', id], queryFn: () => api.get(`/employees/${id}/previous-employment`),
     enabled: !!id && visited.has('employment'), staleTime: 30_000,
   })
   const { data: separationData } = useQuery({
     queryKey: ['separation', id],
-    queryFn: async (): Promise<{ data: any }> => {
+    queryFn: async (): Promise<{ data: SeparationData | null }> => {
       try {
-        return await api.get<{ data: any }>(`/employees/${id}/separation`)
-      } catch (e: any) {
-        if (String(e?.message ?? '').includes('404') || e?.status === 404) return { data: null }
+        return await api.get<{ data: SeparationData | null }>(`/employees/${id}/separation`)
+      } catch (e: unknown) {
+        const err = e as { message?: string; status?: number }
+        if (String(err?.message ?? '').includes('404') || err?.status === 404) return { data: null }
         throw e
       }
     },
     enabled: !!id && visited.has('employment'), staleTime: 30_000,
   })
-  const { data: contractsData } = useQuery<{ data: any[] }>({
+  const { data: contractsData } = useQuery<{ data: ContractRow[] }>({
     queryKey: ['contracts', id], queryFn: () => api.get(`/employees/${id}/contracts`),
     enabled: !!id && visited.has('documents'), staleTime: 30_000,  // Contracts live under the Documents tab
   })
@@ -616,7 +720,7 @@ export function EmployeeProfile() {
   // ── Statutory eligibility (lazy — bank sub-tab only) ────────────────────────
   // PF configuration is now driven by the salary structure (pf_applicable, pf_ceiling_mode).
   // ESI eligibility override is still per-employee (continuation periods, manual exemptions).
-  const { data: esiEligData } = useQuery<{ data: any[] }>({
+  const { data: esiEligData } = useQuery<{ data: { continuation_until?: string | null }[] }>({
     queryKey: ['esi-elig-profile', id],
     queryFn:  () => api.get(`/payroll/statutory/esi/eligibility?employee_id=${id}&active_only=true`),
     enabled:  !!id && visited.has('compensation'),
@@ -626,13 +730,13 @@ export function EmployeeProfile() {
   const esiEligRow = esiEligData?.data?.[0] ?? null
 
   // Holiday groups (for employee holiday calendar group tag)
-  const { data: holidayGroupsData } = useQuery<{ data: any[] }>({
+  const { data: holidayGroupsData } = useQuery<{ data: HolidayGroupRow[] }>({
     queryKey: ['holiday-groups-list'],
     queryFn:  () => api.get('/masters/holiday-groups'),
     enabled:  !!id && visited.has('compensation'),
     staleTime: 5 * 60_000,
   })
-  const holidayGroups = (holidayGroupsData?.data ?? []).filter((g: any) => g.is_active !== false)
+  const holidayGroups = (holidayGroupsData?.data ?? []).filter((g) => g.is_active !== false)
 
   // Configured PT + LWF states — used for state override dropdowns (only show
   // states the tenant has actually set up, not the full list of 28)
@@ -641,14 +745,14 @@ export function EmployeeProfile() {
   const { data: ptaxStates } = useQuery<{ state_code: string; state_name: string; enabled: boolean }[]>({
     queryKey: ['ptax-states'],
     queryFn:  () => api.get('/payroll/statutory/ptax/states')
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+      .then((r: unknown) => Array.isArray(r) ? r as StateRow[] : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: StateRow[] }).data : []),
     enabled:  !!id && visited.has('compensation'),
     staleTime: 5 * 60_000,
   })
   const { data: lwfStates } = useQuery<{ state_code: string; state_name: string; enabled: boolean }[]>({
     queryKey: ['lwf-states'],
     queryFn:  () => api.get('/payroll/statutory/lwf/states')
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+      .then((r: unknown) => Array.isArray(r) ? r as StateRow[] : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: StateRow[] }).data : []),
     enabled:  !!id && visited.has('compensation'),
     staleTime: 5 * 60_000,
   })
@@ -662,45 +766,45 @@ export function EmployeeProfile() {
   // Continuation period — operational data shown read-only on ESI status card
   const profileToday = new Date().toISOString().slice(0, 10)
   const esiContinuationActive = !!(esiEligRow?.continuation_until && esiEligRow.continuation_until >= profileToday)
-  const { data: docsData } = useQuery<{ data: any[] }>({
+  const { data: docsData } = useQuery<{ data: DocumentRow[] }>({
     queryKey: ['emp-docs', id], queryFn: () => api.get(`/employees/${id}/documents`),
     enabled: !!id && visited.has('documents'), staleTime: 30_000,
   })
-  const { data: pvData } = useQuery<{ data: any[] }>({
+  const { data: pvData } = useQuery<{ data: PassportVisaRow[] }>({
     queryKey: ['passport-visa', id], queryFn: () => api.get(`/employees/${id}/passport-visa`),
     enabled: !!id && visited.has('documents'), staleTime: 30_000,
   })
-  const { data: familyData } = useQuery<{ data: any[] }>({
+  const { data: familyData } = useQuery<{ data: FamilyRow[] }>({
     queryKey: ['family', id], queryFn: () => api.get(`/employees/${id}/family`),
     enabled: !!id && visited.has('relationships'), staleTime: 30_000,
   })
-  const { data: nominationsData } = useQuery<{ data: any[] }>({
+  const { data: nominationsData } = useQuery<{ data: NominationRow[] }>({
     queryKey: ['nominations', id], queryFn: () => api.get(`/employees/${id}/nominations`),
     enabled: !!id && visited.has('relationships'), staleTime: 30_000,
   })
-  const { data: relTypesData } = useQuery<{ data: any[] }>({
+  const { data: relTypesData } = useQuery<{ data: MasterOption[] }>({
     queryKey: ['relationship-types'], queryFn: () => api.get('/masters/relationship-types'),
     enabled: !!id && visited.has('relationships'), staleTime: 5 * 60_000,
   })
-  const { data: identityData } = useQuery<{ data: any[] }>({
+  const { data: identityData } = useQuery<{ data: IdentityRow[] }>({
     queryKey: ['identity', id], queryFn: () => api.get(`/employees/${id}/identity`),
     enabled: !!id && visited.has('documents'), staleTime: 30_000,
   })
-  const { data: identityTypesData } = useQuery<{ data: any[] }>({
+  const { data: identityTypesData } = useQuery<{ data: MasterOption[] }>({
     queryKey: ['identity-types'], queryFn: () => api.get('/masters/identity-types'),
     enabled: !!id && visited.has('documents'), staleTime: 5 * 60_000,
   })
-  const { data: accessCardsData } = useQuery<{ data: any[] }>({
+  const { data: accessCardsData } = useQuery<{ data: AccessCardRow[] }>({
     queryKey: ['access-cards', id], queryFn: () => api.get(`/employees/${id}/access-cards`),
     enabled: !!id && visited.has('assets'), staleTime: 30_000,
   })
-  const { data: empAssetsData } = useQuery<{ data: { assigned: any[]; history: any[] } }>({
+  const { data: empAssetsData } = useQuery<{ data: { assigned: AssetRow[]; history: AssetHistoryRow[] } }>({
     queryKey: ['emp-assets', id], queryFn: () => api.get(`/employees/${id}/assets`),
     enabled: !!id && visited.has('assets'), staleTime: 30_000,
   })
 
   // ── New: Shift history ─────────────────────────────────────────────────────
-  const { data: shiftHistoryData } = useQuery<{ data: any[] }>({
+  const { data: shiftHistoryData } = useQuery<{ data: ShiftHistoryRow[] }>({
     queryKey: ['shift-history', id],
     queryFn:  () => api.get(`/employees/${id}/shift-history`),
     enabled:  !!id && visited.has('employment'),
@@ -711,7 +815,7 @@ export function EmployeeProfile() {
   interface OnboardingStatus {
     session: { id: string; status: string; created_at: string; updated_at: string } | null
     draft:   { id: string; status: string; confidence_score: number | null; created_at: string; updated_at: string }
-    documents: { total: number; extracted: number; failed: number; items: any[] }
+    documents: { total: number; extracted: number; failed: number; items: OnboardingDocItem[] }
   }
   const { data: onboardingData } = useQuery<{ data: OnboardingStatus | null }>({
     queryKey: ['onboarding-status', id],
@@ -777,7 +881,7 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['important-dates', id] })
       setIdateDlgOpen(false)
     },
-    onError: (err: any) => toast.error(err?.response?.data?.message ?? 'Failed to save date'),
+    onError: (err: unknown) => toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Failed to save date'),
   })
 
   const deleteImportantDateMut = useMutation({
@@ -808,8 +912,8 @@ export function EmployeeProfile() {
       send_invite:        accountForm.send_invite,
       is_active:          accountForm.is_active,
     }),
-    onSuccess: (res: any) => {
-      const genPwd = res?.data?.generated_password as string | undefined
+    onSuccess: (res: unknown) => {
+      const genPwd = (res as { data?: { generated_password?: string } })?.data?.generated_password
       if (genPwd) {
         // Stay open — show credentials panel so admin can copy the password
         setCreatedCredentials({ email: accountForm.email, password: genPwd })
@@ -840,7 +944,7 @@ export function EmployeeProfile() {
   })
 
   // ── New: Payroll revisions (lazy, admin only) ──────────────────────────────
-  const { data: payrollRevisionsData, refetch: refetchRevisions } = useQuery<{ data: any[] }>({
+  const { data: payrollRevisionsData, refetch: refetchRevisions } = useQuery<{ data: RevisionRow[] }>({
     queryKey: ['payroll-revisions', id],
     queryFn:  () => api.get(`/payroll/revisions?employee_id=${id}`),
     enabled:  !!id && visited.has('compensation') && isAdmin,
@@ -848,7 +952,7 @@ export function EmployeeProfile() {
   })
 
   // ── New: Compensation history timeline (lazy) ───────────────────────────────
-  const { data: compensationHistoryData, refetch: refetchCompHistory } = useQuery<{ data: any[] }>({
+  const { data: compensationHistoryData, refetch: refetchCompHistory } = useQuery<{ data: CompHistoryRow[] }>({
     queryKey: ['compensation-history', id],
     queryFn:  () => api.get(`/employees/${id}/compensation/history`),
     enabled:  !!id && visited.has('compensation'),
@@ -871,7 +975,7 @@ export function EmployeeProfile() {
 
   const pendingRevisions = useMemo(
     () => (payrollRevisionsData?.data ?? []).filter(
-      (r: any) => !['approved', 'rejected', 'withdrawn'].includes(r.status)
+      (r: RevisionRow) => !['approved', 'rejected', 'withdrawn'].includes(r.status ?? '')
     ),
     [payrollRevisionsData],
   )
@@ -979,7 +1083,7 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['compensation-history', id] })
     },
-    onError: (e: any) => toast.error('Delete failed', { description: (e as Error)?.message }),
+    onError: (e: unknown) => toast.error('Delete failed', { description: e instanceof Error ? e.message : undefined }),
   })
 
   const setupCompMutation = useMutation({
@@ -1042,11 +1146,11 @@ export function EmployeeProfile() {
       `Recompute this employee's attendance from ${fmtDate(from)} to today so the new ${label} drives attendance & payroll?`,
     )) return
     api.post('/attendance/recompute', { employee_id: id, from_date: from, to_date: today })
-      .then((r: any) => {
-        toast.success('Attendance recomputed', { description: `${r?.rows_upserted ?? 0} day(s) updated for the new ${label}.` })
+      .then((r: unknown) => {
+        toast.success('Attendance recomputed', { description: `${(r as { rows_upserted?: number })?.rows_upserted ?? 0} day(s) updated for the new ${label}.` })
         qc.invalidateQueries({ queryKey: ['employee-full', id] })
       })
-      .catch((e: any) => toast.error('Recompute failed', { description: (e as Error)?.message }))
+      .catch((e: unknown) => toast.error('Recompute failed', { description: e instanceof Error ? e.message : undefined }))
   }
 
   const orgMutation = useMutation({
@@ -1058,7 +1162,7 @@ export function EmployeeProfile() {
         effective_from:     body.effective_from,
         reason:             body.reason             || null,
       }),
-    onSuccess: (_d: any, body) => {
+    onSuccess: (_d: unknown, body) => {
       setOrgDlgOpen(false); refetchOrgCtx()
       qc.invalidateQueries({ queryKey: ['job-current', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
@@ -1134,7 +1238,7 @@ export function EmployeeProfile() {
     queryKey: ['masters-shifts'], queryFn: () => api.get('/masters/shifts'),
     enabled: assignTarget === 'shift', staleTime: 300_000,
   })
-  const { data: managerListData } = useQuery<{ data: any[]; total: number }>({
+  const { data: managerListData } = useQuery<{ data: ManagerOption[]; total: number }>({
     queryKey: ['employees-active-list'],
     queryFn: () => api.get('/employees?status=active&limit=500'),
     enabled: assignTarget === 'manager' || addJobOpen, staleTime: 120_000,
@@ -1150,7 +1254,7 @@ export function EmployeeProfile() {
     cost_center:     (ccListData?.data    ?? []).map(r => ({ id: r.id, label: `${r.name} (${r.code})` })),
     work_location:   (wlListData?.data    ?? []).map(r => ({ id: r.id, label: r.city ? `${r.name} · ${r.city}` : r.name })),
     shift:           (shiftListData?.data ?? []).map(r => ({ id: r.id, label: `${r.name} (${r.start_time}–${r.end_time})` })),
-    manager:         (managerListData?.data ?? []).filter((e: any) => e.id !== id).map((e: any) => ({ id: e.id, label: `${e.first_name} ${e.last_name} #${e.employee_code}` })),
+    manager:         (managerListData?.data ?? []).filter((e) => e.id !== id).map((e) => ({ id: e.id, label: `${e.first_name} ${e.last_name} #${e.employee_code}` })),
     employment_type: EMPLOYMENT_TYPES.map(t => ({ id: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
   }
 
@@ -1219,7 +1323,7 @@ export function EmployeeProfile() {
   const futureJobRecord = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10)
     return (jobHistoryData?.data ?? []).find(
-      (r: any) => r.effective_from > today && r.is_current
+      (r: JobHistoryRow) => r.effective_from > today && !!r.is_current
     ) ?? null
   }, [jobHistoryData])
 
@@ -1265,27 +1369,27 @@ export function EmployeeProfile() {
 
   // ── Profile edit ───────────────────────────────────────────────────────────
   const [editProfile, setEditProfile] = useState(false)
-  const [profileForm, setProfileForm] = useState<any>({})
+  const [profileForm, setProfileForm] = useState<Record<string, string>>({})
   const profileMutation = useMutation({
-    mutationFn: (d: any) => api.put(`/employees/${id}`, d),
+    mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setEditProfile(false); toast.success('Saved') },
     onError:   () => toast.error('Save failed'),
   })
 
   // ── Personal info edit ─────────────────────────────────────────────────────
   const [editPI, setEditPI] = useState(false)
-  const [piForm, setPiForm] = useState<any>({})
+  const [piForm, setPiForm] = useState<Record<string, string>>({})
   const piMutation = useMutation({
-    mutationFn: (d: any) => api.put(`/employees/${id}/personal-info`, d),
+    mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}/personal-info`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setEditPI(false); toast.success('Saved') },
     onError:   () => toast.error('Save failed'),
   })
 
   // ── Job history ────────────────────────────────────────────────────────────
   // (addJobOpen is declared earlier — it's referenced by the master-list queries)
-  const [jobForm, setJobForm]       = useState<any>({})
+  const [jobForm, setJobForm]       = useState<FormBag>({})
   const addJobMutation = useMutation({
-    mutationFn: async (d: any) => {
+    mutationFn: async (d: FormBag) => {
       // One form writes to TWO backends (single-writer split preserved):
       //   • job fields            → job_history
       //   • site/roster/rotation  → org-context
@@ -1293,7 +1397,7 @@ export function EmployeeProfile() {
       // current record, so re-saving without edits never spawns a duplicate
       // effective-dated revision / org assignment.
       const { site_id, roster_id, rotation_policy_id, ...jobFields } = d
-      const norm = (v: any) => v ?? null
+      const norm = (v: unknown) => v ?? null
       const jobChanged = !job || (
         norm(jobFields.department_id)    !== norm(job.departments?.id)    ||
         norm(jobFields.designation_id)   !== norm(job.designations?.id)   ||
@@ -1323,7 +1427,7 @@ export function EmployeeProfile() {
       }
       return { jobChanged, orgChanged }
     },
-    onSuccess: (res: any) => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['job-history-all', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['emp-org-context', id] })
@@ -1369,7 +1473,7 @@ export function EmployeeProfile() {
     } : {
       employment_type:   'permanent',
       ...org,
-      effective_from:    (emp as any)?.joining_date  ?? today,
+      effective_from:    emp?.joining_date  ?? today,
       reason_for_change: 'Initial',
     })
     setAddJobOpen(true)
@@ -1377,9 +1481,9 @@ export function EmployeeProfile() {
 
   // ── Previous employment ────────────────────────────────────────────────────
   const [addPrevOpen, setAddPrevOpen] = useState(false)
-  const [prevForm, setPrevForm]       = useState<any>({})
+  const [prevForm, setPrevForm]       = useState<Record<string, string>>({})
   const addPrevMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/previous-employment`, d),
+    mutationFn: (d: Record<string, string>) => api.post(`/employees/${id}/previous-employment`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['prev-employment', id] }); setAddPrevOpen(false); toast.success('Added') },
     onError:   () => toast.error('Failed'),
   })
@@ -1391,9 +1495,9 @@ export function EmployeeProfile() {
 
   // ── Passport / Visa ────────────────────────────────────────────────────────
   const [addPvOpen, setAddPvOpen] = useState(false)
-  const [pvForm, setPvForm]       = useState<any>({ record_type: 'passport' })
+  const [pvForm, setPvForm]       = useState<FormBag>({ record_type: 'passport' })
   const addPvMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/passport-visa`, d),
+    mutationFn: (d: FormBag) => api.post(`/employees/${id}/passport-visa`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['passport-visa', id] }); setAddPvOpen(false); toast.success('Added') },
     onError:   () => toast.error('Failed'),
   })
@@ -1405,9 +1509,9 @@ export function EmployeeProfile() {
 
   // ── Addresses ────────────────────────────────────────────────────────────────
   const [addrOpen, setAddrOpen] = useState(false)
-  const [addrForm, setAddrForm] = useState<any>({})
+  const [addrForm, setAddrForm] = useState<FormBag>({})
   const addrMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/addresses`, d),
+    mutationFn: (d: FormBag) => api.post(`/employees/${id}/addresses`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setAddrOpen(false); toast.success('Address saved') },
     onError:   (e: Error) => toast.error('Failed to save address', { description: e.message }),
   })
@@ -1419,9 +1523,9 @@ export function EmployeeProfile() {
 
   // ── Emergency contacts ─────────────────────────────────────────────────────
   const [emOpen, setEmOpen] = useState(false)
-  const [emForm, setEmForm] = useState<any>({})
+  const [emForm, setEmForm] = useState<EmergencyContactForm>({})
   const emMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/emergency-contacts`, d),
+    mutationFn: (d: EmergencyContactForm) => api.post(`/employees/${id}/emergency-contacts`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setEmOpen(false); toast.success('Emergency contact saved') },
     onError:   (e: Error) => toast.error('Failed to save contact', { description: e.message }),
   })
@@ -1433,9 +1537,9 @@ export function EmployeeProfile() {
 
   // ── Identity documents ─────────────────────────────────────────────────────
   const [idOpen, setIdOpen] = useState(false)
-  const [idForm, setIdForm] = useState<any>({})
+  const [idForm, setIdForm] = useState<FormBag>({})
   const idMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/identity`, d),
+    mutationFn: (d: FormBag) => api.post(`/employees/${id}/identity`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['identity', id] }); setIdOpen(false); toast.success('Identity record saved') },
     onError:   (e: Error) => toast.error('Failed to save identity', { description: e.message }),
   })
@@ -1447,9 +1551,9 @@ export function EmployeeProfile() {
 
   // ── Family ─────────────────────────────────────────────────────────────────
   const [addFamOpen, setAddFamOpen] = useState(false)
-  const [famForm, setFamForm]       = useState<any>({})
+  const [famForm, setFamForm]       = useState<FamilyForm>({})
   const addFamMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/family`, d),
+    mutationFn: (d: FamilyForm) => api.post(`/employees/${id}/family`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['family', id] }); setAddFamOpen(false); toast.success('Added') },
     onError:   () => toast.error('Failed'),
   })
@@ -1461,9 +1565,9 @@ export function EmployeeProfile() {
 
   // ── Access cards ───────────────────────────────────────────────────────────
   const [addCardOpen, setAddCardOpen] = useState(false)
-  const [cardForm, setCardForm]       = useState<any>({})
+  const [cardForm, setCardForm]       = useState<FormBag>({})
   const addCardMutation = useMutation({
-    mutationFn: (d: any) => api.post(`/employees/${id}/access-cards`, d),
+    mutationFn: (d: FormBag) => api.post(`/employees/${id}/access-cards`, d),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['access-cards', id] }); setAddCardOpen(false); toast.success('Card issued') },
     onError:   () => toast.error('Failed'),
   })
@@ -1515,7 +1619,7 @@ export function EmployeeProfile() {
       account_number: '',
       ifsc_code:      bs?.ifsc         ?? '',
       branch_name:    bs?.branch       ?? '',
-      account_type:   (bs?.account_type ?? '') as any,
+      account_type:   (bs?.account_type ?? '') as 'savings' | 'current' | 'salary' | '',
       pan_number:     bs?.pan          ?? '',
       aadhaar_number: '',
       uan_number:     bs?.uan          ?? '',
@@ -1525,9 +1629,9 @@ export function EmployeeProfile() {
       lwf_applicable: bs?.lwf_applicable ?? false,
       tax_regime:     (bs?.tax_regime ?? 'new') as 'old' | 'new',
       // PT / LWF state: from bank-statutory response (merged from state config).
-      pt_state_code:    (bs as any)?.pt_state_code    ?? '',
-      lwf_state_code:   (bs as any)?.lwf_state_code   ?? '',
-      holiday_group_id: (bs as any)?.holiday_group_id ?? '',
+      pt_state_code:    bs?.pt_state_code    ?? '',
+      lwf_state_code:   bs?.lwf_state_code   ?? '',
+      holiday_group_id: (bs as { holiday_group_id?: string | null } | null | undefined)?.holiday_group_id ?? '',
     })
     setEditBankOpen(true)
   }
@@ -2296,7 +2400,7 @@ export function EmployeeProfile() {
                         <KV label="Last Sign In"  value={acct.auth_user.last_sign_in_at ? fmtDate(acct.auth_user.last_sign_in_at) : 'Never'} />
                         <div>
                           <p className="text-xs text-muted-foreground mb-0.5">Account Status</p>
-                          <Badge variant={cfg.badge as any} className="rounded-full text-[10px]">
+                          <Badge variant={cfg.badge as BadgeVariant} className="rounded-full text-[10px]">
                             {cfg.label}
                           </Badge>
                         </div>
@@ -2535,7 +2639,7 @@ export function EmployeeProfile() {
                     {job && <KV label="Effective Since" value={fmtDate(job.effective_from)} />}
                   </Grid2>
                   {futureJobRecord && (
-                    <p className="mt-3 text-[11px] text-amber-600">
+                    <p className="mt-3 text-[11px] text-warning">
                       Pending change effective {fmtDate(futureJobRecord.effective_from)}.
                     </p>
                   )}
@@ -3180,7 +3284,7 @@ export function EmployeeProfile() {
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-medium capitalize">{r.revision_type}</span>
-                                  <Badge variant={statusVariant as any} className="rounded-full text-[9px] capitalize">{r.status}</Badge>
+                                  <Badge variant={statusVariant as BadgeVariant} className="rounded-full text-[9px] capitalize">{r.status}</Badge>
                                 </div>
                                 <span className="text-[11px] text-muted-foreground">{fmtDate(r.effective_date)}</span>
                               </div>
@@ -3589,8 +3693,8 @@ export function EmployeeProfile() {
                         </p>
                         {/* Continuation period — genuinely per-employee operational data */}
                         {esiContinuationActive && esiEligRow?.continuation_until && (
-                          <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2.5 py-1.5 mt-1">
-                            <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-snug">
+                          <div className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 mt-1">
+                            <p className="text-[10px] text-warning leading-snug">
                               ESI contributions continue until <span className="font-semibold">{esiEligRow.continuation_until}</span> — salary crossed threshold mid-period.
                             </p>
                           </div>
@@ -3950,9 +4054,9 @@ export function EmployeeProfile() {
               )}
               {!(accessCardsData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={CreditCard} title="No access cards" /></CardContent></Card>
-                : accessCardsData!.data.map((card: any) => {
-                    const STATUS_MAP: Record<string, string> = { active: 'success', returned: 'secondary', deactivated: 'secondary', lost: 'destructive' }
-                    const v: any = STATUS_MAP[card.status as string] ?? 'secondary'
+                : accessCardsData!.data.map((card: AccessCardRow) => {
+                    const STATUS_MAP: Record<string, BadgeVariant> = { active: 'success', returned: 'secondary', deactivated: 'secondary', lost: 'destructive' }
+                    const v: BadgeVariant = STATUS_MAP[card.status as string] ?? 'secondary'
                     return (
                       <Card key={card.id}>
                         <CardContent className="pt-4 pb-4 flex items-start justify-between">

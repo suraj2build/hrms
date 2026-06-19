@@ -136,7 +136,7 @@ export function UnifiedEventFilter({
       onRemove: () => { setLocalSearch(''); onChange({ ...filters, search: undefined }) },
     })
   }
-  ;(filters.severity ?? []).forEach((sev) => {
+  (filters.severity ?? []).forEach((sev) => {
     activeChips.push({
       key:      `sev-${sev}`,
       label:    getSeverityLabel(sev),

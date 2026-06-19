@@ -15,7 +15,7 @@
  *     on focus — only explicit invalidations update it.
  */
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient }       from '@tanstack/react-query'
 import { toast }                                       from 'sonner'
 import {
@@ -126,9 +126,9 @@ export function Holidays() {
   const syncMutation = useMutation({
     mutationFn: ({ holidayId, groupIds }: { holidayId: string; groupIds: string[] }) =>
       api.post('/masters/holidays/group-assignments', { holiday_id: holidayId, group_ids: groupIds }),
-    onError: (e: any, { holidayId, groupIds: _g }) => {
+    onError: (e: unknown, { holidayId, groupIds: _g }) => {
       // Revert: re-sync this holiday's groups from the server cache
-      const serverAssignments = (qc.getQueryData<any>(MATRIX_KEY))?.assignments ?? []
+      const serverAssignments = (qc.getQueryData<{ assignments?: Assignment[] }>(MATRIX_KEY))?.assignments ?? []
       const serverKeys = new Set<string>(serverAssignments
         .filter((a: Assignment) => a.holiday_id === holidayId)
         .map((a: Assignment) => `${a.holiday_id}|${a.group_id}`))
@@ -139,7 +139,7 @@ export function Holidays() {
         for (const k of serverKeys) next.add(k)
         return next
       })
-      toast.error('Failed to save assignment', { description: e?.message })
+      toast.error('Failed to save assignment', { description: e instanceof Error ? e.message : undefined })
     },
   })
 
@@ -177,19 +177,19 @@ export function Holidays() {
       setAddName(''); setAddDate(todayStr()); setAddOptional(false); setAddErr('')
       toast.success('Holiday added')
     },
-    onError: (e: any) => { setAddErr(e?.message ?? 'Failed'); toast.error('Failed to add holiday') },
+    onError: (e: unknown) => { setAddErr(e instanceof Error ? e.message : 'Failed'); toast.error('Failed to add holiday') },
   })
 
   // ── Edit holiday ───────────────────────────────────────────────────────────
   const editMutation = useMutation({
-    mutationFn: ({ id, name, date, is_optional }: any) =>
+    mutationFn: ({ id, name, date, is_optional }: { id: string; name: string; date: string; is_optional: boolean }) =>
       api.patch(`/masters/holidays/${id}`, { name, date, is_optional }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: MATRIX_KEY })
       setEditId(null)
       toast.success('Holiday updated')
     },
-    onError: (e: any) => toast.error('Failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed', { description: e instanceof Error ? e.message : undefined }),
   })
 
   // ── Delete holiday ─────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ export function Holidays() {
       setPendingDelete(null)
       toast.success('Holiday removed')
     },
-    onError: (e: any) => { setPendingDelete(null); toast.error('Failed', { description: e?.message }) },
+    onError: (e: unknown) => { setPendingDelete(null); toast.error('Failed', { description: e instanceof Error ? e.message : undefined }) },
   })
 
   // ── Add group (new column) ─────────────────────────────────────────────────
@@ -214,20 +214,20 @@ export function Holidays() {
       setNewGroupName(''); setNewGroupState(''); setShowAddGroup(false)
       toast.success('Group created')
     },
-    onError: (e: any) => toast.error('Failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed', { description: e instanceof Error ? e.message : undefined }),
   })
 
   // ── Seed govt holidays ─────────────────────────────────────────────────────
   const seedMutation = useMutation({
     mutationFn: () => api.post('/masters/holidays/seed-standard', {}),
-    onSuccess: (res: any) => {
+    onSuccess: (res: { data?: { created?: number; skipped?: number } }) => {
       qc.invalidateQueries({ queryKey: MATRIX_KEY })
       const { created, skipped } = res?.data ?? {}
       toast.success('Government holidays loaded', {
-        description: created > 0 ? `${created} added, ${skipped} already existed` : 'All already loaded',
+        description: (created ?? 0) > 0 ? `${created} added, ${skipped} already existed` : 'All already loaded',
       })
     },
-    onError: (e: any) => toast.error('Failed', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed', { description: e instanceof Error ? e.message : undefined }),
   })
 
   // ── Non-admin guard ────────────────────────────────────────────────────────
@@ -438,7 +438,7 @@ export function Holidays() {
                       </label>
                       <Button size="sm" className="h-7 text-[11px] shrink-0"
                         disabled={addMutation.isPending || !addName.trim()}
-                        onClick={() => { if (!addName.trim()) { setAddErr('Name required'); return }; addMutation.mutate() }}>
+                        onClick={() => { if (!addName.trim()) { setAddErr('Name required'); return } addMutation.mutate() }}>
                         {addMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Plus className="h-3 w-3 mr-1" />Add</>}
                       </Button>
                       {addErr && <span className="text-[10px] text-destructive">{addErr}</span>}

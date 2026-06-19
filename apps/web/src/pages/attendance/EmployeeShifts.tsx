@@ -62,6 +62,7 @@ interface Shift {
   code:       string | null
   start_time: string
   end_time:   string
+  is_active?: boolean
 }
 
 interface WorkLocation {
@@ -136,7 +137,7 @@ export function EmployeeShifts() {
     queryKey: ['shifts'],
     queryFn:  () => api.get('/masters/shifts'),
   })
-  const shifts = (shiftData?.data ?? []).filter(s => (s as any).is_active)
+  const shifts = (shiftData?.data ?? []).filter(s => s.is_active)
 
   const { data: histData, isLoading: histLoading } = useQuery<{ data: HistoryRow[] }>({
     queryKey: ['employee-shift-history', historyEmpId],
@@ -280,7 +281,7 @@ export function EmployeeShifts() {
         row.shift ? (
           <div className="space-y-0.5">
             <div className="flex items-center gap-1.5">
-              <Badge variant="secondary" className="text-[10px] border border-orange-200 bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400">
+              <Badge variant="secondary" className="text-[10px] border border-warning/30 bg-warning/10 text-warning dark:bg-warning/20 dark:text-warning">
                 Override
               </Badge>
               <span className="text-xs text-muted-foreground">{row.shift.name}</span>
@@ -370,9 +371,9 @@ export function EmployeeShifts() {
       />
 
       {/* Governance context banner */}
-      <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs dark:border-blue-800 dark:bg-blue-950/30">
-        <Info className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
-        <span className="text-blue-700 dark:text-blue-300">
+      <div className="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/10 px-3.5 py-2.5 text-xs dark:border-primary/40 dark:bg-primary/20">
+        <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+        <span className="text-primary dark:text-primary">
           <strong>Primary scheduling</strong> is governed by Roster Policy + Rotation Policy.
           Use this page only for temporary overrides or special cases.
           Most employees should have <em>no override</em> here — they inherit from their site's governance policies.

@@ -161,7 +161,7 @@ export function normalizeToQueueItems(sources: RawSources): OperationalQueueItem
 
     let section: QueueSection = 'needs_review'
     let queueType: OperationalQueueItem['queue_type'] = 'attendance_anomaly'
-    let payrollBlocking = false
+    const payrollBlocking = false
     let groupKey: string | undefined
 
     if (anomalyType === 'missing_punch') {

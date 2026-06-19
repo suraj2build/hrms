@@ -217,7 +217,7 @@ export function MusterRoll() {
     hasAutoNavigated.current = true
   }, [latestMonthData?.month])
 
-  const allEmployees = data?.employees ?? []
+  const allEmployees = useMemo(() => data?.employees ?? [], [data])
 
   // ── Canonical metrics — all derived from shared selectors (attendance/selectors.ts)
   // Selectors use the same PAYABLE_STATUSES / LOP_STATUSES constants as the backend

@@ -159,7 +159,7 @@ export function PayrollLedger() {
       const params = new URLSearchParams()
       if (employeeId) params.set('employee_id', employeeId)
       if (month)      params.set('month', month)
-      return api.get(`/payroll/ledger?${params.toString()}`).then((r: any) => r.data)
+      return api.get<{ data: LedgerEntry[] }>(`/payroll/ledger?${params.toString()}`).then((r) => r.data)
     },
     enabled: isAdmin && applied,
   })

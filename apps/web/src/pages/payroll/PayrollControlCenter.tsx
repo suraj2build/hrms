@@ -198,9 +198,9 @@ function StepPanel({
           className={cn(
             'p-2 rounded-lg',
             status === 'ok'
-              ? 'bg-emerald-500/10'
+              ? 'bg-success/10'
               : status === 'warning'
-                ? 'bg-amber-500/10'
+                ? 'bg-warning/10'
                 : 'bg-destructive/10',
           )}
         >
@@ -208,9 +208,9 @@ function StepPanel({
             className={cn(
               'h-5 w-5',
               status === 'ok'
-                ? 'text-emerald-600'
+                ? 'text-success'
                 : status === 'warning'
-                  ? 'text-amber-600'
+                  ? 'text-warning'
                   : 'text-destructive',
             )}
           />
@@ -242,8 +242,8 @@ function StepPanel({
 
       {/* Bypass reason input — shown inline when user clicks Proceed Anyway */}
       {showBypass && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-          <p className="text-xs font-medium text-amber-700">
+        <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-2">
+          <p className="text-xs font-medium text-warning">
             Bypassing with open issues — enter a reason to confirm
           </p>
           <textarea
@@ -258,7 +258,7 @@ function StepPanel({
               onClick={() => { setShowBypass(false); setBypassReason('') }}>
               Cancel
             </Button>
-            <Button size="sm" className="h-7 text-xs gap-1 bg-amber-600 hover:bg-amber-700 text-white border-0"
+            <Button size="sm" className="h-7 text-xs gap-1 bg-warning hover:bg-warning/90 text-warning-foreground border-0"
               disabled={!bypassReason.trim()}
               onClick={handleBypassConfirm}>
               <SkipForward className="h-3 w-3" /> Confirm bypass
@@ -279,7 +279,7 @@ function StepPanel({
           </Button>
         )}
         {status !== 'ok' && canBypass && !showBypass && onSkip && (
-          <Button variant="outline" size="sm" className="gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
+          <Button variant="outline" size="sm" className="gap-1.5 text-warning border-warning/30 hover:bg-warning/10"
             onClick={() => setShowBypass(true)}>
             <SkipForward className="h-3.5 w-3.5" /> Proceed anyway
           </Button>
@@ -312,9 +312,9 @@ function IssueRow({
     <div className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/40 border border-border">
       <div className="flex items-center gap-2">
         {count > 0 ? (
-          <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+          <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0" />
         ) : (
-          <Check className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+          <Check className="h-4 w-4 text-success flex-shrink-0" />
         )}
         <span className="text-sm">{label}</span>
         <Badge variant={count > 0 ? 'destructive' : 'secondary'} className="text-xs">
@@ -349,7 +349,7 @@ function PreviousStepChecklist({
             className="flex items-center gap-2 py-1.5 px-3 rounded-md bg-muted/30"
           >
             {isDone ? (
-              <Check className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+              <Check className="h-4 w-4 text-success flex-shrink-0" />
             ) : (
               <X className="h-4 w-4 text-destructive flex-shrink-0" />
             )}
@@ -612,7 +612,7 @@ export function PayrollControlCenter(): JSX.Element {
                 onLink={() => navigate('/admin/attendance/corrections')}
               />
               {!hasIssues && (
-                <p className="text-sm text-emerald-600 font-medium">
+                <p className="text-sm text-success font-medium">
                   All pre-run checks passed. Ready to proceed.
                 </p>
               )}
@@ -640,7 +640,7 @@ export function PayrollControlCenter(): JSX.Element {
                 onLink={() => navigate('/admin/attendance/anomalies')}
               />
               {ec === 0 && (
-                <p className="text-sm text-emerald-600 font-medium">
+                <p className="text-sm text-success font-medium">
                   No open exceptions. Ready to proceed.
                 </p>
               )}
@@ -661,17 +661,17 @@ export function PayrollControlCenter(): JSX.Element {
           >
             <div className="flex flex-col gap-3">
               {isFrozen ? (
-                <div className="flex items-center gap-2 py-2 px-3 rounded-md bg-emerald-500/10 border border-emerald-500/30">
-                  <Lock className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                  <span className="text-sm text-emerald-700 font-medium">
+                <div className="flex items-center gap-2 py-2 px-3 rounded-md bg-success/10 border border-success/30">
+                  <Lock className="h-4 w-4 text-success flex-shrink-0" />
+                  <span className="text-sm text-success font-medium">
                     Attendance period is frozen
                   </span>
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-2 py-2 px-3 rounded-md bg-amber-500/10 border border-amber-500/30">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
-                    <span className="text-sm text-amber-700">
+                  <div className="flex items-center gap-2 py-2 px-3 rounded-md bg-warning/10 border border-warning/30">
+                    <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0" />
+                    <span className="text-sm text-warning">
                       Freezing the attendance period is irreversible. No further changes can be
                       made to attendance records once locked.
                     </span>
@@ -710,7 +710,7 @@ export function PayrollControlCenter(): JSX.Element {
                 onLink={() => navigate('/admin/overtime')}
               />
               {oc === 0 && (
-                <p className="text-sm text-emerald-600 font-medium">
+                <p className="text-sm text-success font-medium">
                   No pending overtime approval requests.
                 </p>
               )}
@@ -737,7 +737,7 @@ export function PayrollControlCenter(): JSX.Element {
                 onLink={() => navigate('/admin/payroll/compensation-revisions')}
               />
               {rc === 0 && (
-                <p className="text-sm text-emerald-600 font-medium">
+                <p className="text-sm text-success font-medium">
                   No pending salary variance items.
                 </p>
               )}
@@ -792,7 +792,7 @@ export function PayrollControlCenter(): JSX.Element {
                 )
               })}
               {allReady && (
-                <p className="text-sm text-emerald-600 font-medium">
+                <p className="text-sm text-success font-medium">
                   All statutory obligations verified. Ready to proceed.
                 </p>
               )}
@@ -818,12 +818,12 @@ export function PayrollControlCenter(): JSX.Element {
               <PreviousStepChecklist stepStatuses={stepStatuses} />
 
               {canRunPayroll && (
-                <div className="flex items-center gap-3 py-3 px-4 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-                  <Check className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                <div className="flex items-center gap-3 py-3 px-4 rounded-lg bg-success/10 border border-success/30">
+                  <Check className="h-5 w-5 text-success flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-emerald-700">Ready to run payroll</p>
+                    <p className="text-sm font-semibold text-success">Ready to run payroll</p>
                     {activeEmployees > 0 && (
-                      <p className="text-xs text-emerald-600">
+                      <p className="text-xs text-success">
                         {activeEmployees.toLocaleString()} active employee
                         {activeEmployees !== 1 ? 's' : ''} will be processed
                       </p>
@@ -914,7 +914,7 @@ export function PayrollControlCenter(): JSX.Element {
 
         <div className="flex items-center gap-2">
           {isDeadlineMode && hoursUntilDeadline !== undefined && (
-            <span className="text-xs text-amber-600 font-medium">
+            <span className="text-xs text-warning font-medium">
               {hoursUntilDeadline > 0 ? `${hoursUntilDeadline}h until deadline` : 'Deadline now'}
             </span>
           )}
@@ -932,9 +932,9 @@ export function PayrollControlCenter(): JSX.Element {
 
       {/* Deadline mode warning strip */}
       {isDeadlineMode && (
-        <div className="flex items-center gap-2 px-6 py-2 bg-amber-500/10 border-b border-amber-500/30">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
-          <span className="text-xs font-semibold text-amber-700">
+        <div className="flex items-center gap-2 px-6 py-2 bg-warning/10 border-b border-warning/30">
+          <AlertTriangle className="h-3.5 w-3.5 text-warning flex-shrink-0" />
+          <span className="text-xs font-semibold text-warning">
             Deadline Mode Active — prioritise completing all steps
           </span>
         </div>
@@ -955,7 +955,7 @@ export function PayrollControlCenter(): JSX.Element {
                   className={cn(
                     'h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors',
                     status === 'complete'
-                      ? 'bg-emerald-500 border-emerald-500 text-white'
+                      ? 'bg-success border-success text-success-foreground'
                       : status === 'blocked'
                         ? 'bg-destructive border-destructive text-white'
                         : isActive
@@ -986,7 +986,7 @@ export function PayrollControlCenter(): JSX.Element {
                   className={cn(
                     'flex-1 h-0.5 mx-1 min-w-4',
                     stepStatuses[PAYROLL_STEPS[i].id] === 'complete'
-                      ? 'bg-emerald-500'
+                      ? 'bg-success'
                       : 'bg-muted',
                   )}
                 />

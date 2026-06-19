@@ -162,7 +162,7 @@ function todayMonth(): string {
 }
 
 function fmtMonth(m: string): string {
-  const [y, mo] = m.split('-')
+  const [_y, _mo] = m.split('-')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   if (isNaN(d.getTime())) return '—'
@@ -405,13 +405,13 @@ function TabLive({ stats, statsLoading }: { stats: AttendanceStats | undefined; 
                       'text-[10px] capitalize',
                       emp.status === 'PRESENT' ? 'text-green-700 border-green-200 bg-green-50' :
                       emp.status === 'ABSENT'  ? 'text-red-700 border-red-200 bg-red-50' :
-                      emp.status === 'LATE'    ? 'text-yellow-700 border-yellow-200 bg-yellow-50' : '',
+                      emp.status === 'LATE'    ? 'text-warning border-warning/30 bg-warning/10' : '',
                     )}
                   >
                     {emp.status}
                   </Badge>
                   {emp.anomaly_risk > 0 && (
-                    <span className="flex items-center gap-0.5 text-red-600 font-semibold">
+                    <span className="flex items-center gap-0.5 text-destructive font-semibold">
                       <AlertTriangle className="h-3 w-3" />
                       {emp.anomaly_risk}
                     </span>
@@ -495,14 +495,14 @@ function TabSessions({
                         </span>
                       </td>
                       <td className="px-3 py-2 tabular-nums">{fmtMins(s.work_minutes)}</td>
-                      <td className="px-3 py-2 tabular-nums text-amber-600">
+                      <td className="px-3 py-2 tabular-nums text-warning">
                         {s.overtime_minutes > 0 ? `+${fmtMins(s.overtime_minutes)}` : '—'}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">{s.source}</td>
                       <td className="px-3 py-2">
                         <Badge variant="outline" className="text-[10px] capitalize">{s.approval_status}</Badge>
                         {s.payroll_locked && (
-                          <Badge className="ml-1 text-[10px] bg-slate-100 text-slate-700 border-slate-200">Locked</Badge>
+                          <Badge className="ml-1 text-[10px] bg-muted text-muted-foreground border-border">Locked</Badge>
                         )}
                       </td>
                       <td className="px-3 py-2">
@@ -559,10 +559,10 @@ function TabMissingPunches({ month, onMonthChange }: { month: string; onMonthCha
         <div className="flex flex-wrap items-center justify-between gap-3">
           <MonthNav month={month} onChange={onMonthChange} />
           <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-red-600 flex items-center gap-1">
+            <span className="text-xs font-semibold text-destructive flex items-center gap-1">
               <XCircle className="h-3.5 w-3.5" />{missingIn} missing IN
             </span>
-            <span className="text-xs font-semibold text-amber-600 flex items-center gap-1">
+            <span className="text-xs font-semibold text-warning flex items-center gap-1">
               <XCircle className="h-3.5 w-3.5" />{missingOut} missing OUT
             </span>
             {(entries?.length ?? 0) > 0 && (
@@ -604,13 +604,13 @@ function TabMissingPunches({ month, onMonthChange }: { month: string; onMonthCha
                     <td className="px-3 py-2 font-mono text-muted-foreground">{e.date}</td>
                     <td className="px-3 py-2">
                       {e.in_punch
-                        ? <span className="text-green-700 font-medium">{fmtTime(e.in_punch)}</span>
-                        : <span className="text-red-600 font-semibold flex items-center gap-1"><XCircle className="h-3 w-3" />Missing</span>}
+                        ? <span className="text-success font-medium">{fmtTime(e.in_punch)}</span>
+                        : <span className="text-destructive font-semibold flex items-center gap-1"><XCircle className="h-3 w-3" />Missing</span>}
                     </td>
                     <td className="px-3 py-2">
                       {e.out_punch
-                        ? <span className="text-green-700 font-medium">{fmtTime(e.out_punch)}</span>
-                        : <span className="text-amber-600 font-semibold flex items-center gap-1"><XCircle className="h-3 w-3" />Missing</span>}
+                        ? <span className="text-success font-medium">{fmtTime(e.out_punch)}</span>
+                        : <span className="text-warning font-semibold flex items-center gap-1"><XCircle className="h-3 w-3" />Missing</span>}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{e.source}</td>
                   </tr>
@@ -646,8 +646,8 @@ function TabOT({ month, onMonthChange }: { month: string; onMonthChange: (m: str
           <MonthNav month={month} onChange={onMonthChange} />
           {(rows?.length ?? 0) > 0 && (
             <div className="flex items-center gap-2">
-              <Timer className="h-4 w-4 text-amber-500" />
-              <span className="text-sm font-semibold text-amber-700">
+              <Timer className="h-4 w-4 text-warning" />
+              <span className="text-sm font-semibold text-warning">
                 Total OT: {fmtMins(totalOt)}
               </span>
               <Badge variant="secondary" className="text-xs">{rows?.length} employees</Badge>
@@ -678,8 +678,8 @@ function TabOT({ month, onMonthChange }: { month: string; onMonthChange: (m: str
                   <tr key={i} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                     <td className="px-3 py-2 font-medium">{r.employee_name}</td>
                     <td className="px-3 py-2 font-mono text-muted-foreground">{r.employee_code}</td>
-                    <td className="px-3 py-2 tabular-nums font-semibold text-amber-700">{fmtMins(r.ot_minutes)}</td>
-                    <td className="px-3 py-2 tabular-nums text-green-700">
+                    <td className="px-3 py-2 tabular-nums font-semibold text-warning">{fmtMins(r.ot_minutes)}</td>
+                    <td className="px-3 py-2 tabular-nums text-success">
                       {r.approved_minutes != null ? fmtMins(r.approved_minutes) : '—'}
                     </td>
                     <td className="px-3 py-2">
@@ -792,7 +792,7 @@ function TabAnomalies() {
                       {a.severity}
                     </Badge>
                     {a.resolved && (
-                      <Badge variant="outline" className="text-[10px] text-green-700 border-green-200">
+                      <Badge variant="outline" className="text-[10px] text-success border-success/30">
                         <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Resolved
                       </Badge>
                     )}
@@ -891,7 +891,7 @@ function TabApprovals() {
                 <div className="flex gap-1.5 shrink-0">
                   <Button
                     size="sm"
-                    className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700"
+                    className="h-7 text-xs gap-1 bg-success hover:bg-success/90"
                     disabled={approve.isPending || reject.isPending}
                     onClick={() => approve.mutate(req.id)}
                   >
@@ -900,7 +900,7 @@ function TabApprovals() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-7 text-xs gap-1 text-red-600 border-red-200 hover:bg-red-50"
+                    className="h-7 text-xs gap-1 text-destructive border-destructive/30 hover:bg-destructive/10"
                     disabled={approve.isPending || reject.isPending}
                     onClick={() => reject.mutate(req.id)}
                   >
@@ -1089,7 +1089,19 @@ export function AttendanceWorkspace() {
   const { data: stats, isLoading: statsLoading } = useQuery<AttendanceStats>({
     queryKey:  ['att-workspace-stats'],
     queryFn:   () =>
-      api.get('/attendance/stats').then((r: any) => ({
+      api.get<{
+        active_period_summary?: {
+          present?: number
+          absent?: number
+          late?: number
+          wfh?: number
+          on_leave?: number
+          total?: number
+        }
+        unresolved_anomalies?: number
+        overnight_issues?: number
+        pending_corrections?: number
+      }>('/attendance/stats').then((r) => ({
         // Present/absent/late counts live inside active_period_summary
         present:           r?.active_period_summary?.present          ?? 0,
         absent:            r?.active_period_summary?.absent           ?? 0,

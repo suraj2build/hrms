@@ -18,7 +18,6 @@ import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
-import { Badge }          from '@/components/ui/badge'
 import { cn }             from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,8 +84,8 @@ function OtRow({ req, onAction }: {
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm font-semibold tabular-nums">{fmtMins(req.raw_ot_minutes)}</p>
-          {req.is_weekend_day && <p className="text-[10px] text-amber-600">Weekend</p>}
-          {req.is_holiday_day && <p className="text-[10px] text-red-600">Holiday</p>}
+          {req.is_weekend_day && <p className="text-[10px] text-warning">Weekend</p>}
+          {req.is_holiday_day && <p className="text-[10px] text-destructive">Holiday</p>}
         </div>
         <StatusBadge status={req.status} />
         {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
@@ -99,7 +98,7 @@ function OtRow({ req, onAction }: {
           {req.approved_at && <p><span className="text-muted-foreground">Actioned:</span> {new Date(req.approved_at).toLocaleDateString()}</p>}
           {isPending && (
             <div className="flex gap-2 pt-2">
-              <Button size="sm" variant="default" className="h-7 gap-1 bg-green-600 hover:bg-green-700"
+              <Button size="sm" variant="default" className="h-7 gap-1 bg-success hover:bg-success/90"
                 onClick={e => { e.stopPropagation(); onAction(req.id, 'approve') }}>
                 <Check className="h-3 w-3" /> Approve
               </Button>
@@ -121,7 +120,6 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
   const qc = useQueryClient()
 
-  const status = tab === 'pending' ? 'PENDING' : undefined
   const { data, isFetching, refetch } = useQuery<{ data: OtRequest[] }>({
     queryKey: ['manager-team-overtime', tab],
     queryFn:  () => api.get(`/overtime/requests${tab === 'pending' ? '?status=PENDING' : ''}`),

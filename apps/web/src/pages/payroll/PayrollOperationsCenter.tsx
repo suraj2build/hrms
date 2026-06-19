@@ -285,7 +285,7 @@ export function PayrollOperationsCenter() {
       items.push({ id: 'anomalies',       severity: 'warning',  title: 'Unresolved payroll anomalies',  desc: 'System-flagged inconsistencies needing investigation',  count: stats.unresolved_anomalies,  href: '/admin/payroll/investigate' })
 
     return items
-  }, [stats])
+  }, [stats, blockerHref])
 
   // ── Timeline events ─────────────────────────────────────────────────────────
   const timeline: TimelineEvent[] = useMemo(() => {

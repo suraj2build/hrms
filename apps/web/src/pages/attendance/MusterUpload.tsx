@@ -113,7 +113,7 @@ function parseExcel(file: File): Promise<{ rows: ParsedRow[]; parseErrors: strin
           : wb.SheetNames[0]
         const ws = wb.Sheets[sheetName]
 
-        const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+        const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
 
         const parseErrors: string[] = []
         const rows: ParsedRow[]     = []
@@ -146,7 +146,7 @@ function parseExcel(file: File): Promise<{ rows: ParsedRow[]; parseErrors: strin
           }
 
           if (!VALID_STATUSES.has(status)) {
-            parseErrors.push(`Row ${i + 1} (${empCode}): invalid status "${raw[3]}" — use P, A, or HLF`)
+            parseErrors.push(`Row ${i + 1} (${empCode}): invalid status "${String(raw[3])}" — use P, A, or HLF`)
             continue
           }
 
@@ -214,8 +214,8 @@ export function MusterUpload() {
       a.click()
       URL.revokeObjectURL(url)
       toast.success('Template downloaded')
-    } catch (err: any) {
-      toast.error('Download failed', { description: err.message })
+    } catch (err: unknown) {
+      toast.error('Download failed', { description: err instanceof Error ? err.message : String(err) })
     } finally {
       setIsDownloading(false)
     }
@@ -252,7 +252,7 @@ export function MusterUpload() {
       rows: parsedRows,
     }),
     onSuccess: (res) => {
-      const result = (res as any).data ?? res
+      const result = (res as { data?: UploadResult }).data ?? res
       setUploadResult(result)
       setParsedRows([])
       setFilename('')
@@ -267,7 +267,7 @@ export function MusterUpload() {
       qc.invalidateQueries({ queryKey: ['muster-upload-history'] })
       refetchHistory()
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error('Upload failed', { description: err.message })
     },
   })

@@ -38,7 +38,6 @@ interface ActionDialogState {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtMonth(ym: string): string {
-  const [y, m] = ym.split('-')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const d = new Date(ym.slice(0,7) + '-01T12:00:00Z')
   if (isNaN(d.getTime())) return '—'
@@ -127,10 +126,15 @@ export function AttendancePeriods() {
     staleTime: 60_000,
   })
 
+  const summary = anomalySummary as {
+    summary?: { unresolved?: number }
+    by_department?: { unresolved_count?: number; affected_employees?: number }[]
+  } | undefined
+  const byDepartment = summary?.by_department ?? []
   const lopImpact = {
-    anomalyCount:      (anomalySummary as any)?.summary?.unresolved ?? 0,
-    departmentCount:   ((anomalySummary as any)?.by_department ?? []).filter((d: any) => d.unresolved_count > 0).length,
-    affectedEmployees: ((anomalySummary as any)?.by_department ?? []).reduce((sum: number, d: any) => sum + (d.affected_employees ?? 0), 0),
+    anomalyCount:      summary?.summary?.unresolved ?? 0,
+    departmentCount:   byDepartment.filter((d) => (d.unresolved_count ?? 0) > 0).length,
+    affectedEmployees: byDepartment.reduce((sum: number, d) => sum + (d.affected_employees ?? 0), 0),
   }
 
   // ── Mutation ───────────────────────────────────────────────────────────────

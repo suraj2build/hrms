@@ -302,7 +302,7 @@ export function EPFManagement() {
     refetch: refetchConfig,
   } = useQuery<EPFConfig>({
     queryKey: ['epf-config'],
-    queryFn:  () => api.get('/payroll/statutory/epf/config').then((r: any) => r?.data ?? r),
+    queryFn:  () => api.get<{ data?: EPFConfig } & EPFConfig>('/payroll/statutory/epf/config').then((r) => r?.data ?? r),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -313,7 +313,7 @@ export function EPFManagement() {
     isLoading: registrationsLoading,
   } = useQuery<EPFRegistration[]>({
     queryKey: ['epf-registrations'],
-    queryFn:  () => api.get('/payroll/statutory/epf/registrations').then((r: any) => r?.data ?? []),
+    queryFn:  () => api.get<{ data?: EPFRegistration[] }>('/payroll/statutory/epf/registrations').then((r) => r?.data ?? []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -366,7 +366,7 @@ export function EPFManagement() {
   } = useQuery<EPFContribution[]>({
     queryKey: ['epf-contributions', viewMonth],
     queryFn:  () => api.get(`/payroll/statutory/epf/contributions?month=${viewMonth}`)
-      .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []),
+      .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: EPFContribution[] }).data : []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -379,7 +379,10 @@ export function EPFManagement() {
       refetchContrib()
       toast.success('EPF contributions computed', { description: `Month ${month}` })
     },
-    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message ?? 'Finalize the payroll run for this month first.' }),
+    onError: (e: unknown) => {
+      const err = e as { response?: { data?: { message?: string } }; message?: string }
+      toast.error('Compute failed', { description: err?.response?.data?.message ?? err?.message ?? 'Finalize the payroll run for this month first.' })
+    },
   })
 
   // ── Last 6 months (history table) ─────────────────────────────────────────────
@@ -387,7 +390,7 @@ export function EPFManagement() {
     queries: last6.map(ym => ({
       queryKey: ['epf-contributions', ym],
       queryFn:  () => api.get(`/payroll/statutory/epf/contributions?month=${ym}`)
-        .then((r: any) => Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : []) as Promise<EPFContribution[]>,
+        .then((r: unknown) => Array.isArray(r) ? r : Array.isArray((r as { data?: unknown })?.data) ? (r as { data: EPFContribution[] }).data : []) as Promise<EPFContribution[]>,
       enabled:  isAdmin,
       staleTime: 120_000,
     })),
@@ -728,7 +731,7 @@ export function EPFManagement() {
                     <td className="px-3 py-2.5 text-xs font-mono">
                       {row.loading ? <span className="inline-block h-3 w-16 bg-muted rounded animate-pulse" /> : row.staff === 0 ? <span className="text-muted-foreground">—</span> : fmtCurrency(row.pfWages)}
                     </td>
-                    <td className="px-3 py-2.5 text-xs font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <td className="px-3 py-2.5 text-xs font-mono text-success font-semibold">
                       {row.loading ? <span className="inline-block h-3 w-16 bg-muted rounded animate-pulse" /> : row.staff === 0 ? <span className="text-muted-foreground">—</span> : fmtCurrency(row.empEPF)}
                     </td>
                     <td className="px-3 py-2.5 text-xs font-mono">

@@ -69,7 +69,6 @@ export function LWFManagement() {
   const qc          = useQueryClient()
 
   const [viewMonth]         = useStatutoryMonth()
-  const [selectedStateCode, setSelectedStateCode] = useState<string>('')
   const [editingState, setEditingState]           = useState<LWFState | null>(null)
   const [showAddState, setShowAddState]           = useState(false)
   const [newStateCode, setNewStateCode]           = useState('')
@@ -79,7 +78,7 @@ export function LWFManagement() {
   // ── State list ───────────────────────────────────────────────────────────────
   const { data: statesData, isLoading: statesLoading, refetch: refetchStates } = useQuery<LWFState[]>({
     queryKey: ['lwf-states'],
-    queryFn:  () => api.get('/payroll/statutory/lwf/states').then((r: any) => Array.isArray(r) ? r : r?.data ?? []),
+    queryFn:  () => api.get('/payroll/statutory/lwf/states').then((r: unknown) => Array.isArray(r) ? r : (r as { data?: LWFState[] })?.data ?? []),
     enabled:  isAdmin,
     staleTime: 30_000,
   })
@@ -101,7 +100,7 @@ export function LWFManagement() {
       setEditingState(null)
       toast.success('LWF state updated')
     },
-    onError: (e: any) => toast.error('Failed to update', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed to update', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   const addStateMutation = useMutation({
@@ -113,7 +112,7 @@ export function LWFManagement() {
       toast.success('State added')
       setNewStateCode(''); setNewStateName(''); setShowAddState(false)
     },
-    onError: (e: any) => toast.error('Failed to add state', { description: e?.message }),
+    onError: (e: unknown) => toast.error('Failed to add state', { description: e instanceof Error ? e.message : String(e) }),
   })
 
   // ── Compute contributions ────────────────────────────────────────────────────
@@ -123,7 +122,10 @@ export function LWFManagement() {
       qc.invalidateQueries({ queryKey: ['lwf-contributions'] })
       toast.success('LWF contributions computed', { description: `Month ${month}` })
     },
-    onError: (e: any) => toast.error('Compute failed', { description: e?.response?.data?.message ?? e?.message }),
+    onError: (e: unknown) => {
+      const err = e as { response?: { data?: { message?: string } }; message?: string }
+      toast.error('Compute failed', { description: err?.response?.data?.message ?? err?.message })
+    },
   })
 
   // ── Export the monthly LWF register as CSV ───────────────────────────────────
@@ -138,8 +140,8 @@ export function LWFManagement() {
       const a    = document.createElement('a')
       a.href = url; a.download = `lwf-${viewMonth}.csv`; a.click()
       URL.revokeObjectURL(url)
-    } catch (e: any) {
-      toast.error('Export failed', { description: e?.message })
+    } catch (e: unknown) {
+      toast.error('Export failed', { description: e instanceof Error ? e.message : String(e) })
     } finally {
       setExporting(false)
     }
@@ -149,7 +151,7 @@ export function LWFManagement() {
   const { data: contribData } = useQuery<LWFContribution[]>({
     queryKey: ['lwf-contributions', viewMonth],
     queryFn:  () => api.get(`/payroll/statutory/lwf/contributions?month=${viewMonth}`)
-      .then((r: any) => Array.isArray(r) ? r : r?.data ?? []),
+      .then((r: unknown) => Array.isArray(r) ? r : (r as { data?: LWFContribution[] })?.data ?? []),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
@@ -160,7 +162,7 @@ export function LWFManagement() {
     queries: last6.map(ym => ({
       queryKey: ['lwf-contributions', ym],
       queryFn:  () => api.get(`/payroll/statutory/lwf/contributions?month=${ym}`)
-        .then((r: any) => Array.isArray(r) ? r : r?.data ?? []) as Promise<LWFContribution[]>,
+        .then((r: unknown) => Array.isArray(r) ? r : (r as { data?: LWFContribution[] })?.data ?? []) as Promise<LWFContribution[]>,
       enabled:  isAdmin,
       staleTime: 120_000,
     })),
@@ -246,7 +248,7 @@ export function LWFManagement() {
           </div>
         </div>
         <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4">
-          <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400">
+          <div className="h-10 w-10 rounded-xl bg-success/10 border border-success/30 flex items-center justify-center text-success shrink-0">
             <CheckCircle2 className="h-5 w-5" />
           </div>
           <div>
@@ -255,7 +257,7 @@ export function LWFManagement() {
           </div>
         </div>
         <div className="bg-card p-5 rounded-2xl border border-border shadow-sm flex items-center gap-4">
-          <div className="h-10 w-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-600 shrink-0 dark:bg-orange-950/40 dark:border-orange-800 dark:text-orange-400">
+          <div className="h-10 w-10 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center text-warning shrink-0">
             <AlertCircle className="h-5 w-5" />
           </div>
           <div>
