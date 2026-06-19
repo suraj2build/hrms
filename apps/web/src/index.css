@@ -1474,70 +1474,71 @@
 :root[data-theme="pastel"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #564080 25%, transparent); }
 :root[data-theme="pastel"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #564080 30%, transparent); }
 
-/* ── Midnight (dark) theme ────────────────────────────────────────────────────
-   Deep navy-black canvas with elevated card surfaces, bright azure primary
-   (#4F8FF7) and a teal brand accent (#2DD4BF) for charts/brand text. Semantic
-   colours are brightened so they stay legible on dark. Sidebar is dark and
-   color-scheme:dark (set in JS) themes native controls/scrollbars. */
+/* ── Synthwave (dark) theme — Electric ────────────────────────────────────────
+   Indigo-black canvas with elevated indigo surfaces, an electric indigo→cyan
+   gradient (#6366F1 → #22D3EE) and a magenta pop (#E879F9). Cyan drives the
+   focus ring/accents; the button gradient is capped at a mid teal-cyan so
+   white text stays legible. Semantic colours brightened for dark; dark sidebar
+   and color-scheme:dark (set in JS) theme native controls/scrollbars. */
 :root[data-theme="dark"] {
-  --background:            #0C1019;
-  --foreground:            #E4E8F1;
-  --card:                  #141A28;
-  --card-foreground:       #E4E8F1;
-  --popover:               #161D2D;
-  --popover-foreground:    #E4E8F1;
+  --background:            #0D0820;
+  --foreground:            #E8E6FA;
+  --card:                  #16102E;
+  --card-foreground:       #E8E6FA;
+  --popover:               #1A1336;
+  --popover-foreground:    #E8E6FA;
 
-  --primary:               #4F8FF7;
-  --primary-foreground:    #07101F;
+  --primary:               #7C8AFF;
+  --primary-foreground:    #0A0420;
 
-  --secondary:             #1C2435;
-  --secondary-foreground:  #C7D0E0;
-  --muted:                 #1A2130;
-  --muted-foreground:      #939DB2;
-  --accent:                #1F2A40;
-  --accent-foreground:     #D2DCEC;
+  --secondary:             #221A40;
+  --secondary-foreground:  #C9C4E8;
+  --muted:                 #1C1638;
+  --muted-foreground:      #908AB8;
+  --accent:                #232048;
+  --accent-foreground:     #D6D2F0;
 
-  --destructive:             #F0625A;
-  --destructive-foreground:  #1A0604;
-  --success:                 #35D08A;
+  --destructive:             #FB6B7C;
+  --destructive-foreground:  #20060C;
+  --success:                 #34D399;
   --success-foreground:      #04140C;
-  --warning:                 #E5AC4D;
+  --warning:                 #F0B84E;
   --warning-foreground:      #1E1404;
-  --info:                    #5B9BFF;
-  --info-foreground:         #07101F;
+  --info:                    #22D3EE;
+  --info-foreground:         #04181C;
 
-  --border:  #232C3E;
-  --input:   #232C3E;
-  --ring:    #4F8FF7;
+  --border:  #2A2150;
+  --input:   #2A2150;
+  --ring:    #22D3EE;
 
-  --chart-1: #4F8FF7;
-  --chart-2: #35D08A;
-  --chart-3: #E5AC4D;
-  --chart-4: #F0625A;
-  --chart-5: #2DD4BF;
+  --chart-1: #818CF8;
+  --chart-2: #34D399;
+  --chart-3: #F0B84E;
+  --chart-4: #E879F9;
+  --chart-5: #22D3EE;
 
-  --sidebar:                    #0F1521;
-  --sidebar-foreground:         #E4E8F1;
-  --sidebar-primary:            #4F8FF7;
-  --sidebar-primary-foreground: #07101F;
-  --sidebar-accent:             #1C2638;
-  --sidebar-accent-foreground:  #D2DCEC;
-  --sidebar-border:             #20293A;
-  --sidebar-ring:               #4F8FF7;
+  --sidebar:                    #120C28;
+  --sidebar-foreground:         #E8E6FA;
+  --sidebar-primary:            #7C8AFF;
+  --sidebar-primary-foreground: #0A0420;
+  --sidebar-accent:             #1E1240;
+  --sidebar-accent-foreground:  #C9C4E8;
+  --sidebar-border:             #281A4E;
+  --sidebar-ring:               #22D3EE;
 
-  --grad-hero:    linear-gradient(135deg, #0E1A30 0%, #1A2C4A 100%);
-  --grad-primary: linear-gradient(135deg, #4F8FF7 0%, #2E6FE6 100%);
-  --grad-sidebar: linear-gradient(180deg, #0F1521 0%, #0C1019 100%);
-  --gradient-nav: linear-gradient(to right, #111A2C, #16243C, #111A2C);
+  --grad-hero:    linear-gradient(135deg, #0F1240 0%, #164A66 100%);
+  --grad-primary: linear-gradient(135deg, #6366F1 0%, #22D3EE 100%);
+  --grad-sidebar: linear-gradient(180deg, #120C28 0%, #0D0820 100%);
+  --gradient-nav: linear-gradient(to right, #0F1240, #1E2A66, #164A66);
 
-  /* Primary button gradient + shadow — bright azure, white text stays ≥4.3:1 */
-  --grad-btn:   linear-gradient(to bottom, #4585F0, #3370DC, #2A5BBE);
+  /* Primary button gradient + shadow — electric, capped so white text stays ≥3.4:1 */
+  --grad-btn:   linear-gradient(135deg, #5B5EE8 0%, #3E78D0 55%, #2A93C4 100%);
   --shadow-btn: 0 6px 16px -6px rgba(0,0,0,0.65);
 
-  --brand-navy:      #4F8FF7;
-  --brand-navy-deep: #0E1A30;
-  --brand-navy-soft: #2E6FE6;
-  --primary-glow:    oklch(0.70 0.16 255);
+  --brand-navy:      #7C8AFF;
+  --brand-navy-deep: #0F1240;
+  --brand-navy-soft: #22D3EE;
+  --primary-glow:    oklch(0.72 0.16 265);
 
   --elev-1: 0 1px 2px rgba(0,0,0,0.40), 0 8px 20px -12px rgba(0,0,0,0.60), 0 0 0 1px rgba(255,255,255,0.04);
   --elev-2: 0 2px 6px rgba(0,0,0,0.45), 0 14px 32px -14px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05);
@@ -1546,107 +1547,107 @@
 
 :root[data-theme="dark"] .app-canvas {
   background:
-    radial-gradient(60% 48% at 100% 0%,  rgba(79,143,247,0.10), transparent 70%),
-    radial-gradient(48% 40% at 0% 100%,  rgba(45,212,191,0.06), transparent 72%),
+    radial-gradient(60% 48% at 100% 0%,  rgba(99,102,241,0.12), transparent 70%),
+    radial-gradient(48% 40% at 0% 100%,  rgba(34,211,238,0.08), transparent 72%),
     var(--color-background);
 }
 
 :root[data-theme="dark"] .hero-band {
-  background: linear-gradient(135deg, #0E1A30 0%, #16243C 55%, #0B1424 100%);
+  background: linear-gradient(135deg, #0F1240 0%, #1E2A66 55%, #102840 100%);
   box-shadow: 0 24px 56px -22px rgba(0,0,0,0.7);
 }
 :root[data-theme="dark"] .hero-band::after {
-  background: rgba(79,143,247,0.16);
+  background: rgba(34,211,238,0.16);
 }
 
 :root[data-theme="dark"] .chip-grad {
-  background: linear-gradient(145deg, #3D80EA 0%, #2A5BBE 100%);
+  background: linear-gradient(135deg, #5B5EE8 0%, #2A93C4 100%);
   box-shadow: 0 6px 14px -6px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.12);
 }
 
 :root[data-theme="dark"] .brand-gradient-text {
-  background: linear-gradient(135deg, #5B9BFF 0%, #4F8FF7 45%, #2DD4BF 100%);
+  background: linear-gradient(135deg, #818CF8 0%, #22D3EE 50%, #E879F9 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 :root[data-theme="dark"] .op-pill-active {
-  background: #2E6FE6;
+  background: #5B5EE8;
   box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
 :root[data-theme="dark"] .op-pill-inactive:hover {
-  border-color: #2E3B54;
-  background: #1C2638;
-  color: #E4E8F1;
+  border-color: #322860;
+  background: #1E1240;
+  color: #E8E6FA;
 }
-:root[data-theme="dark"] .op-accent-bar      { background: #4F8FF7; }
-:root[data-theme="dark"] .op-heading          { color: #6BA5FF; }
+:root[data-theme="dark"] .op-accent-bar      { background: #6366F1; }
+:root[data-theme="dark"] .op-heading          { color: #8FA0FF; }
 :root[data-theme="dark"] .op-section-bg       { border-color: rgba(255,255,255,0.06); }
-:root[data-theme="dark"] .op-meta-pill        { background: rgba(79,143,247,0.14); color: #9FC1FB; }
-:root[data-theme="dark"] .op-tint-medium      { background: rgba(31,42,64,0.90) !important; }
-:root[data-theme="dark"] .op-lane-medium      { border-left-color: rgba(79,143,247,0.45); background: rgba(31,42,64,0.50); }
+:root[data-theme="dark"] .op-meta-pill        { background: rgba(99,102,241,0.16); color: #A5AEFF; }
+:root[data-theme="dark"] .op-tint-medium      { background: rgba(34,24,64,0.90) !important; }
+:root[data-theme="dark"] .op-lane-medium      { border-left-color: rgba(34,211,238,0.45); background: rgba(34,24,64,0.50); }
 :root[data-theme="dark"] .op-lane-default     { border-left-color: rgba(255,255,255,0.10); }
-:root[data-theme="dark"] .mission-lane-active { background: rgba(31,42,64,0.75); border-left-color: rgba(79,143,247,0.45); color: #9FC1FB; }
-:root[data-theme="dark"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(79,143,247,0.40), 0 4px 12px rgba(0,0,0,0.4) !important; }
-:root[data-theme="dark"] .op-row-selected     { background: rgba(31,42,64,0.85) !important; box-shadow: inset 2px 0 0 rgba(79,143,247,0.60), 0 0 0 1px rgba(79,143,247,0.18) !important; }
+:root[data-theme="dark"] .mission-lane-active { background: rgba(34,24,64,0.75); border-left-color: rgba(34,211,238,0.45); color: #8FA0FF; }
+:root[data-theme="dark"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(34,211,238,0.40), 0 4px 12px rgba(0,0,0,0.4) !important; }
+:root[data-theme="dark"] .op-row-selected     { background: rgba(34,24,64,0.85) !important; box-shadow: inset 2px 0 0 rgba(34,211,238,0.60), 0 0 0 1px rgba(34,211,238,0.18) !important; }
 :root[data-theme="dark"] .op-row-processing::after {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(79,143,247,0.05) 35%,
-    rgba(79,143,247,0.10) 50%,
-    rgba(79,143,247,0.05) 65%,
+    rgba(99,102,241,0.06) 35%,
+    rgba(99,102,241,0.12) 50%,
+    rgba(99,102,241,0.06) 65%,
     transparent 100%
   );
 }
 
 /* ────────────────────────────────────────────────────────────────────────
-   Midnight — global remap of hardcoded brand-blue utility classes.
-   Solids stay a readable blue (white text ≥4:1); text/icons brighten so they
-   pop on dark; the lighter accent maps to brand teal.
-     #2E6FE6 / #1A4D8F  → #2E6FE6   (solid accent)   / text → #6BA5FF
-     #2260A8            → #3B82F6   (gradient mid)
-     #1E5BA8            → #2E6FE6   (gradient via)
-     #163F75            → #2456C0   (gradient deep)
-     #3B82F6            → #2DD4BF   (teal accent)
+   Synthwave — global remap of hardcoded brand-blue utility classes.
+   Solids → indigo (white text ≥4:1); text/icons → bright indigo; rings and the
+   lighter accent → electric cyan; gradients sweep indigo→cyan.
+     #2E6FE6 / #1A4D8F  → #6366F1   (solid indigo)  / text → #8FA0FF
+     #2260A8            → cyan #22D3EE (gradient end)
+     #1E5BA8            → #4F7FD0   (gradient via)
+     #163F75            → #4338CA   (gradient deep)
+     #3B82F6            → #22D3EE   (cyan accent)
    ──────────────────────────────────────────────────────────────────────── */
 
 /* Solid backgrounds */
 :root[data-theme="dark"] .bg-\[\#2E6FE6\],
 :root[data-theme="dark"] .bg-\[\#1A4D8F\],
-:root[data-theme="dark"] .bg-\[\#1E5BA8\]   { background-color: #2E6FE6; }
-:root[data-theme="dark"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #2456C0 90%, transparent); }
-:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #4F8FF7 40%, transparent); }
-:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #4F8FF7 16%, transparent); }
-:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #4F8FF7 10%, transparent); }
-:root[data-theme="dark"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #2DD4BF 26%, transparent); }
-:root[data-theme="dark"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #3B82F6; }
-:root[data-theme="dark"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #4F8FF7 18%, transparent); }
+:root[data-theme="dark"] .bg-\[\#1E5BA8\]   { background-color: #6366F1; }
+:root[data-theme="dark"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #4338CA 90%, transparent); }
+:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #6366F1 40%, transparent); }
+:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #6366F1 18%, transparent); }
+:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #6366F1 12%, transparent); }
+:root[data-theme="dark"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #22D3EE 26%, transparent); }
+:root[data-theme="dark"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #4F46E5; }
+:root[data-theme="dark"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #6366F1 20%, transparent); }
 
 /* Text */
 :root[data-theme="dark"] .text-\[\#2E6FE6\],
-:root[data-theme="dark"] .text-\[\#1A4D8F\]          { color: #6BA5FF; }
-:root[data-theme="dark"] .hover\:text-\[\#2E6FE6\]:hover { color: #8FBBFF; }
+:root[data-theme="dark"] .text-\[\#1A4D8F\]          { color: #8FA0FF; }
+:root[data-theme="dark"] .hover\:text-\[\#2E6FE6\]:hover { color: #A5B4FF; }
 
 /* Borders */
 :root[data-theme="dark"] .border-\[\#2E6FE6\],
-:root[data-theme="dark"] .border-\[\#1A4D8F\]            { border-color: #3B82F6; }
-:root[data-theme="dark"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #4F8FF7 45%, transparent); }
+:root[data-theme="dark"] .border-\[\#1A4D8F\]            { border-color: #6366F1; }
+:root[data-theme="dark"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #6366F1 45%, transparent); }
 
 /* Gradient stops */
-:root[data-theme="dark"] .from-\[\#1A4D8F\] { --tw-gradient-from: #3B82F6; }
-:root[data-theme="dark"] .from-\[\#2E6FE6\] { --tw-gradient-from: #4F8FF7; }
-:root[data-theme="dark"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #2E6FE6; }
-:root[data-theme="dark"] .to-\[\#2260A8\]   { --tw-gradient-to: #2456C0; }
-:root[data-theme="dark"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #2E6FE6; }
+:root[data-theme="dark"] .from-\[\#1A4D8F\] { --tw-gradient-from: #6366F1; }
+:root[data-theme="dark"] .from-\[\#2E6FE6\] { --tw-gradient-from: #6366F1; }
+:root[data-theme="dark"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #4F7FD0; }
+:root[data-theme="dark"] .to-\[\#2260A8\]   { --tw-gradient-to: #22D3EE; }
+:root[data-theme="dark"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #22D3EE; }
 
 /* Rings */
-:root[data-theme="dark"] .ring-\[\#1A4D8F\]\/15 { --tw-ring-color: color-mix(in oklab, #4F8FF7 25%, transparent); }
-:root[data-theme="dark"] .ring-\[\#2E6FE6\]\/20 { --tw-ring-color: color-mix(in oklab, #4F8FF7 32%, transparent); }
-:root[data-theme="dark"] .ring-\[\#2E6FE6\]\/30 { --tw-ring-color: color-mix(in oklab, #4F8FF7 40%, transparent); }
-:root[data-theme="dark"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #4F8FF7; }
+:root[data-theme="dark"] .ring-\[\#1A4D8F\]\/15 { --tw-ring-color: color-mix(in oklab, #22D3EE 25%, transparent); }
+:root[data-theme="dark"] .ring-\[\#2E6FE6\]\/20 { --tw-ring-color: color-mix(in oklab, #22D3EE 32%, transparent); }
+:root[data-theme="dark"] .ring-\[\#2E6FE6\]\/30 { --tw-ring-color: color-mix(in oklab, #22D3EE 40%, transparent); }
+:root[data-theme="dark"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #22D3EE; }
 
 /* Colored shadows */
-:root[data-theme="dark"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #4F8FF7 28%, transparent); }
-:root[data-theme="dark"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #4F8FF7 34%, transparent); }
+:root[data-theme="dark"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #6366F1 28%, transparent); }
+:root[data-theme="dark"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #6366F1 34%, transparent); }

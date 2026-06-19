@@ -1,4 +1,4 @@
-import { Sun, Waves, Wine, CloudDrizzle, Sparkles, Moon, Check } from 'lucide-react'
+import { Sun, Waves, Wine, CloudDrizzle, Sparkles, Zap, Check } from 'lucide-react'
 import { Button }     from '@/components/ui/button'
 import { cn }         from '@/lib/utils'
 import { useTheme, type Theme } from '@/components/theme-provider'
@@ -19,7 +19,7 @@ export const THEME_OPTIONS: Option[] = [
   { value: 'bordeaux', label: 'Bordeaux', Icon: Wine,         hint: 'Wine red'           },
   { value: 'slate',    label: 'Slate',    Icon: CloudDrizzle, hint: 'Storm grey'         },
   { value: 'pastel',   label: 'Pastel',   Icon: Sparkles,     hint: 'Soft violet'        },
-  { value: 'dark',     label: 'Dark',     Icon: Moon,         hint: 'Midnight navy'      },
+  { value: 'dark',     label: 'Synthwave', Icon: Zap,         hint: 'Electric indigo + cyan' },
 ]
 
 /**
