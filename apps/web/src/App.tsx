@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, QueryCache } from '@tanstack/react-query'
 import { Toaster, toast } from 'sonner'
 import { ErrorBoundary } from '@/components/error-boundary/ErrorBoundary'
 import { supabase } from '@/lib/supabase/client'
@@ -55,6 +55,8 @@ import type { Profile, Tenant } from '@/types'
 // Each uses .then(m => ({ default: m.X })) to unwrap named exports.
 
 const Organization      = lazy(() => import('@/pages/organization/Organization').then(m => ({ default: m.Organization })))
+const TermsPage         = lazy(() => import('@/pages/legal/LegalPages').then(m => ({ default: m.TermsPage })))
+const PrivacyPage       = lazy(() => import('@/pages/legal/LegalPages').then(m => ({ default: m.PrivacyPage })))
 const Positions         = lazy(() => import('@/pages/positions/Positions').then(m => ({ default: m.Positions })))
 const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m => ({ default: m.OrgChart })))
 const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
@@ -365,6 +367,14 @@ function PageLoader() {
 // ── React Query client ────────────────────────────────────────────────────────
 
 const queryClient = new QueryClient({
+  // Global read-error seam — previously query failures were swallowed silently.
+  // Logs to console (kept in prod) so failures are observable and Sentry can
+  // hook here later. Per-page error states still handle user-facing messaging.
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      console.error('[query]', query.queryHash, error)
+    },
+  }),
   defaultOptions: {
     queries: {
       // ── Refetch governance ──────────────────────────────────────────────
@@ -573,6 +583,8 @@ export default function App() {
               {/* ── Public ─────────────────────────────────────────────────── */}
               <Route path="/login"         element={<Login />} />
               <Route path="/signup"        element={<Signup />} />
+              <Route path="/terms"         element={<TermsPage />} />
+              <Route path="/privacy"       element={<PrivacyPage />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/pre-join/:token"          element={<PreJoinPortal />} />
               <Route path="/portal/candidate/:token" element={<CandidatePortal />} />

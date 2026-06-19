@@ -19,6 +19,14 @@ window.addEventListener('vite:preloadError', () => {
   window.location.reload()
 })
 
+// ── Global async-error seam ─────────────────────────────────────────────────
+// Surfaces otherwise-silent floating-promise rejections to the console (kept in
+// production) so they are not swallowed. This is the single place to wire an
+// error-tracking SDK (e.g. Sentry.captureException) when observability is added.
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[unhandledrejection]', event.reason)
+})
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>

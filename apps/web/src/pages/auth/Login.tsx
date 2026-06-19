@@ -210,7 +210,9 @@ export function Login() {
 
           {/* Footer */}
           <p className="mt-8 text-center text-[11px] text-slate-400">
-            © {new Date().getFullYear()} CognixHR · All rights reserved · Terms · Privacy Policy
+            © {new Date().getFullYear()} CognixHR · All rights reserved ·{' '}
+            <Link to="/terms" className="hover:text-slate-600 hover:underline">Terms</Link> ·{' '}
+            <Link to="/privacy" className="hover:text-slate-600 hover:underline">Privacy Policy</Link>
           </p>
         </div>
       </div>

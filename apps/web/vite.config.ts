@@ -39,8 +39,15 @@ function apiProxy(extra?: object): NonNullable<NonNullable<ServerOptions['proxy'
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
+
+  // Strip noisy console.log/debug/info from production bundles (keep error/warn
+  // so real failures still surface — and so Sentry can capture them later).
+  esbuild: mode === 'production'
+    ? { pure: ['console.log', 'console.debug', 'console.info'] }
+    : undefined,
+
   build: {
     // Split the few very heavy vendor libraries out of the main bundle so the
     // initial load only pulls what every page needs. Pages already lazy-load;
@@ -144,4 +151,4 @@ export default defineConfig({
       }),
     },
   },
-})
+}))

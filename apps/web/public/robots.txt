@@ -1,0 +1,18 @@
+# CognixHR — robots
+# The app is an authenticated product; only public marketing/legal/auth pages
+# should be crawlable. Disallow the app surfaces.
+
+User-agent: *
+Allow: /$
+Allow: /login
+Allow: /signup
+Allow: /terms
+Allow: /privacy
+Disallow: /admin
+Disallow: /manager
+Disallow: /ess
+Disallow: /owner
+Disallow: /api
+Disallow: /auth
+Disallow: /pre-join
+Disallow: /portal
