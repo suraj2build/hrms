@@ -38,7 +38,7 @@ import { PayrollDeadlineProvider }    from '@/contexts/PayrollDeadlineContext'
 function ShellPageLoader() {
   return (
     <div className="flex h-[60vh] items-center justify-center">
-      <div className="h-7 w-7 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+      <div className="h-7 w-7 rounded-full border-2 border-primary border-t-transparent animate-spin" />
     </div>
   )
 }
@@ -53,8 +53,8 @@ function LoadingScreen() {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
-        <p className="text-sm text-slate-500">Loading…</p>
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     </div>
   )

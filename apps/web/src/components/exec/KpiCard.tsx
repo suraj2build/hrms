@@ -32,14 +32,6 @@ const toneStroke: Record<Tone, string> = {
   info: 'var(--info)',
 }
 
-const toneText: Record<Tone, string> = {
-  primary: 'text-primary',
-  success: 'text-success',
-  warning: 'text-warning',
-  destructive: 'text-destructive',
-  info: 'text-info',
-}
-
 // Glossy gradient chip per tone
 const toneChip: Record<Tone, string> = {
   primary:     'var(--grad-primary)',

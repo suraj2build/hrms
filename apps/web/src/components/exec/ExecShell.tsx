@@ -8,21 +8,6 @@ import { NavLink } from 'react-router-dom'
 import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, BarChart2, Brain, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
-export const TIP = { background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 } as const
-
-export function cr(n: number): string {
-  if (n >= 1e7) return `₹${(n / 1e7).toFixed(1)}Cr`
-  if (n >= 1e5) return `₹${(n / 1e5).toFixed(1)}L`
-  if (n >= 1e3) return `₹${(n / 1e3).toFixed(0)}K`
-  return `₹${Math.round(n).toLocaleString()}`
-}
-export function fmtMonth(ym: string): string {
-  try { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1).toLocaleString('default', { month: 'short' }) }
-  catch { return ym }
-}
-export const fmtNum = (n: number | undefined | null) => (n ?? 0).toLocaleString()
-
 const TABS = [
   { to: '/admin/executive',            label: 'CEO View',   icon: Activity,    end: true },
   { to: '/admin/executive/chro',       label: 'CHRO View',  icon: Users2 },

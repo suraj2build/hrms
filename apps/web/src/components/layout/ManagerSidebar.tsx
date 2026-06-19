@@ -404,10 +404,10 @@ export function ManagerSidebar() {
 
       {/* ── Help card ────────────────────────────────────────────────────── */}
       {!sidebarCollapsed && (
-        <div className="mx-3 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+        <div className="mx-3 mb-3 p-3 rounded-xl bg-warning/10 border border-warning/20">
           <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-full bg-amber-500/15 flex items-center justify-center flex-shrink-0">
-              <HelpCircle className="h-3.5 w-3.5 text-amber-600" />
+            <div className="h-7 w-7 rounded-full bg-warning/15 flex items-center justify-center flex-shrink-0">
+              <HelpCircle className="h-3.5 w-3.5 text-warning" />
             </div>
             <div>
               <p className="text-xs font-semibold text-sidebar-foreground">Need Help?</p>

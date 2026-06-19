@@ -15,6 +15,11 @@ import { useAuthStore } from '@/stores/authStore'
 import { EventToast }    from '@/components/notifications'
 import { api }           from '@/lib/api/client'
 
+interface Anomaly {
+  date: string
+  resolved?: boolean
+}
+
 function ShellPageLoader() {
   return (
     <div className="flex h-[60vh] items-center justify-center">
@@ -46,15 +51,15 @@ function AnomalyLoginAlert() {
     sessionStorage.getItem(DISMISS_KEY) === 'true'
   )
 
-  const { data } = useQuery({
+  const { data } = useQuery<{ data: Anomaly[] }>({
     queryKey: ['my-anomalies-alert'],
     queryFn:  () => api.get('/attendance/anomalies/my?resolved=false&limit=10'),
     enabled:  !dismissed,
     staleTime: 10 * 60_000,
   })
 
-  const anomalies: any[] = Array.isArray((data as any)?.data) ? (data as any).data : []
-  const unresolved = anomalies.filter((a: any) => !a.resolved)
+  const anomalies: Anomaly[] = Array.isArray(data?.data) ? data.data : []
+  const unresolved = anomalies.filter((a) => !a.resolved)
 
   function dismiss() {
     sessionStorage.setItem(DISMISS_KEY, 'true')
@@ -64,7 +69,7 @@ function AnomalyLoginAlert() {
   if (dismissed || unresolved.length === 0) return null
 
   // Show up to 3 dates
-  const dates = unresolved.slice(0, 3).map((a: any) => {
+  const dates = unresolved.slice(0, 3).map((a) => {
     const _d = new Date(a.date + 'T12:00:00Z')
     const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
     return isNaN(_d.getTime()) ? a.date : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}`

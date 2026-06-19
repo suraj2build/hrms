@@ -100,7 +100,6 @@ import {
   ListChecks,
   Settings2,
   Bell,
-  Smartphone,
   Command,
   Lock,
   GraduationCap,

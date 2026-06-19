@@ -7,15 +7,16 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, Panel, EmptyBody, TIP, fmtMonth } from '@/components/exec/ExecShell'
+import { ExecLayout, Panel, EmptyBody } from '@/components/exec/ExecShell'
+import { TIP, fmtMonth } from '@/components/exec/exec-utils'
 
 interface TrendsData {
   months: Array<{ month: string; attendance_rate: number; leave_days_approved: number; payroll_gross: number | null; payroll_headcount: number | null; joiners: number; exits: number; net_headcount: number }>
 }
 
 export default function TrendsView() {
-  const { data: t } = useQuery<TrendsData>({ queryKey: ['exec-trends'], queryFn: () => api.get('/executive/trends').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
-  const months = t?.months ?? []
+  const { data: t } = useQuery<TrendsData>({ queryKey: ['exec-trends'], queryFn: () => api.get<{ data?: TrendsData } & TrendsData>('/executive/trends').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const months = useMemo(() => t?.months ?? [], [t])
 
   // Derived metrics — all from real monthly series.
   const metrics = useMemo(() => {

@@ -248,14 +248,21 @@ function CoreIdentity({ emp, teamSize, pendingCount }: {
   pendingCount: number
 }) {
   const { profile } = useAuthStore()
+  // The API may return either singular or pluralised joined relations.
+  const e = emp as (Employee & {
+    departments?:    { name?: string }
+    work_location?:  { name?: string }
+    work_locations?: { name?: string }
+    grades?:         { name?: string }
+  }) | null
   const name    = emp ? `${emp.first_name} ${emp.last_name}` : (profile?.full_name ?? 'Manager')
-  const dept    = (emp as any)?.department?.name  ?? (emp as any)?.departments?.name  ?? '—'
-  const loc     = (emp as any)?.work_location?.name ?? (emp as any)?.work_locations?.name ?? '—'
-  const grade   = (emp as any)?.grade?.name ?? (emp as any)?.grades?.name ?? null
+  const dept    = e?.department?.name  ?? e?.departments?.name  ?? '—'
+  const loc     = e?.work_location?.name ?? e?.work_locations?.name ?? '—'
+  const grade   = e?.grade?.name ?? e?.grades?.name ?? null
   const code    = emp?.employee_code ?? '—'
-  const tenure  = calcTenure((emp as any)?.joining_date)
+  const tenure  = calcTenure(e?.joining_date)
   const joined  = (() => {
-    const jd = (emp as any)?.joining_date
+    const jd = e?.joining_date
     if (!jd) return ''
     const d = new Date(jd.length === 10 ? jd + 'T12:00:00Z' : jd)
     const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -701,7 +708,7 @@ function TeamHeatmap({
     ? `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}`
     : ''
 
-  const LEGEND = [
+  const LEGEND: { bg?: string; color?: string; label: string; exception?: boolean }[] = [
     { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', label: 'Present' },
     { bg: 'var(--tint-blue-bg)', color: 'var(--tint-blue-fg)', label: 'On Leave' },
     { bg: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', label: 'Absent'  },
@@ -839,8 +846,8 @@ function TeamHeatmap({
                 <span style={{ position: 'absolute', top: 1, right: 1, width: 3, height: 3, borderRadius: '50%', background: '#f59e0b' }} />
               </span>
             ) : (
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: (l as any).bg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <span style={{ fontSize: 7, fontWeight: 700, color: (l as any).color }}>{(l as any).label === 'Weekly Off' ? 'W' : (l as any).label[0]}</span>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: l.bg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 7, fontWeight: 700, color: l.color }}>{l.label === 'Weekly Off' ? 'W' : l.label[0]}</span>
               </span>
             )}
             {l.label}
@@ -1213,7 +1220,7 @@ export function ManagerDashboardPage() {
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
-  const emp           = (empResp as any)?.data ?? (empResp as any) ?? null
+  const emp           = empResp?.data ?? (empResp as Employee | undefined) ?? null
   const teamMembers   = dashResp?.team_members   ?? []
   const summary       = dashResp?.today_summary  ?? { present: 0, late: 0, absent: 0, leave: 0, not_marked: 0, total: 0 }
   const leaveRequests   = approvalsResp?.leave_requests  ?? dashResp?.pending?.leave_requests  ?? []
@@ -1225,7 +1232,7 @@ export function ManagerDashboardPage() {
     for (const item of (teamAttendanceRaw ?? [])) {
       if (!item.data) continue
       const memberMap = new Map<string, string>()
-      const daily = (item.data as any)?.daily ?? []
+      const daily = item.data?.daily ?? []
       for (const row of daily as AttendanceDailyRow[]) {
         const s = (row.status ?? 'not_marked').toLowerCase()
           .replace('on_leave', 'leave')

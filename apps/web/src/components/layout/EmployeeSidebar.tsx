@@ -118,6 +118,10 @@ const BASE_GROUPS: NavGroup[] = [
 
 // ── Manager quick-access items (rendered only for manager+ roles) ──────────────
 
+// Approvals now lives in Attendance & Leave group; My Team in Documents & Support.
+// Both remain filtered for non-managers via this set.
+const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team'])
+
 const MANAGER_QUICK_ITEMS: NavItem[] = [
   { label: 'Manager Console', icon: LayoutDashboard, href: '/manager/dashboard', exact: true },
   { label: 'Team Attendance', icon: CalendarDays,    href: '/manager/team/attendance'         },
@@ -168,7 +172,7 @@ function usePendingCount(employeeId: string | null) {
   })
   const { data: reimbData }   = useQuery<Array<{ status: string }>>({
     queryKey: ['sb-reimb', employeeId],
-    queryFn:  () => api.get('/payroll/reimbursements/my').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: Array<{ status: string }> }>('/payroll/reimbursements/my').then((r) => r.data),
     enabled:  !!employeeId,
     staleTime: 60_000,
   })
@@ -206,9 +210,6 @@ export function EmployeeSidebar() {
 
   // Manager-only nav items — hidden for pure employee role
   const isManager = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
-  const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team'])
-  // Approvals now lives in Attendance & Leave group; My Team in Documents & Support.
-  // Both remain filtered for non-managers via this set.
 
   // Filter manager-only items; inject live badge into Approvals
   const GROUPS = useMemo((): NavGroup[] =>
@@ -353,8 +354,8 @@ export function EmployeeSidebar() {
 
             {!sidebarCollapsed && (
               <div className="flex items-center gap-1.5 px-2.5 pb-1">
-                <ShieldCheck className="h-3 w-3 text-amber-500/80" />
-                <p className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80 select-none">
+                <ShieldCheck className="h-3 w-3 text-warning/80" />
+                <p className="text-[9px] font-bold uppercase tracking-widest text-warning/80 select-none">
                   Manager
                 </p>
               </div>

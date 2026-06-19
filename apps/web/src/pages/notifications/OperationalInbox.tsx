@@ -7,7 +7,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 
@@ -26,9 +26,27 @@ interface InboxItem {
   created_at: string
 }
 
+// Raw shape returned by /notifications/inbox before it is mapped onto InboxItem.
+interface InboxRow {
+  id: string
+  recipient_id: string
+  title: string
+  summary?: string | null
+  body?: string | null
+  severity?: string
+  entity_type?: string | null
+  item_type?: string | null
+  status?: string | null
+  action_route?: string | null
+  action_url?: string | null
+  expires_at?: string | null
+  escalated?: boolean
+  created_at: string
+}
+
 type FilterTab = 'all' | 'urgent' | 'action_required' | 'unread'
 
-function priorityVariant(priority: InboxItem['priority']): string {
+function priorityVariant(priority: InboxItem['priority']): BadgeProps['variant'] {
   switch (priority) {
     case 'urgent': return 'destructive'
     case 'high': return 'warning'
@@ -68,16 +86,16 @@ export function OperationalInbox() {
     // onto this component's model (body/priority/is_read/action_url) so filters,
     // unread count and action buttons work — the raw fields didn't exist before,
     // so every item showed unread and the Urgent/Action tabs were always empty.
-    queryFn:         () => api.get('/notifications/inbox').then((r: any) => {
+    queryFn:         () => api.get<{ data: InboxRow[] }>('/notifications/inbox').then((r) => {
       const SEV_TO_PRIORITY: Record<string, InboxItem['priority']> = {
         critical: 'urgent', error: 'high', warning: 'normal', info: 'low',
       }
-      return (Array.isArray(r.data) ? r.data : []).map((row: any): InboxItem => ({
+      return (Array.isArray(r.data) ? r.data : []).map((row): InboxItem => ({
         id:              row.id,
         recipient_id:    row.recipient_id,
         title:           row.title,
         body:            row.summary ?? row.body ?? '',
-        priority:        SEV_TO_PRIORITY[row.severity] ?? 'normal',
+        priority:        SEV_TO_PRIORITY[row.severity ?? ''] ?? 'normal',
         item_type:       row.entity_type ?? row.item_type ?? '',
         is_read:         (row.status ?? 'unread') !== 'unread',
         action_required: !!(row.action_route ?? row.action_url),
@@ -273,7 +291,7 @@ export function OperationalInbox() {
                   >
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <Badge variant={priorityVariant(item.priority) as any} className="text-xs px-1.5 py-0">
+                        <Badge variant={priorityVariant(item.priority)} className="text-xs px-1.5 py-0">
                           {fmtPriority(item.priority)}
                         </Badge>
                         {item.action_required && (
@@ -327,7 +345,7 @@ export function OperationalInbox() {
                 <div className="flex items-start justify-between gap-4 mb-4">
                   <h2 className="text-base font-semibold text-foreground leading-snug">{selected.title}</h2>
                   <div className="flex gap-2 shrink-0">
-                    <Badge variant={priorityVariant(selected.priority) as any}>
+                    <Badge variant={priorityVariant(selected.priority)}>
                       {fmtPriority(selected.priority)}
                     </Badge>
                     <Badge variant="secondary">{selected.item_type.replace(/_/g, ' ')}</Badge>

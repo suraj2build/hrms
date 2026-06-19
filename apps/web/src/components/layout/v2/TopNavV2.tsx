@@ -38,7 +38,7 @@ import { useBasePath } from '@/lib/routing'
 
 // ── TopNavV2 ──────────────────────────────────────────────────────────────────
 
-export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
+export function TopNavV2({ onSearchOpen: _onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const location   = useLocation()
   const navigate   = useNavigate()
   const basePath   = useBasePath()

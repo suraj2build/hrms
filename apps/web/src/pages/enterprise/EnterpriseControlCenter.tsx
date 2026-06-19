@@ -339,7 +339,7 @@ function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
             ? <IntelligenceLoadingSkeleton rows={4} cardHeight="h-10" />
             : alerts.length === 0
             ? (
-              <div className="flex flex-col items-center gap-1.5 py-8 text-emerald-600">
+              <div className="flex flex-col items-center gap-1.5 py-8 text-success">
                 <CheckCircle2 className="h-7 w-7 opacity-60" />
                 <p className="text-sm font-medium">No active compliance alerts</p>
               </div>
@@ -408,7 +408,7 @@ function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
           ? <IntelligenceLoadingSkeleton rows={3} cardHeight="h-10" />
           : incidents.length === 0
           ? (
-            <div className="flex flex-col items-center gap-1.5 py-8 text-emerald-600">
+            <div className="flex flex-col items-center gap-1.5 py-8 text-success">
               <CheckCircle2 className="h-7 w-7 opacity-60" />
               <p className="text-sm font-medium">No open incidents</p>
             </div>
@@ -509,7 +509,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
             ? <IntelligenceLoadingSkeleton rows={4} cardHeight="h-14" />
             : lowTrust.length === 0
             ? (
-              <div className="flex flex-col items-center gap-1.5 py-8 text-emerald-600">
+              <div className="flex flex-col items-center gap-1.5 py-8 text-success">
                 <CheckCircle2 className="h-7 w-7 opacity-60" />
                 <p className="text-sm font-medium">All trust scores are healthy</p>
               </div>
@@ -596,7 +596,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
             ? <IntelligenceLoadingSkeleton rows={3} cardHeight="h-10" />
             : duplicates.length === 0
             ? (
-              <div className="flex flex-col items-center gap-1.5 py-8 text-emerald-600">
+              <div className="flex flex-col items-center gap-1.5 py-8 text-success">
                 <CheckCircle2 className="h-7 w-7 opacity-60" />
                 <p className="text-sm font-medium">No duplicate alerts</p>
               </div>
@@ -684,11 +684,11 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
                   </div>
                   <div className="rounded-lg border bg-muted/10 p-2.5 text-center">
                     <p className="text-[10px] text-muted-foreground">Degraded</p>
-                    <p className="text-lg font-bold text-amber-600">{verStatsData.degraded}</p>
+                    <p className="text-lg font-bold text-warning">{verStatsData.degraded}</p>
                   </div>
                   <div className="rounded-lg border bg-muted/10 p-2.5 text-center">
                     <p className="text-[10px] text-muted-foreground">Need Review</p>
-                    <p className="text-lg font-bold text-orange-500">{verStatsData.needs_review}</p>
+                    <p className="text-lg font-bold text-warning">{verStatsData.needs_review}</p>
                   </div>
                 </div>
               )}
@@ -727,7 +727,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
 
               {/* Retry queue */}
               {verStatsData?.retry_queue?.pending != null && verStatsData.retry_queue.pending > 0 && (
-                <p className="text-xs text-amber-600">
+                <p className="text-xs text-warning">
                   {verStatsData.retry_queue.pending} pending {verStatsData.retry_queue.pending === 1 ? 'retry' : 'retries'} in queue
                 </p>
               )}
@@ -812,7 +812,7 @@ function OperationsTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
           ? <IntelligenceLoadingSkeleton rows={3} cardHeight="h-10" />
           : breaches.length === 0
           ? (
-            <div className="flex flex-col items-center gap-1.5 py-8 text-emerald-600">
+            <div className="flex flex-col items-center gap-1.5 py-8 text-success">
               <CheckCircle2 className="h-7 w-7 opacity-60" />
               <p className="text-sm font-medium">No SLA breaches</p>
             </div>
@@ -920,7 +920,7 @@ function SecurityTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => voi
           ? <IntelligenceLoadingSkeleton rows={4} cardHeight="h-14" />
           : highCritical.length === 0
           ? (
-            <div className="flex flex-col items-center gap-1.5 py-8 text-emerald-600">
+            <div className="flex flex-col items-center gap-1.5 py-8 text-success">
               <CheckCircle2 className="h-7 w-7 opacity-60" />
               <p className="text-sm font-medium">No high or critical security signals</p>
             </div>
@@ -1287,8 +1287,8 @@ interface PlatformMetrics {
 }
 
 function StatusDot({ status }: { status: string }) {
-  if (status === 'healthy')  return <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
-  if (status === 'warning')  return <span className="h-2 w-2 rounded-full bg-amber-400  inline-block" />
+  if (status === 'healthy')  return <span className="h-2 w-2 rounded-full bg-success inline-block" />
+  if (status === 'warning')  return <span className="h-2 w-2 rounded-full bg-warning  inline-block" />
   return <span className="h-2 w-2 rounded-full bg-destructive inline-block" />
 }
 
@@ -1354,7 +1354,7 @@ function OperationalHealthCard() {
       {/* Overall status badge */}
       <div className="flex items-center gap-1.5">
         {overallOk
-          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+          ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
           : <AlertCircle  className="h-3.5 w-3.5 text-warning" />
         }
         <span className="text-xs font-semibold">

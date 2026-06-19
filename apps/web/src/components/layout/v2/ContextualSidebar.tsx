@@ -204,7 +204,7 @@ export function ContextualSidebar() {
   useEffect(() => {
     if (!domain) return
     setExpanded(loadExpanded(domain.id, domain.groups))
-  }, [domain?.id])
+  }, [domain])
 
   function toggleGroup(label: string) {
     setExpanded(prev => {

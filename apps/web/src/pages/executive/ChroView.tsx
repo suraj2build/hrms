@@ -3,7 +3,8 @@ import { Users2, Heart, GraduationCap, Lightbulb, ShieldCheck, CalendarCheck, Sp
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, Panel, EmptyBody, StatTile, TIP, PALETTE } from '@/components/exec/ExecShell'
+import { ExecLayout, Panel, EmptyBody, StatTile } from '@/components/exec/ExecShell'
+import { TIP, PALETTE } from '@/components/exec/exec-utils'
 
 interface HiringFunnel {
   applied: number; screening: number; interviewing: number; offer: number; hired: number; rejected: number; withdrawn: number
@@ -32,7 +33,7 @@ const FUNNEL_STAGES: Array<{ key: keyof HiringFunnel; label: string }> = [
 ]
 
 export default function ChroView() {
-  const { data: chro } = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'], queryFn: () => api.get('/executive/chro').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: chro } = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'], queryFn: () => api.get<{ data?: ChroSnapshot } & ChroSnapshot>('/executive/chro').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const gender = Object.entries(chro?.gender_distribution ?? {}).map(([name, value], i) => ({ name, value, color: PALETTE[i % PALETTE.length] }))
   const genderTotal = gender.reduce((s, g) => s + g.value, 0)

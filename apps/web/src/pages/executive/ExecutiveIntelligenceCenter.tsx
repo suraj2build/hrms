@@ -17,7 +17,7 @@ import {
   UserMinus, UserPlus, Users, Wallet, CalendarCheck, Info, ChevronRight,
 } from 'lucide-react'
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart,
+  Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart,
   Legend, Line, Pie, PieChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -87,13 +87,6 @@ function fmtMonth(ym: string): string {
   catch { return ym }
 }
 
-const sevTone: Record<string, string> = {
-  critical: 'bg-destructive/10 text-destructive border-destructive/20',
-  high: 'bg-warning/15 text-warning border-warning/30',
-  medium: 'bg-info/10 text-info border-info/20',
-  low: 'bg-muted text-muted-foreground border-border',
-}
-
 // ── Page ─────────────────────────────────────────────────────────────────────────
 
 export default function ExecutiveIntelligenceCenter() {
@@ -101,12 +94,12 @@ export default function ExecutiveIntelligenceCenter() {
   const [period, setPeriod] = useState<'30D' | 'QTD' | 'YTD' | '12M'>('12M')
   const [drillDept, setDrillDept] = useState<DeptRow | null>(null)
 
-  const ceoQ        = useQuery<CeoSnapshot>({ queryKey: ['exec-ceo'],        queryFn: () => api.get('/executive/ceo').then((r: any) => r.data ?? r),        staleTime: 5 * 60_000 })
-  const chroQ       = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'],       queryFn: () => api.get('/executive/chro').then((r: any) => r.data ?? r),       staleTime: 5 * 60_000 })
-  const workforceQ  = useQuery<WorkforceData>({ queryKey: ['exec-workforce'],  queryFn: () => api.get('/executive/workforce').then((r: any) => r.data ?? r),  staleTime: 5 * 60_000 })
-  const financialQ  = useQuery<FinancialData>({ queryKey: ['exec-financial'],  queryFn: () => api.get('/executive/financial').then((r: any) => r.data ?? r),  staleTime: 5 * 60_000 })
-  const complianceQ = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get('/executive/compliance').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
-  const trendsQ     = useQuery<TrendsData>({ queryKey: ['exec-trends'],      queryFn: () => api.get('/executive/trends').then((r: any) => r.data ?? r),      staleTime: 5 * 60_000 })
+  const ceoQ        = useQuery<CeoSnapshot>({ queryKey: ['exec-ceo'],        queryFn: () => api.get<{ data?: CeoSnapshot } & CeoSnapshot>('/executive/ceo').then((r) => r.data ?? r),        staleTime: 5 * 60_000 })
+  const chroQ       = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'],       queryFn: () => api.get<{ data?: ChroSnapshot } & ChroSnapshot>('/executive/chro').then((r) => r.data ?? r),       staleTime: 5 * 60_000 })
+  const workforceQ  = useQuery<WorkforceData>({ queryKey: ['exec-workforce'],  queryFn: () => api.get<{ data?: WorkforceData } & WorkforceData>('/executive/workforce').then((r) => r.data ?? r),  staleTime: 5 * 60_000 })
+  const financialQ  = useQuery<FinancialData>({ queryKey: ['exec-financial'],  queryFn: () => api.get<{ data?: FinancialData } & FinancialData>('/executive/financial').then((r) => r.data ?? r),  staleTime: 5 * 60_000 })
+  const complianceQ = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get<{ data?: ComplianceData } & ComplianceData>('/executive/compliance').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const trendsQ     = useQuery<TrendsData>({ queryKey: ['exec-trends'],      queryFn: () => api.get<{ data?: TrendsData } & TrendsData>('/executive/trends').then((r) => r.data ?? r),      staleTime: 5 * 60_000 })
 
   const ceo = ceoQ.data, chro = chroQ.data, wf = workforceQ.data, fin = financialQ.data, comp = complianceQ.data, trends = trendsQ.data
 

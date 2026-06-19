@@ -5,7 +5,8 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, Panel, EmptyBody, TIP, fmtNum } from '@/components/exec/ExecShell'
+import { ExecLayout, Panel, EmptyBody } from '@/components/exec/ExecShell'
+import { TIP, fmtNum } from '@/components/exec/exec-utils'
 
 interface WorkforceData {
   employee_count: number
@@ -19,7 +20,7 @@ interface WorkforceData {
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
 
 export default function WorkforceView() {
-  const { data: wf } = useQuery<WorkforceData>({ queryKey: ['exec-workforce'], queryFn: () => api.get('/executive/workforce').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: wf } = useQuery<WorkforceData>({ queryKey: ['exec-workforce'], queryFn: () => api.get<{ data?: WorkforceData } & WorkforceData>('/executive/workforce').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const joinersSpark = (wf?.monthly_trends ?? []).map(t => t.joiners)
   const exitsSpark   = (wf?.monthly_trends ?? []).map(t => t.exits)

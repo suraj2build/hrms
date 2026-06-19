@@ -7,7 +7,8 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, Panel, EmptyBody, StatTile, TIP, PALETTE, cr, fmtMonth } from '@/components/exec/ExecShell'
+import { ExecLayout, Panel, EmptyBody, StatTile } from '@/components/exec/ExecShell'
+import { TIP, PALETTE, cr, fmtMonth } from '@/components/exec/exec-utils'
 
 type FlagTone = 'high' | 'medium' | 'normal'
 
@@ -34,11 +35,10 @@ const flagTone = (f?: FlagTone): 'warning' | 'destructive' | 'success' =>
   f === 'high' ? 'destructive' : f === 'medium' ? 'warning' : 'success'
 
 export default function FinancialView() {
-  const { data: fin } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get('/executive/financial').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: fin } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get<{ data?: FinancialData } & FinancialData>('/executive/financial').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const trend = fin?.payroll_cost_trend ?? []
   const grossSpark = trend.map(t => +(t.total_gross / 1e7).toFixed(2))
-  const headSpark  = trend.map(t => t.employee_count)
   const cphSpark   = trend.map(t => +(t.avg_cost_per_head / 1000).toFixed(1))
 
   const latestCph = trend.length ? trend[trend.length - 1].avg_cost_per_head : 0

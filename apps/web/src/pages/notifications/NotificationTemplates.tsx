@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { SubTabs } from '@/components/ui/SubTabs'
 import { SectionCard } from '@/components/layout/SectionCard'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import {
   Dialog,
@@ -70,7 +70,6 @@ interface NotifLog {
 }
 
 type Tab = 'templates' | 'channels' | 'digest-status' | 'log'
-type ChannelType = 'email' | 'sms' | 'in_app' | 'push' | 'webhook'
 
 interface DigestStatusRow {
   id: string
@@ -92,8 +91,8 @@ function channelIcon(type: string) {
   }
 }
 
-function logStatusBadge(status: NotifLog['status']) {
-  const map: Record<NotifLog['status'], string> = {
+function logStatusBadge(status: NotifLog['status']): BadgeProps['variant'] {
+  const map: Record<NotifLog['status'], BadgeProps['variant']> = {
     queued: 'secondary',
     sent: 'success',
     failed: 'destructive',
@@ -141,14 +140,14 @@ export function NotificationTemplates() {
 
   const { data: templates = [], isLoading: tLoading } = useQuery<NotifTemplate[]>({
     queryKey: ['notifications', 'templates'],
-    queryFn: () => api.get('/notifications/templates').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: NotifTemplate[] }>('/notifications/templates').then((r) => r.data),
     enabled: activeTab === 'templates',
   })
 
   // Single source of truth for the editor — categories, severities, channels, variables.
   const { data: meta } = useQuery<TemplateMeta>({
     queryKey: ['notifications', 'template-meta'],
-    queryFn: () => api.get('/notifications/templates/meta').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: TemplateMeta }>('/notifications/templates/meta').then((r) => r.data),
     staleTime: Infinity,
   })
 
@@ -173,13 +172,13 @@ export function NotificationTemplates() {
 
   const { data: channels = [], isLoading: cLoading } = useQuery<NotifChannel[]>({
     queryKey: ['notifications', 'channels'],
-    queryFn: () => api.get('/notifications/channels').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: NotifChannel[] }>('/notifications/channels').then((r) => r.data),
     enabled: activeTab === 'channels',
   })
 
   const { data: logs = [], isLoading: lLoading } = useQuery<NotifLog[]>({
     queryKey: ['notifications', 'log'],
-    queryFn: () => api.get('/notifications/log').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: NotifLog[] }>('/notifications/log').then((r) => r.data),
     enabled: activeTab === 'log',
   })
 
@@ -205,14 +204,14 @@ export function NotificationTemplates() {
 
   const { data: digestStatus = [], isLoading: dsLoading } = useQuery<DigestStatusRow[]>({
     queryKey: ['notifications', 'digest-status'],
-    queryFn: () => api.get('/notifications/digest/status').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: DigestStatusRow[] }>('/notifications/digest/status').then((r) => r.data),
     enabled: activeTab === 'digest-status',
     refetchInterval: activeTab === 'digest-status' ? 30_000 : false,
   })
 
   const runDigest = useMutation({
-    mutationFn: (frequency: string) => api.post('/notifications/digest/run', { frequency }),
-    onSuccess: (r: any) => {
+    mutationFn: (frequency: string) => api.post<{ data?: { in_app: number; email: number; failed: number } }>('/notifications/digest/run', { frequency }),
+    onSuccess: (r) => {
       const d = r?.data
       qc.invalidateQueries({ queryKey: ['notifications', 'digest-status'] })
       toast.success('Digest sent', { description: d ? `${d.in_app} in-app · ${d.email} email · ${d.failed} failed` : undefined })
@@ -508,7 +507,7 @@ export function NotificationTemplates() {
                         </span>
                       </td>
                       <td className="py-2 px-3">
-                        <Badge variant={logStatusBadge(log.status) as any}>
+                        <Badge variant={logStatusBadge(log.status)}>
                           {log.status}
                         </Badge>
                       </td>

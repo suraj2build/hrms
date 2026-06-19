@@ -52,7 +52,7 @@ export function WorkspacePanel() {
   // Sync document density attribute on mount
   useEffect(() => {
     document.documentElement.dataset.density = density
-  }, [])
+  }, [density])
 
   // Flatten all items across groups for the current domain
   const items = useMemo(
@@ -63,12 +63,12 @@ export function WorkspacePanel() {
   const workspaceTitle = domain?.label ?? 'Workspace'
 
   return (
-    <div className="w-[216px] h-full flex flex-col border-r border-indigo-100/50 bg-white/70 backdrop-blur-sm shrink-0">
+    <div className="w-[216px] h-full flex flex-col border-r border-border bg-white/70 backdrop-blur-sm shrink-0">
 
       {/* Header */}
       <div className="px-3 pt-3 pb-2 border-b border-[#E8E6F5] shrink-0">
         <div className="flex items-center gap-1.5 mb-0.5">
-          <span className="h-3 w-0.5 bg-indigo-500 rounded-full shrink-0" />
+          <span className="h-3 w-0.5 bg-primary rounded-full shrink-0" />
           <h2 className="text-[10px] font-black text-[#1C1B2E] uppercase tracking-[0.1em] truncate">
             {workspaceTitle}
           </h2>
@@ -128,7 +128,7 @@ export function WorkspacePanel() {
           <span className="text-[9px] font-bold text-[#A8A4C8] uppercase tracking-wider font-mono">
             DENSITY
           </span>
-          <span className="text-[8px] bg-violet-100 text-violet-700 font-extrabold rounded px-1 uppercase font-mono">
+          <span className="text-[8px] bg-primary/15 text-primary font-extrabold rounded px-1 uppercase font-mono">
             {density}
           </span>
         </div>

@@ -21,7 +21,6 @@ import {
   ChevronUp,
   CheckCircle2,
   XCircle,
-  Upload,
   ShieldCheck,
   ShieldX,
   ClipboardList,
@@ -87,25 +86,11 @@ const CATEGORY_ICON: Record<TimelineCategory, React.ComponentType<{ className?: 
   system:       Cpu,
 }
 
-const SEVERITY_DOT: Record<TimelineSeverity, string> = {
-  info:     'bg-blue-500',
-  success:  'bg-emerald-500',
-  warning:  'bg-amber-500',
-  critical: 'bg-red-500',
-}
-
 const SEVERITY_ICON: Record<TimelineSeverity, React.ComponentType<{ className?: string }>> = {
   info:     Info,
   success:  CheckCircle2,
   warning:  AlertTriangle,
   critical: XCircle,
-}
-
-const SEVERITY_BADGE_VARIANT: Record<TimelineSeverity, 'info' | 'success' | 'warning' | 'destructive'> = {
-  info:     'info',
-  success:  'success',
-  warning:  'warning',
-  critical: 'destructive',
 }
 
 const READINESS_LABEL: Record<ReadinessDimension, string | null> = {

@@ -3,7 +3,8 @@ import { ShieldCheck, ShieldAlert, AlertTriangle, FileWarning, Gauge, ClipboardC
 import { RadialBar, RadialBarChart, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, Panel, EmptyBody, StatTile, PALETTE } from '@/components/exec/ExecShell'
+import { ExecLayout, Panel, EmptyBody, StatTile } from '@/components/exec/ExecShell'
+import { PALETTE } from '@/components/exec/exec-utils'
 
 interface ComplianceData {
   open_incidents: number; critical_incidents: number; total_incidents_30d: number
@@ -49,7 +50,7 @@ const POSTURE_LABELS: Record<string, string> = {
 interface CalDeadline { id: string; label: string; compliance_type: string; jurisdiction: string; due_date: string; status: string; days_to_due: number }
 
 export default function ComplianceView() {
-  const { data: c } = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get('/executive/compliance').then((r: any) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: c } = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get<{ data?: ComplianceData } & ComplianceData>('/executive/compliance').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
   const { data: cal } = useQuery<{ data: CalDeadline[] }>({ queryKey: ['exec-compliance-calendar'], queryFn: () => api.get('/compliance/calendar/upcoming?within_days=30'), staleTime: 5 * 60_000 })
   const deadlines = cal?.data ?? []
   const overdue   = deadlines.filter(d => d.status === 'overdue')
@@ -252,7 +253,7 @@ export default function ComplianceView() {
             <div className="mt-3 space-y-2.5">
               {(['low', 'medium', 'high', 'critical'] as const)
                 .filter(s => (c.trust_distribution?.[s] ?? 0) > 0)
-                .map((sev, i) => {
+                .map((sev) => {
                   const n   = c.trust_distribution[sev] ?? 0
                   const max = Math.max(...Object.values(c.trust_distribution))
                   const color = sev === 'low' ? 'var(--success)' : sev === 'medium' ? 'var(--warning)' : 'var(--destructive)'
