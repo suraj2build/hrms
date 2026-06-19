@@ -108,6 +108,18 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   // /employees/:id/separation
   mm = path.match(/^\/employees\/([^/]+)\/separation$/)
   if (mm) return { data: null }
+  // /employees/:id/assets — needs { assigned, history } shape, not a flat array
+  mm = path.match(/^\/employees\/([^/]+)\/assets$/)
+  if (mm) return { data: { assigned: [], history: [] } }
+  // /employees/:id/onboarding-status
+  mm = path.match(/^\/employees\/([^/]+)\/onboarding-status$/)
+  if (mm) return { data: null }
+  // /employees/:id/user-account
+  mm = path.match(/^\/employees\/([^/]+)\/user-account$/)
+  if (mm) return { status: 'no-profile', profile: null, auth_user: null, email: null }
+  // /employees/:id/org-context
+  mm = path.match(/^\/employees\/([^/]+)\/org-context$/)
+  if (mm) return { data: { manager: null, reportees: [], skip_levels: [] } }
   // /employees/:id/<subresource> → empty list (job-history, contracts, family, etc.)
   mm = path.match(/^\/employees\/([^/]+)\/[^/]+$/)
   if (mm) return { data: [] }
@@ -317,6 +329,213 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/billing/status') return { data: { status: 'active', plan: 'enterprise' } }
   if (path.startsWith('/system/incidents/')) return { data: null }
   if (path.startsWith('/system/jobs/')) return { data: [] }
+
+  // ── Intelligence ───────────────────────────────────────────────────────────
+  if (path === '/intelligence/org/departments') {
+    return {
+      departments: fx.demoDepartments.map((d, i) => ({
+        id: d.id, name: d.name,
+        headcount: [8, 5, 4, 6, 3, 7, 2, 5][i % 8],
+        joiners_30d: [1, 0, 1, 0, 0, 1, 0, 0][i % 8],
+        exits_30d: 0, probation_due: 0,
+        summary_text: `${d.name} is operating normally.`,
+      })),
+    }
+  }
+  if (path === '/intelligence/org/headcount-trend') {
+    const months = ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06']
+    return {
+      months: months.map((period, i) => ({
+        period, headcount: 18 + i, joiners: i === 0 ? 2 : 1, exits: 0,
+      })),
+    }
+  }
+  if (path === '/intelligence/org/attrition-signal') {
+    return { signal: 'normal', by_department: [], total: 0 }
+  }
+  if (path === '/intelligence/org/headcount-by-site') {
+    return {
+      by_site: [{ key: 'bengaluru', label: 'Bengaluru', headcount: fx.demoEmployeeList.length, joiners_30d: 2, city: 'Bengaluru', region: 'South', zone: 'South', site_type: 'HQ' }],
+      by_region: [{ key: 'south', label: 'South', headcount: fx.demoEmployeeList.length }],
+      by_zone: [], by_site_type: [], unassigned: 0,
+      total: fx.demoEmployeeList.length, dimensions_configured: true,
+    }
+  }
+  if (path === '/intelligence/workforce-command') {
+    return {
+      data: {
+        summary: 'Workforce is stable. No critical issues detected.',
+        critical_count: 0, high_count: 0,
+        observations: [],
+        kpis: {
+          on_notice: 0, stalled_onboarding: 0, pending_separations: 0,
+          assets_at_risk: 0, probation_due: 1,
+          active_headcount: fx.demoEmployeeList.length, joiners_this_month: 1,
+        },
+        generated_at: new Date().toISOString(),
+      },
+    }
+  }
+  if (path.startsWith('/intelligence/digest/')) {
+    const period = path.split('/').pop() ?? 'daily'
+    return {
+      period,
+      summary_text: `${period.charAt(0).toUpperCase() + period.slice(1)} workforce digest: all systems normal at Saar Technologies.`,
+      metrics: {
+        active_headcount: fx.demoEmployeeList.length,
+        attendance_rate: 94,
+        pending_approvals: 1,
+        payroll_processed: period === 'monthly',
+      },
+      generated_at: new Date().toISOString(),
+      sources: [{ table: 'employees', description: 'Active employee records' }],
+    }
+  }
+  if (path === '/intelligence/action-center') {
+    return { observations: [], total: 0, generated_at: new Date().toISOString() }
+  }
+  // /intelligence/employee/:id/360
+  mm = path.match(/^\/intelligence\/employee\/([^/]+)\/360$/)
+  if (mm) {
+    const emp = fx.demoEmployee(mm[1])
+    return {
+      data: {
+        employee: {
+          id: emp?.id ?? mm[1], name: emp ? `${emp.first_name} ${emp.last_name}` : 'Demo Employee',
+          code: emp?.employee_code ?? 'EMP-001', status: emp?.status ?? 'active',
+          joining_date: emp?.joining_date ?? '2023-01-01', tenure_days: 550,
+          department_id: emp?.department?.id ?? null,
+          designation: emp?.designation?.name ?? 'Employee',
+        },
+        compliance: { probation_due: false, separation_stage: null, assets_assigned: 0, assets: [] },
+        compensation: emp ? { ctc_annual: fx.demoActiveComp(mm[1]).ctc_annual, effective_from: '2025-04-01' } : null,
+        leave: { balances: fx.demoLeaveBalances() },
+        attendance_signal: 'normal',
+        onboarding: null,
+        summary: 'Employee is performing well with no open compliance items.',
+        generated_at: new Date().toISOString(),
+        sources: [{ table: 'employees', description: 'Core employee record' }],
+      },
+    }
+  }
+  // /intelligence/onboarding/:id/readiness
+  mm = path.match(/^\/intelligence\/onboarding\/([^/]+)\/readiness$/)
+  if (mm) {
+    return {
+      data: {
+        session_id: mm[1], candidate_name: 'Candidate',
+        readiness_score: 85, readiness_text: 'Ready',
+        documents: { total: 0, extracted: 0, failed: 0, rejected: 0, pending: 0 },
+        missing_fields: [], validation_errors: [], suggested_actions: [],
+        sources: [], generated_at: new Date().toISOString(),
+      },
+    }
+  }
+  if (path === '/intelligence/manager-summary') {
+    return {
+      data: {
+        summary: 'Your team is performing well. No urgent items require attention.',
+        team_size: 6, new_joiners_this_month: 0, probation_due: 1,
+        pending_leave_approvals: 1, generated_at: new Date().toISOString(),
+      },
+    }
+  }
+  if (path === '/intelligence/executive-narrative') {
+    const month = q.month || new Date().toISOString().slice(0, 7)
+    return {
+      data: {
+        narrative: `Saar Technologies maintained a stable headcount of ${fx.demoEmployeeList.length} employees in ${month}. Attrition remains low and payroll was processed on schedule.`,
+        metrics: {
+          headcount: fx.demoEmployeeList.length, joiners: 1, exits: 0,
+          probation_backlog: 1, net_change: 1, period: month,
+        },
+        period_start: `${month}-01`,
+        period_end: `${month}-30`,
+        generated_at: new Date().toISOString(),
+      },
+    }
+  }
+  // /intelligence/* catch-all
+  if (path.startsWith('/intelligence/')) return { data: {} }
+
+  // ── Reports ────────────────────────────────────────────────────────────────
+  if (path === '/reports/headcount') {
+    const employees = fx.demoEmployeeList.map(e => ({
+      employee_code: e.employee_code, name: `${e.first_name} ${e.last_name}`,
+      department: e.department?.name ?? '', employment_type: e.current_job?.employment_type ?? 'permanent',
+      joining_date: e.joining_date, status: e.status,
+    }))
+    return {
+      summary: { total_employees: employees.length, active_employees: employees.filter(e => e.status === 'active').length, total_separations: 0 },
+      monthly_trend: ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06'].map((month, i) => ({ month, joiners: i < 2 ? 2 : 1, separations: 0 })),
+      department_breakdown: fx.demoDepartments.map(d => ({ department: d.name, count: Math.floor(employees.length / fx.demoDepartments.length) })),
+      employment_type_breakdown: [{ employment_type: 'permanent', count: employees.length }],
+      employees,
+    }
+  }
+  if (path === '/reports/attendance-summary') {
+    const rows = fx.demoEmployeeList.map(e => ({
+      employee_code: e.employee_code, name: `${e.first_name} ${e.last_name}`,
+      department: e.department?.name ?? '',
+      present: 22, absent: 0, late: 1, half_day: 0,
+      total_work_hours: 176, total_late_minutes: 12, total_overtime_minutes: 0, leave_days: 0,
+    }))
+    return {
+      from: q.from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+      to: q.to || new Date().toISOString().slice(0, 10),
+      totals: { present: rows.length * 22, absent: 0, late: rows.length, half_day: 0, total_work_hours: rows.length * 176, leave_days: 0 },
+      rows,
+    }
+  }
+  if (path === '/reports/salary-register') {
+    const rows = fx.demoEmployeeList.map(e => {
+      const comp = fx.demoActiveComp(e.id)
+      return {
+        employee_code: e.employee_code, name: `${e.first_name} ${e.last_name}`,
+        department: e.department?.name ?? '', employment_type: e.current_job?.employment_type ?? 'permanent',
+        ctc_annual: comp.ctc_annual, ctc_monthly: comp.ctc_monthly,
+        effective_from: comp.effective_from ?? '2025-04-01', components: {},
+      }
+    })
+    const totals = { employee_count: rows.length, total_ctc_annual: rows.reduce((s, r) => s + r.ctc_annual, 0), total_ctc_monthly: rows.reduce((s, r) => s + r.ctc_monthly, 0) }
+    return { month: q.month || new Date().toISOString().slice(0, 7), component_columns: [], totals, rows }
+  }
+  if (path === '/reports/statutory') {
+    const rows = fx.demoEmployeeList.map(e => {
+      const comp = fx.demoActiveComp(e.id)
+      return {
+        employee_code: e.employee_code, name: `${e.first_name} ${e.last_name}`,
+        department: e.department?.name ?? '', employment_type: e.current_job?.employment_type ?? 'permanent',
+        ctc_monthly: comp.ctc_monthly, ctc_annual: comp.ctc_annual,
+        uan: `100${e.id.replace(/\D/g, '').slice(0, 8).padStart(9, '0')}`,
+        pf_number: `KA/BN/12345/000/${e.id.replace(/\D/g, '').slice(-4).padStart(4, '0')}`,
+        pf_employee_monthly: Math.round(comp.ctc_monthly * 0.12 * 0.5),
+        pf_employer_monthly: Math.round(comp.ctc_monthly * 0.12 * 0.5),
+        esi_number: null, esi_applicable: false, esi_employee_monthly: 0, esi_employer_monthly: 0,
+        pan: 'ALHPXXXXXA', pt_applicable: true, lwf_applicable: true, tax_regime: 'new',
+      }
+    })
+    const totals = {
+      employee_count: rows.length, pf_employees: rows.length, esi_employees: 0,
+      pt_employees: rows.length, lwf_employees: rows.length,
+      total_pf_employee: rows.reduce((s, r) => s + r.pf_employee_monthly, 0),
+      total_pf_employer: rows.reduce((s, r) => s + r.pf_employer_monthly, 0),
+      total_esi_employee: 0, total_esi_employer: 0,
+    }
+    return { totals, rows }
+  }
+  // /reports/* catch-all
+  if (path.startsWith('/reports/')) return { data: [], rows: [], totals: {}, summary: {} }
+
+  // ── Datasets ───────────────────────────────────────────────────────────────
+  if (path === '/datasets/payroll-cost/anchor') {
+    return { month: new Date().toISOString().slice(0, 7) }
+  }
+  if (path.startsWith('/datasets/')) return { data: {} }
+
+  // ── Recruitment ────────────────────────────────────────────────────────────
+  if (path === '/recruitment/hired') return { data: [], total: 0 }
+  if (path.startsWith('/recruitment/')) return { data: [] }
 
   // ── Metrics (prometheus-style text) ────────────────────────────────────────
   if (path === '/metrics') return ''
