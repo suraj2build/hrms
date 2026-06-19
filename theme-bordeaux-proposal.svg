@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="940" viewBox="0 0 1480 940" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="grad-btn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5C1730"/>
+      <stop offset="0.5" stop-color="#4A1126"/>
+      <stop offset="1" stop-color="#33091B"/>
+    </linearGradient>
+    <linearGradient id="grad-nav" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2A0716"/>
+      <stop offset="0.5" stop-color="#33091B"/>
+      <stop offset="1" stop-color="#4A1430"/>
+    </linearGradient>
+    <linearGradient id="grad-hero" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E0610"/>
+      <stop offset="1" stop-color="#4A1126"/>
+    </linearGradient>
+    <linearGradient id="grad-accent" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#33091B"/>
+      <stop offset="1" stop-color="#5C1730"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1480" height="940" fill="#FAF5F7"/>
+
+  <!-- Title -->
+  <text x="48" y="58" font-size="30" font-weight="700" fill="#1F0712">Bordeaux Theme — proposed palette around #33091B</text>
+  <text x="48" y="88" font-size="16" fill="#8A6470">A third switchable theme alongside Blue and Petrol · light canvas · white sidebar</text>
+
+  <!-- ============ LEFT: PALETTE SWATCHES ============ -->
+  <text x="48" y="140" font-size="15" font-weight="700" fill="#1F0712" letter-spacing="1">CORE</text>
+
+  <!-- Primary anchor (big) -->
+  <rect x="48" y="156" width="190" height="120" rx="14" fill="#33091B"/>
+  <text x="64" y="232" font-size="18" font-weight="700" fill="#FFFFFF">#33091B</text>
+  <text x="64" y="256" font-size="12" fill="#E9C9D4">primary (anchor)</text>
+
+  <!-- Button gradient -->
+  <rect x="252" y="156" width="190" height="120" rx="14" fill="url(#grad-btn)"/>
+  <text x="268" y="232" font-size="13" font-weight="700" fill="#FFFFFF">#5C1730→#33091B</text>
+  <text x="268" y="256" font-size="12" fill="#E9C9D4">primary button gradient</text>
+
+  <!-- Hero / top bar -->
+  <rect x="456" y="156" width="190" height="120" rx="14" fill="url(#grad-hero)"/>
+  <text x="472" y="232" font-size="13" font-weight="700" fill="#FFFFFF">#1E0610→#4A1126</text>
+  <text x="472" y="256" font-size="12" fill="#E9C9D4">hero / top bar</text>
+
+  <!-- Foreground text -->
+  <rect x="48" y="292" width="190" height="92" rx="14" fill="#1F0712"/>
+  <text x="64" y="344" font-size="18" font-weight="700" fill="#FFFFFF">#1F0712</text>
+  <text x="64" y="366" font-size="12" fill="#C9A9B4">foreground / text</text>
+
+  <!-- Muted foreground -->
+  <rect x="252" y="292" width="190" height="92" rx="14" fill="#8A6470"/>
+  <text x="268" y="344" font-size="18" font-weight="700" fill="#FFFFFF">#8A6470</text>
+  <text x="268" y="366" font-size="12" fill="#F3E1E8">muted text</text>
+
+  <!-- Lighter wine accent -->
+  <rect x="456" y="292" width="190" height="92" rx="14" fill="#7A2547"/>
+  <text x="472" y="344" font-size="18" font-weight="700" fill="#FFFFFF">#7A2547</text>
+  <text x="472" y="366" font-size="12" fill="#F3E1E8">accent / chart-5</text>
+
+  <text x="48" y="424" font-size="15" font-weight="700" fill="#1F0712" letter-spacing="1">SURFACES &amp; LINES</text>
+
+  <!-- Background -->
+  <rect x="48" y="440" width="138" height="86" rx="12" fill="#FAF5F7" stroke="#ECD9E0"/>
+  <text x="62" y="500" font-size="14" font-weight="700" fill="#1F0712">#FAF5F7</text>
+  <text x="62" y="518" font-size="11" fill="#8A6470">background</text>
+
+  <!-- Card -->
+  <rect x="198" y="440" width="138" height="86" rx="12" fill="#FFFFFF" stroke="#ECD9E0"/>
+  <text x="212" y="500" font-size="14" font-weight="700" fill="#1F0712">#FFFFFF</text>
+  <text x="212" y="518" font-size="11" fill="#8A6470">card</text>
+
+  <!-- Secondary / accent tint -->
+  <rect x="348" y="440" width="138" height="86" rx="12" fill="#F3E1E8" stroke="#ECD9E0"/>
+  <text x="362" y="500" font-size="14" font-weight="700" fill="#1F0712">#F3E1E8</text>
+  <text x="362" y="518" font-size="11" fill="#8A6470">secondary / accent</text>
+
+  <!-- Border -->
+  <rect x="498" y="440" width="138" height="86" rx="12" fill="#ECD9E0"/>
+  <text x="512" y="500" font-size="14" font-weight="700" fill="#1F0712">#ECD9E0</text>
+  <text x="512" y="518" font-size="11" fill="#5A1126">border / input</text>
+
+  <!-- Semantic (retained) -->
+  <text x="48" y="574" font-size="15" font-weight="700" fill="#1F0712" letter-spacing="1">SEMANTIC — UNCHANGED (shared across all themes)</text>
+  <rect x="48"  y="590" width="138" height="72" rx="12" fill="#1A8050"/>
+  <text x="62" y="632" font-size="14" font-weight="700" fill="#FFFFFF">#1A8050</text>
+  <text x="62" y="650" font-size="11" fill="#CDEBD9">success</text>
+  <rect x="198" y="590" width="138" height="72" rx="12" fill="#B07B18"/>
+  <text x="212" y="632" font-size="14" font-weight="700" fill="#FFFFFF">#B07B18</text>
+  <text x="212" y="650" font-size="11" fill="#F4E6C8">warning</text>
+  <rect x="348" y="590" width="138" height="72" rx="12" fill="#C93535"/>
+  <text x="362" y="632" font-size="14" font-weight="700" fill="#FFFFFF">#C93535</text>
+  <text x="362" y="650" font-size="11" fill="#F6D2D2">destructive</text>
+  <rect x="498" y="590" width="138" height="72" rx="12" fill="#33091B"/>
+  <text x="512" y="632" font-size="14" font-weight="700" fill="#FFFFFF">#33091B</text>
+  <text x="512" y="650" font-size="11" fill="#E9C9D4">info → wine</text>
+
+  <text x="48" y="712" font-size="13" fill="#8A6470">Note: destructive red (#C93535) is brighter/cleaner than the deep wine, so</text>
+  <text x="48" y="732" font-size="13" fill="#8A6470">alert buttons stay clearly distinct. Can shift to orange-red if you prefer.</text>
+
+  <!-- ============ RIGHT: MINI APP MOCKUP ============ -->
+  <g transform="translate(700, 130)">
+    <rect x="0" y="0" width="732" height="678" rx="18" fill="#FFFFFF" stroke="#ECD9E0" stroke-width="1.5"/>
+
+    <!-- Top bar -->
+    <rect x="0" y="0" width="732" height="50" rx="18" fill="url(#grad-nav)"/>
+    <rect x="0" y="24" width="732" height="26" fill="url(#grad-nav)"/>
+    <circle cx="36" cy="25" r="13" fill="#FFFFFF"/>
+    <text x="30" y="30" font-size="15" font-weight="800" fill="#33091B">C</text>
+    <text x="58" y="30" font-size="15" font-weight="700" fill="#FFFFFF">Cognix</text>
+    <text x="122" y="30" font-size="15" font-weight="700" fill="#E58FB0">HR</text>
+    <rect x="560" y="12" width="92" height="26" rx="13" fill="#FFFFFF" opacity="0.16"/>
+    <text x="576" y="29" font-size="12" fill="#FFFFFF">Run Payroll</text>
+
+    <!-- Sidebar (white) -->
+    <rect x="0" y="50" width="176" height="628" fill="#FFFFFF"/>
+    <line x1="176" y1="50" x2="176" y2="678" stroke="#ECD9E0"/>
+    <!-- active item -->
+    <rect x="12" y="70" width="152" height="34" rx="9" fill="#F3E1E8"/>
+    <rect x="12" y="70" width="3.5" height="34" rx="2" fill="#33091B"/>
+    <text x="30" y="92" font-size="12.5" font-weight="600" fill="#33091B">Dashboard</text>
+    <text x="30" y="132" font-size="12.5" fill="#6B5560">Employees</text>
+    <text x="30" y="166" font-size="12.5" fill="#6B5560">Attendance</text>
+    <text x="30" y="200" font-size="12.5" fill="#6B5560">Payroll</text>
+    <text x="30" y="234" font-size="12.5" fill="#6B5560">Reports</text>
+
+    <!-- Content -->
+    <!-- Page header with accent bar -->
+    <rect x="200" y="74" width="4" height="24" rx="2" fill="url(#grad-accent)"/>
+    <text x="216" y="94" font-size="20" font-weight="700" fill="#1F0712">Team Reports</text>
+    <text x="216" y="116" font-size="12.5" fill="#8A6470">Operational HR reporting</text>
+
+    <!-- KPI tiles -->
+    <g>
+      <rect x="200" y="140" width="160" height="92" rx="12" fill="#FFFFFF" stroke="#ECD9E0"/>
+      <rect x="216" y="156" width="34" height="34" rx="9" fill="url(#grad-accent)"/>
+      <text x="216" y="214" font-size="22" font-weight="700" fill="#1F0712">248</text>
+      <text x="270" y="172" font-size="10" fill="#8A6470">Head</text>
+      <text x="270" y="186" font-size="10" fill="#8A6470">count</text>
+
+      <rect x="372" y="140" width="160" height="92" rx="12" fill="#FFFFFF" stroke="#ECD9E0"/>
+      <rect x="388" y="156" width="34" height="34" rx="9" fill="#1A8050"/>
+      <text x="388" y="214" font-size="22" font-weight="700" fill="#1F0712">96%</text>
+      <text x="442" y="172" font-size="10" fill="#8A6470">Present</text>
+
+      <rect x="544" y="140" width="160" height="92" rx="12" fill="#FFFFFF" stroke="#ECD9E0"/>
+      <rect x="560" y="156" width="34" height="34" rx="9" fill="#B07B18"/>
+      <text x="560" y="214" font-size="22" font-weight="700" fill="#1F0712">12</text>
+      <text x="614" y="172" font-size="10" fill="#8A6470">Pending</text>
+    </g>
+
+    <!-- A list card -->
+    <rect x="200" y="248" width="504" height="220" rx="12" fill="#FFFFFF" stroke="#ECD9E0"/>
+    <text x="216" y="276" font-size="13" font-weight="700" fill="#1F0712">Headcount &amp; Attendance</text>
+    <text x="216" y="296" font-size="11" fill="#8A6470">Workforce visibility</text>
+    <rect x="216" y="312" width="472" height="1" fill="#ECD9E0"/>
+    <!-- selected row -->
+    <rect x="216" y="322" width="472" height="36" rx="8" fill="#F3E1E8"/>
+    <rect x="216" y="322" width="3" height="36" rx="2" fill="#33091B"/>
+    <text x="232" y="345" font-size="12" font-weight="600" fill="#33091B">PF · ESI · PT · LWF</text>
+    <rect x="600" y="330" width="74" height="20" rx="10" fill="#33091B"/>
+    <text x="614" y="344" font-size="10" fill="#FFFFFF">Active</text>
+    <text x="232" y="385" font-size="12" fill="#4A3540">Leave Register</text>
+    <text x="232" y="415" font-size="12" fill="#4A3540">Salary Register</text>
+    <text x="232" y="445" font-size="12" fill="#4A3540">Compliance Pack</text>
+
+    <!-- Buttons row -->
+    <rect x="200" y="486" width="150" height="40" rx="9" fill="url(#grad-btn)"/>
+    <text x="246" y="511" font-size="13" font-weight="600" fill="#FFFFFF">Add Employee</text>
+
+    <rect x="362" y="486" width="130" height="40" rx="9" fill="#FFFFFF" stroke="#ECD9E0"/>
+    <text x="400" y="511" font-size="13" font-weight="600" fill="#33091B">Export</text>
+
+    <rect x="504" y="486" width="120" height="40" rx="9" fill="#F3E1E8"/>
+    <text x="534" y="511" font-size="13" font-weight="600" fill="#4A1126">Secondary</text>
+
+    <!-- chips -->
+    <rect x="200" y="544" width="96" height="28" rx="14" fill="#F3E1E8"/>
+    <text x="218" y="562" font-size="11" fill="#4A1126">Filter chip</text>
+    <rect x="308" y="544" width="110" height="28" rx="14" fill="url(#grad-accent)"/>
+    <text x="326" y="562" font-size="11" fill="#FFFFFF">Active chip</text>
+
+    <!-- link -->
+    <text x="200" y="606" font-size="12.5" font-weight="600" fill="#33091B" text-decoration="underline">View all reports →</text>
+    <text x="200" y="636" font-size="11.5" fill="#8A6470">Body copy in muted mauve-grey for secondary information and hints.</text>
+  </g>
+</svg>
