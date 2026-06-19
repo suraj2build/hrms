@@ -5,4 +5,29 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* CognixHR brand palette — cohesive navy → teal */
+  --color-brand-blue: #2e6fe6;
+  --color-brand-navy: #1a4d8f;
+  --color-brand-ink: #0a1f44;     /* deep navy surface */
+  --color-brand-ink2: #0d2a5c;    /* slightly lifted navy */
+  --color-brand-teal: #15b8a6;
+  --color-brand-teal-bright: #2dd4bf; /* teal on dark */
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Subtle utility: animated brand gradient text shimmer */
+@keyframes brand-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }

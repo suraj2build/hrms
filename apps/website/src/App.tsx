@@ -19,7 +19,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 antialiased text-slate-800 font-sans">
+    <div className="min-h-screen bg-white antialiased text-slate-800 font-sans">
       {view === 'landing' ? (
         <LandingPage onLaunchDemo={handleLaunchConsole} />
       ) : (

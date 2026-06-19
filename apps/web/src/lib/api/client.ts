@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/stores/authStore'
+import { DEMO_MODE, resolveDemo } from '@/lib/demo'
 
 // ── Structured API error ───────────────────────────────────────────────────────
 //
@@ -69,6 +70,20 @@ if (
   )
 }
 
+/**
+ * DEMO MODE helper — request bodies are JSON-stringified before they reach the
+ * request() helper. The demo resolver wants the parsed object, so undo that.
+ * Non-string / non-JSON bodies (FormData, blobs) are passed through untouched.
+ */
+function safeParse(body: BodyInit): unknown {
+  if (typeof body !== 'string') return body
+  try {
+    return JSON.parse(body)
+  } catch {
+    return body
+  }
+}
+
 function getAuthHeaders(): HeadersInit {
   const token = useAuthStore.getState().accessToken
   return {
@@ -81,6 +96,13 @@ async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  // ── DEMO MODE — short-circuit to fixtures, no network/auth ─────────────────
+  if (DEMO_MODE) {
+    await new Promise(r => setTimeout(r, 120))
+    const parsedBody = options.body != null ? safeParse(options.body) : undefined
+    return resolveDemo(endpoint, options.method ?? 'GET', parsedBody) as T
+  }
+
   const token = useAuthStore.getState().accessToken
   const hasBody = options.body != null
 
@@ -122,6 +144,16 @@ async function request<T>(
  * The caller is responsible for reading response.blob() or response.text().
  */
 async function requestRaw(endpoint: string): Promise<Response> {
+  // ── DEMO MODE — wrap the resolved JSON in a Response so callers can .blob() ─
+  if (DEMO_MODE) {
+    await new Promise(r => setTimeout(r, 120))
+    const resolved = resolveDemo(endpoint, 'GET')
+    return new Response(JSON.stringify(resolved), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const token = useAuthStore.getState().accessToken
   const response = await fetch(`${API_URL}${endpoint}`, {
     headers: {
@@ -148,6 +180,13 @@ async function requestRaw(endpoint: string): Promise<Response> {
 async function requestWithMeta<T>(
   endpoint: string,
 ): Promise<{ data: T; headers: Headers }> {
+  // ── DEMO MODE — resolve fixtures + synthetic headers ───────────────────────
+  if (DEMO_MODE) {
+    await new Promise(r => setTimeout(r, 120))
+    const resolved = resolveDemo(endpoint, 'GET') as T
+    return { data: resolved, headers: new Headers({ 'Content-Type': 'application/json' }) }
+  }
+
   const authHeaders = getAuthHeaders()
   const response = await fetch(`${API_URL}${endpoint}`, { headers: authHeaders })
 

@@ -7,6 +7,9 @@ import { captureError } from '@/lib/observability/sentry'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/lib/api/client'
+import { DEMO_MODE } from '@/lib/demo'
+import { demoProfile, demoTenant } from '@/lib/demo/fixtures'
+import { DemoBanner } from '@/components/demo/DemoBanner'
 
 // ── Layouts ──────────────────────────────────────────────────────────────────
 import { AdminShellV2 }  from '@/components/layout/AdminShellV2'  // /admin/* — V2 shell with domain tabs
@@ -411,6 +414,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setProfile, setTenant, setLoading, setAccessToken, setBootstrapping } = useAuthStore()
 
   useEffect(() => {
+    // ── DEMO MODE — seed a fixture identity and skip all supabase/auth wiring ──
+    // The whole app then runs against the demo resolver (see lib/api/client.ts).
+    if (DEMO_MODE) {
+      setProfile(demoProfile)
+      setTenant(demoTenant)
+      setAccessToken('demo')
+      setLoading(false)
+      setBootstrapping(false)
+      return
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         // ── Silent token refresh ─────────────────────────────────────────────
@@ -990,6 +1004,7 @@ export default function App() {
             </Routes>
           </Suspense>
           </RouteErrorBoundary>
+          {DEMO_MODE && <DemoBanner />}
           <Toaster richColors position="top-right" />
         </AuthProvider>
       </BrowserRouter>
