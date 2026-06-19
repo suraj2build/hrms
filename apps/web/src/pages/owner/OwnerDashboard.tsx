@@ -115,8 +115,8 @@ export function OwnerDashboard() {
         </div>
         <div className="hidden sm:flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
           </span>
           All systems operational
         </div>
@@ -125,7 +125,7 @@ export function OwnerDashboard() {
       {isLoading && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-2xl bg-card ring-1 ring-slate-200/60 animate-pulse" />
+            <div key={i} className="h-24 rounded-2xl bg-card ring-1 ring-ring/60 animate-pulse" />
           ))}
         </div>
       )}
@@ -162,10 +162,10 @@ export function OwnerDashboard() {
 
           {/* Quick actions */}
           {d.requests.pending > 0 && (
-            <section className="relative overflow-hidden rounded-2xl border border-amber-300/60 bg-gradient-to-r from-amber-50 to-white p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-warning/40 bg-gradient-to-r from-warning/10 to-white p-4 shadow-sm">
               <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <span className="text-sm font-semibold text-amber-700">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <span className="text-sm font-semibold text-warning">
                   {d.requests.pending} signup request{d.requests.pending !== 1 ? 's' : ''} awaiting review
                 </span>
               </div>

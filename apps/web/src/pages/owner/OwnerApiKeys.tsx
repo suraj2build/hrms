@@ -219,16 +219,16 @@ export function OwnerApiKeys() {
       <Dialog open={!!newKey} onOpenChange={() => { setNewKey(null); setShowKey(false) }}>
         <DialogContent className="bg-card border-border text-foreground max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-600">
+            <DialogTitle className="flex items-center gap-2 text-success">
               <CheckCircle2 className="h-5 w-5" /> API Key Generated
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <p className="text-sm text-amber-700 font-medium">
+            <p className="text-sm text-warning font-medium">
               ⚠ Save this key now — it will never be shown again.
             </p>
             <div className="relative rounded-lg bg-muted border border-border p-3">
-              <p className="font-mono text-[12px] text-emerald-700 break-all pr-16">
+              <p className="font-mono text-[12px] text-success break-all pr-16">
                 {showKey ? newKey : '•'.repeat(Math.min((newKey?.length ?? 40), 40))}
               </p>
               <div className="absolute top-2 right-2 flex gap-1">

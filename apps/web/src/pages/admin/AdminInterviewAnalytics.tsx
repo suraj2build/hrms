@@ -115,8 +115,8 @@ export function AdminInterviewAnalytics() {
       {/* Per-criterion effectiveness */}
       <SectionCard title="Criterion effectiveness" icon={<Target className="h-4 w-4 text-muted-foreground" />}>
         <p className="text-xs text-muted-foreground mb-3">
-          How strongly each criterion separates <span className="text-emerald-600 font-medium">hired</span> from{' '}
-          <span className="text-red-600 font-medium">rejected</span> candidates. Higher lift ⇒ the criterion is more predictive of a good hire.
+          How strongly each criterion separates <span className="text-success font-medium">hired</span> from{' '}
+          <span className="text-destructive font-medium">rejected</span> candidates. Higher lift ⇒ the criterion is more predictive of a good hire.
         </p>
         {noOutcomeYet ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
@@ -128,7 +128,7 @@ export function AdminInterviewAnalytics() {
               <BarChart data={criteriaChart} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
                 <XAxis type="number" hide />
                 <YAxis type="category" dataKey="name" width={96} tick={{ fontSize: 11 }} />
-                <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} contentStyle={{ fontSize: 12 }} formatter={(v: any) => [`${v} lift`, 'Hired − Rejected']} />
+                <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} contentStyle={{ fontSize: 12 }} formatter={(v: number) => [`${v} lift`, 'Hired − Rejected']} />
                 <ReferenceLine x={0} stroke="hsl(var(--border))" />
                 <Bar dataKey="lift" radius={[0, 4, 4, 0]} maxBarSize={20}>
                   {criteriaChart.map((c, i) => <Cell key={i} fill={c.lift >= 0 ? '#10b981' : '#ef4444'} />)}
@@ -150,8 +150,8 @@ export function AdminInterviewAnalytics() {
                   {d.criteria.map(c => (
                     <tr key={c.criterion} className="border-b border-border/50">
                       <td className="py-2 px-3 text-xs font-medium">{CRIT_LABEL[c.criterion] ?? c.criterion}</td>
-                      <td className="py-2 px-3 text-xs text-right text-emerald-600">{c.avg_hired ?? '—'}</td>
-                      <td className="py-2 px-3 text-xs text-right text-red-600">{c.avg_rejected ?? '—'}</td>
+                      <td className="py-2 px-3 text-xs text-right text-success">{c.avg_hired ?? '—'}</td>
+                      <td className="py-2 px-3 text-xs text-right text-destructive">{c.avg_rejected ?? '—'}</td>
                       <td className={cn('py-2 px-3 text-xs text-right font-semibold', (c.lift ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600')}>
                         {c.lift != null ? (c.lift > 0 ? `+${c.lift}` : c.lift) : '—'}
                       </td>

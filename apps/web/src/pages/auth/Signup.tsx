@@ -234,16 +234,16 @@ export function Signup() {
           )}
 
           {step < 3 && (
-            <p className="mt-6 text-center text-sm text-slate-500">
+            <p className="mt-6 text-center text-sm text-muted-foreground">
               Already have an account?{' '}
               <Link to="/login" className="font-medium text-[#1A4D8F] hover:underline">Sign in</Link>
             </p>
           )}
 
-          <p className="mt-8 text-center text-[11px] text-slate-400">
+          <p className="mt-8 text-center text-[11px] text-muted-foreground">
             © {new Date().getFullYear()} CognixHR · All rights reserved ·{' '}
-            <Link to="/terms" className="hover:text-slate-600 hover:underline">Terms</Link> ·{' '}
-            <Link to="/privacy" className="hover:text-slate-600 hover:underline">Privacy Policy</Link>
+            <Link to="/terms" className="hover:text-foreground hover:underline">Terms</Link> ·{' '}
+            <Link to="/privacy" className="hover:text-foreground hover:underline">Privacy Policy</Link>
           </p>
         </div>
       </div>
@@ -263,13 +263,13 @@ function Field({
 }) {
   return (
     <div>
-      <label className={labelCls}>{label} <span className="text-rose-500">*</span></label>
+      <label className={labelCls}>{label} <span className="text-destructive">*</span></label>
       <div className="relative">
-        <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         {children}
       </div>
-      {hint && !error && <p className="mt-1 text-[11px] text-slate-400">{hint}</p>}
-      {error && <p className="mt-1 text-xs text-rose-500">{error}</p>}
+      {hint && !error && <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p>}
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   )
 }

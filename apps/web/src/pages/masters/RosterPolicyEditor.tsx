@@ -27,7 +27,6 @@ import {
   Copy, Info,
 } from 'lucide-react'
 import { Button }   from '@/components/ui/button'
-import { Input }    from '@/components/ui/input'
 import { Badge }    from '@/components/ui/badge'
 import { api }      from '@/lib/api/client'
 import { cn }       from '@/lib/utils'
@@ -495,7 +494,7 @@ export function RosterPolicyEditor() {
   // WO-credit structures available for tagging (retail floating weekly-off)
   const { data: woStructures = [] } = useQuery<WoStructureOption[]>({
     queryKey: ['wo-credit', 'structures', 'options'],
-    queryFn:  () => api.get('/attendance/wo-credit/structures').then((r: any) => (r.data ?? []).map((s: any) => ({ id: s.id, name: s.name }))),
+    queryFn:  () => api.get<{ data?: WoStructureOption[] }>('/attendance/wo-credit/structures').then((r) => (r.data ?? []).map((s) => ({ id: s.id, name: s.name }))),
     staleTime: 60_000,
   })
 
@@ -549,10 +548,10 @@ export function RosterPolicyEditor() {
         wo_credit_structure_id: woStructureId,
       }
       return isNew
-        ? api.post('/masters/rosters', payload)
-        : api.put(`/masters/rosters/${id}`, payload)
+        ? api.post<{ data?: { id?: string } }>('/masters/rosters', payload)
+        : api.put<{ data?: { id?: string } }>(`/masters/rosters/${id}`, payload)
     },
-    onSuccess: (res: any) => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
       qc.invalidateQueries({ queryKey: ['roster-policy', id] })
       toast.success(isNew ? 'Roster policy created' : 'Roster policy saved')
@@ -561,7 +560,7 @@ export function RosterPolicyEditor() {
         navigate(`/admin/masters/rosters/${res.data.id}`, { replace: true })
       }
     },
-    onError: (e: any) => toast.error('Failed to save policy', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to save policy', { description: e.message }),
   })
 
   // ── Archive toggle mutation ───────────────────────────────────────────────
@@ -573,7 +572,7 @@ export function RosterPolicyEditor() {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
       toast.success(next ? 'Policy restored' : 'Policy archived')
     },
-    onError: (e: any) => toast.error('Failed to update status', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to update status', { description: e.message }),
   })
 
   // ── Loading skeleton ──────────────────────────────────────────────────────
@@ -681,7 +680,7 @@ export function RosterPolicyEditor() {
 
         {/* Unsaved changes indicator */}
         {isDirty && (
-          <div className="mt-2 ml-10 flex items-center gap-1.5 text-[11px] text-amber-600">
+          <div className="mt-2 ml-10 flex items-center gap-1.5 text-[11px] text-warning">
             <AlertTriangle className="h-3 w-3" />
             Unsaved changes
           </div>
@@ -792,10 +791,10 @@ export function RosterPolicyEditor() {
             </div>
 
             {/* Payroll note */}
-            <div className="rounded-lg border border-amber-200/60 bg-amber-50/50 p-2.5">
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-2.5">
               <div className="flex items-start gap-1.5">
-                <Info className="h-3 w-3 text-amber-500 flex-shrink-0 mt-0.5" />
-                <div className="text-[10px] text-amber-800/80 leading-relaxed">
+                <Info className="h-3 w-3 text-warning flex-shrink-0 mt-0.5" />
+                <div className="text-[10px] text-warning leading-relaxed">
                   Off days are excluded from payable days. Half days count as 0.5 days. Changes apply to the next payroll cycle.
                 </div>
               </div>

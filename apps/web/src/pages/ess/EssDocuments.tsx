@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   FileText, Download, Eye, AlertTriangle, Loader2,
   FileImage, File, FileBadge, FolderOpen, Info,
@@ -257,7 +257,7 @@ export function EssDocuments() {
     dataUpdatedAt: docUpdatedAt,
   } = useQuery<EmpDocument[]>({
     queryKey: ['ess-documents', employeeId],
-    queryFn:  () => api.get('/ess/me/documents').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: EmpDocument[] }>('/ess/me/documents').then(r => r.data),
     enabled:  !!employeeId,
     // Pro-active refresh every 45 min ensures signed URLs (1h TTL) never expire
     // while the tab is in focus, eliminating the need for on-click refresh in most cases.
@@ -281,7 +281,7 @@ export function EssDocuments() {
     dataUpdatedAt: contractUpdatedAt,
   } = useQuery<EmpContract[]>({
     queryKey: ['ess-contracts', employeeId],
-    queryFn:  () => api.get(`/employees/${employeeId}/contracts`).then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: EmpContract[] }>(`/employees/${employeeId}/contracts`).then(r => r.data),
     enabled:  !!employeeId,
     staleTime:       45 * 60 * 1000,
     refetchInterval: 45 * 60 * 1000,

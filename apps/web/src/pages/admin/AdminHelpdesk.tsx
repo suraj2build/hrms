@@ -315,7 +315,7 @@ export function AdminHelpdesk() {
                     <tr key={t.id} className="border-b border-border/50 hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => setOpenId(t.id)}>
                       <td className="py-2 px-3">
                         <div className="flex items-center gap-1.5">
-                          {breached && <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                          {breached && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                           <span className="text-xs font-medium text-foreground">{t.subject}</span>
                         </div>
                       </td>
@@ -348,10 +348,10 @@ export function AdminHelpdesk() {
                 <span className="text-[10px] text-muted-foreground capitalize">{detail.category.replace('_', ' ')}</span>
                 {detail.employees && <span className="text-[10px] text-muted-foreground">· {detail.employees.first_name} {detail.employees.last_name} ({detail.employees.employee_code})</span>}
                 {detail.sla_breached_at && !['resolved', 'closed'].includes(detail.status) && (
-                  <Badge variant="outline" className="text-[10px] text-red-600 border-red-200 bg-red-50 gap-1"><AlertTriangle className="h-3 w-3" />Response SLA breached</Badge>
+                  <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30 bg-destructive/10 gap-1"><AlertTriangle className="h-3 w-3" />Response SLA breached</Badge>
                 )}
                 {detail.resolution_breached_at && !['resolved', 'closed'].includes(detail.status) && (
-                  <Badge variant="outline" className="text-[10px] text-red-600 border-red-200 bg-red-50 gap-1"><AlertTriangle className="h-3 w-3" />Resolution SLA breached</Badge>
+                  <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30 bg-destructive/10 gap-1"><AlertTriangle className="h-3 w-3" />Resolution SLA breached</Badge>
                 )}
               </div>
               {(detail.sla_due_at || detail.resolution_due_at) && !['resolved', 'closed'].includes(detail.status) && (
@@ -408,7 +408,7 @@ export function AdminHelpdesk() {
               )}
 
               {detail.resolution_note && (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
+                <div className="rounded-md border border-success/30 bg-success/10 p-2.5 text-xs text-success">
                   <span className="font-medium">Resolution:</span> {detail.resolution_note}
                 </div>
               )}
@@ -426,7 +426,7 @@ export function AdminHelpdesk() {
                     )}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-                          {c.is_internal && <StickyNote className="h-3 w-3 text-amber-500" />}
+                          {c.is_internal && <StickyNote className="h-3 w-3 text-warning" />}
                           {c.author_role === 'hr' ? 'HR Team' : 'Employee'}{c.is_internal ? ' · Internal' : ''}
                         </span>
                         <span className="text-[10px] text-muted-foreground">{fmtDateTime(c.created_at)}</span>

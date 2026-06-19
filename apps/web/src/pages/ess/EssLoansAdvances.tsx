@@ -79,7 +79,7 @@ function computeEMI(principal: number, annualRate: number, months: number): numb
   return Math.round((principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1) * 100) / 100
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; Icon: React.ComponentType<any> }> = {
+const STATUS_CONFIG: Record<string, { label: string; color: string; Icon: React.ComponentType<{ className?: string }> }> = {
   pending_manager: { label: 'Pending Manager',  color: 'text-yellow-600 bg-yellow-50 border-yellow-200',   Icon: Clock         },
   pending_hr:      { label: 'Pending HR',       color: 'text-blue-600 bg-blue-50 border-blue-200',         Icon: Clock         },
   pending:         { label: 'Pending HR',       color: 'text-blue-600 bg-blue-50 border-blue-200',         Icon: Clock         },
@@ -118,7 +118,7 @@ function WorkflowTracker({ status }: { status: string }) {
 
   if (isRejected) {
     return (
-      <div className="flex items-center gap-1 text-xs text-red-600">
+      <div className="flex items-center gap-1 text-xs text-destructive">
         <XCircle className="h-3.5 w-3.5" />
         <span>Request rejected</span>
       </div>
@@ -212,7 +212,7 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
         <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
       </div>
       {mutation.isError && (
-        <p className="text-xs text-destructive">{(mutation.error as any)?.message ?? 'Failed to submit'}</p>
+        <p className="text-xs text-destructive">{(mutation.error instanceof Error ? mutation.error.message : null) ?? 'Failed to submit'}</p>
       )}
     </div>
   )
@@ -314,7 +314,7 @@ function NewLoanForm({ onClose }: { onClose: () => void }) {
         <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
       </div>
       {mutation.isError && (
-        <p className="text-xs text-destructive">{(mutation.error as any)?.message ?? 'Failed to submit'}</p>
+        <p className="text-xs text-destructive">{(mutation.error instanceof Error ? mutation.error.message : null) ?? 'Failed to submit'}</p>
       )}
     </div>
   )
@@ -423,8 +423,8 @@ function AdvanceCard({ advance }: { advance: AdvanceRequest }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
       <div className="px-3 py-2.5 flex items-start gap-3">
-        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-blue-500/10">
-          <Wallet className="h-3.5 w-3.5 text-blue-600" />
+        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-primary/10">
+          <Wallet className="h-3.5 w-3.5 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -471,8 +471,8 @@ function LoanCard({ loan }: { loan: LoanRequest }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
       <div className="px-3 py-2.5 flex items-start gap-3">
-        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-violet-500/10">
-          <CreditCard className="h-3.5 w-3.5 text-violet-600" />
+        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-primary/10">
+          <CreditCard className="h-3.5 w-3.5 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -567,7 +567,7 @@ export function EssLoansAdvances() {
       </div>
 
       {/* ── Info banner ───────────────────────────────────────────────────── */}
-      <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50/50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
+      <div className="mb-4 rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-xs text-info flex items-start gap-2">
         <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
         <p>
           Your request is reviewed by your manager first, then by HR. Once approved and disbursed, deductions are

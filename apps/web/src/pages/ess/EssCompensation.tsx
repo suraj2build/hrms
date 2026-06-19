@@ -23,14 +23,14 @@ import {
   Tooltip as RechartsTip, ResponsiveContainer,
 } from 'recharts'
 import {
-  DollarSign, ChevronDown, ChevronUp,
+  DollarSign,
   Loader2, AlertCircle, FileText,
-  TrendingDown, TrendingUp, Calendar,
-  BookOpen, Printer, BarChart2,
+  TrendingUp,
+  Printer, BarChart2,
   AlertTriangle,
   Receipt,
   Wallet, Gift, ShieldCheck, History as HistoryIcon,
-  Building2, ArrowUpRight, PiggyBank, Clock,
+  Building2, ArrowUpRight, PiggyBank,
 } from 'lucide-react'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
@@ -946,7 +946,6 @@ export function EssCompensation() {
   const revisions  = revData?.data ?? []
   const components  = comp?.employee_compensation_components ?? []
   const earnings    = components.filter(c => c.salary_components?.component_type === 'earning')
-  const deductions  = components.filter(c => c.salary_components?.component_type === 'deduction')
   const empContribs = components.filter(c => c.salary_components?.component_type === 'employer_contribution')
   const sumMonthly  = (arr: typeof components) => arr.reduce((s, c) => s + (c.computed_monthly ?? 0), 0)
   const grossMonthly    = sumMonthly(earnings)

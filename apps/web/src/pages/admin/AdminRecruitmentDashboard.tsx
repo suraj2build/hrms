@@ -252,7 +252,7 @@ export function AdminRecruitmentDashboard() {
                   </div>
                 </div>
                 <div className="pt-1 flex gap-4 text-xs text-muted-foreground">
-                  <span className="text-red-500">✕ {d.funnel.rejected} rejected</span>
+                  <span className="text-destructive">✕ {d.funnel.rejected} rejected</span>
                   <span>↩ {d.funnel.withdrawn} withdrawn</span>
                 </div>
               </>
@@ -336,7 +336,7 @@ export function AdminRecruitmentDashboard() {
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-teal-500 rounded-full transition-all duration-700"
+                    className="h-full bg-success rounded-full transition-all duration-700"
                     style={{ width: `${d.pass_rate}%` }}
                   />
                 </div>

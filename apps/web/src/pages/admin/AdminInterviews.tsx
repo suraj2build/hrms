@@ -11,10 +11,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  CalendarCheck, Plus, RefreshCw, Search, Video, Phone,
-  Users, MapPin, Clock, MoreHorizontal, CheckCircle2,
-  XCircle, UserX, ChevronDown, Briefcase, UserCircle2,
-  CalendarDays, AlarmClock, Star,
+  CalendarCheck, Plus, RefreshCw, Video, Phone,
+  Users, MapPin, MoreHorizontal, CheckCircle2,
+  XCircle, UserX, Briefcase,
+  CalendarDays, Star,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -205,15 +205,15 @@ export function AdminInterviews() {
       await api.post(`/recruitment/interviews/${id}/${action}`, {})
       toast.success(label)
       invalidate()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Action failed')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Action failed')
     }
   }
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/interviews/${id}`),
     onSuccess:  () => { toast.success('Interview deleted'); invalidate() },
-    onError:    (e: any) => toast.error(e?.response?.data?.message ?? 'Delete failed'),
+    onError:    (e: unknown) => toast.error(e instanceof Error ? e.message : 'Delete failed'),
   })
 
   // ── Scorecard helpers ──────────────────────────────────────────────────────
@@ -243,8 +243,8 @@ export function AdminInterviews() {
       })
       toast.success('Score submitted')
       refetchScorecard()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Submit failed')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Submit failed')
     } finally { setScoreSaving(false) }
   }
 
@@ -291,7 +291,7 @@ export function AdminInterviews() {
       if (form.scheduled_at) {
         scheduledAt = new Date(`${form.scheduled_at}T${form.scheduled_time}:00`).toISOString()
       }
-      const payload: any = {
+      const payload = {
         application_id:  form.application_id,
         round_number:    parseInt(form.round_number) || 1,
         title:           form.title || null,
@@ -303,7 +303,7 @@ export function AdminInterviews() {
         interviewer_ids: form.interviewer_ids,
       }
       if (editTarget) {
-        const { application_id, ...updatePayload } = payload
+        const { application_id: _application_id, ...updatePayload } = payload
         await api.put(`/recruitment/interviews/${editTarget.id}`, updatePayload)
         toast.success('Interview updated')
       } else {
@@ -313,8 +313,8 @@ export function AdminInterviews() {
       setSheetOpen(false)
       invalidate()
       qc.invalidateQueries({ queryKey: ['recruitment', 'applications'] })
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Save failed')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setSaving(false)
     }

@@ -95,7 +95,7 @@ export function Rosters() {
         : api.post('/masters/rosters', payload)
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['rosters'] }); setDlgOpen(false); toast.success('Roster saved') },
-    onError:   (e: any) => { setErr(e?.message ?? 'Failed to save'); toast.error('Roster saved', { description: e.message }) },
+    onError:   (e: Error) => { setErr(e.message ?? 'Failed to save'); toast.error('Roster saved', { description: e.message }) },
   })
 
   const delMut = useMutation({

@@ -52,17 +52,17 @@ export function OwnerBilling() {
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
-          <CreditCard className="h-8 w-8 text-emerald-600 flex-shrink-0" />
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
+          <CreditCard className="h-8 w-8 text-success flex-shrink-0" />
           <div>
             <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total (filtered)</p>
             <p className="text-xl font-bold text-foreground">{fmtCurrency(totalAmount)}</p>
           </div>
         </div>
         {monthSummary.map(([month, amount]) => (
-          <div key={month} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3">
+          <div key={month} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] p-3">
             <p className="text-[11px] text-muted-foreground font-mono">{month}</p>
-            <p className="text-base font-semibold text-emerald-700 mt-0.5">{fmtCurrency(amount)}</p>
+            <p className="text-base font-semibold text-success mt-0.5">{fmtCurrency(amount)}</p>
           </div>
         ))}
       </div>
@@ -93,7 +93,7 @@ export function OwnerBilling() {
       </div>
 
       {/* Table */}
-      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-card border-b border-border">
@@ -103,7 +103,7 @@ export function OwnerBilling() {
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-border">
             {isLoading && Array.from({ length: 5 }).map((_, i) => (
               <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 w-full bg-muted animate-pulse rounded" /></td></tr>
             ))}
@@ -116,7 +116,7 @@ export function OwnerBilling() {
                 <td className="px-4 py-2.5 text-[13px] text-foreground">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
                 <td className="px-4 py-2.5 text-foreground">{r.employee_count}</td>
                 <td className="px-4 py-2.5 text-muted-foreground">{fmtCurrency(r.per_employee_rate)}</td>
-                <td className="px-4 py-2.5 font-semibold text-emerald-700">{fmtCurrency(r.amount_due)}</td>
+                <td className="px-4 py-2.5 font-semibold text-success">{fmtCurrency(r.amount_due)}</td>
                 <td className="px-4 py-2.5">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
                     r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-700' : 'border-border text-muted-foreground'

@@ -142,7 +142,7 @@ export function HRADeclarations() {
 
   const { data: records = [], isLoading, isError } = useQuery<HRARecord[]>({
     queryKey: ['hra-my', fy],
-    queryFn:  () => api.get(`/payroll/statutory/tds/hra/my?financial_year=${fy}`).then((r: any) => r?.data ?? []),
+    queryFn:  () => api.get<{ data?: HRARecord[] }>(`/payroll/statutory/tds/hra/my?financial_year=${fy}`).then(r => r?.data ?? []),
   })
 
   const totalAnnualRent = records.reduce((s, r) => {

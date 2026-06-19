@@ -19,7 +19,7 @@ import { Input }         from '@/components/ui/input'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
+import { uploadEmployeeFile } from '@/lib/supabase-storage'
 
 interface RComponent { id: string; name: string; code: string; is_reimbursement?: boolean }
 interface Submission {
@@ -70,8 +70,9 @@ export function EssFBP() {
 
   const compQ = useQuery<{ data: RComponent[] }>({
     queryKey: ['ess-fbp-components'],
-    queryFn:  () => api.get('/masters/salary-components').then((r: any) => {
-      const raw = Array.isArray(r?.data) ? r.data : (r?.data?.data ?? r ?? [])
+    queryFn:  () => api.get<RComponent[] | { data?: RComponent[] | { data?: RComponent[] } }>('/masters/salary-components').then((r) => {
+      const inner = Array.isArray(r) ? r : r?.data
+      const raw = Array.isArray(inner) ? inner : (inner?.data ?? [])
       return { data: (raw as RComponent[]).filter(c => c.is_reimbursement) }
     }),
     staleTime: 120_000,
@@ -113,7 +114,7 @@ export function EssFBP() {
   const submit = useMutation({
     mutationFn: async () => {
       // 1) create draft → 2) upload + attach bills → 3) submit to HR
-      const res: any = await api.post('/payroll/fbp/my', {
+      const res = await api.post<{ data?: { id?: string } }>('/payroll/fbp/my', {
         salary_component_id: componentId,
         financial_year: fy,
         quarter,

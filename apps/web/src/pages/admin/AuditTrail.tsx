@@ -19,7 +19,6 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
-import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
@@ -77,7 +76,7 @@ export function AuditTrail() {
 
   const { data: tables = [] } = useQuery<string[]>({
     queryKey: ['audit-logs', 'tables'],
-    queryFn:  () => api.get('/enterprise/audit/logs/tables').then((r: any) => r.data ?? []),
+    queryFn:  () => api.get<{ data: string[] }>('/enterprise/audit/logs/tables').then(r => r.data ?? []),
     enabled:  isAdmin,
     staleTime: 5 * 60 * 1000,
   })

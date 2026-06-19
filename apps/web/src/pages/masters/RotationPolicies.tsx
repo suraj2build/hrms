@@ -222,8 +222,8 @@ export default function RotationPolicies() {
       toast.success('Policy duplicated — it starts as inactive')
       queryClient.invalidateQueries({ queryKey: ['rotation-policies'] })
     },
-    onError: (err: any) =>
-      toast.error(err?.message ?? 'Failed to duplicate policy'),
+    onError: (err: Error) =>
+      toast.error(err.message ?? 'Failed to duplicate policy'),
   })
 
   const toggleMutation = useMutation({

@@ -281,9 +281,9 @@ export function EssHelpdesk() {
               <p className="text-sm text-foreground border border-border rounded-md p-3 bg-muted/20">{detail.description}</p>
 
               {detail.resolution_note && (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
-                  <div><p className="text-xs font-medium text-emerald-800">Resolution</p><p className="text-xs text-emerald-700 mt-0.5">{detail.resolution_note}</p></div>
+                <div className="rounded-md border border-success/30 bg-success/10 p-3 flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-success mt-0.5 shrink-0" />
+                  <div><p className="text-xs font-medium text-success">Resolution</p><p className="text-xs text-success mt-0.5">{detail.resolution_note}</p></div>
                 </div>
               )}
 

@@ -238,7 +238,7 @@ export function OwnerTenantDetail() {
             <h2 className="text-sm font-semibold text-foreground">Details</h2>
             {editing && (
               <div className="flex gap-1.5">
-                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 h-7 text-xs gap-1">
+                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20 h-7 text-xs gap-1">
                   <Save className="h-3 w-3" /> Save
                 </Button>
                 <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-muted-foreground h-7 text-xs gap-1">
@@ -317,12 +317,12 @@ export function OwnerTenantDetail() {
                 >
                   {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
-                <Button onClick={issueLicense} className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20">
+                <Button onClick={issueLicense} className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20">
                   Issue License
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Sets status to <span className="text-emerald-600">active</span> and records license_issued_at / license_expires_at.
+                Sets status to <span className="text-success">active</span> and records license_issued_at / license_expires_at.
               </p>
             </div>
           </div>
@@ -344,13 +344,13 @@ export function OwnerTenantDetail() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border">
               {t.billing_snapshots.map(b => (
                 <tr key={b.id} className="hover:bg-muted">
                   <td className="px-4 py-2.5 text-foreground font-mono text-[12px]">{b.snapshot_month}</td>
                   <td className="px-4 py-2.5 text-foreground">{b.employee_count}</td>
                   <td className="px-4 py-2.5 text-foreground">{fmtCurrency(b.per_employee_rate)}</td>
-                  <td className="px-4 py-2.5 text-emerald-700 font-semibold">{fmtCurrency(b.amount_due)}</td>
+                  <td className="px-4 py-2.5 text-success font-semibold">{fmtCurrency(b.amount_due)}</td>
                   <td className="px-4 py-2.5 text-muted-foreground text-[11px]">{b.plan}</td>
                 </tr>
               ))}
@@ -375,7 +375,7 @@ export function OwnerTenantDetail() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border">
               {t.api_keys.map(k => (
                 <tr key={k.id} className="hover:bg-muted">
                   <td className="px-4 py-2.5 text-foreground">{k.name}</td>
@@ -413,7 +413,7 @@ export function OwnerTenantDetail() {
             <Button
               size="sm"
               onClick={() => setAddAdminOpen(true)}
-              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 h-7 text-xs gap-1"
+              className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20 h-7 text-xs gap-1"
             >
               <UserPlus className="h-3 w-3" /> Add Admin
             </Button>
@@ -436,7 +436,7 @@ export function OwnerTenantDetail() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border">
               {admins.map(a => {
                 const displayName = a.full_name || a.email || 'Unknown'
                 const roleLabel: Record<string, string> = {
@@ -458,7 +458,7 @@ export function OwnerTenantDetail() {
                       a.role === 'super_admin'
                         ? 'border-primary/40 text-primary bg-primary/10'
                         : a.role === 'hr_admin'
-                        ? 'border-sky-500/40 text-sky-700 bg-sky-500/10'
+                        ? 'border-info/40 text-info bg-info/10'
                         : 'border-border text-muted-foreground bg-muted'
                     }`}>
                       {roleLabel[a.role] ?? a.role}
@@ -468,7 +468,7 @@ export function OwnerTenantDetail() {
                     {fmtDate(a.created_at)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className={`text-[11px] font-medium ${a.is_active ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <span className={`text-[11px] font-medium ${a.is_active ? 'text-success' : 'text-destructive'}`}>
                       {a.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
@@ -670,7 +670,7 @@ export function OwnerTenantDetail() {
             <Button
               onClick={() => addAdminMut.mutate()}
               disabled={!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim() || addAdminMut.isPending}
-              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
+              className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20"
             >
               {addAdminMut.isPending ? 'Creating…' : 'Create Admin'}
             </Button>

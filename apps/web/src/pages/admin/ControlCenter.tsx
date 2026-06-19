@@ -360,6 +360,8 @@ const EVENT_META: Record<string, { icon: React.ComponentType<{ className?: strin
 }
 
 /** Module hub tile — clickable card linking to a major app section */
+type ModuleStatus = 'healthy' | 'degraded' | 'critical' | 'unknown'
+
 function ModuleCard({
   icon: Icon, label, stat, status,
   iconBg, iconColor, badge, onClick,
@@ -367,7 +369,7 @@ function ModuleCard({
   icon:       React.ComponentType<{ className?: string }>
   label:      string
   stat:       string
-  status:     'healthy' | 'degraded' | 'critical' | 'unknown'
+  status:     ModuleStatus
   iconBg:     string
   iconColor:  string
   badge?:     number | null
@@ -810,7 +812,7 @@ export function ControlCenter() {
           <ModuleCard
             icon={CalendarCheck} label="Attendance"
             stat={freshness?.health === 'healthy' ? 'All synced' : `${freshness?.employees_missing ?? 0} missing data`}
-            status={(freshness?.health ?? 'unknown') as any}
+            status={(freshness?.health ?? 'unknown') as ModuleStatus}
             iconBg="bg-violet-50" iconColor="text-violet-600"
             badge={(freshness?.employees_missing ?? 0) > 0 ? freshness!.employees_missing : null}
             onClick={() => nav('/admin/attendance/center')}

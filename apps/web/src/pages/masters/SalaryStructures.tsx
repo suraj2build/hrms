@@ -127,9 +127,9 @@ export function SalaryStructures() {
       setDlgOpen(false)
       toast.success(editItem ? 'Structure updated' : 'Structure created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
-      toast.error('Save failed', { description: e?.message })
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
+      toast.error('Save failed', { description: e.message })
     },
   })
 
@@ -139,7 +139,7 @@ export function SalaryStructures() {
       qc.invalidateQueries({ queryKey: ['salary-structures'] })
       toast.success('Structure deleted')
     },
-    onError: (e: any) => toast.error('Delete failed', { description: e?.message }),
+    onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
 
   return (

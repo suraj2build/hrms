@@ -298,8 +298,8 @@ export default function RotationPolicyEditor() {
       if (isNew) navigate('/admin/masters/rotation-policies')
       else queryClient.invalidateQueries({ queryKey: ['rotation-policy', id] })
     },
-    onError: (err: any) =>
-      toast.error(err?.message ?? 'Failed to save policy'),
+    onError: (err: Error) =>
+      toast.error(err.message ?? 'Failed to save policy'),
   })
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -497,7 +497,7 @@ export default function RotationPolicyEditor() {
                     {mappedShift ? (
                       <div className="flex flex-col gap-0.5">
                         <span className="flex items-center gap-1 text-foreground font-medium">
-                          <CheckCircle className="h-3 w-3 text-green-500" />
+                          <CheckCircle className="h-3 w-3 text-success" />
                           {fmtTime(mappedShift.start_time)}
                         </span>
                         <span className="pl-4">

@@ -438,7 +438,7 @@ export function AdminRecruitment() {
                             )}
                             {canHold && (
                               <DropdownMenuItem
-                                className="text-amber-600"
+                                className="text-warning"
                                 onClick={() => runAction(`/recruitment/requisitions/${r.id}/hold`, 'Put on hold')}
                               >
                                 <PauseCircle className="h-3.5 w-3.5 mr-2" />Put on Hold
@@ -446,7 +446,7 @@ export function AdminRecruitment() {
                             )}
                             {canReopen && (
                               <DropdownMenuItem
-                                className="text-blue-600"
+                                className="text-primary"
                                 onClick={() => runAction(`/recruitment/requisitions/${r.id}/reopen`, 'Requisition reopened')}
                               >
                                 <RefreshCw className="h-3.5 w-3.5 mr-2" />Reopen
@@ -456,7 +456,7 @@ export function AdminRecruitment() {
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
-                                  className="text-red-600"
+                                  className="text-destructive"
                                   onClick={() => runAction(`/recruitment/requisitions/${r.id}/cancel`, 'Requisition cancelled')}
                                 >
                                   <XCircle className="h-3.5 w-3.5 mr-2" />Cancel
@@ -465,7 +465,7 @@ export function AdminRecruitment() {
                             )}
                             {canDelete && (
                               <DropdownMenuItem
-                                className="text-red-600"
+                                className="text-destructive"
                                 onClick={() => deleteMut.mutate(r.id)}
                               >
                                 <Trash2 className="h-3.5 w-3.5 mr-2" />Delete Draft
@@ -496,7 +496,7 @@ export function AdminRecruitment() {
                 <h2 className="text-white font-semibold text-lg leading-tight">
                   {editTarget ? 'Edit Requisition' : 'New Job Requisition'}
                 </h2>
-                <p className="text-blue-100 text-sm mt-0.5">
+                <p className="text-primary-foreground/80 text-sm mt-0.5">
                   {editTarget ? 'Update the role details below' : 'Open a new position for your organisation'}
                 </p>
               </div>
