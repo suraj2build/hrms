@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Sun, Waves, Wine, CloudDrizzle, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
+import { Sun, Waves, Wine, CloudDrizzle, Sparkles, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -52,7 +52,8 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
     light:    { Icon: Sun,          label: 'Blue',     next: 'Petrol'   },
     petrol:   { Icon: Waves,        label: 'Petrol',   next: 'Bordeaux' },
     bordeaux: { Icon: Wine,         label: 'Bordeaux', next: 'Slate'    },
-    slate:    { Icon: CloudDrizzle, label: 'Slate',    next: 'Blue'     },
+    slate:    { Icon: CloudDrizzle, label: 'Slate',    next: 'Pastel'   },
+    pastel:   { Icon: Sparkles,     label: 'Pastel',   next: 'Blue'     },
   }[theme]
   const ThemeIcon = themeMeta.Icon
 

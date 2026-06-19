@@ -1298,3 +1298,178 @@
 /* Colored shadows */
 :root[data-theme="slate"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #283440 25%, transparent); }
 :root[data-theme="slate"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #283440 30%, transparent); }
+
+/* ── Pastel Dreamland theme (soft lilac / pink / sky) ─────────────────────────
+   Dreamy multi-pastel. Primary is a deepened violet (#7C5CAE) so white button
+   text stays legible; the airy lilac/pink/sky live in accents, tints, the
+   brand-gradient text and charts. Top bar uses a slightly deeper dreamy
+   gradient so its white nav labels remain readable. */
+:root[data-theme="pastel"] {
+  --background:            #FBF7FD;
+  --foreground:            #2E2440;
+  --card:                  #FFFFFF;
+  --card-foreground:       #2E2440;
+  --popover:               #FFFFFF;
+  --popover-foreground:    #2E2440;
+
+  --primary:               #7C5CAE;
+  --primary-foreground:    #FFFFFF;
+
+  --secondary:             #F1E9F8;
+  --secondary-foreground:  #443560;
+  --muted:                 #F2EDF7;
+  --muted-foreground:      #6B5E80;   /* darkened from #7E7193 → ~5.9:1 on white (AA+) */
+  --accent:                #F1E9F8;
+  --accent-foreground:     #443560;
+
+  --destructive:             #C93535;
+  --destructive-foreground:  #FFFFFF;
+  --success:                 #1A8050;
+  --success-foreground:      #FFFFFF;
+  --warning:                 #B07B18;
+  --warning-foreground:      #FFFFFF;
+  --info:                    #4E8FD0;
+  --info-foreground:         #FFFFFF;
+
+  --border:  #E9DEF3;
+  --input:   #E9DEF3;
+  --ring:    #7C5CAE;
+
+  --chart-1: #7C5CAE;
+  --chart-2: #1A8050;
+  --chart-3: #B07B18;
+  --chart-4: #E07BA8;
+  --chart-5: #5E9BD6;
+
+  --sidebar:                    #FFFFFF;
+  --sidebar-foreground:         #2E2440;
+  --sidebar-primary:            #7C5CAE;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent:             #F1E9F8;
+  --sidebar-accent-foreground:  #4A3B65;
+  --sidebar-border:             #E9DEF3;
+  --sidebar-ring:               #7C5CAE;
+
+  --grad-hero:    linear-gradient(135deg, #6E54A0 0%, #9B8FD4 100%);
+  --grad-primary: linear-gradient(135deg, #7C5CAE 0%, #9B7BCB 100%);
+  --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #FBF7FD 100%);
+  --gradient-nav: linear-gradient(to right, #6E4F9E, #8364B5, #6E78C2);   /* deepened so white nav text stays readable (≥4:1) */
+
+  /* Primary button gradient + shadow — pastel */
+  --grad-btn:   linear-gradient(to bottom, #9B7BCB, #8A68BC, #7C5CAE);
+  --shadow-btn: 0 6px 16px -6px rgba(124,92,174,0.50);
+
+  --brand-navy:      #7C5CAE;
+  --brand-navy-deep: #6E54A0;
+  --brand-navy-soft: #9B7BCB;
+  --primary-glow:    oklch(0.70 0.13 300);
+
+  --elev-1: 0 1px 2px rgba(74,59,101,0.05), 0 8px 20px -12px rgba(74,59,101,0.12), 0 0 0 1px rgba(74,59,101,0.035);
+  --elev-2: 0 2px 6px rgba(74,59,101,0.06), 0 14px 32px -14px rgba(74,59,101,0.16), 0 0 0 1px rgba(74,59,101,0.03);
+  --elev-3: 0 10px 24px rgba(74,59,101,0.08), 0 32px 60px -24px rgba(74,59,101,0.22), 0 0 0 1px rgba(74,59,101,0.03);
+}
+
+:root[data-theme="pastel"] .app-canvas {
+  background:
+    radial-gradient(60% 48% at 100% 0%,  rgba(255,175,204,0.10), transparent 70%),
+    radial-gradient(48% 40% at 0% 100%,  rgba(162,210,255,0.10), transparent 72%),
+    var(--color-background);
+}
+
+:root[data-theme="pastel"] .hero-band {
+  background: linear-gradient(135deg, #6E54A0 0%, #7C5CAE 55%, #5E4690 100%);
+  box-shadow: 0 24px 56px -22px rgba(124,92,174,0.55);
+}
+:root[data-theme="pastel"] .hero-band::after {
+  background: rgba(205,180,219,0.30);
+}
+
+:root[data-theme="pastel"] .chip-grad {
+  background: linear-gradient(145deg, #9B7BCB 0%, #7C5CAE 100%);
+  box-shadow: 0 6px 14px -6px rgba(124,92,174,0.55), inset 0 1px 0 rgba(255,255,255,0.40);
+}
+
+:root[data-theme="pastel"] .brand-gradient-text {
+  background: linear-gradient(135deg, #7C5CAE 0%, #C77BA8 50%, #5E9BD6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:root[data-theme="pastel"] .op-pill-active {
+  background: #7C5CAE;
+  box-shadow: 0 1px 3px rgba(124,92,174,0.30);
+}
+:root[data-theme="pastel"] .op-pill-inactive:hover {
+  border-color: #D8C5EC;
+  background: #F1E9F8;
+  color: #7C5CAE;
+}
+:root[data-theme="pastel"] .op-accent-bar      { background: #7C5CAE; }
+:root[data-theme="pastel"] .op-heading          { color: #7C5CAE; }
+:root[data-theme="pastel"] .op-section-bg       { border-color: rgba(124,92,174,0.08); }
+:root[data-theme="pastel"] .op-meta-pill        { background: rgba(124,92,174,0.08); color: #7C5CAE; }
+:root[data-theme="pastel"] .op-tint-medium      { background: rgba(241,233,248,0.90) !important; }
+:root[data-theme="pastel"] .op-lane-medium      { border-left-color: rgba(124,92,174,0.40); background: rgba(241,233,248,0.50); }
+:root[data-theme="pastel"] .op-lane-default     { border-left-color: rgba(124,92,174,0.15); }
+:root[data-theme="pastel"] .mission-lane-active { background: rgba(241,233,248,0.75); border-left-color: rgba(124,92,174,0.40); color: #7C5CAE; }
+:root[data-theme="pastel"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(124,92,174,0.30), 0 4px 12px rgba(0,0,0,0.08) !important; }
+:root[data-theme="pastel"] .op-row-selected     { background: rgba(241,233,248,0.85) !important; box-shadow: inset 2px 0 0 rgba(124,92,174,0.50), 0 0 0 1px rgba(124,92,174,0.14) !important; }
+:root[data-theme="pastel"] .op-row-processing::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(124,92,174,0.035) 35%,
+    rgba(124,92,174,0.070) 50%,
+    rgba(124,92,174,0.035) 65%,
+    transparent 100%
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Pastel Dreamland — global remap of hardcoded brand-blue utility classes.
+     #2E6FE6 / #1A4D8F  → #7C5CAE   (primary violet)
+     #2260A8            → #9B7BCB   (gradient mid)
+     #1E5BA8            → #8A68BC   (gradient via)
+     #163F75            → #6E54A0   (gradient deep)
+     #3B82F6            → #5E9BD6   (sky accent)
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Solid backgrounds */
+:root[data-theme="pastel"] .bg-\[\#2E6FE6\],
+:root[data-theme="pastel"] .bg-\[\#1A4D8F\],
+:root[data-theme="pastel"] .bg-\[\#1E5BA8\]   { background-color: #7C5CAE; }
+:root[data-theme="pastel"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #6E54A0 90%, transparent); }
+:root[data-theme="pastel"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #7C5CAE 40%, transparent); }
+:root[data-theme="pastel"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #7C5CAE 10%, transparent); }
+:root[data-theme="pastel"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #7C5CAE 5%,  transparent); }
+:root[data-theme="pastel"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #5E9BD6 30%, transparent); }
+:root[data-theme="pastel"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #6E54A0; }
+:root[data-theme="pastel"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #7C5CAE 10%, transparent); }
+
+/* Text */
+:root[data-theme="pastel"] .text-\[\#2E6FE6\],
+:root[data-theme="pastel"] .text-\[\#1A4D8F\]          { color: #7C5CAE; }
+:root[data-theme="pastel"] .hover\:text-\[\#2E6FE6\]:hover { color: #7C5CAE; }
+
+/* Borders */
+:root[data-theme="pastel"] .border-\[\#2E6FE6\],
+:root[data-theme="pastel"] .border-\[\#1A4D8F\]            { border-color: #7C5CAE; }
+:root[data-theme="pastel"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #7C5CAE 40%, transparent); }
+
+/* Gradient stops */
+:root[data-theme="pastel"] .from-\[\#1A4D8F\] { --tw-gradient-from: #7C5CAE; }
+:root[data-theme="pastel"] .from-\[\#2E6FE6\] { --tw-gradient-from: #7C5CAE; }
+:root[data-theme="pastel"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #8A68BC; }
+:root[data-theme="pastel"] .to-\[\#2260A8\]   { --tw-gradient-to: #9B7BCB; }
+:root[data-theme="pastel"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #9B7BCB; }
+
+/* Rings */
+:root[data-theme="pastel"] .ring-\[\#1A4D8F\]\/15 { --tw-ring-color: color-mix(in oklab, #7C5CAE 15%, transparent); }
+:root[data-theme="pastel"] .ring-\[\#2E6FE6\]\/20 { --tw-ring-color: color-mix(in oklab, #7C5CAE 20%, transparent); }
+:root[data-theme="pastel"] .ring-\[\#2E6FE6\]\/30 { --tw-ring-color: color-mix(in oklab, #7C5CAE 30%, transparent); }
+:root[data-theme="pastel"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #7C5CAE; }
+
+/* Colored shadows */
+:root[data-theme="pastel"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #7C5CAE 25%, transparent); }
+:root[data-theme="pastel"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #7C5CAE 30%, transparent); }
