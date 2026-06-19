@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="880" viewBox="0 0 1480 880" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="rq-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C98198"/><stop offset="1" stop-color="#9A5872"/></linearGradient>
+    <linearGradient id="sg-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8FA678"/><stop offset="1" stop-color="#647A50"/></linearGradient>
+    <linearGradient id="pw-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8B97D9"/><stop offset="1" stop-color="#5E6BAE"/></linearGradient>
+    <linearGradient id="mt-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6FBFA2"/><stop offset="1" stop-color="#4A937A"/></linearGradient>
+    <linearGradient id="ws-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#AC80C1"/><stop offset="1" stop-color="#7E5694"/></linearGradient>
+    <linearGradient id="bc-btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D88E92"/><stop offset="1" stop-color="#A55F68"/></linearGradient>
+  </defs>
+
+  <rect width="1480" height="880" fill="#FBFAFC"/>
+  <text x="40" y="48" font-size="28" font-weight="700" fill="#1A1A22">Feminine / pastel — more directions (batch 3)</text>
+  <text x="40" y="76" font-size="14" fill="#6B6B78">Fresh moods: a Pantone pairing, two botanical greens, periwinkle, wisteria &amp; warm buttercream · same architecture, deepened primaries for legible buttons</text>
+
+  <!-- Row 1 -->
+  <!-- RQ -->
+  <g transform="translate(40,100)">
+    <rect width="440" height="350" rx="16" fill="#FFFFFF" stroke="#FBEAEF" stroke-width="1.5"/>
+    <rect width="440" height="44" rx="16" fill="url(#rq-btn)"/><rect y="28" width="440" height="16" fill="url(#rq-btn)"/>
+    <circle cx="28" cy="22" r="11" fill="#FFF"/><text x="23" y="26" font-size="12" font-weight="800" fill="#9A5872">C</text>
+    <text x="46" y="26" font-size="12.5" font-weight="700" fill="#FFF">Cognix</text><text x="98" y="26" font-size="12.5" font-weight="700" fill="#F7CAC9">HR</text>
+    <text x="20" y="78" font-size="19" font-weight="700" fill="#3A1F2C">Rose Quartz &amp; Serenity</text>
+    <text x="20" y="98" font-size="12" fill="#94697A">Pantone classic · rose + periwinkle blue</text>
+    <rect x="20" y="110" width="110" height="50" rx="9" fill="#B5708A"/><text x="30" y="140" font-size="11.5" font-weight="700" fill="#FFF">#B5708A</text><text x="30" y="154" font-size="9" fill="#F2D6DF">primary</text>
+    <rect x="140" y="110" width="110" height="50" rx="9" fill="url(#rq-btn)"/><text x="150" y="140" font-size="11" font-weight="700" fill="#FFF">gradient</text>
+    <rect x="260" y="110" width="80" height="50" rx="9" fill="#92A8D1"/><text x="270" y="140" font-size="10.5" font-weight="700" fill="#1E2A45">serenity</text>
+    <rect x="350" y="110" width="70" height="50" rx="9" fill="#F7CAC9"/><text x="358" y="140" font-size="10" font-weight="700" fill="#6E2A38">rose qtz</text>
+    <rect x="20" y="176" width="120" height="36" rx="9" fill="url(#rq-btn)"/><text x="42" y="199" font-size="12" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="150" y="176" width="86" height="36" rx="9" fill="#FFF" stroke="#FBEAEF"/><text x="170" y="199" font-size="12" font-weight="600" fill="#B5708A">Export</text>
+    <rect x="246" y="176" width="78" height="36" rx="18" fill="#92A8D1"/><text x="262" y="199" font-size="11" fill="#1E2A45">Serenity</text>
+    <text x="20" y="246" font-size="12" fill="#3A1F2C" font-weight="600">Vibe: timeless, soft, balanced pink+blue</text>
+    <text x="20" y="270" font-size="11" fill="#A98A95">The famous 2016 pairing — gentle &amp; elegant</text>
+    <text x="20" y="300" font-size="11" fill="#B89AA2">canvas #FCF6F8 · border #FBEAEF · text #3A1F2C</text>
+  </g>
+  <!-- SAGE -->
+  <g transform="translate(520,100)">
+    <rect width="440" height="350" rx="16" fill="#FFFFFF" stroke="#DFE6D4" stroke-width="1.5"/>
+    <rect width="440" height="44" rx="16" fill="url(#sg-btn)"/><rect y="28" width="440" height="16" fill="url(#sg-btn)"/>
+    <circle cx="28" cy="22" r="11" fill="#FFF"/><text x="23" y="26" font-size="12" font-weight="800" fill="#647A50">C</text>
+    <text x="46" y="26" font-size="12.5" font-weight="700" fill="#FFF">Cognix</text><text x="98" y="26" font-size="12.5" font-weight="700" fill="#D8E8C4">HR</text>
+    <text x="20" y="78" font-size="19" font-weight="700" fill="#2A3320">Sage &amp; Blush</text>
+    <text x="20" y="98" font-size="12" fill="#768268">Botanical · soft sage green + dusty blush</text>
+    <rect x="20" y="110" width="110" height="50" rx="9" fill="#7E9466"/><text x="30" y="140" font-size="11.5" font-weight="700" fill="#FFF">#7E9466</text><text x="30" y="154" font-size="9" fill="#DCE7CC">primary</text>
+    <rect x="140" y="110" width="110" height="50" rx="9" fill="url(#sg-btn)"/><text x="150" y="140" font-size="11" font-weight="700" fill="#FFF">gradient</text>
+    <rect x="260" y="110" width="80" height="50" rx="9" fill="#E8C4C4"/><text x="270" y="140" font-size="10.5" font-weight="700" fill="#6E3A3A">blush</text>
+    <rect x="350" y="110" width="70" height="50" rx="9" fill="#EDF0E6"/><text x="358" y="140" font-size="10" font-weight="700" fill="#647A50">tint</text>
+    <rect x="20" y="176" width="120" height="36" rx="9" fill="url(#sg-btn)"/><text x="42" y="199" font-size="12" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="150" y="176" width="86" height="36" rx="9" fill="#FFF" stroke="#DFE6D4"/><text x="170" y="199" font-size="12" font-weight="600" fill="#647A50">Export</text>
+    <rect x="246" y="176" width="78" height="36" rx="18" fill="#E8C4C4"/><text x="266" y="199" font-size="11" fill="#6E3A3A">Blush</text>
+    <text x="20" y="246" font-size="12" fill="#2A3320" font-weight="600">Vibe: fresh, organic, calming</text>
+    <text x="20" y="270" font-size="11" fill="#8A9678">Trendy "quiet luxury" — feminine but unexpected</text>
+    <text x="20" y="300" font-size="11" fill="#9AA688">canvas #F8FAF5 · border #DFE6D4 · text #2A3320</text>
+  </g>
+  <!-- PERIWINKLE -->
+  <g transform="translate(1000,100)">
+    <rect width="440" height="350" rx="16" fill="#FFFFFF" stroke="#DEE2F2" stroke-width="1.5"/>
+    <rect width="440" height="44" rx="16" fill="url(#pw-btn)"/><rect y="28" width="440" height="16" fill="url(#pw-btn)"/>
+    <circle cx="28" cy="22" r="11" fill="#FFF"/><text x="23" y="26" font-size="12" font-weight="800" fill="#5E6BAE">C</text>
+    <text x="46" y="26" font-size="12.5" font-weight="700" fill="#FFF">Cognix</text><text x="98" y="26" font-size="12.5" font-weight="700" fill="#C4CBF0">HR</text>
+    <text x="20" y="78" font-size="19" font-weight="700" fill="#1F2440">Periwinkle Dream</text>
+    <text x="20" y="98" font-size="12" fill="#6E7396">Soft blue-violet · 2022 colour of the year family</text>
+    <rect x="20" y="110" width="110" height="50" rx="9" fill="#7A86C9"/><text x="30" y="140" font-size="11.5" font-weight="700" fill="#FFF">#7A86C9</text><text x="30" y="154" font-size="9" fill="#D6DAF0">primary</text>
+    <rect x="140" y="110" width="110" height="50" rx="9" fill="url(#pw-btn)"/><text x="150" y="140" font-size="11" font-weight="700" fill="#FFF">gradient</text>
+    <rect x="260" y="110" width="80" height="50" rx="9" fill="#A6B1E1"/><text x="270" y="140" font-size="10.5" font-weight="700" fill="#222A4A">accent</text>
+    <rect x="350" y="110" width="70" height="50" rx="9" fill="#ECEEF9"/><text x="358" y="140" font-size="10" font-weight="700" fill="#5E6BAE">tint</text>
+    <rect x="20" y="176" width="120" height="36" rx="9" fill="url(#pw-btn)"/><text x="42" y="199" font-size="12" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="150" y="176" width="86" height="36" rx="9" fill="#FFF" stroke="#DEE2F2"/><text x="170" y="199" font-size="12" font-weight="600" fill="#5E6BAE">Export</text>
+    <rect x="246" y="176" width="78" height="36" rx="18" fill="#A6B1E1"/><text x="266" y="199" font-size="11" fill="#222A4A">Chip</text>
+    <text x="20" y="246" font-size="12" fill="#1F2440" font-weight="600">Vibe: dreamy, modern, gender-neutral-ish</text>
+    <text x="20" y="270" font-size="11" fill="#8E93B0">Closest pastel to your blue — easy transition</text>
+    <text x="20" y="300" font-size="11" fill="#9EA3C0">canvas #F7F8FD · border #DEE2F2 · text #1F2440</text>
+  </g>
+
+  <!-- Row 2 -->
+  <!-- MINT -->
+  <g transform="translate(40,470)">
+    <rect width="440" height="350" rx="16" fill="#FFFFFF" stroke="#D5EAE0" stroke-width="1.5"/>
+    <rect width="440" height="44" rx="16" fill="url(#mt-btn)"/><rect y="28" width="440" height="16" fill="url(#mt-btn)"/>
+    <circle cx="28" cy="22" r="11" fill="#FFF"/><text x="23" y="26" font-size="12" font-weight="800" fill="#4A937A">C</text>
+    <text x="46" y="26" font-size="12.5" font-weight="700" fill="#FFF">Cognix</text><text x="98" y="26" font-size="12.5" font-weight="700" fill="#C4E8D8">HR</text>
+    <text x="20" y="78" font-size="19" font-weight="700" fill="#163029">Mint Macaron</text>
+    <text x="20" y="98" font-size="12" fill="#5E8478">Pastel mint + a pink accent · sweet &amp; clean</text>
+    <rect x="20" y="110" width="110" height="50" rx="9" fill="#5FAE92"/><text x="30" y="140" font-size="11.5" font-weight="700" fill="#FFF">#5FAE92</text><text x="30" y="154" font-size="9" fill="#D2EEE2">primary</text>
+    <rect x="140" y="110" width="110" height="50" rx="9" fill="url(#mt-btn)"/><text x="150" y="140" font-size="11" font-weight="700" fill="#FFF">gradient</text>
+    <rect x="260" y="110" width="80" height="50" rx="9" fill="#B8E0D2"/><text x="270" y="140" font-size="10.5" font-weight="700" fill="#1E4036">mint</text>
+    <rect x="350" y="110" width="70" height="50" rx="9" fill="#FFC8DD"/><text x="358" y="140" font-size="10" font-weight="700" fill="#6E2A40">pink</text>
+    <rect x="20" y="176" width="120" height="36" rx="9" fill="url(#mt-btn)"/><text x="42" y="199" font-size="12" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="150" y="176" width="86" height="36" rx="9" fill="#FFF" stroke="#D5EAE0"/><text x="170" y="199" font-size="12" font-weight="600" fill="#4A937A">Export</text>
+    <rect x="246" y="176" width="78" height="36" rx="18" fill="#FFC8DD"/><text x="266" y="199" font-size="11" fill="#6E2A40">Pink</text>
+    <text x="20" y="246" font-size="12" fill="#163029" font-weight="600">Vibe: crisp, optimistic, spa-fresh</text>
+    <text x="20" y="270" font-size="11" fill="#7BA294">Green base is unusual — very "wellness" feel</text>
+    <text x="20" y="300" font-size="11" fill="#8BB2A4">canvas #F5FBF8 · border #D5EAE0 · text #163029</text>
+  </g>
+  <!-- WISTERIA -->
+  <g transform="translate(520,470)">
+    <rect width="440" height="350" rx="16" fill="#FFFFFF" stroke="#E8DAF0" stroke-width="1.5"/>
+    <rect width="440" height="44" rx="16" fill="url(#ws-btn)"/><rect y="28" width="440" height="16" fill="url(#ws-btn)"/>
+    <circle cx="28" cy="22" r="11" fill="#FFF"/><text x="23" y="26" font-size="12" font-weight="800" fill="#7E5694">C</text>
+    <text x="46" y="26" font-size="12.5" font-weight="700" fill="#FFF">Cognix</text><text x="98" y="26" font-size="12.5" font-weight="700" fill="#DDC4EC">HR</text>
+    <text x="20" y="78" font-size="19" font-weight="700" fill="#2A1B33">Wisteria</text>
+    <text x="20" y="98" font-size="12" fill="#7E6E8C">Floral orchid-purple · soft but rich</text>
+    <rect x="20" y="110" width="110" height="50" rx="9" fill="#9B6FB0"/><text x="30" y="140" font-size="11.5" font-weight="700" fill="#FFF">#9B6FB0</text><text x="30" y="154" font-size="9" fill="#E2D2EC">primary</text>
+    <rect x="140" y="110" width="110" height="50" rx="9" fill="url(#ws-btn)"/><text x="150" y="140" font-size="11" font-weight="700" fill="#FFF">gradient</text>
+    <rect x="260" y="110" width="80" height="50" rx="9" fill="#C9A0DC"/><text x="270" y="140" font-size="10.5" font-weight="700" fill="#3A2249">accent</text>
+    <rect x="350" y="110" width="70" height="50" rx="9" fill="#F0E7F6"/><text x="358" y="140" font-size="10" font-weight="700" fill="#7E5694">tint</text>
+    <rect x="20" y="176" width="120" height="36" rx="9" fill="url(#ws-btn)"/><text x="42" y="199" font-size="12" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="150" y="176" width="86" height="36" rx="9" fill="#FFF" stroke="#E8DAF0"/><text x="170" y="199" font-size="12" font-weight="600" fill="#7E5694">Export</text>
+    <rect x="246" y="176" width="78" height="36" rx="18" fill="#C9A0DC"/><text x="266" y="199" font-size="11" fill="#3A2249">Chip</text>
+    <text x="20" y="246" font-size="12" fill="#2A1B33" font-weight="600">Vibe: pretty, floral, lightly luxe</text>
+    <text x="20" y="270" font-size="11" fill="#9580A6">A softer, lighter cousin of Plum Orchid</text>
+    <text x="20" y="300" font-size="11" fill="#A590B6">canvas #FAF6FC · border #E8DAF0 · text #2A1B33</text>
+  </g>
+  <!-- BUTTERCREAM -->
+  <g transform="translate(1000,470)">
+    <rect width="440" height="350" rx="16" fill="#FFFFFF" stroke="#F0E0D8" stroke-width="1.5"/>
+    <rect width="440" height="44" rx="16" fill="url(#bc-btn)"/><rect y="28" width="440" height="16" fill="url(#bc-btn)"/>
+    <circle cx="28" cy="22" r="11" fill="#FFF"/><text x="23" y="26" font-size="12" font-weight="800" fill="#A55F68">C</text>
+    <text x="46" y="26" font-size="12.5" font-weight="700" fill="#FFF">Cognix</text><text x="98" y="26" font-size="12.5" font-weight="700" fill="#FBE9C8">HR</text>
+    <text x="20" y="78" font-size="19" font-weight="700" fill="#38211F">Buttercream Rose</text>
+    <text x="20" y="98" font-size="12" fill="#99746E">Warm rose + soft buttercream · cosy &amp; rich</text>
+    <rect x="20" y="110" width="110" height="50" rx="9" fill="#C77D85"/><text x="30" y="140" font-size="11.5" font-weight="700" fill="#FFF">#C77D85</text><text x="30" y="154" font-size="9" fill="#F4DCDE">primary</text>
+    <rect x="140" y="110" width="110" height="50" rx="9" fill="url(#bc-btn)"/><text x="150" y="140" font-size="11" font-weight="700" fill="#FFF">gradient</text>
+    <rect x="260" y="110" width="80" height="50" rx="9" fill="#FBE9C8"/><text x="270" y="140" font-size="10.5" font-weight="700" fill="#7A5A24">cream</text>
+    <rect x="350" y="110" width="70" height="50" rx="9" fill="#FAEBE9"/><text x="358" y="140" font-size="10" font-weight="700" fill="#A55F68">tint</text>
+    <rect x="20" y="176" width="120" height="36" rx="9" fill="url(#bc-btn)"/><text x="42" y="199" font-size="12" font-weight="600" fill="#FFF">Run Payroll</text>
+    <rect x="150" y="176" width="86" height="36" rx="9" fill="#FFF" stroke="#F0E0D8"/><text x="170" y="199" font-size="12" font-weight="600" fill="#A55F68">Export</text>
+    <rect x="246" y="176" width="78" height="36" rx="18" fill="#FBE9C8"/><text x="262" y="199" font-size="11" fill="#7A5A24">Cream</text>
+    <text x="20" y="246" font-size="12" fill="#38211F" font-weight="600">Vibe: warm, nurturing, boutique</text>
+    <text x="20" y="270" font-size="11" fill="#AD8882">Rose + cream feels editorial &amp; cosy</text>
+    <text x="20" y="300" font-size="11" fill="#BD9892">canvas #FDF8F4 · border #F0E0D8 · text #38211F</text>
+  </g>
+</svg>
