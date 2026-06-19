@@ -264,6 +264,8 @@ import fabricRoutes from './routes/fabric/index.js'
 // Routes — Public (no JWT required)
 import setupRoute from './routes/setup.js'
 import billingRoutes from './routes/billing/index.js'
+import supportRoutes from './routes/support/index.js'
+import ownerErrorReportRoutes from './routes/owner/error-reports.js'
 
 // Routes — Owner Panel (platform admin only — separate auth)
 import ownerRoutes from './routes/owner/index.js'
@@ -493,6 +495,7 @@ async function start() {
     field: 'rawBody', global: false, runFirst: true, encoding: 'utf8',
   })
   await fastify.register(billingRoutes)         // /billing/status|checkout|webhook (Razorpay)
+  await fastify.register(supportRoutes)         // POST /support/error-reports (in-product error reporting)
 
   // ── Sprint 1 Routes ─────────────────────────────────────────
   // Static sub-paths MUST come before /:id to avoid route shadowing
@@ -701,6 +704,7 @@ async function start() {
 
   // ── Owner Panel (platform admin — separate from tenant auth) ─────────────────
   await fastify.register(ownerRoutes)                   // GET|POST|PATCH /owner/*
+  await fastify.register(ownerErrorReportRoutes)        // GET|PATCH /owner/error-reports (triage)
 
   // ── Workforce Optimization Engine ────────────────────────────────────────
   await fastify.register(workforceOptimizationRoute)    // GET/POST /attendance/workforce-optimization/*

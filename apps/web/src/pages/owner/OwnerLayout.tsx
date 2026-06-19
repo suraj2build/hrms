@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Key,
-  CreditCard, Users, LogOut, ExternalLink,
+  CreditCard, Users, LogOut, ExternalLink, Bug,
 } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
 import { ownerSupabase }  from '@/lib/supabase/ownerClient'
@@ -21,6 +21,7 @@ const navItems = [
   { to: '/owner/requests',   label: 'Requests',      icon: FileText, badge: true },
   { to: '/owner/api-keys',   label: 'API Keys',      icon: Key },
   { to: '/owner/billing',    label: 'Billing',       icon: CreditCard },
+  { to: '/owner/errors',     label: 'Error Reports', icon: Bug },
   { to: '/owner/admins',     label: 'Admins',        icon: Users },
 ]
 

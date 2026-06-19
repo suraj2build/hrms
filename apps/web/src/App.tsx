@@ -354,6 +354,7 @@ const OwnerRequests     = lazy(() => import('@/pages/owner/OwnerRequests').then(
 const OwnerApiKeys      = lazy(() => import('@/pages/owner/OwnerApiKeys').then(m => ({ default: m.OwnerApiKeys })))
 const OwnerBilling      = lazy(() => import('@/pages/owner/OwnerBilling').then(m => ({ default: m.OwnerBilling })))
 const OwnerAdmins       = lazy(() => import('@/pages/owner/OwnerAdmins').then(m => ({ default: m.OwnerAdmins })))
+const OwnerErrorReports = lazy(() => import('@/pages/owner/OwnerErrorReports').then(m => ({ default: m.OwnerErrorReports })))
 
 // ── Page loading fallback ─────────────────────────────────────────────────────
 
@@ -583,6 +584,7 @@ export default function App() {
                 <Route path="requests"      element={<OwnerRequests />} />
                 <Route path="api-keys"      element={<OwnerApiKeys />} />
                 <Route path="billing"       element={<OwnerBilling />} />
+                <Route path="errors"        element={<OwnerErrorReports />} />
                 <Route path="admins"        element={<OwnerAdmins />} />
               </Route>
 

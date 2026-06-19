@@ -25,8 +25,11 @@ export function initSentry(): void {
   enabled = true
 }
 
-/** Report an error to Sentry if configured; otherwise a no-op. */
-export function captureError(error: unknown, context?: Record<string, unknown>): void {
-  if (!enabled) return
-  Sentry.captureException(error, context ? { extra: context } : undefined)
+/**
+ * Report an error to Sentry if configured; otherwise a no-op.
+ * Returns the Sentry event id (for cross-referencing in error reports), or null.
+ */
+export function captureError(error: unknown, context?: Record<string, unknown>): string | null {
+  if (!enabled) return null
+  return Sentry.captureException(error, context ? { extra: context } : undefined) ?? null
 }
