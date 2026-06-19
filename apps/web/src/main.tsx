@@ -2,7 +2,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import { ThemeProvider } from './components/theme-provider.tsx'
+import { initSentry, captureError } from './lib/observability/sentry'
 import './index.css'
+
+// Error tracking (no-op unless VITE_SENTRY_DSN is set).
+initSentry()
 
 // ── Stale-chunk recovery ────────────────────────────────────────────────────
 // When a new build deploys, lazy chunk filenames change (content hashes). A tab
@@ -25,6 +29,7 @@ window.addEventListener('vite:preloadError', () => {
 // error-tracking SDK (e.g. Sentry.captureException) when observability is added.
 window.addEventListener('unhandledrejection', (event) => {
   console.error('[unhandledrejection]', event.reason)
+  captureError(event.reason, { source: 'unhandledrejection' })
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { QueryClient, QueryClientProvider, QueryCache } from '@tanstack/react-query'
 import { Toaster, toast } from 'sonner'
 import { ErrorBoundary } from '@/components/error-boundary/ErrorBoundary'
+import { captureError } from '@/lib/observability/sentry'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/lib/api/client'
@@ -376,6 +377,7 @@ const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
       console.error('[query]', query.queryHash, error)
+      captureError(error, { queryHash: query.queryHash })
     },
   }),
   defaultOptions: {
