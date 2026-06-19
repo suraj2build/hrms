@@ -1123,3 +1123,178 @@
 /* Colored shadows */
 :root[data-theme="bordeaux"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #33091B 25%, transparent); }
 :root[data-theme="bordeaux"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #33091B 30%, transparent); }
+
+/* ── Stormy Slate theme (deep storm-grey + ice-blue accent) ───────────────── */
+:root[data-theme="slate"] {
+  --background:            #F4F6F9;
+  --foreground:            #1A222C;
+  --card:                  #FFFFFF;
+  --card-foreground:       #1A222C;
+  --popover:               #FFFFFF;
+  --popover-foreground:    #1A222C;
+
+  --primary:               #283440;
+  --primary-foreground:    #FFFFFF;
+
+  --secondary:             #E3EEF6;
+  --secondary-foreground:  #28465C;
+  --muted:                 #EEF2F6;
+  --muted-foreground:      #647588;
+  --accent:                #E3EEF6;
+  --accent-foreground:     #28465C;
+
+  --destructive:             #C93535;
+  --destructive-foreground:  #FFFFFF;
+  --success:                 #1A8050;
+  --success-foreground:      #FFFFFF;
+  --warning:                 #B07B18;
+  --warning-foreground:      #FFFFFF;
+  --info:                    #2D7DB0;
+  --info-foreground:         #FFFFFF;
+
+  --border:  #DBE3EC;
+  --input:   #DBE3EC;
+  --ring:    #283440;
+
+  --chart-1: #283440;
+  --chart-2: #1A8050;
+  --chart-3: #B07B18;
+  --chart-4: #C93535;
+  --chart-5: #5A9FC9;
+
+  --sidebar:                    #FFFFFF;
+  --sidebar-foreground:         #1A222C;
+  --sidebar-primary:            #283440;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent:             #E3EEF6;
+  --sidebar-accent-foreground:  #28465C;
+  --sidebar-border:             #DBE3EC;
+  --sidebar-ring:               #283440;
+
+  --grad-hero:    linear-gradient(135deg, #1B232D 0%, #36465A 100%);
+  --grad-primary: linear-gradient(135deg, #283440 0%, #384858 100%);
+  --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #F4F6F9 100%);
+  --gradient-nav: linear-gradient(to right, #1F2A35, #283440, #36465A);
+
+  /* Primary button gradient + shadow — slate */
+  --grad-btn:   linear-gradient(to bottom, #384858, #303E4C, #283440);
+  --shadow-btn: 0 6px 16px -6px rgba(40,52,64,0.55);
+
+  --brand-navy:      #283440;
+  --brand-navy-deep: #1B232D;
+  --brand-navy-soft: #384858;
+  --primary-glow:    oklch(0.72 0.09 230);
+
+  --elev-1: 0 1px 2px rgba(26,34,44,0.05), 0 8px 20px -12px rgba(26,34,44,0.12), 0 0 0 1px rgba(26,34,44,0.035);
+  --elev-2: 0 2px 6px rgba(26,34,44,0.06), 0 14px 32px -14px rgba(26,34,44,0.16), 0 0 0 1px rgba(26,34,44,0.03);
+  --elev-3: 0 10px 24px rgba(26,34,44,0.08), 0 32px 60px -24px rgba(26,34,44,0.22), 0 0 0 1px rgba(26,34,44,0.03);
+}
+
+:root[data-theme="slate"] .app-canvas {
+  background:
+    radial-gradient(60% 48% at 100% 0%,  rgba(40,52,64,0.06), transparent 70%),
+    radial-gradient(48% 40% at 0% 100%,  rgba(122,188,224,0.07), transparent 72%),
+    var(--color-background);
+}
+
+:root[data-theme="slate"] .hero-band {
+  background: linear-gradient(135deg, #1B232D 0%, #283440 55%, #161D26 100%);
+  box-shadow: 0 24px 56px -22px rgba(40,52,64,0.55);
+}
+:root[data-theme="slate"] .hero-band::after {
+  background: rgba(122,188,224,0.22);
+}
+
+:root[data-theme="slate"] .chip-grad {
+  background: linear-gradient(145deg, #384858 0%, #283440 100%);
+  box-shadow: 0 6px 14px -6px rgba(40,52,64,0.55), inset 0 1px 0 rgba(255,255,255,0.35);
+}
+
+:root[data-theme="slate"] .brand-gradient-text {
+  background: linear-gradient(135deg, #283440 0%, #384858 45%, #5A9FC9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:root[data-theme="slate"] .op-pill-active {
+  background: #283440;
+  box-shadow: 0 1px 3px rgba(40,52,64,0.30);
+}
+:root[data-theme="slate"] .op-pill-inactive:hover {
+  border-color: #B8D4E6;
+  background: #E3EEF6;
+  color: #283440;
+}
+:root[data-theme="slate"] .op-accent-bar      { background: #283440; }
+:root[data-theme="slate"] .op-heading          { color: #283440; }
+:root[data-theme="slate"] .op-section-bg       { border-color: rgba(40,52,64,0.07); }
+:root[data-theme="slate"] .op-meta-pill        { background: rgba(40,52,64,0.07); color: #283440; }
+:root[data-theme="slate"] .op-tint-medium      { background: rgba(227,238,246,0.90) !important; }
+:root[data-theme="slate"] .op-lane-medium      { border-left-color: rgba(40,52,64,0.40); background: rgba(227,238,246,0.50); }
+:root[data-theme="slate"] .op-lane-default     { border-left-color: rgba(40,52,64,0.15); }
+:root[data-theme="slate"] .mission-lane-active { background: rgba(227,238,246,0.75); border-left-color: rgba(40,52,64,0.40); color: #283440; }
+:root[data-theme="slate"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(90,159,201,0.32), 0 4px 12px rgba(0,0,0,0.08) !important; }
+:root[data-theme="slate"] .op-row-selected     { background: rgba(227,238,246,0.85) !important; box-shadow: inset 2px 0 0 rgba(40,52,64,0.50), 0 0 0 1px rgba(40,52,64,0.14) !important; }
+:root[data-theme="slate"] .op-row-processing::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(40,52,64,0.035) 35%,
+    rgba(40,52,64,0.070) 50%,
+    rgba(40,52,64,0.035) 65%,
+    transparent 100%
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Stormy Slate theme — global remap of hardcoded brand-blue utility classes.
+   Same single-source approach: blue → slate, with the ice-blue accent for
+   the lighter stop.
+
+   Slate palette:
+     #2E6FE6 / #1A4D8F  → #283440   (primary slate)
+     #2260A8            → #384858   (gradient mid)
+     #1E5BA8            → #303E4C   (gradient via)
+     #163F75            → #1F2A35   (gradient deep)
+     #3B82F6            → #5A9FC9   (ice-blue accent)
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Solid backgrounds */
+:root[data-theme="slate"] .bg-\[\#2E6FE6\],
+:root[data-theme="slate"] .bg-\[\#1A4D8F\],
+:root[data-theme="slate"] .bg-\[\#1E5BA8\]   { background-color: #283440; }
+:root[data-theme="slate"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #1F2A35 90%, transparent); }
+:root[data-theme="slate"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #283440 40%, transparent); }
+:root[data-theme="slate"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #283440 10%, transparent); }
+:root[data-theme="slate"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #283440 5%,  transparent); }
+:root[data-theme="slate"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #5A9FC9 30%, transparent); }
+:root[data-theme="slate"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #1F2A35; }
+:root[data-theme="slate"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #283440 10%, transparent); }
+
+/* Text */
+:root[data-theme="slate"] .text-\[\#2E6FE6\],
+:root[data-theme="slate"] .text-\[\#1A4D8F\]          { color: #283440; }
+:root[data-theme="slate"] .hover\:text-\[\#2E6FE6\]:hover { color: #283440; }
+
+/* Borders */
+:root[data-theme="slate"] .border-\[\#2E6FE6\],
+:root[data-theme="slate"] .border-\[\#1A4D8F\]            { border-color: #283440; }
+:root[data-theme="slate"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #283440 40%, transparent); }
+
+/* Gradient stops */
+:root[data-theme="slate"] .from-\[\#1A4D8F\] { --tw-gradient-from: #283440; }
+:root[data-theme="slate"] .from-\[\#2E6FE6\] { --tw-gradient-from: #283440; }
+:root[data-theme="slate"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #303E4C; }
+:root[data-theme="slate"] .to-\[\#2260A8\]   { --tw-gradient-to: #384858; }
+:root[data-theme="slate"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #384858; }
+
+/* Rings */
+:root[data-theme="slate"] .ring-\[\#1A4D8F\]\/15 { --tw-ring-color: color-mix(in oklab, #283440 15%, transparent); }
+:root[data-theme="slate"] .ring-\[\#2E6FE6\]\/20 { --tw-ring-color: color-mix(in oklab, #283440 20%, transparent); }
+:root[data-theme="slate"] .ring-\[\#2E6FE6\]\/30 { --tw-ring-color: color-mix(in oklab, #283440 30%, transparent); }
+:root[data-theme="slate"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #283440; }
+
+/* Colored shadows */
+:root[data-theme="slate"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #283440 25%, transparent); }
+:root[data-theme="slate"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #283440 30%, transparent); }

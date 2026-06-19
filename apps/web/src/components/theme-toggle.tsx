@@ -1,11 +1,12 @@
-import { Sun, Waves, Wine } from 'lucide-react'
+import { Sun, Waves, Wine, CloudDrizzle } from 'lucide-react'
 import { Button }     from '@/components/ui/button'
 import { useTheme }   from '@/components/theme-provider'
 
 const META = {
-  light:    { Icon: Sun,   label: 'Blue',     next: 'Petrol'   },
-  petrol:   { Icon: Waves, label: 'Petrol',   next: 'Bordeaux' },
-  bordeaux: { Icon: Wine,  label: 'Bordeaux', next: 'Blue'     },
+  light:    { Icon: Sun,          label: 'Blue',     next: 'Petrol'   },
+  petrol:   { Icon: Waves,        label: 'Petrol',   next: 'Bordeaux' },
+  bordeaux: { Icon: Wine,         label: 'Bordeaux', next: 'Slate'    },
+  slate:    { Icon: CloudDrizzle, label: 'Slate',    next: 'Blue'     },
 } as const
 
 export function ThemeToggle({ className }: { className?: string }) {

@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Sun, Waves, Wine, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
+import { Sun, Waves, Wine, CloudDrizzle, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -49,9 +49,10 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const [notifOpen, setNotifOpen]  = useState(false)
   const { theme, cycleTheme } = useTheme()
   const themeMeta = {
-    light:    { Icon: Sun,   label: 'Blue',     next: 'Petrol'   },
-    petrol:   { Icon: Waves, label: 'Petrol',   next: 'Bordeaux' },
-    bordeaux: { Icon: Wine,  label: 'Bordeaux', next: 'Blue'     },
+    light:    { Icon: Sun,          label: 'Blue',     next: 'Petrol'   },
+    petrol:   { Icon: Waves,        label: 'Petrol',   next: 'Bordeaux' },
+    bordeaux: { Icon: Wine,         label: 'Bordeaux', next: 'Slate'    },
+    slate:    { Icon: CloudDrizzle, label: 'Slate',    next: 'Blue'     },
   }[theme]
   const ThemeIcon = themeMeta.Icon
 

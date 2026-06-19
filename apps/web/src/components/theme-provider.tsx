@@ -1,11 +1,11 @@
 import * as React from 'react'
 
-type Theme = 'light' | 'petrol' | 'bordeaux'
+type Theme = 'light' | 'petrol' | 'bordeaux' | 'slate'
 
 type ThemeContextValue = {
   theme:     Theme
   setTheme:  (theme: Theme) => void
-  /** Advance to the next theme in the cycle: light → petrol → bordeaux → light */
+  /** Advance to the next theme in the cycle: light → petrol → bordeaux → slate → light */
   cycleTheme: () => void
 }
 
@@ -14,10 +14,10 @@ const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefine
 const STORAGE_KEY = 'aurora-theme'
 
 /** Order of the cycle-on-click toggle. */
-export const THEME_ORDER: Theme[] = ['light', 'petrol', 'bordeaux']
+export const THEME_ORDER: Theme[] = ['light', 'petrol', 'bordeaux', 'slate']
 
 function parseTheme(raw: string | null): Theme {
-  return raw === 'petrol' || raw === 'bordeaux' ? raw : 'light'
+  return raw === 'petrol' || raw === 'bordeaux' || raw === 'slate' ? raw : 'light'
 }
 
 function applyTheme(theme: Theme): void {
