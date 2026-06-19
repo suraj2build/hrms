@@ -71,10 +71,10 @@ function statusBadge(s: TicketStatus): { variant: BadgeVariant; label: string } 
 }
 function priorityColor(p: TicketPriority): string {
   switch (p) {
-    case 'urgent': return 'text-destructive border-destructive bg-destructive'
-    case 'high':   return 'text-accent-coral border-accent-coral bg-accent-coral'
-    case 'medium': return 'text-warning border-warning bg-warning'
-    default:       return 'text-success border-success bg-success'
+    case 'urgent': return 'text-destructive border-destructive/30 bg-destructive/10'
+    case 'high':   return 'text-accent-coral border-accent-coral/30 bg-accent-coral/10'
+    case 'medium': return 'text-warning border-warning/30 bg-warning/10'
+    default:       return 'text-success border-success/30 bg-success/10'
   }
 }
 function fmtDateTime(s: string): string {
@@ -421,7 +421,7 @@ export function AdminHelpdesk() {
                   detail.comments!.map(c => (
                     <div key={c.id} className={cn(
                       'rounded-lg p-2.5 text-sm border',
-                      c.is_internal ? 'bg-warning border-warning'
+                      c.is_internal ? 'bg-warning/10 border-warning/30'
                         : c.author_role === 'hr' ? 'bg-primary/5 border-primary/15' : 'bg-muted/40 border-border',
                     )}>
                       <div className="flex items-center justify-between mb-1">
@@ -444,7 +444,7 @@ export function AdminHelpdesk() {
                     value={reply} onChange={e => setReply(e.target.value)}
                     placeholder={internal ? 'Internal note (not visible to employee)…' : 'Reply to employee…'}
                     rows={2}
-                    className={cn('w-full text-sm border rounded-md px-3 py-2 bg-background text-foreground resize-none', internal ? 'border-warning' : 'border-border')}
+                    className={cn('w-full text-sm border rounded-md px-3 py-2 bg-background text-foreground resize-none', internal ? 'border-warning/40' : 'border-border')}
                   />
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">

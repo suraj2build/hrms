@@ -128,30 +128,30 @@ function currentMonth() {
 }
 
 const ADV_STATUS_BADGE: Record<string, string> = {
-  pending:         'bg-warning text-warning border-warning',
-  approved:        'bg-info text-info border-info',
-  rejected:        'bg-destructive text-destructive border-destructive',
-  disbursed:       'bg-primary text-primary border-primary',
-  recovering:      'bg-success text-success border-success',
+  pending:         'bg-warning/10 text-warning border-warning/30',
+  approved:        'bg-info/10 text-info border-info/30',
+  rejected:        'bg-destructive/10 text-destructive border-destructive/30',
+  disbursed:       'bg-primary/10 text-primary border-primary/30',
+  recovering:      'bg-success/10 text-success border-success/30',
   fully_recovered: 'bg-muted text-muted-foreground border-border',
   cancelled:       'bg-muted text-muted-foreground border-border',
 }
 
 const LOAN_STATUS_BADGE: Record<string, string> = {
-  pending:    'bg-warning text-warning border-warning',
-  approved:   'bg-info text-info border-info',
-  rejected:   'bg-destructive text-destructive border-destructive',
-  active:     'bg-success text-success border-success',
-  disbursed:  'bg-primary text-primary border-primary',
-  foreclosed: 'bg-accent-coral text-accent-coral border-accent-coral',
+  pending:    'bg-warning/10 text-warning border-warning/30',
+  approved:   'bg-info/10 text-info border-info/30',
+  rejected:   'bg-destructive/10 text-destructive border-destructive/30',
+  active:     'bg-success/10 text-success border-success/30',
+  disbursed:  'bg-primary/10 text-primary border-primary/30',
+  foreclosed: 'bg-accent-coral/10 text-accent-coral border-accent-coral/30',
   completed:  'bg-muted text-muted-foreground border-border',
   cancelled:  'bg-muted text-muted-foreground border-border',
 }
 
 const SCHED_STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-warning text-warning border-warning',
-  recovered: 'bg-success text-success border-success',
-  paid:      'bg-success text-success border-success',
+  pending:   'bg-warning/10 text-warning border-warning/30',
+  recovered: 'bg-success/10 text-success border-success/30',
+  paid:      'bg-success/10 text-success border-success/30',
   skipped:   'bg-muted text-muted-foreground border-border',
   adjusted:  'bg-muted text-muted-foreground border-border',
 }
@@ -1558,16 +1558,16 @@ export function LoansAndAdvances() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <KpiCard icon={AlertTriangle} label="Pending Approvals" value={String(pendingApprovals)}
           sub="requires action"
-          accent={pendingApprovals > 0 ? 'bg-warning text-warning' : 'bg-muted text-muted-foreground'} />
+          accent={pendingApprovals > 0 ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground'} />
         <KpiCard icon={Users} label="Active (Adv + Loans)" value={String(activeAdvances + activeLoans)}
           sub={`${activeAdvances} advances · ${activeLoans} loans`}
-          accent="bg-info text-info" />
+          accent="bg-info/15 text-info" />
         <KpiCard icon={CreditCard} label="This Month EMI" value={fmtINR(thisMonthEmi)}
           sub="auto-deducted via payroll"
           accent="bg-primary/10 text-primary" />
         <KpiCard icon={Banknote} label="Total Outstanding" value={fmtINR(totalOutstanding)}
           sub="across advances + loans"
-          accent="bg-accent-violet text-accent-violet" />
+          accent="bg-accent-violet/15 text-accent-violet" />
       </div>
 
       {/* Tab nav */}

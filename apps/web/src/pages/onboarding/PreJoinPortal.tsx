@@ -704,7 +704,7 @@ function DocSlot({
               status === "done"
                 ? "bg-muted text-muted-foreground hover:bg-muted"
                 : status === "error"
-                ? "bg-destructive text-destructive hover:bg-destructive"
+                ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                 : "bg-[#2E6FE6] text-white hover:bg-[#1A4D8F]",
             ].join(" ")}
           >

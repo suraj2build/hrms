@@ -71,10 +71,10 @@ function TabSkeleton() {
 
 function AttendanceBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    present:  'bg-success text-success',
-    absent:   'bg-destructive text-destructive',
-    half_day: 'bg-warning text-warning',
-    holiday:  'bg-info text-info',
+    present:  'bg-success/15 text-success',
+    absent:   'bg-destructive/15 text-destructive',
+    half_day: 'bg-warning/15 text-warning',
+    holiday:  'bg-info/15 text-info',
   }
   return (
     <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', map[status] ?? 'bg-muted text-muted-foreground')}>
@@ -276,7 +276,7 @@ function OtTab({ employeeId, activeTab }: { employeeId: string; activeTab: TabId
           const pct     = Math.round((hrs / maxHours) * 100)
           const flagged = row['flagged'] === 'true' || row['status'] === 'flagged'
           return (
-            <div key={idx} className={cn('flex items-center gap-2', flagged && 'bg-warning rounded px-1')}>
+            <div key={idx} className={cn('flex items-center gap-2', flagged && 'bg-warning/10 rounded px-1')}>
               <span className="text-[11px] text-muted-foreground w-20 shrink-0">
                 {row['date'] ?? `Day ${idx + 1}`}
               </span>
@@ -336,7 +336,7 @@ function LeaveTab({
             key={idx}
             className={cn(
               'rounded border px-3 py-2 text-xs',
-              conflict ? 'border-warning bg-warning' : 'border-border bg-card',
+              conflict ? 'border-warning/40 bg-warning/10' : 'border-border bg-card',
             )}
           >
             <div className="flex items-center justify-between">

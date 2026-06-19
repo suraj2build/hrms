@@ -132,13 +132,13 @@ function categoryLabel(cat: string): string {
 
 function categoryColor(cat: string): string {
   const map: Record<string, string> = {
-    documentation: 'bg-info text-info',
-    it_setup: 'bg-info text-info',
-    training: 'bg-warning text-warning',
-    hr_formalities: 'bg-destructive text-destructive',
-    compliance: 'bg-destructive text-destructive',
-    orientation: 'bg-accent-teal text-accent-teal',
-    equipment: 'bg-accent-coral text-accent-coral',
+    documentation: 'bg-info/15 text-info',
+    it_setup: 'bg-info/15 text-info',
+    training: 'bg-warning/15 text-warning',
+    hr_formalities: 'bg-destructive/15 text-destructive',
+    compliance: 'bg-destructive/15 text-destructive',
+    orientation: 'bg-accent-teal/15 text-accent-teal',
+    equipment: 'bg-accent-coral/15 text-accent-coral',
     other: 'bg-muted text-muted-foreground',
   }
   return map[cat] ?? 'bg-muted text-muted-foreground'
@@ -147,11 +147,11 @@ function categoryColor(cat: string): string {
 function statusColor(status: string): string {
   const map: Record<string, string> = {
     not_started: 'bg-muted text-muted-foreground',
-    in_progress: 'bg-info text-info',
-    completed: 'bg-success text-success',
-    overdue: 'bg-destructive text-destructive',
+    in_progress: 'bg-info/15 text-info',
+    completed: 'bg-success/15 text-success',
+    overdue: 'bg-destructive/15 text-destructive',
     pending: 'bg-muted text-muted-foreground',
-    skipped: 'bg-warning text-warning',
+    skipped: 'bg-warning/15 text-warning',
   }
   return map[status] ?? 'bg-muted text-muted-foreground'
 }

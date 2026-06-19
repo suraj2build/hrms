@@ -64,12 +64,12 @@ interface Requisition {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  linkedin: 'bg-info text-info',
-  naukri:   'bg-accent-coral text-accent-coral',
-  indeed:   'bg-primary text-primary',
-  referral: 'bg-primary text-primary',
-  portal:   'bg-accent-teal text-accent-teal',
-  agency:   'bg-accent-magenta text-accent-magenta',
+  linkedin: 'bg-info/15 text-info',
+  naukri:   'bg-accent-coral/15 text-accent-coral',
+  indeed:   'bg-primary/15 text-primary',
+  referral: 'bg-primary/15 text-primary',
+  portal:   'bg-accent-teal/15 text-accent-teal',
+  agency:   'bg-accent-magenta/15 text-accent-magenta',
   direct:   'bg-muted text-muted-foreground',
   other:    'bg-muted text-muted-foreground',
 }

@@ -80,18 +80,18 @@ function computeEMI(principal: number, annualRate: number, months: number): numb
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; Icon: React.ComponentType<{ className?: string }> }> = {
-  pending_manager: { label: 'Pending Manager',  color: 'text-warning bg-warning border-warning',   Icon: Clock         },
-  pending_hr:      { label: 'Pending HR',       color: 'text-info bg-info border-info',         Icon: Clock         },
-  pending:         { label: 'Pending HR',       color: 'text-info bg-info border-info',         Icon: Clock         },
-  approved:        { label: 'Approved',         color: 'text-success bg-success border-success',      Icon: CheckCircle   },
-  rejected:        { label: 'Rejected',         color: 'text-destructive bg-destructive border-destructive',            Icon: XCircle       },
-  disbursed:       { label: 'Disbursed',        color: 'text-primary bg-primary border-primary',   Icon: CheckCircle   },
-  recovering:      { label: 'Recovering',       color: 'text-accent-violet bg-accent-violet border-accent-violet',   Icon: TrendingDown  },
+  pending_manager: { label: 'Pending Manager',  color: 'text-warning bg-warning/10 border-warning/30',   Icon: Clock         },
+  pending_hr:      { label: 'Pending HR',       color: 'text-info bg-info/10 border-info/30',         Icon: Clock         },
+  pending:         { label: 'Pending HR',       color: 'text-info bg-info/10 border-info/30',         Icon: Clock         },
+  approved:        { label: 'Approved',         color: 'text-success bg-success/10 border-success/30',      Icon: CheckCircle   },
+  rejected:        { label: 'Rejected',         color: 'text-destructive bg-destructive/10 border-destructive/30',            Icon: XCircle       },
+  disbursed:       { label: 'Disbursed',        color: 'text-primary bg-primary/10 border-primary/30',   Icon: CheckCircle   },
+  recovering:      { label: 'Recovering',       color: 'text-accent-violet bg-accent-violet/10 border-accent-violet/30',   Icon: TrendingDown  },
   fully_recovered: { label: 'Fully Recovered',  color: 'text-muted-foreground bg-muted border-border',      Icon: CheckCircle   },
-  active:          { label: 'Active — EMI',     color: 'text-accent-violet bg-accent-violet border-accent-violet',   Icon: TrendingDown  },
+  active:          { label: 'Active — EMI',     color: 'text-accent-violet bg-accent-violet/10 border-accent-violet/30',   Icon: TrendingDown  },
   foreclosed:      { label: 'Foreclosed',       color: 'text-muted-foreground bg-muted border-border',      Icon: CheckCircle   },
   completed:       { label: 'Completed',        color: 'text-muted-foreground bg-muted border-border',      Icon: CheckCircle   },
-  cancelled:       { label: 'Cancelled',        color: 'text-destructive bg-destructive border-destructive',            Icon: XCircle       },
+  cancelled:       { label: 'Cancelled',        color: 'text-destructive bg-destructive/10 border-destructive/20',            Icon: XCircle       },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -348,8 +348,8 @@ function AdvanceScheduleRow({ advanceId }: { advanceId: string }) {
               <td className="p-1.5 text-center">
                 <span className={cn(
                   'rounded-full px-1.5 py-0.5 text-[9px] font-medium',
-                  s.status === 'recovered' ? 'bg-success text-success' :
-                  s.status === 'pending'   ? 'bg-info text-info'   :
+                  s.status === 'recovered' ? 'bg-success/15 text-success' :
+                  s.status === 'pending'   ? 'bg-info/15 text-info'   :
                                             'bg-muted text-muted-foreground',
                 )}>
                   {s.status}
@@ -399,8 +399,8 @@ function LoanScheduleRow({ loanId }: { loanId: string }) {
               <td className="p-1.5 text-center">
                 <span className={cn(
                   'rounded-full px-1.5 py-0.5 text-[9px] font-medium',
-                  s.status === 'paid'    ? 'bg-success text-success' :
-                  s.status === 'pending' ? 'bg-info text-info'   :
+                  s.status === 'paid'    ? 'bg-success/15 text-success' :
+                  s.status === 'pending' ? 'bg-info/15 text-info'   :
                                           'bg-muted text-muted-foreground',
                 )}>
                   {s.status}

@@ -48,10 +48,10 @@ function fmtMins(mins: number) {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    PENDING:      'bg-warning text-warning',
-    APPROVED:     'bg-success text-success',
-    AUTO_APPROVED: 'bg-success text-success',
-    REJECTED:     'bg-destructive text-destructive',
+    PENDING:      'bg-warning/15 text-warning',
+    APPROVED:     'bg-success/15 text-success',
+    AUTO_APPROVED: 'bg-success/15 text-success',
+    REJECTED:     'bg-destructive/15 text-destructive',
   }
   return (
     <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold', map[status] ?? 'bg-muted text-muted-foreground')}>

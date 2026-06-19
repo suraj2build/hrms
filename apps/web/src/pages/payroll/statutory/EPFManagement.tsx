@@ -471,9 +471,9 @@ export function EPFManagement() {
             ))
           : <>
               <ColoredStatCard icon={Building}    label="Filing Headcount"         value={totalEmployees}                sub="staff active"
-                iconBg="bg-accent-coral dark:bg-accent-coral/40"  iconBorder="border-accent-coral dark:border-accent-coral"  iconColor="text-accent-coral dark:text-accent-coral" />
+                iconBg="bg-accent-coral/10 dark:bg-accent-coral/40"  iconBorder="border-accent-coral/20 dark:border-accent-coral"  iconColor="text-accent-coral dark:text-accent-coral" />
               <ColoredStatCard icon={TrendingUp}  label="Employee Contribution Pool" value={fmtCurrency(totalEmployeeContrib)} sub={`@${config?.employee_contribution_pct ?? 12}%`}
-                iconBg="bg-success dark:bg-success/40" iconBorder="border-success dark:border-success" iconColor="text-success dark:text-success" />
+                iconBg="bg-success/10 dark:bg-success/40" iconBorder="border-success/20 dark:border-success" iconColor="text-success dark:text-success" />
               <ColoredStatCard icon={ShieldCheck} label="Employer Liability"         value={fmtCurrency(totalEmployerContrib)} sub="incl. EPS"
                 iconBg="bg-primary/10" iconBorder="border-primary/20" iconColor="text-primary" valueColor="text-primary" />
             </>

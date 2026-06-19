@@ -61,9 +61,9 @@ export function InfoTooltip({ text, className }: { text: string; className?: str
 export type PFMode = 'actual' | 'capped' | 'override'
 
 const PF_MODE_STYLES: Record<PFMode, { label: string; cls: string }> = {
-  actual:   { label: 'Actual PF',  cls: 'bg-info text-info border-info dark:bg-info/40 dark:text-info dark:border-info' },
+  actual:   { label: 'Actual PF',  cls: 'bg-info/10 text-info border-info/30 dark:bg-info/40 dark:text-info dark:border-info' },
   capped:   { label: 'Capped PF',  cls: 'bg-muted text-muted-foreground border-border dark:bg-muted dark:text-muted-foreground dark:border-border' },
-  override: { label: 'Override',   cls: 'bg-warning text-warning border-warning dark:bg-warning/40 dark:text-warning dark:border-warning' },
+  override: { label: 'Override',   cls: 'bg-warning/10 text-warning border-warning/30 dark:bg-warning/40 dark:text-warning dark:border-warning' },
 }
 
 /** One-liner "why" text shown beneath the badge as muted helper copy. */
@@ -119,9 +119,9 @@ export function PFModeWithExplain({ mode, className }: { mode: PFMode; className
 export type ESIStatusType = 'eligible' | 'not_applicable' | 'continuation' | 'exempt'
 
 const ESI_STATUS_STYLES: Record<ESIStatusType, { label: string; cls: string }> = {
-  eligible:       { label: 'ESI Eligible',   cls: 'bg-success text-success border-success dark:bg-success/40 dark:text-success dark:border-success' },
+  eligible:       { label: 'ESI Eligible',   cls: 'bg-success/10 text-success border-success/30 dark:bg-success/40 dark:text-success dark:border-success' },
   not_applicable: { label: 'Not Applicable', cls: 'bg-muted text-muted-foreground border-border' },
-  continuation:   { label: 'Continuation',   cls: 'bg-warning text-warning border-warning dark:bg-warning/40 dark:text-warning dark:border-warning' },
+  continuation:   { label: 'Continuation',   cls: 'bg-warning/10 text-warning border-warning/30 dark:bg-warning/40 dark:text-warning dark:border-warning' },
   exempt:         { label: 'Exempt',         cls: 'bg-muted text-muted-foreground border-border dark:bg-muted dark:text-muted-foreground dark:border-border' },
 }
 
@@ -250,8 +250,8 @@ export function StatCountChip({
 }) {
   const variantCls: Record<string, string> = {
     default: 'bg-muted/60 text-foreground border-border',
-    amber:   'bg-warning text-warning border-warning dark:bg-warning/40 dark:text-warning dark:border-warning',
-    blue:    'bg-info text-info border-info dark:bg-info/40 dark:text-info dark:border-info',
+    amber:   'bg-warning/10 text-warning border-warning/30 dark:bg-warning/40 dark:text-warning dark:border-warning',
+    blue:    'bg-info/10 text-info border-info/30 dark:bg-info/40 dark:text-info dark:border-info',
     muted:   'bg-muted text-muted-foreground border-border',
   }
   const Tag = onClick ? 'button' : 'div'

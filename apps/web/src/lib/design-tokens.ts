@@ -33,27 +33,27 @@ export const TOKENS = {
   },
   status: {
     success: {
-      bg:     'bg-success  dark:bg-success/30',
+      bg:     'bg-success/10  dark:bg-success/30',
       text:   'text-success  dark:text-success',
-      border: 'border-success  dark:border-success',
+      border: 'border-success/30  dark:border-success',
       dot:    'bg-success',
     },
     warning: {
-      bg:     'bg-warning  dark:bg-warning/30',
+      bg:     'bg-warning/10  dark:bg-warning/30',
       text:   'text-warning  dark:text-warning',
-      border: 'border-warning  dark:border-warning',
+      border: 'border-warning/30  dark:border-warning',
       dot:    'bg-warning',
     },
     danger: {
-      bg:     'bg-destructive    dark:bg-destructive/30',
+      bg:     'bg-destructive/10    dark:bg-destructive/30',
       text:   'text-destructive    dark:text-destructive',
-      border: 'border-destructive    dark:border-destructive',
+      border: 'border-destructive/30    dark:border-destructive',
       dot:    'bg-destructive',
     },
     info: {
-      bg:     'bg-info   dark:bg-info/30',
+      bg:     'bg-info/10   dark:bg-info/30',
       text:   'text-info   dark:text-info',
-      border: 'border-info   dark:border-info',
+      border: 'border-info/30   dark:border-info',
       dot:    'bg-info',
     },
     muted: {

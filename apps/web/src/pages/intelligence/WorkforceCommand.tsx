@@ -43,10 +43,10 @@ interface WorkforceCommandData {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 const SEV_COLORS: Record<string, string> = {
-  critical: 'bg-destructive border-destructive',
-  high:     'bg-accent-coral border-accent-coral',
-  medium:   'bg-warning border-warning',
-  info:     'bg-info border-info',
+  critical: 'bg-destructive/10 border-destructive/30',
+  high:     'bg-accent-coral/10 border-accent-coral/30',
+  medium:   'bg-warning/10 border-warning/30',
+  info:     'bg-info/10 border-info/30',
 }
 
 const CAT_ICON: Record<string, React.ComponentType<{ className?: string }>> = {

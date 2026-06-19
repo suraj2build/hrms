@@ -60,9 +60,9 @@ const CRIT_LABEL: Record<string, string> = { technical: 'Technical', communicati
 
 function leniencyBadge(l: number | null) {
   if (l === null) return { label: '—', cls: 'text-muted-foreground' }
-  if (l >= 0.5)  return { label: `+${l.toFixed(2)} lenient`, cls: 'text-warning bg-warning border-warning' }
-  if (l <= -0.5) return { label: `${l.toFixed(2)} strict`,   cls: 'text-info bg-info border-info' }
-  return { label: `${l > 0 ? '+' : ''}${l.toFixed(2)} balanced`, cls: 'text-success bg-success border-success' }
+  if (l >= 0.5)  return { label: `+${l.toFixed(2)} lenient`, cls: 'text-warning bg-warning/10 border-warning/30' }
+  if (l <= -0.5) return { label: `${l.toFixed(2)} strict`,   cls: 'text-info bg-info/10 border-info/30' }
+  return { label: `${l > 0 ? '+' : ''}${l.toFixed(2)} balanced`, cls: 'text-success bg-success/10 border-success/30' }
 }
 
 export function AdminInterviewAnalytics() {

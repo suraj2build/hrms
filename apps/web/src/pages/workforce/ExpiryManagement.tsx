@@ -58,9 +58,9 @@ const fmtDate = (iso: string) =>
   new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
 const BUCKET_META: Record<Bucket, { label: string; icon: LucideIcon; cls: string; chip: string }> = {
-  overdue: { label: 'Overdue',     icon: AlertTriangle, cls: 'text-destructive',   chip: 'bg-destructive text-destructive border-destructive' },
-  due_7:   { label: 'Due in 7 days',  icon: Clock,         cls: 'text-warning', chip: 'bg-warning text-warning border-warning' },
-  due_30:  { label: 'Due in 30 days', icon: CalendarClock, cls: 'text-info',  chip: 'bg-info text-info border-info' },
+  overdue: { label: 'Overdue',     icon: AlertTriangle, cls: 'text-destructive',   chip: 'bg-destructive/10 text-destructive border-destructive/30' },
+  due_7:   { label: 'Due in 7 days',  icon: Clock,         cls: 'text-warning', chip: 'bg-warning/10 text-warning border-warning/30' },
+  due_30:  { label: 'Due in 30 days', icon: CalendarClock, cls: 'text-info',  chip: 'bg-info/10 text-info border-info/30' },
   due_90:  { label: 'Due in 90 days', icon: CalendarDays,  cls: 'text-muted-foreground', chip: 'bg-muted text-muted-foreground border-border' },
 }
 const BUCKET_ORDER: Bucket[] = ['overdue', 'due_7', 'due_30', 'due_90']

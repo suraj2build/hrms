@@ -126,18 +126,18 @@ interface DetectionRule {
 // ── Severity configs ──────────────────────────────────────────────────────────
 
 const SEV: Record<string, { label: string; color: string }> = {
-  critical: { label: 'Critical', color: 'bg-destructive    text-destructive    border-destructive'    },
-  high:     { label: 'High',     color: 'bg-accent-coral text-accent-coral border-accent-coral' },
-  medium:   { label: 'Medium',   color: 'bg-warning  text-warning  border-warning'  },
-  low:      { label: 'Low',      color: 'bg-info   text-info   border-info'   },
+  critical: { label: 'Critical', color: 'bg-destructive/10    text-destructive    border-destructive/30'    },
+  high:     { label: 'High',     color: 'bg-accent-coral/10 text-accent-coral border-accent-coral/30' },
+  medium:   { label: 'Medium',   color: 'bg-warning/10  text-warning  border-warning/30'  },
+  low:      { label: 'Low',      color: 'bg-info/10   text-info   border-info/30'   },
   info:     { label: 'Info',     color: 'bg-muted  text-muted-foreground   border-border'   },
 }
 
 const ALERT_STATUS: Record<string, { label: string; color: string }> = {
-  open:           { label: 'Open',          color: 'bg-destructive    text-destructive    border-destructive'    },
-  acknowledged:   { label: 'Acknowledged',  color: 'bg-warning  text-warning  border-warning'  },
-  investigating:  { label: 'Investigating', color: 'bg-info   text-info   border-info'   },
-  resolved:       { label: 'Resolved',      color: 'bg-success text-success border-success' },
+  open:           { label: 'Open',          color: 'bg-destructive/10    text-destructive    border-destructive/30'    },
+  acknowledged:   { label: 'Acknowledged',  color: 'bg-warning/10  text-warning  border-warning/30'  },
+  investigating:  { label: 'Investigating', color: 'bg-info/10   text-info   border-info/30'   },
+  resolved:       { label: 'Resolved',      color: 'bg-success/10 text-success border-success/30' },
   false_positive: { label: 'False Positive', color: 'bg-muted text-muted-foreground   border-border'   },
 }
 
@@ -402,9 +402,9 @@ export function SecurityOpsWorkspace() {
                     <div key={a.id} className={cn('py-3.5 flex items-start gap-3', isOpen && a.severity === 'critical' && 'bg-destructive/30')}>
                       <div className={cn(
                         'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        a.severity === 'critical' ? 'bg-destructive'    :
-                        a.severity === 'high'     ? 'bg-accent-coral' :
-                        'bg-warning',
+                        a.severity === 'critical' ? 'bg-destructive/15'    :
+                        a.severity === 'high'     ? 'bg-accent-coral/15' :
+                        'bg-warning/15',
                       )}>
                         <ShieldAlert className={cn(
                           'h-3.5 w-3.5',
@@ -523,7 +523,7 @@ export function SecurityOpsWorkspace() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-medium">{r.rule_name}</p>
                           {sm && <Badge variant="outline" className={cn('text-[10px]', sm.color)}>{sm.label}</Badge>}
-                          <Badge variant="outline" className={cn('text-[10px]', r.enabled ? 'bg-success text-success border-success' : 'bg-muted text-muted-foreground border-border')}>
+                          <Badge variant="outline" className={cn('text-[10px]', r.enabled ? 'bg-success/10 text-success border-success/30' : 'bg-muted text-muted-foreground border-border')}>
                             {r.enabled ? 'Enabled' : 'Disabled'}
                           </Badge>
                         </div>
@@ -589,9 +589,9 @@ export function SecurityOpsWorkspace() {
                     <div key={e.id} className="py-3 flex items-start gap-3">
                       <div className={cn(
                         'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        e.severity === 'critical' ? 'bg-destructive'    :
-                        e.severity === 'high'     ? 'bg-accent-coral' :
-                        e.severity === 'warning'  ? 'bg-warning'  : 'bg-muted',
+                        e.severity === 'critical' ? 'bg-destructive/15'    :
+                        e.severity === 'high'     ? 'bg-accent-coral/15' :
+                        e.severity === 'warning'  ? 'bg-warning/15'  : 'bg-muted',
                       )}>
                         <Brain className={cn('h-3.5 w-3.5',
                           e.severity === 'critical' ? 'text-destructive'    :
@@ -672,7 +672,7 @@ export function SecurityOpsWorkspace() {
                     <div key={e.id} className="py-3 flex items-start gap-3">
                       <div className={cn(
                         'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        isVerified ? 'bg-success' : isFailed ? 'bg-destructive' : 'bg-muted',
+                        isVerified ? 'bg-success/15' : isFailed ? 'bg-destructive/15' : 'bg-muted',
                       )}>
                         {isVerified
                           ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -684,8 +684,8 @@ export function SecurityOpsWorkspace() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium uppercase">{e.verification_type.replace('_', ' ')}</span>
                           <Badge variant="outline" className={cn('text-[10px]',
-                            isVerified ? 'bg-success text-success border-success' :
-                            isFailed   ? 'bg-destructive text-destructive border-destructive' :
+                            isVerified ? 'bg-success/10 text-success border-success/30' :
+                            isFailed   ? 'bg-destructive/10 text-destructive border-destructive/30' :
                                          'bg-muted text-muted-foreground border-border')}>
                             {e.status}
                           </Badge>

@@ -102,23 +102,23 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  linkedin: 'bg-info text-info',
-  naukri:   'bg-accent-coral text-accent-coral',
-  indeed:   'bg-primary text-primary',
-  referral: 'bg-primary text-primary',
-  portal:   'bg-accent-teal text-accent-teal',
-  agency:   'bg-accent-magenta text-accent-magenta',
+  linkedin: 'bg-info/15 text-info',
+  naukri:   'bg-accent-coral/15 text-accent-coral',
+  indeed:   'bg-primary/15 text-primary',
+  referral: 'bg-primary/15 text-primary',
+  portal:   'bg-accent-teal/15 text-accent-teal',
+  agency:   'bg-accent-magenta/15 text-accent-magenta',
   direct:   'bg-muted text-muted-foreground',
   other:    'bg-muted text-muted-foreground',
 }
 
 const APP_STATUS_META: Record<string, { label: string; className: string }> = {
   applied:      { label: 'Applied',       className: 'text-muted-foreground   bg-muted   border-border'   },
-  screening:    { label: 'Screening',     className: 'text-info   bg-info   border-info'   },
-  interviewing: { label: 'Interviewing',  className: 'text-primary bg-primary border-primary' },
-  offer:        { label: 'Offer',         className: 'text-warning  bg-warning  border-warning'  },
-  hired:        { label: 'Hired',         className: 'text-success bg-success border-success' },
-  rejected:     { label: 'Rejected',      className: 'text-destructive    bg-destructive    border-destructive'    },
+  screening:    { label: 'Screening',     className: 'text-info   bg-info/10   border-info/30'   },
+  interviewing: { label: 'Interviewing',  className: 'text-primary bg-primary/10 border-primary/30' },
+  offer:        { label: 'Offer',         className: 'text-warning  bg-warning/10  border-warning/30'  },
+  hired:        { label: 'Hired',         className: 'text-success bg-success/10 border-success/30' },
+  rejected:     { label: 'Rejected',      className: 'text-destructive    bg-destructive/10    border-destructive/30'    },
   withdrawn:    { label: 'Withdrawn',     className: 'text-muted-foreground   bg-muted   border-border'   },
 }
 
@@ -631,10 +631,10 @@ export function AdminCandidates() {
                     <div className="space-y-2">
                       {candidateInterviews.map(iv => {
                         const ivStatusMeta: Record<string, string> = {
-                          scheduled: 'text-info bg-info border-info',
-                          completed: 'text-success bg-success border-success',
+                          scheduled: 'text-info bg-info/10 border-info/30',
+                          completed: 'text-success bg-success/10 border-success/30',
                           cancelled: 'text-muted-foreground bg-muted border-border',
-                          no_show:   'text-destructive bg-destructive border-destructive',
+                          no_show:   'text-destructive bg-destructive/10 border-destructive/30',
                         }
                         return (
                           <div key={iv.id} className="rounded-lg border border-border p-2.5">

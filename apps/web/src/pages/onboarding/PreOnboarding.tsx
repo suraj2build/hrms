@@ -181,10 +181,10 @@ function formatDate(iso?: string | null): string {
 }
 
 const STATUS_CONFIG: Record<InviteStatus, { label: string; className: string }> = {
-  pending:   { label: 'Pending',   className: 'bg-warning text-warning border-warning' },
-  submitted: { label: 'Submitted', className: 'bg-info text-info border-info' },
-  approved:  { label: 'Approved',  className: 'bg-success text-success border-success' },
-  rejected:  { label: 'Rejected',  className: 'bg-destructive text-destructive border-destructive' },
+  pending:   { label: 'Pending',   className: 'bg-warning/15 text-warning border-warning/30' },
+  submitted: { label: 'Submitted', className: 'bg-info/15 text-info border-info/30' },
+  approved:  { label: 'Approved',  className: 'bg-success/15 text-success border-success/30' },
+  rejected:  { label: 'Rejected',  className: 'bg-destructive/15 text-destructive border-destructive/30' },
   expired:   { label: 'Expired',   className: 'bg-muted text-muted-foreground border-border' },
 }
 
@@ -228,10 +228,10 @@ const MATCH_REASON_LABEL: Record<string, string> = {
 }
 
 const EMPLOYEE_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  active:     { label: 'Active',     className: 'bg-success text-success border-success' },
+  active:     { label: 'Active',     className: 'bg-success/15 text-success border-success/30' },
   inactive:   { label: 'Inactive',   className: 'bg-muted text-muted-foreground border-border' },
-  terminated: { label: 'Terminated', className: 'bg-destructive text-destructive border-destructive' },
-  on_leave:   { label: 'On Leave',   className: 'bg-warning text-warning border-warning' },
+  terminated: { label: 'Terminated', className: 'bg-destructive/15 text-destructive border-destructive/30' },
+  on_leave:   { label: 'On Leave',   className: 'bg-warning/15 text-warning border-warning/30' },
 }
 
 interface RehireCheckDialogProps {
@@ -767,10 +767,10 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
 
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-info text-info" />
-        <StatCard label="Pending"           value={stats.pending}   icon={Clock}          accent="bg-warning text-warning" />
-        <StatCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  accent="bg-info text-info" />
-        <StatCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   accent="bg-success text-success" />
+        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-info/15 text-info" />
+        <StatCard label="Pending"           value={stats.pending}   icon={Clock}          accent="bg-warning/15 text-warning" />
+        <StatCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  accent="bg-info/15 text-info" />
+        <StatCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   accent="bg-success/15 text-success" />
       </div>
 
       {/* Table */}

@@ -24,19 +24,19 @@ import { getDomainForPath, getVisibleDomain, getExecutiveDomainForPath, type Dom
 
 // Colored icon container tokens — one accent per domain
 const DOMAIN_ICON_COLORS: Record<string, { bg: string; text: string }> = {
-  'workforce':    { bg: 'bg-primary',   text: 'text-primary'  },
-  'attendance':   { bg: 'bg-warning',    text: 'text-warning'   },
-  'leave':        { bg: 'bg-success',  text: 'text-success' },
-  'payroll':      { bg: 'bg-accent-violet',   text: 'text-accent-violet'  },
-  'compliance':   { bg: 'bg-destructive',     text: 'text-destructive'    },
-  'operations':   { bg: 'bg-info',      text: 'text-info'     },
-  'reports':      { bg: 'bg-info',     text: 'text-info'    },
-  'advanced-ops': { bg: 'bg-accent-magenta',  text: 'text-accent-magenta' },
+  'workforce':    { bg: 'bg-primary/10',   text: 'text-primary'  },
+  'attendance':   { bg: 'bg-warning/10',    text: 'text-warning'   },
+  'leave':        { bg: 'bg-success/10',  text: 'text-success' },
+  'payroll':      { bg: 'bg-accent-violet/10',   text: 'text-accent-violet'  },
+  'compliance':   { bg: 'bg-destructive/10',     text: 'text-destructive'    },
+  'operations':   { bg: 'bg-info/10',      text: 'text-info'     },
+  'reports':      { bg: 'bg-info/10',     text: 'text-info'    },
+  'advanced-ops': { bg: 'bg-accent-magenta/10',  text: 'text-accent-magenta' },
   'setup':        { bg: 'bg-muted',   text: 'text-muted-foreground'   },
   // Executive Mode domains
   'exec-intelligence': { bg: 'bg-primary/10', text: 'text-primary'    },
-  'exec-reports':      { bg: 'bg-info',    text: 'text-info'   },
-  'exec-workforce':    { bg: 'bg-primary',  text: 'text-primary' },
+  'exec-reports':      { bg: 'bg-info/10',    text: 'text-info'   },
+  'exec-workforce':    { bg: 'bg-primary/10',  text: 'text-primary' },
 }
 
 // v3: groups collapsed by default (bumped from v2 so old "expanded" caches are ignored)

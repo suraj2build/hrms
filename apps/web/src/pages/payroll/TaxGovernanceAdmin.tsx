@@ -98,10 +98,10 @@ interface HRAAdmin {
 
 function StatusBadge({ status }: { status: RecordStatus }) {
   const map: Record<RecordStatus, { label: string; cls: string }> = {
-    pending:      { label: 'Pending',      cls: 'bg-warning text-warning border-warning' },
-    under_review: { label: 'Under Review', cls: 'bg-info text-info border-info' },
-    verified:     { label: 'Verified',     cls: 'bg-success text-success border-success' },
-    rejected:     { label: 'Rejected',     cls: 'bg-destructive text-destructive border-destructive' },
+    pending:      { label: 'Pending',      cls: 'bg-warning/15 text-warning border-warning/30' },
+    under_review: { label: 'Under Review', cls: 'bg-info/15 text-info border-info/30' },
+    verified:     { label: 'Verified',     cls: 'bg-success/15 text-success border-success/30' },
+    rejected:     { label: 'Rejected',     cls: 'bg-destructive/15 text-destructive border-destructive/30' },
   }
   const { label, cls } = map[status] ?? map.pending
   return (

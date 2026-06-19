@@ -59,9 +59,9 @@ const EXAMPLE_QUERIES = [
 ]
 
 const STATUS_COLORS: Record<string, string> = {
-  active:     'bg-success text-success',
-  on_notice:  'bg-accent-coral text-accent-coral',
-  separated:  'bg-destructive text-destructive',
+  active:     'bg-success/15 text-success',
+  on_notice:  'bg-accent-coral/15 text-accent-coral',
+  separated:  'bg-destructive/15 text-destructive',
   inactive:   'bg-muted text-muted-foreground',
 }
 

@@ -136,9 +136,9 @@ function TimelineEntry({ item, isLast }: { item: TimelineItem; isLast: boolean }
             'mt-1 h-7 w-7 shrink-0 rounded-full flex items-center justify-center ring-2 ring-background',
             item.is_milestone
               ? 'bg-gradient-to-br from-[#2E6FE6] to-[#15B8A6]'
-              : item.severity === 'critical' ? 'bg-destructive dark:bg-destructive/30'
-              : item.severity === 'warning'  ? 'bg-warning dark:bg-warning/30'
-              : item.severity === 'success'  ? 'bg-success dark:bg-success/30'
+              : item.severity === 'critical' ? 'bg-destructive/15 dark:bg-destructive/30'
+              : item.severity === 'warning'  ? 'bg-warning/15 dark:bg-warning/30'
+              : item.severity === 'success'  ? 'bg-success/15 dark:bg-success/30'
               : 'bg-muted',
           )}
         >

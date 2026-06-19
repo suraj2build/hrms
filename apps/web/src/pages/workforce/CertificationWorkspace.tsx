@@ -67,17 +67,17 @@ interface ExpiringCert extends Certification {
 }
 
 const TYPE_META: Record<string, { label: string; color: string }> = {
-  certification: { label: 'Certification', color: 'bg-info   text-info   border-info'   },
-  license:       { label: 'License',       color: 'bg-primary text-primary border-primary' },
-  credential:    { label: 'Credential',    color: 'bg-accent-teal   text-accent-teal   border-accent-teal'   },
-  membership:    { label: 'Membership',    color: 'bg-accent-coral text-accent-coral border-accent-coral' },
+  certification: { label: 'Certification', color: 'bg-info/10   text-info   border-info/30'   },
+  license:       { label: 'License',       color: 'bg-primary/10 text-primary border-primary/30' },
+  credential:    { label: 'Credential',    color: 'bg-accent-teal/10   text-accent-teal   border-accent-teal/30'   },
+  membership:    { label: 'Membership',    color: 'bg-accent-coral/10 text-accent-coral border-accent-coral/30' },
 }
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
-  active:  { label: 'Active',  color: 'bg-success text-success border-success' },
-  expired: { label: 'Expired', color: 'bg-destructive     text-destructive     border-destructive'     },
+  active:  { label: 'Active',  color: 'bg-success/10 text-success border-success/30' },
+  expired: { label: 'Expired', color: 'bg-destructive/10     text-destructive     border-destructive/30'     },
   revoked: { label: 'Revoked', color: 'bg-muted   text-muted-foreground    border-border'    },
-  pending: { label: 'Pending', color: 'bg-warning   text-warning   border-warning'   },
+  pending: { label: 'Pending', color: 'bg-warning/10   text-warning   border-warning/30'   },
 }
 
 // ── Form helper ───────────────────────────────────────────────────────────────
@@ -480,9 +480,9 @@ function ExpiringTable({
         <div key={c.id} className="py-3 flex items-center gap-3">
           <div className={cn(
             'h-10 w-10 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
-            c.days_remaining <= 7  ? 'bg-destructive text-destructive'    :
-            c.days_remaining <= 30 ? 'bg-warning text-warning' :
-            'bg-info text-info',
+            c.days_remaining <= 7  ? 'bg-destructive/15 text-destructive'    :
+            c.days_remaining <= 30 ? 'bg-warning/15 text-warning' :
+            'bg-info/15 text-info',
           )}>
             {c.days_remaining}d
           </div>

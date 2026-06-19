@@ -19,10 +19,10 @@ export function TodaysMission({ mission, onModeChange }: TodaysMissionProps) {
   const cardCn = cn(
     'rounded-xl border p-4',
     blockers_remaining === 0
-      ? 'bg-success border-success'
+      ? 'bg-success/10 border-success/30'
       : blockers_remaining <= 2
-        ? 'bg-warning border-warning'
-        : 'bg-destructive border-destructive',
+        ? 'bg-warning/10 border-warning/30'
+        : 'bg-destructive/10 border-destructive/30',
   )
 
   const readinessCn = cn(
@@ -50,10 +50,10 @@ export function TodaysMission({ mission, onModeChange }: TodaysMissionProps) {
             className={cn(
               'inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-bold leading-none',
               blockers_remaining === 0
-                ? 'bg-success text-success'
+                ? 'bg-success/15 text-success'
                 : blockers_remaining <= 2
-                  ? 'bg-warning text-warning'
-                  : 'bg-destructive text-destructive',
+                  ? 'bg-warning/15 text-warning'
+                  : 'bg-destructive/15 text-destructive',
             )}
           >
             {blockers_remaining}

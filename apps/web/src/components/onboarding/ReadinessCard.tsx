@@ -76,9 +76,9 @@ const STATUS_CONFIG: Record<ReadinessStatus, {
   textColor:   string
   bgColor:     string
 }> = {
-  ready:   { label: 'Ready',    badgeVariant: 'success',     ringColor: 'stroke-success', textColor: 'text-success dark:text-success', bgColor: 'bg-success dark:bg-success/30' },
-  at_risk: { label: 'At Risk',  badgeVariant: 'warning',     ringColor: 'stroke-warning',   textColor: 'text-warning dark:text-warning',     bgColor: 'bg-warning dark:bg-warning/30'     },
-  blocked: { label: 'Blocked',  badgeVariant: 'destructive', ringColor: 'stroke-destructive',     textColor: 'text-destructive dark:text-destructive',         bgColor: 'bg-destructive dark:bg-destructive/30'         },
+  ready:   { label: 'Ready',    badgeVariant: 'success',     ringColor: 'stroke-success', textColor: 'text-success dark:text-success', bgColor: 'bg-success/10 dark:bg-success/30' },
+  at_risk: { label: 'At Risk',  badgeVariant: 'warning',     ringColor: 'stroke-warning',   textColor: 'text-warning dark:text-warning',     bgColor: 'bg-warning/10 dark:bg-warning/30'     },
+  blocked: { label: 'Blocked',  badgeVariant: 'destructive', ringColor: 'stroke-destructive',     textColor: 'text-destructive dark:text-destructive',         bgColor: 'bg-destructive/10 dark:bg-destructive/30'         },
 }
 
 const DIMENSION_META: Record<keyof ReadinessDimensions, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {

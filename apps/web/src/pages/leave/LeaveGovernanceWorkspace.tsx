@@ -425,18 +425,18 @@ function GrantStatusBadge({ status }: { status: EventGrant['status'] }) {
 // ── Ledger txn type badge ─────────────────────────────────────────────────────
 
 const TXN_BADGE_CLASS: Record<LedgerTxnType, string> = {
-  accrual:            'bg-success text-success border-success',
-  carry_forward:      'bg-info text-info border-info',
-  manual_credit:      'bg-info text-info border-info',
-  deduction:          'bg-destructive text-destructive border-destructive',
-  encashment:         'bg-success text-success border-success',
+  accrual:            'bg-success/15 text-success border-success/30',
+  carry_forward:      'bg-info/15 text-info border-info/30',
+  manual_credit:      'bg-info/15 text-info border-info/30',
+  deduction:          'bg-destructive/15 text-destructive border-destructive/30',
+  encashment:         'bg-success/15 text-success border-success/30',
   expiry:             'bg-muted text-muted-foreground border-border',
-  opening_balance:    'bg-primary text-primary border-primary',
-  event_grant:        'bg-primary text-primary border-primary',
-  reversal:           'bg-accent-coral text-accent-coral border-accent-coral',
-  payroll_adjustment: 'bg-warning text-warning border-warning',
-  correction:         'bg-destructive text-destructive border-destructive',
-  lop_recovery:       'bg-accent-magenta text-accent-magenta border-accent-magenta',
+  opening_balance:    'bg-primary/15 text-primary border-primary/30',
+  event_grant:        'bg-primary/15 text-primary border-primary/30',
+  reversal:           'bg-accent-coral/15 text-accent-coral border-accent-coral/30',
+  payroll_adjustment: 'bg-warning/15 text-warning border-warning/30',
+  correction:         'bg-destructive/15 text-destructive border-destructive/30',
+  lop_recovery:       'bg-accent-magenta/15 text-accent-magenta border-accent-magenta/30',
 }
 
 function TxnTypeBadge({ type }: { type: LedgerTxnType }) {
@@ -455,9 +455,9 @@ function TxnTypeBadge({ type }: { type: LedgerTxnType }) {
 function SeverityBadge({ severity }: { severity: ReconciliationRun['severity'] }) {
   const map: Record<ReconciliationRun['severity'], { label: string; className: string }> = {
     ok:       { label: 'OK',       className: 'bg-success/10 text-success border-success/20' },
-    low:      { label: 'Low',      className: 'bg-info text-info border-info' },
+    low:      { label: 'Low',      className: 'bg-info/15 text-info border-info/30' },
     medium:   { label: 'Medium',   className: 'bg-warning/10 text-warning border-warning/20' },
-    high:     { label: 'High',     className: 'bg-accent-coral text-accent-coral border-accent-coral' },
+    high:     { label: 'High',     className: 'bg-accent-coral/15 text-accent-coral border-accent-coral/30' },
     critical: { label: 'Critical', className: 'bg-destructive/10 text-destructive border-destructive/20' },
   }
   const { label, className } = map[severity] ?? map.ok

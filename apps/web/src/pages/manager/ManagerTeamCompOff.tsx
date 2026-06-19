@@ -39,9 +39,9 @@ interface CoRequest {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    pending:  'bg-warning text-warning',
-    approved: 'bg-success text-success',
-    rejected: 'bg-destructive text-destructive',
+    pending:  'bg-warning/15 text-warning',
+    approved: 'bg-success/15 text-success',
+    rejected: 'bg-destructive/15 text-destructive',
   }
   return (
     <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize', map[status] ?? 'bg-muted text-muted-foreground')}>

@@ -88,10 +88,10 @@ const EMPTY_FORM: ReqForm = {
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
   draft:     { label: 'Draft',     className: 'text-muted-foreground   border-border   bg-muted'   },
-  open:      { label: 'Open',      className: 'text-success border-success bg-success' },
-  on_hold:   { label: 'On Hold',   className: 'text-warning  border-warning  bg-warning'  },
-  filled:    { label: 'Filled',    className: 'text-info   border-info   bg-info'   },
-  cancelled: { label: 'Cancelled', className: 'text-destructive    border-destructive    bg-destructive'    },
+  open:      { label: 'Open',      className: 'text-success border-success/30 bg-success/10' },
+  on_hold:   { label: 'On Hold',   className: 'text-warning  border-warning/30  bg-warning/10'  },
+  filled:    { label: 'Filled',    className: 'text-info   border-info/30   bg-info/10'   },
+  cancelled: { label: 'Cancelled', className: 'text-destructive    border-destructive/30    bg-destructive/10'    },
 }
 
 const EMP_TYPE_LABELS: Record<string, string> = {
@@ -400,7 +400,7 @@ export function AdminRecruitment() {
                       <td className="py-2 px-3 text-center">
                         <span className={cn(
                           'inline-flex items-center gap-1 text-xs font-medium rounded-full px-2 py-0.5',
-                          r.applicant_count > 0 ? 'bg-info text-info' : 'text-muted-foreground',
+                          r.applicant_count > 0 ? 'bg-info/10 text-info' : 'text-muted-foreground',
                         )}>
                           <Users className="h-3 w-3" />{r.applicant_count}
                         </span>

@@ -232,7 +232,7 @@ export default function AttendanceAnomalies() {
               value={data.summary.total}
               sub={trend ? `${trend.up ? '↑' : '↓'} ${Math.abs(trend.pct)}% vs last month` : 'This month'}
               icon={AlertTriangle}
-              iconBg={data.summary.total > 100 ? 'bg-warning' : 'bg-muted'}
+              iconBg={data.summary.total > 100 ? 'bg-warning/10' : 'bg-muted'}
               iconColor={data.summary.total > 100 ? 'text-warning' : 'text-muted-foreground'}
               valueColor={data.summary.total > 100 ? 'text-warning' : undefined}
             />
@@ -250,7 +250,7 @@ export default function AttendanceAnomalies() {
               value={data.summary.high_severity}
               sub="Needs priority attention"
               icon={AlertTriangle}
-              iconBg="bg-destructive"
+              iconBg="bg-destructive/10"
               iconColor="text-destructive"
               valueColor={data.summary.high_severity > 0 ? 'text-destructive' : undefined}
             />
@@ -259,7 +259,7 @@ export default function AttendanceAnomalies() {
               value={data.by_department.filter(d => d.anomaly_count > 0).length}
               sub={`of ${data.by_department.length} total`}
               icon={BarChart3}
-              iconBg="bg-info"
+              iconBg="bg-info/10"
               iconColor="text-info"
             />
           </div>

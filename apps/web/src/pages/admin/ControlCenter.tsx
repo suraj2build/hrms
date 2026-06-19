@@ -296,7 +296,7 @@ function KpiCard({
   label:          string
   value:          string | number
   icon:           React.ComponentType<{ className?: string }>
-  iconBg:         string   // e.g. 'bg-accent-teal'
+  iconBg:         string   // e.g. 'bg-accent-teal/10'
   iconColor:      string   // e.g. 'text-accent-teal'
   valueColor?:    string
   sub?:           string
@@ -806,14 +806,14 @@ export function ControlCenter() {
             icon={Users} label="Employees"
             stat={`${dashStats?.total_employees ?? freshness?.total_active_employees ?? '—'} active`}
             status="healthy"
-            iconBg="bg-info" iconColor="text-info"
+            iconBg="bg-info/10" iconColor="text-info"
             onClick={() => nav('/admin/employees')}
           />
           <ModuleCard
             icon={CalendarCheck} label="Attendance"
             stat={freshness?.health === 'healthy' ? 'All synced' : `${freshness?.employees_missing ?? 0} missing data`}
             status={(freshness?.health ?? 'unknown') as ModuleStatus}
-            iconBg="bg-accent-violet" iconColor="text-accent-violet"
+            iconBg="bg-accent-violet/10" iconColor="text-accent-violet"
             badge={(freshness?.employees_missing ?? 0) > 0 ? freshness!.employees_missing : null}
             onClick={() => nav('/admin/attendance/center')}
           />
@@ -821,7 +821,7 @@ export function ControlCenter() {
             icon={CalendarDays} label="Leave"
             stat={regList.length > 0 ? `${regList.length} pending approval` : 'All approved'}
             status={regList.length > 0 ? 'degraded' : 'healthy'}
-            iconBg="bg-success" iconColor="text-success"
+            iconBg="bg-success/10" iconColor="text-success"
             badge={regList.length > 0 ? regList.length : null}
             onClick={() => nav('/admin/leave/balances')}
           />
@@ -831,14 +831,14 @@ export function ControlCenter() {
               ? `${payroll.current_month} · ${payroll.current_run.status.charAt(0).toUpperCase() + payroll.current_run.status.slice(1)}`
               : (payroll?.current_month ?? 'No run yet')}
             status={payrollHealth as ModuleStatus}
-            iconBg="bg-warning" iconColor="text-warning"
+            iconBg="bg-warning/10" iconColor="text-warning"
             onClick={() => nav('/admin/payroll/center')}
           />
           <ModuleCard
             icon={BarChart3} label="Analytics"
             stat="CEO · CHRO · Workforce views"
             status="healthy"
-            iconBg="bg-info" iconColor="text-info"
+            iconBg="bg-info/10" iconColor="text-info"
             onClick={() => nav('/admin/executive')}
           />
           <ModuleCard
@@ -925,7 +925,7 @@ export function ControlCenter() {
           label="Pending Regularisations"
           value={regList.length}
           icon={ClipboardList}
-          iconBg={regList.length > 0 ? 'bg-accent-violet' : 'bg-muted'}
+          iconBg={regList.length > 0 ? 'bg-accent-violet/10' : 'bg-muted'}
           iconColor={regList.length > 0 ? 'text-accent-violet' : 'text-muted-foreground'}
           valueColor={regList.length > 0 ? 'text-accent-violet' : undefined}
           sub="Awaiting manager action"
@@ -1230,7 +1230,7 @@ export function ControlCenter() {
             label="New Joiners"
             value={dashStats?.new_joiners_this_month ?? '—'}
             icon={UserPlus}
-            iconBg="bg-info"
+            iconBg="bg-info/10"
             iconColor="text-info"
             valueColor={(dashStats?.new_joiners_this_month ?? 0) > 0 ? 'text-info' : undefined}
             sub="This month"
@@ -1241,7 +1241,7 @@ export function ControlCenter() {
             label="Absent Today"
             value={todayAbsent}
             icon={UserX}
-            iconBg={todayAbsent > 0 ? 'bg-warning' : 'bg-muted'}
+            iconBg={todayAbsent > 0 ? 'bg-warning/10' : 'bg-muted'}
             iconColor={todayAbsent > 0 ? 'text-warning' : 'text-muted-foreground'}
             valueColor={todayAbsent > 0 ? 'text-warning' : undefined}
             sub="Real-time"
@@ -1313,7 +1313,7 @@ export function ControlCenter() {
           label="Pending Corrections"
           value={correctionsCount}
           icon={CheckSquare}
-          iconBg={correctionsCount > 0 ? 'bg-accent-coral' : 'bg-success'}
+          iconBg={correctionsCount > 0 ? 'bg-accent-coral/10' : 'bg-success/10'}
           iconColor={correctionsCount > 0 ? 'text-accent-coral' : 'text-success'}
           valueColor={correctionsCount > 0 ? 'text-accent-coral' : undefined}
           sub={correctionsCount > 0 ? 'Awaiting approval' : 'All corrections clear'}

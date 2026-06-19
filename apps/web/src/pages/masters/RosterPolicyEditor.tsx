@@ -209,17 +209,17 @@ function MatrixCell({
       className={cn(
         'h-10 w-full rounded-lg border-2 transition-all duration-100 flex items-center justify-center text-[10px] font-semibold tracking-wide select-none focus:outline-none focus:ring-2 focus:ring-primary/40',
         state === 'working' && [
-          'border-success bg-success text-success',
-          'hover:bg-success hover:border-success',
+          'border-success/30 bg-success/10 text-success',
+          'hover:bg-success/15 hover:border-success/40',
           isWeekend && 'border-success/60 bg-success/50',
         ],
         state === 'off' && [
-          'border-destructive bg-destructive text-destructive',
-          'hover:bg-destructive hover:border-destructive',
+          'border-destructive/30 bg-destructive/10 text-destructive',
+          'hover:bg-destructive/15 hover:border-destructive/40',
         ],
         state === 'half_day' && [
-          'border-warning bg-warning text-warning',
-          'hover:bg-warning hover:border-warning',
+          'border-warning/30 bg-warning/10 text-warning',
+          'hover:bg-warning/15 hover:border-warning/40',
         ],
       )}
     >
@@ -294,7 +294,7 @@ function MatrixGrid({
                     'w-5 h-1.5 rounded-full transition-colors',
                     allOff   && 'bg-destructive',
                     allWork  && 'bg-success',
-                    !allOff && !allWork && 'bg-warning',
+                    !allOff && !allWork && 'bg-warning/30',
                   )}
                 />
               </div>
@@ -640,7 +640,7 @@ export function RosterPolicyEditor() {
                   className={cn(
                     'rounded-full text-[10px] px-2',
                     isActive
-                      ? 'bg-success/15 text-success border-success hover:bg-success/15'
+                      ? 'bg-success/15 text-success border-success/30 hover:bg-success/15'
                       : 'text-muted-foreground',
                   )}
                 >

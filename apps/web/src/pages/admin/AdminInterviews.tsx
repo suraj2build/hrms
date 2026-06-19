@@ -95,10 +95,10 @@ const TYPE_META: Record<string, { label: string; icon: React.ReactNode }> = {
 }
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
-  scheduled:  { label: 'Scheduled',  className: 'text-info   bg-info   border-info'   },
-  completed:  { label: 'Completed',  className: 'text-success bg-success border-success' },
+  scheduled:  { label: 'Scheduled',  className: 'text-info   bg-info/10   border-info/30'   },
+  completed:  { label: 'Completed',  className: 'text-success bg-success/10 border-success/30' },
   cancelled:  { label: 'Cancelled',  className: 'text-muted-foreground   bg-muted   border-border'   },
-  no_show:    { label: 'No-show',    className: 'text-destructive    bg-destructive    border-destructive'     },
+  no_show:    { label: 'No-show',    className: 'text-destructive    bg-destructive/10    border-destructive/30'     },
 }
 
 function fmtDT(s: string | null): string {
@@ -833,11 +833,11 @@ export function AdminInterviews() {
                 {(['strong_yes','yes','maybe','no','strong_no'] as const).map(rec => {
                   const recLabel: Record<string, string> = { strong_yes: 'Strong Yes', yes: 'Yes', maybe: 'Maybe', no: 'No', strong_no: 'Strong No' }
                   const recColor: Record<string, string> = {
-                    strong_yes: 'border-success bg-success text-success',
-                    yes: 'border-success bg-success text-success',
-                    maybe: 'border-warning bg-warning text-warning',
-                    no: 'border-accent-coral bg-accent-coral text-accent-coral',
-                    strong_no: 'border-destructive bg-destructive text-destructive',
+                    strong_yes: 'border-success bg-success/10 text-success',
+                    yes: 'border-success bg-success/10 text-success',
+                    maybe: 'border-warning bg-warning/10 text-warning',
+                    no: 'border-accent-coral bg-accent-coral/10 text-accent-coral',
+                    strong_no: 'border-destructive bg-destructive/10 text-destructive',
                   }
                   return (
                     <button

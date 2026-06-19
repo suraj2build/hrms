@@ -130,19 +130,19 @@ interface ErasureRequest {
 // ── Status configs ────────────────────────────────────────────────────────────
 
 const CONTROL_STATUS: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
-  verified:    { label: 'Verified',    color: 'bg-success text-success border-success', icon: CheckCircle2 },
-  implemented: { label: 'Implemented', color: 'bg-info   text-info   border-info',     icon: CheckCircle2 },
-  in_progress: { label: 'In Progress', color: 'bg-warning  text-warning  border-warning',    icon: Clock        },
+  verified:    { label: 'Verified',    color: 'bg-success/10 text-success border-success/30', icon: CheckCircle2 },
+  implemented: { label: 'Implemented', color: 'bg-info/10   text-info   border-info/30',     icon: CheckCircle2 },
+  in_progress: { label: 'In Progress', color: 'bg-warning/10  text-warning  border-warning/30',    icon: Clock        },
   not_started: { label: 'Not Started', color: 'bg-muted  text-muted-foreground   border-border',     icon: XCircle      },
-  waived:      { label: 'Waived',      color: 'bg-primary text-primary border-primary',   icon: CheckCircle2 },
+  waived:      { label: 'Waived',      color: 'bg-primary/10 text-primary border-primary/30',   icon: CheckCircle2 },
 }
 
 const ERASURE_STATUS: Record<string, { label: string; color: string }> = {
-  pending:     { label: 'Pending',     color: 'bg-warning  text-warning  border-warning'  },
-  in_progress: { label: 'In Progress', color: 'bg-info   text-info   border-info'   },
-  completed:   { label: 'Completed',   color: 'bg-success text-success border-success' },
-  rejected:    { label: 'Rejected',    color: 'bg-destructive    text-destructive    border-destructive'    },
-  partial:     { label: 'Partial',     color: 'bg-accent-coral text-accent-coral border-accent-coral' },
+  pending:     { label: 'Pending',     color: 'bg-warning/10  text-warning  border-warning/30'  },
+  in_progress: { label: 'In Progress', color: 'bg-info/10   text-info   border-info/30'   },
+  completed:   { label: 'Completed',   color: 'bg-success/10 text-success border-success/30' },
+  rejected:    { label: 'Rejected',    color: 'bg-destructive/10    text-destructive    border-destructive/30'    },
+  partial:     { label: 'Partial',     color: 'bg-accent-coral/10 text-accent-coral border-accent-coral/30' },
   on_hold:     { label: 'On Hold',     color: 'bg-muted  text-muted-foreground   border-border'   },
 }
 
@@ -419,7 +419,7 @@ export function GovernancePrivacyWorkspace() {
                         {c.latest_evidence && (
                           <div className={cn(
                             'flex-shrink-0 rounded-full h-6 w-6 flex items-center justify-center',
-                            c.latest_evidence.pass ? 'bg-success' : 'bg-destructive',
+                            c.latest_evidence.pass ? 'bg-success/15' : 'bg-destructive/15',
                           )}>
                             {c.latest_evidence.pass
                               ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -480,7 +480,7 @@ export function GovernancePrivacyWorkspace() {
                   <div key={e.id} className={cn('py-3 flex items-start gap-3', e.flagged && 'bg-destructive/30')}>
                     <div className={cn(
                       'mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                      e.flagged ? 'bg-destructive' : 'bg-muted',
+                      e.flagged ? 'bg-destructive/15' : 'bg-muted',
                     )}>
                       {e.flagged
                         ? <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
@@ -634,14 +634,14 @@ export function GovernancePrivacyWorkspace() {
             ) : (
               <div className="divide-y divide-border">
                 {(evaluationsQ.data?.data ?? []).map(e => {
-                  const sevColor = e.severity === 'critical' ? 'bg-destructive text-destructive border-destructive'
-                    : e.severity === 'high'    ? 'bg-accent-coral text-accent-coral border-accent-coral'
-                    : e.severity === 'warning' ? 'bg-warning  text-warning  border-warning'
+                  const sevColor = e.severity === 'critical' ? 'bg-destructive/10 text-destructive border-destructive/30'
+                    : e.severity === 'high'    ? 'bg-accent-coral/10 text-accent-coral border-accent-coral/30'
+                    : e.severity === 'warning' ? 'bg-warning/10  text-warning  border-warning/30'
                     :                            'bg-muted  text-muted-foreground   border-border'
                   return (
                     <div key={e.id} className={cn('py-3 flex items-start gap-3', !e.compliant && 'bg-destructive/20')}>
                       <div className={cn('mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
-                        e.compliant ? 'bg-success' : 'bg-destructive')}>
+                        e.compliant ? 'bg-success/15' : 'bg-destructive/15')}>
                         {e.compliant
                           ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                           : <AlertTriangle className="h-3.5 w-3.5 text-destructive" />}
@@ -653,7 +653,7 @@ export function GovernancePrivacyWorkspace() {
                           {e.rule_id && <Badge variant="outline" className="text-[10px]">{e.rule_id}</Badge>}
                           <Badge variant="outline" className={cn('text-[10px] capitalize', sevColor)}>{e.severity}</Badge>
                           <Badge variant="outline" className={cn('text-[10px]',
-                            e.compliant ? 'bg-success text-success border-success' : 'bg-destructive text-destructive border-destructive')}>
+                            e.compliant ? 'bg-success/10 text-success border-success/30' : 'bg-destructive/10 text-destructive border-destructive/30')}>
                             {e.compliant ? 'Compliant' : 'Non-Compliant'}
                           </Badge>
                         </div>

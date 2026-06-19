@@ -60,10 +60,10 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'blue' }: {
   color?: 'blue' | 'teal' | 'amber' | 'violet'
 }) {
   const ring = {
-    blue:   'bg-info text-info',
-    teal:   'bg-accent-teal text-accent-teal',
-    amber:  'bg-warning text-warning',
-    violet: 'bg-accent-violet text-accent-violet',
+    blue:   'bg-info/10 text-info',
+    teal:   'bg-accent-teal/10 text-accent-teal',
+    amber:  'bg-warning/10 text-warning',
+    violet: 'bg-accent-violet/10 text-accent-violet',
   }[color]
 
   return (
@@ -316,10 +316,10 @@ export function AdminRecruitmentDashboard() {
             ) : d ? (
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: 'Scheduled', count: d.interviews.scheduled, color: 'text-info bg-info' },
-                  { label: 'Completed', count: d.interviews.completed, color: 'text-accent-teal bg-accent-teal' },
-                  { label: 'Cancelled', count: d.interviews.cancelled, color: 'text-destructive bg-destructive' },
-                  { label: 'No Show',   count: d.interviews.no_show,   color: 'text-warning bg-warning' },
+                  { label: 'Scheduled', count: d.interviews.scheduled, color: 'text-info bg-info/10' },
+                  { label: 'Completed', count: d.interviews.completed, color: 'text-accent-teal bg-accent-teal/10' },
+                  { label: 'Cancelled', count: d.interviews.cancelled, color: 'text-destructive bg-destructive/10' },
+                  { label: 'No Show',   count: d.interviews.no_show,   color: 'text-warning bg-warning/10' },
                 ].map(item => (
                   <div key={item.label} className={`rounded-lg p-3 ${item.color}`}>
                     <p className="text-2xl font-bold">{item.count}</p>

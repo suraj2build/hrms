@@ -60,13 +60,13 @@ interface Dependent {
 }
 
 const PLAN_META: Record<PlanType, { label: string; icon: React.ComponentType<{ className?: string }>; tint: string }> = {
-  health:    { label: 'Group Health',  icon: HeartPulse, tint: 'text-destructive bg-destructive border-destructive' },
-  term_life: { label: 'Term Life',     icon: Shield,     tint: 'text-info bg-info border-info' },
-  accident:  { label: 'Accident',      icon: Activity,   tint: 'text-warning bg-warning border-warning' },
-  wellness:  { label: 'Wellness',      icon: Sparkles,   tint: 'text-success bg-success border-success' },
-  meal:      { label: 'Meal',          icon: Utensils,   tint: 'text-accent-coral bg-accent-coral border-accent-coral' },
-  transport: { label: 'Transport',     icon: Bus,        tint: 'text-accent-teal bg-accent-teal border-accent-teal' },
-  other:     { label: 'Benefit',       icon: Gift,       tint: 'text-accent-violet bg-accent-violet border-accent-violet' },
+  health:    { label: 'Group Health',  icon: HeartPulse, tint: 'text-destructive bg-destructive/10 border-destructive/30' },
+  term_life: { label: 'Term Life',     icon: Shield,     tint: 'text-info bg-info/10 border-info/30' },
+  accident:  { label: 'Accident',      icon: Activity,   tint: 'text-warning bg-warning/10 border-warning/30' },
+  wellness:  { label: 'Wellness',      icon: Sparkles,   tint: 'text-success bg-success/10 border-success/30' },
+  meal:      { label: 'Meal',          icon: Utensils,   tint: 'text-accent-coral bg-accent-coral/10 border-accent-coral/30' },
+  transport: { label: 'Transport',     icon: Bus,        tint: 'text-accent-teal bg-accent-teal/10 border-accent-teal/30' },
+  other:     { label: 'Benefit',       icon: Gift,       tint: 'text-accent-violet bg-accent-violet/10 border-accent-violet/30' },
 }
 
 const inr = (n: number) =>

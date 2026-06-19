@@ -322,12 +322,12 @@ function isoDate(y: number, m: number, d: number) {
 
 // ── Leave type card color palette (cycles by index) ────────────────────────────
 const LT_CARD_COLORS = [
-  { topBar: 'bg-info',    iconBg: 'bg-info dark:bg-info/40',       iconText: 'text-info dark:text-info'       },
-  { topBar: 'bg-success', iconBg: 'bg-success dark:bg-success/40', iconText: 'text-success dark:text-success' },
-  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet dark:bg-accent-violet/40',   iconText: 'text-accent-violet dark:text-accent-violet'   },
-  { topBar: 'bg-destructive',    iconBg: 'bg-destructive dark:bg-destructive/40',       iconText: 'text-destructive dark:text-destructive'       },
-  { topBar: 'bg-warning',   iconBg: 'bg-warning dark:bg-warning/40',     iconText: 'text-warning dark:text-warning'     },
-  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal dark:bg-accent-teal/40',       iconText: 'text-accent-teal dark:text-accent-teal'       },
+  { topBar: 'bg-info',    iconBg: 'bg-info/15 dark:bg-info/40',       iconText: 'text-info dark:text-info'       },
+  { topBar: 'bg-success', iconBg: 'bg-success/15 dark:bg-success/40', iconText: 'text-success dark:text-success' },
+  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet/15 dark:bg-accent-violet/40',   iconText: 'text-accent-violet dark:text-accent-violet'   },
+  { topBar: 'bg-destructive',    iconBg: 'bg-destructive/15 dark:bg-destructive/40',       iconText: 'text-destructive dark:text-destructive'       },
+  { topBar: 'bg-warning',   iconBg: 'bg-warning/15 dark:bg-warning/40',     iconText: 'text-warning dark:text-warning'     },
+  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal/15 dark:bg-accent-teal/40',       iconText: 'text-accent-teal dark:text-accent-teal'       },
 ] as const
 
 // ── Reason chips constant ──────────────────────────────────────────────────────
@@ -399,7 +399,7 @@ function LeaveCalendar({
         case 'present':       return { annotation: 'P',  annotationCls: 'text-success',                              bgCls: 'bg-success/8'                              }
         case 'late':          return { annotation: 'P',  annotationCls: 'text-warning',                              bgCls: 'bg-warning/8'                              }
         case 'early_out':     return { annotation: 'P',  annotationCls: 'text-warning',                              bgCls: 'bg-warning/5'                              }
-        case 'holiday':       return { annotation: 'H',  annotationCls: 'text-accent-violet dark:text-accent-violet',      bgCls: 'bg-accent-violet dark:bg-accent-violet/30'        }
+        case 'holiday':       return { annotation: 'H',  annotationCls: 'text-accent-violet dark:text-accent-violet',      bgCls: 'bg-accent-violet/10 dark:bg-accent-violet/30'        }
         case 'weekend':
         case 'weekly_off':    return { annotation: 'O',  annotationCls: 'text-muted-foreground/50',                  bgCls: ''                                          }
         case 'leave':         return { annotation: 'OL', annotationCls: 'text-info',                                 bgCls: 'bg-info/8'                                 }

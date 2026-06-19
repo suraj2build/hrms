@@ -43,11 +43,11 @@ const EVENT_ICON: Record<string, React.ComponentType<{ className?: string }>> = 
 }
 
 const EVENT_COLOR: Record<string, string> = {
-  new_hire:                 'border-info bg-info',
-  separation_initiated:     'border-accent-coral bg-accent-coral',
+  new_hire:                 'border-info/30 bg-info/10',
+  separation_initiated:     'border-accent-coral/30 bg-accent-coral/10',
   asset_assigned:           'border-border bg-muted',
-  asset_separation_overlap: 'border-destructive bg-destructive',
-  on_notice:                'border-warning bg-warning',
+  asset_separation_overlap: 'border-destructive/30 bg-destructive/10',
+  on_notice:                'border-warning/30 bg-warning/10',
 }
 
 const EVENT_ICON_COLOR: Record<string, string> = {

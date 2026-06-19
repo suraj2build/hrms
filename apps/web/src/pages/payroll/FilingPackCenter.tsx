@@ -104,9 +104,9 @@ function artifactLabel(type: string): string {
 }
 
 const STATUS_CLASSES: Record<Artifact['status'], { bg: string; text: string; label: string }> = {
-  generated:    { bg: 'bg-info',    text: 'text-info',    label: 'Generated' },
-  submitted:    { bg: 'bg-warning',   text: 'text-warning',   label: 'Submitted' },
-  acknowledged: { bg: 'bg-success', text: 'text-success', label: 'Acknowledged' },
+  generated:    { bg: 'bg-info/10',    text: 'text-info',    label: 'Generated' },
+  submitted:    { bg: 'bg-warning/10',   text: 'text-warning',   label: 'Submitted' },
+  acknowledged: { bg: 'bg-success/10', text: 'text-success', label: 'Acknowledged' },
 }
 
 // ── ReadinessCard ─────────────────────────────────────────────────────────────
@@ -126,9 +126,9 @@ function ReadinessCard({ label, icon: Icon, check, loading }: ReadinessCardProps
     : 'warning'
 
   const COLORS = {
-    success:  { border: 'border-success', icon: 'text-success bg-success', indicator: 'text-success', dot: 'bg-success' },
-    critical: { border: 'border-destructive',    icon: 'text-destructive bg-destructive',       indicator: 'text-destructive',    dot: 'bg-destructive' },
-    warning:  { border: 'border-warning',   icon: 'text-warning bg-warning',     indicator: 'text-warning',   dot: 'bg-warning' },
+    success:  { border: 'border-success/30', icon: 'text-success bg-success/10', indicator: 'text-success', dot: 'bg-success' },
+    critical: { border: 'border-destructive/30',    icon: 'text-destructive bg-destructive/10',       indicator: 'text-destructive',    dot: 'bg-destructive' },
+    warning:  { border: 'border-warning/30',   icon: 'text-warning bg-warning/10',     indicator: 'text-warning',   dot: 'bg-warning' },
     neutral:  { border: 'border-border',      icon: 'text-muted-foreground bg-muted', indicator: 'text-muted-foreground', dot: 'bg-muted-foreground/40' },
   }[severity]
 
@@ -433,8 +433,8 @@ export function FilingPackCenter() {
               <span className={cn(
                 'inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border',
                 overall
-                  ? 'bg-success text-success border-success'
-                  : 'bg-destructive text-destructive border-destructive',
+                  ? 'bg-success/10 text-success border-success/30'
+                  : 'bg-destructive/10 text-destructive border-destructive/30',
               )}>
                 {overall
                   ? <><CheckCircle2 className="h-3 w-3" /> All systems ready</>
@@ -506,9 +506,9 @@ export function FilingPackCenter() {
                   <span className="text-[11px] font-medium text-muted-foreground">Deductor (TAN / PAN)</span>
                   {deductor?.data && (
                     <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded-full border',
-                      deductor.data.tan_status === 'ok' ? 'text-success bg-success border-success'
-                        : deductor.data.tan_status === 'invalid' ? 'text-warning bg-warning border-warning'
-                        : 'text-destructive bg-destructive border-destructive')}>
+                      deductor.data.tan_status === 'ok' ? 'text-success bg-success/10 border-success/30'
+                        : deductor.data.tan_status === 'invalid' ? 'text-warning bg-warning/10 border-warning/30'
+                        : 'text-destructive bg-destructive/10 border-destructive/30')}>
                       TAN {deductor.data.tan_status}
                     </span>
                   )}
@@ -531,9 +531,9 @@ export function FilingPackCenter() {
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-muted-foreground">Filing readiness</span>
                     <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase',
-                      r24.readiness.status === 'ready' ? 'text-success bg-success border-success'
-                        : r24.readiness.status === 'warning' ? 'text-warning bg-warning border-warning'
-                        : 'text-destructive bg-destructive border-destructive')}>
+                      r24.readiness.status === 'ready' ? 'text-success bg-success/10 border-success/30'
+                        : r24.readiness.status === 'warning' ? 'text-warning bg-warning/10 border-warning/30'
+                        : 'text-destructive bg-destructive/10 border-destructive/30')}>
                       {r24.readiness.status}
                     </span>
                   </div>

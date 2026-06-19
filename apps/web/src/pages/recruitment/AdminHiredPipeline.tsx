@@ -62,10 +62,10 @@ interface HiredApplication {
 }
 
 const PRE_JOINEE_STATUS: Record<string, { label: string; className: string }> = {
-  pending:   { label: 'Invitation Sent',  className: 'bg-info   text-info   border-info'   },
-  submitted: { label: 'Form Submitted',   className: 'bg-warning  text-warning  border-warning'  },
-  approved:  { label: 'Approved',         className: 'bg-success text-success border-success' },
-  rejected:  { label: 'Rejected',         className: 'bg-destructive    text-destructive    border-destructive'    },
+  pending:   { label: 'Invitation Sent',  className: 'bg-info/10   text-info   border-info/30'   },
+  submitted: { label: 'Form Submitted',   className: 'bg-warning/10  text-warning  border-warning/30'  },
+  approved:  { label: 'Approved',         className: 'bg-success/10 text-success border-success/30' },
+  rejected:  { label: 'Rejected',         className: 'bg-destructive/10    text-destructive    border-destructive/30'    },
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -128,9 +128,9 @@ export function AdminHiredPipeline() {
       {/* Stats strip */}
       <div className="grid grid-cols-3 gap-3 mb-4">
         {[
-          { label: 'Awaiting Preboarding', value: pending,   color: 'text-warning',   bg: 'bg-warning',   icon: AlertCircle },
-          { label: 'Preboarding Sent',      value: initiated, color: 'text-info',    bg: 'bg-info',    icon: Mail        },
-          { label: 'Total Hired',           value: rows.length, color: 'text-success', bg: 'bg-success', icon: UserCheck  },
+          { label: 'Awaiting Preboarding', value: pending,   color: 'text-warning',   bg: 'bg-warning/10',   icon: AlertCircle },
+          { label: 'Preboarding Sent',      value: initiated, color: 'text-info',    bg: 'bg-info/10',    icon: Mail        },
+          { label: 'Total Hired',           value: rows.length, color: 'text-success', bg: 'bg-success/10', icon: UserCheck  },
         ].map(s => (
           <div key={s.label} className={cn('rounded-xl border p-4 flex items-center gap-3', s.bg)}>
             <div className={cn('h-8 w-8 rounded-full flex items-center justify-center bg-white/60')}>

@@ -594,8 +594,8 @@ export function ESIManagement() {
                 sub={`/ ${totalEmployees} active workforce`}
                 footer="Corporate Scope:"
                 footerValue={todayYM}
-                iconBg="bg-accent-coral dark:bg-accent-coral/40"
-                iconBorder="border-accent-coral dark:border-accent-coral"
+                iconBg="bg-accent-coral/10 dark:bg-accent-coral/40"
+                iconBorder="border-accent-coral/20 dark:border-accent-coral"
                 iconColor="text-accent-coral dark:text-accent-coral"
               />
               <ColoredStatCard
@@ -605,8 +605,8 @@ export function ESIManagement() {
                 sub={`${config?.employee_contribution_pct ?? 0.75}% share`}
                 footer="ESI Wage Base:"
                 footerValue={fmtCurrency(contribList.reduce((s, c) => s + (Number(c.esi_wages) || 0), 0))}
-                iconBg="bg-success dark:bg-success/40"
-                iconBorder="border-success dark:border-success"
+                iconBg="bg-success/10 dark:bg-success/40"
+                iconBorder="border-success/20 dark:border-success"
                 iconColor="text-success dark:text-success"
               />
               <ColoredStatCard

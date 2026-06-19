@@ -173,9 +173,9 @@ function fmtMins(m: number | null): string {
 }
 
 const ANOMALY_SEVERITY_COLOR: Record<string, string> = {
-  info:     'text-info bg-info border-info',
-  warning:  'text-warning bg-warning border-warning',
-  critical: 'text-destructive bg-destructive border-destructive',
+  info:     'text-info bg-info/10 border-info/30',
+  warning:  'text-warning bg-warning/10 border-warning/30',
+  critical: 'text-destructive bg-destructive/10 border-destructive/30',
 }
 
 const ANOMALY_LABELS: Record<string, string> = {
@@ -193,17 +193,17 @@ const ANOMALY_LABELS: Record<string, string> = {
 }
 
 const STATE_STYLES: Record<string, string> = {
-  PRESENT:           'bg-success text-success',
-  LATE:              'bg-warning text-warning',
-  HALF_DAY:          'bg-accent-coral text-accent-coral',
-  ABSENT:            'bg-destructive text-destructive',
-  HOLIDAY:           'bg-warning text-warning',
+  PRESENT:           'bg-success/15 text-success',
+  LATE:              'bg-warning/15 text-warning',
+  HALF_DAY:          'bg-accent-coral/15 text-accent-coral',
+  ABSENT:            'bg-destructive/15 text-destructive',
+  HOLIDAY:           'bg-warning/15 text-warning',
   WEEKLY_OFF:        'bg-muted text-muted-foreground',
-  WORKED_ON_OFF:     'bg-accent-violet text-accent-violet',
-  WORKED_ON_HOLIDAY: 'bg-primary text-primary',
-  INCOMPLETE_PUNCH:  'bg-accent-coral text-accent-coral',
-  MANUAL_REVIEW:     'bg-destructive text-destructive',
-  AUTO_REGULARIZED:  'bg-accent-teal text-accent-teal',
+  WORKED_ON_OFF:     'bg-accent-violet/15 text-accent-violet',
+  WORKED_ON_HOLIDAY: 'bg-primary/15 text-primary',
+  INCOMPLETE_PUNCH:  'bg-accent-coral/15 text-accent-coral',
+  MANUAL_REVIEW:     'bg-destructive/15 text-destructive',
+  AUTO_REGULARIZED:  'bg-accent-teal/15 text-accent-teal',
 }
 
 const SOURCE_ICON: Record<string, string> = {
@@ -944,8 +944,8 @@ function TabReplay({
                     className={cn(
                       'text-[10px]',
                       p.punch_type === 'IN'
-                        ? 'text-success border-success bg-success'
-                        : 'text-destructive border-destructive bg-destructive',
+                        ? 'text-success border-success/30 bg-success/10'
+                        : 'text-destructive border-destructive/30 bg-destructive/10',
                     )}
                   >
                     {p.punch_type}
@@ -1013,8 +1013,8 @@ function TabReplay({
                     className={cn(
                       'text-[10px]',
                       s.is_complete
-                        ? 'text-success border-success bg-success'
-                        : 'text-warning border-warning bg-warning',
+                        ? 'text-success border-success/30 bg-success/10'
+                        : 'text-warning border-warning/30 bg-warning/10',
                     )}
                   >
                     {s.is_complete ? 'complete' : 'incomplete'}
@@ -1180,9 +1180,9 @@ function TabLocks({
 
 function otHeatColor(minutes: number): string {
   if (minutes === 0)       return 'bg-muted/40 text-muted-foreground/40'
-  if (minutes <= 60)       return 'bg-warning text-warning'
-  if (minutes <= 120)      return 'bg-warning text-warning'
-  return 'bg-destructive text-destructive'
+  if (minutes <= 60)       return 'bg-warning/15 text-warning'
+  if (minutes <= 120)      return 'bg-warning/30 text-warning'
+  return 'bg-destructive/30 text-destructive'
 }
 
 function buildCalendarDays(month: string): string[] {
@@ -1313,9 +1313,9 @@ function TabOtHeatmap({
                   <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
                     {[
                       { cls: 'bg-muted/40',  label: 'No OT' },
-                      { cls: 'bg-warning', label: '1–60m' },
-                      { cls: 'bg-warning', label: '1–2h' },
-                      { cls: 'bg-destructive',   label: '2h+' },
+                      { cls: 'bg-warning/15', label: '1–60m' },
+                      { cls: 'bg-warning/30', label: '1–2h' },
+                      { cls: 'bg-destructive/30',   label: '2h+' },
                     ].map(({ cls, label }) => (
                       <span key={label} className="flex items-center gap-1">
                         <span className={cn('h-2.5 w-2.5 rounded-sm', cls)} />
@@ -1419,7 +1419,7 @@ function TabCompliance({
                 key={entry.employee_id}
                 className={cn(
                   'rounded-lg border p-4 space-y-2',
-                  hasCritical ? 'border-destructive bg-destructive/40' : 'border-border bg-card',
+                  hasCritical ? 'border-destructive/40 bg-destructive/40' : 'border-border bg-card',
                 )}
               >
                 <div className="flex items-center justify-between gap-2">

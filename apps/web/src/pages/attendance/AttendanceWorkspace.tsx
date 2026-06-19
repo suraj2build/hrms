@@ -201,9 +201,9 @@ function fmtMins(m: number | null): string {
 }
 
 const ANOMALY_SEVERITY_COLOR: Record<string, string> = {
-  info:     'text-info bg-info border-info',
-  warning:  'text-warning bg-warning border-warning',
-  critical: 'text-destructive bg-destructive border-destructive',
+  info:     'text-info bg-info/10 border-info/30',
+  warning:  'text-warning bg-warning/10 border-warning/30',
+  critical: 'text-destructive bg-destructive/10 border-destructive/30',
 }
 
 const ANOMALY_LABELS: Record<string, string> = {
@@ -217,13 +217,13 @@ const ANOMALY_LABELS: Record<string, string> = {
 }
 
 const STATE_STYLES: Record<string, string> = {
-  PRESENT:           'bg-success text-success',
-  LATE:              'bg-warning text-warning',
-  ABSENT:            'bg-destructive text-destructive',
-  HOLIDAY:           'bg-warning text-warning',
+  PRESENT:           'bg-success/15 text-success',
+  LATE:              'bg-warning/15 text-warning',
+  ABSENT:            'bg-destructive/15 text-destructive',
+  HOLIDAY:           'bg-warning/15 text-warning',
   WEEKLY_OFF:        'bg-muted text-muted-foreground',
-  INCOMPLETE_PUNCH:  'bg-accent-coral text-accent-coral',
-  AUTO_REGULARIZED:  'bg-accent-teal text-accent-teal',
+  INCOMPLETE_PUNCH:  'bg-accent-coral/15 text-accent-coral',
+  AUTO_REGULARIZED:  'bg-accent-teal/15 text-accent-teal',
 }
 
 // ── Shared Sub-components ──────────────────────────────────────────────────────
@@ -362,11 +362,11 @@ function TabLive({ stats, statsLoading }: { stats: AttendanceStats | undefined; 
   })
 
   const kpiItems = [
-    { label: 'Present',   value: stats?.present  ?? 0, bg: 'bg-success',   text: 'text-success'  },
-    { label: 'Absent',    value: stats?.absent   ?? 0, bg: 'bg-destructive',     text: 'text-destructive'    },
-    { label: 'Late',      value: stats?.late     ?? 0, bg: 'bg-warning',  text: 'text-warning' },
-    { label: 'WFH',       value: stats?.wfh      ?? 0, bg: 'bg-info',    text: 'text-info'   },
-    { label: 'On Leave',  value: stats?.on_leave ?? 0, bg: 'bg-accent-violet',  text: 'text-accent-violet' },
+    { label: 'Present',   value: stats?.present  ?? 0, bg: 'bg-success/10',   text: 'text-success'  },
+    { label: 'Absent',    value: stats?.absent   ?? 0, bg: 'bg-destructive/10',     text: 'text-destructive'    },
+    { label: 'Late',      value: stats?.late     ?? 0, bg: 'bg-warning/10',  text: 'text-warning' },
+    { label: 'WFH',       value: stats?.wfh      ?? 0, bg: 'bg-info/10',    text: 'text-info'   },
+    { label: 'On Leave',  value: stats?.on_leave ?? 0, bg: 'bg-accent-violet/10',  text: 'text-accent-violet' },
     { label: 'Total',     value: stats?.total    ?? 0, bg: 'bg-muted/50',   text: 'text-foreground'  },
   ]
 
@@ -403,8 +403,8 @@ function TabLive({ stats, statsLoading }: { stats: AttendanceStats | undefined; 
                     variant="outline"
                     className={cn(
                       'text-[10px] capitalize',
-                      emp.status === 'PRESENT' ? 'text-success border-success bg-success' :
-                      emp.status === 'ABSENT'  ? 'text-destructive border-destructive bg-destructive' :
+                      emp.status === 'PRESENT' ? 'text-success border-success/30 bg-success/10' :
+                      emp.status === 'ABSENT'  ? 'text-destructive border-destructive/30 bg-destructive/10' :
                       emp.status === 'LATE'    ? 'text-warning border-warning/30 bg-warning/10' : '',
                     )}
                   >
@@ -687,9 +687,9 @@ function TabOT({ month, onMonthChange }: { month: string; onMonthChange: (m: str
                         variant="outline"
                         className={cn(
                           'text-[10px] capitalize',
-                          r.status === 'APPROVED'  ? 'text-success border-success bg-success' :
-                          r.status === 'PENDING'   ? 'text-warning border-warning bg-warning' :
-                          r.status === 'REJECTED'  ? 'text-destructive border-destructive bg-destructive' : '',
+                          r.status === 'APPROVED'  ? 'text-success border-success/30 bg-success/10' :
+                          r.status === 'PENDING'   ? 'text-warning border-warning/30 bg-warning/10' :
+                          r.status === 'REJECTED'  ? 'text-destructive border-destructive/30 bg-destructive/10' : '',
                         )}
                       >
                         {r.status}
@@ -978,7 +978,7 @@ function TabReplay({ employees }: { employees: Employee[] }) {
                       variant="outline"
                       className={cn(
                         'text-[10px]',
-                        p.punch_type === 'IN' ? 'text-success border-success bg-success' : 'text-destructive border-destructive bg-destructive',
+                        p.punch_type === 'IN' ? 'text-success border-success/30 bg-success/10' : 'text-destructive border-destructive/30 bg-destructive/10',
                       )}
                     >
                       {p.punch_type}
@@ -1005,7 +1005,7 @@ function TabReplay({ employees }: { employees: Employee[] }) {
                     variant="outline"
                     className={cn(
                       'text-[10px]',
-                      s.is_complete ? 'text-success border-success bg-success' : 'text-warning border-warning bg-warning',
+                      s.is_complete ? 'text-success border-success/30 bg-success/10' : 'text-warning border-warning/30 bg-warning/10',
                     )}
                   >
                     {s.is_complete ? 'complete' : 'incomplete'}

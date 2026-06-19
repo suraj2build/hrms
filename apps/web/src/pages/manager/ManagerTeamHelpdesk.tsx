@@ -45,17 +45,17 @@ interface HelpdeskResponse {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const PRIORITY_COLORS: Record<string, string> = {
-  urgent: 'bg-destructive text-destructive',
-  high:   'bg-accent-coral text-accent-coral',
-  medium: 'bg-warning text-warning',
+  urgent: 'bg-destructive/15 text-destructive',
+  high:   'bg-accent-coral/15 text-accent-coral',
+  medium: 'bg-warning/15 text-warning',
   low:    'bg-muted text-muted-foreground',
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  open:               'bg-info text-info',
-  in_progress:        'bg-warning text-warning',
-  awaiting_employee:  'bg-primary text-primary',
-  resolved:           'bg-success text-success',
+  open:               'bg-info/15 text-info',
+  in_progress:        'bg-warning/15 text-warning',
+  awaiting_employee:  'bg-primary/15 text-primary',
+  resolved:           'bg-success/15 text-success',
   closed:             'bg-muted text-muted-foreground',
 }
 

@@ -81,10 +81,10 @@ function statusBadge(s: TicketStatus): { variant: BadgeVariant; label: string } 
 
 function priorityColor(p: TicketPriority): string {
   switch (p) {
-    case 'urgent': return 'text-destructive border-destructive bg-destructive'
-    case 'high':   return 'text-accent-coral border-accent-coral bg-accent-coral'
-    case 'medium': return 'text-warning border-warning bg-warning'
-    default:       return 'text-success border-success bg-success'
+    case 'urgent': return 'text-destructive border-destructive/30 bg-destructive/10'
+    case 'high':   return 'text-accent-coral border-accent-coral/30 bg-accent-coral/10'
+    case 'medium': return 'text-warning border-warning/30 bg-warning/10'
+    default:       return 'text-success border-success/30 bg-success/10'
   }
 }
 

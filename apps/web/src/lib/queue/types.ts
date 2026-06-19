@@ -116,10 +116,10 @@ export interface SmartRecommendation {
 export const SEVERITY_META: Record<QueueSeverity, {
   label: string; color: string; bg: string; border: string; dot: string
 }> = {
-  critical: { label: 'Critical', color: 'text-destructive',    bg: 'bg-destructive',     border: 'border-destructive',    dot: 'bg-destructive'    },
-  high:     { label: 'High',     color: 'text-accent-coral', bg: 'bg-accent-coral',  border: 'border-accent-coral', dot: 'bg-accent-coral' },
-  medium:   { label: 'Medium',   color: 'text-warning',  bg: 'bg-warning',   border: 'border-warning',  dot: 'bg-warning'  },
-  low:      { label: 'Low',      color: 'text-info',   bg: 'bg-info',    border: 'border-info',   dot: 'bg-info'   },
+  critical: { label: 'Critical', color: 'text-destructive',    bg: 'bg-destructive/10',     border: 'border-destructive/30',    dot: 'bg-destructive'    },
+  high:     { label: 'High',     color: 'text-accent-coral', bg: 'bg-accent-coral/10',  border: 'border-accent-coral/30', dot: 'bg-accent-coral' },
+  medium:   { label: 'Medium',   color: 'text-warning',  bg: 'bg-warning/10',   border: 'border-warning/30',  dot: 'bg-warning'  },
+  low:      { label: 'Low',      color: 'text-info',   bg: 'bg-info/10',    border: 'border-info/30',   dot: 'bg-info'   },
   info:     { label: 'Info',     color: 'text-muted-foreground',  bg: 'bg-muted',   border: 'border-border',  dot: 'bg-muted'  },
 } as const satisfies Record<QueueSeverity, { label: string; color: string; bg: string; border: string; dot: string }>
 

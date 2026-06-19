@@ -379,12 +379,12 @@ const LEDGER_COLUMNS: DataTableColumn<LedgerRow>[] = [
 
 // ── Leave card color palette (cycles by index) ─────────────────────────────
 const LEAVE_CARD_COLORS = [
-  { topBar: 'bg-info',    iconBg: 'bg-info dark:bg-info/40',    iconText: 'text-info dark:text-info',    bar: 'bg-info'    },
-  { topBar: 'bg-success', iconBg: 'bg-success dark:bg-success/40', iconText: 'text-success dark:text-success', bar: 'bg-success' },
-  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet dark:bg-accent-violet/40',  iconText: 'text-accent-violet dark:text-accent-violet',   bar: 'bg-accent-violet'  },
-  { topBar: 'bg-destructive',    iconBg: 'bg-destructive dark:bg-destructive/40',    iconText: 'text-destructive dark:text-destructive',    bar: 'bg-destructive'    },
-  { topBar: 'bg-warning',   iconBg: 'bg-warning dark:bg-warning/40',   iconText: 'text-warning dark:text-warning',   bar: 'bg-warning'   },
-  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal dark:bg-accent-teal/40',    iconText: 'text-accent-teal dark:text-accent-teal',    bar: 'bg-accent-teal'    },
+  { topBar: 'bg-info',    iconBg: 'bg-info/15 dark:bg-info/40',    iconText: 'text-info dark:text-info',    bar: 'bg-info'    },
+  { topBar: 'bg-success', iconBg: 'bg-success/15 dark:bg-success/40', iconText: 'text-success dark:text-success', bar: 'bg-success' },
+  { topBar: 'bg-accent-violet',  iconBg: 'bg-accent-violet/15 dark:bg-accent-violet/40',  iconText: 'text-accent-violet dark:text-accent-violet',   bar: 'bg-accent-violet'  },
+  { topBar: 'bg-destructive',    iconBg: 'bg-destructive/15 dark:bg-destructive/40',    iconText: 'text-destructive dark:text-destructive',    bar: 'bg-destructive'    },
+  { topBar: 'bg-warning',   iconBg: 'bg-warning/15 dark:bg-warning/40',   iconText: 'text-warning dark:text-warning',   bar: 'bg-warning'   },
+  { topBar: 'bg-accent-teal',    iconBg: 'bg-accent-teal/15 dark:bg-accent-teal/40',    iconText: 'text-accent-teal dark:text-accent-teal',    bar: 'bg-accent-teal'    },
 ] as const
 
 // ── Main component ────────────────────────────────────────────────────────────
