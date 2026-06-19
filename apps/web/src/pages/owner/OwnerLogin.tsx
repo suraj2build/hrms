@@ -56,9 +56,9 @@ export function OwnerLogin() {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 text-slate-900 antialiased overflow-hidden">
+    <div className="relative min-h-screen flex items-center justify-center p-4 text-foreground antialiased overflow-hidden">
       {/* Ambient backdrop */}
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-slate-50" />
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-background" />
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(110%_110%_at_0%_0%,rgba(13,148,136,0.14),transparent_45%),radial-gradient(110%_110%_at_100%_0%,rgba(79,70,229,0.12),transparent_45%),radial-gradient(130%_130%_at_50%_100%,rgba(56,189,248,0.10),transparent_50%)]" />
       {/* Faint grid */}
       <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.4] [background-image:linear-gradient(to_right,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.04)_1px,transparent_1px)] [background-size:38px_38px]" />
@@ -72,35 +72,38 @@ export function OwnerLogin() {
           <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-slate-900 to-slate-600 bg-clip-text text-transparent">
             Control Center
           </h1>
-          <p className="text-sm text-slate-500 mt-1.5">Platform owner — sign in to continue</p>
+          <p className="text-sm text-muted-foreground mt-1.5">Platform owner — sign in to continue</p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200/70 bg-white/70 backdrop-blur-xl p-6 shadow-xl shadow-slate-900/5">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-xl p-6 shadow-xl shadow-slate-900/5">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Email</label>
+              <label htmlFor="owner-login-email" className="text-sm font-medium text-foreground">Email</label>
               <Input
+                id="owner-login-email"
                 type="email"
                 placeholder="owner@platform.local"
-                className="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-teal-500/30"
+                className="bg-card border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-teal-500/30"
                 {...register('email')}
               />
               {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Password</label>
+              <label htmlFor="owner-login-password" className="text-sm font-medium text-foreground">Password</label>
               <div className="relative">
                 <Input
+                  id="owner-login-password"
                   type={showPw ? 'text' : 'password'}
                   placeholder="••••••••"
-                  className="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 pr-10 focus-visible:ring-teal-500/30"
+                  className="bg-card border-border text-foreground placeholder:text-muted-foreground pr-10 focus-visible:ring-teal-500/30"
                   {...register('password')}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={showPw ? 'Hide password' : 'Show password'}
                 >
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -119,7 +122,7 @@ export function OwnerLogin() {
           </form>
         </div>
 
-        <p className="flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
+        <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
           <ShieldCheck className="h-3.5 w-3.5" />
           Restricted to platform administrators only.
         </p>

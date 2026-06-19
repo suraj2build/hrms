@@ -156,8 +156,8 @@ export function OwnerTenants() {
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tenants</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{data?.meta?.total ?? 0} total companies</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Tenants</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{data?.meta?.total ?? 0} total companies</p>
         </div>
         {isOwner() && (
           <Button
@@ -172,22 +172,23 @@ export function OwnerTenants() {
       {/* Filters */}
       <div className="flex gap-2">
         <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search by name…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-8 bg-white/60 backdrop-blur border-white/70 text-slate-900 placeholder:text-slate-400 h-9 text-sm shadow-sm"
+            className="pl-8 bg-card backdrop-blur border-border text-foreground placeholder:text-muted-foreground h-9 text-sm shadow-sm"
           />
         </div>
         {['', 'active', 'trial', 'suspended', 'expired'].map(s => (
           <button
             key={s}
             onClick={() => setStatusFilt(s)}
+            aria-pressed={statusFilt === s}
             className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
               statusFilt === s
                 ? 'bg-gradient-to-r from-teal-500 to-indigo-600 text-white shadow-md shadow-teal-500/20'
-                : 'bg-white/60 backdrop-blur border border-white/70 text-slate-600 hover:text-slate-900 hover:bg-white shadow-sm'
+                : 'bg-card backdrop-blur border border-border text-muted-foreground hover:text-foreground hover:bg-muted shadow-sm'
             }`}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -196,23 +197,23 @@ export function OwnerTenants() {
       </div>
 
       {/* Table */}
-      <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full min-w-[840px] text-sm">
-          <thead className="bg-white/50 border-b border-slate-200/70">
+          <thead className="bg-card border-b border-border">
             <tr>
               {['Company', 'Plan', 'Status', 'Rate / emp', 'Employees', 'Live Activity', 'Last Payroll'].map(h => (
-                <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-3">{h}</th>
+                <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-4 py-3">{h}</th>
               ))}
               <th className="w-8" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i}><td colSpan={8} className="px-4 py-3"><div className="h-4 w-full bg-slate-100 animate-pulse rounded" /></td></tr>
+              <tr key={i}><td colSpan={8} className="px-4 py-3"><div className="h-4 w-full bg-muted animate-pulse rounded" /></td></tr>
             ))}
             {!isLoading && tenants.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">No tenants found</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">No tenants found</td></tr>
             )}
             {tenants.map(t => {
               const h = healthMap.get(t.id)
@@ -226,16 +227,16 @@ export function OwnerTenants() {
               <tr
                 key={t.id}
                 onClick={() => navigate(`/owner/tenants/${t.id}`)}
-                className="hover:bg-slate-100/50 cursor-pointer transition-colors"
+                className="hover:bg-muted cursor-pointer transition-colors"
               >
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="h-7 w-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
-                      <Building2 className="h-3.5 w-3.5 text-slate-500" />
+                    <div className="h-7 w-7 rounded-lg bg-muted border border-border flex items-center justify-center flex-shrink-0">
+                      <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
                     </div>
                     <div>
-                      <p className="font-medium text-slate-900 text-[13px]">{t.name}</p>
-                      <p className="text-[11px] text-slate-500">{t.slug}</p>
+                      <p className="font-medium text-foreground text-[13px]">{t.name}</p>
+                      <p className="text-[11px] text-muted-foreground">{t.slug}</p>
                     </div>
                   </div>
                 </td>
@@ -243,7 +244,7 @@ export function OwnerTenants() {
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
                     t.plan === 'enterprise'
                       ? 'border-purple-300 text-purple-700 bg-purple-100/70'
-                      : 'border-slate-200 text-slate-600 bg-slate-100/70'
+                      : 'border-border text-muted-foreground bg-muted'
                   }`}>
                     {t.plan}
                   </span>
@@ -254,19 +255,19 @@ export function OwnerTenants() {
                     {t.status}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-slate-700 text-[13px]">
-                  {t.per_employee_rate > 0 ? fmtCurrency(t.per_employee_rate) : <span className="text-slate-400">—</span>}
+                <td className="px-4 py-3 text-foreground text-[13px]">
+                  {t.per_employee_rate > 0 ? fmtCurrency(t.per_employee_rate) : <span className="text-muted-foreground">—</span>}
                 </td>
 
                 {/* Employees */}
                 <td className="px-4 py-3">
                   {h ? (
-                    <div className="flex items-center gap-1.5 text-[12px] text-slate-700">
-                      <Users2 className="h-3 w-3 text-slate-500 flex-shrink-0" />
+                    <div className="flex items-center gap-1.5 text-[12px] text-foreground">
+                      <Users2 className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                       {h.employee_count}
                     </div>
                   ) : (
-                    <span className="text-slate-400 text-[12px]">—</span>
+                    <span className="text-muted-foreground text-[12px]">—</span>
                   )}
                 </td>
 
@@ -276,18 +277,18 @@ export function OwnerTenants() {
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-1.5 text-[12px]">
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${h.active_users > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className={h.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
+                        <span className={h.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}>
                           {h.active_users} user{h.active_users !== 1 ? 's' : ''}
                         </span>
                       </div>
                       {h.last_login_at && (
-                        <p className="text-[10px] text-slate-400">
+                        <p className="text-[10px] text-muted-foreground">
                           last {timeAgo(h.last_login_at)}
                         </p>
                       )}
                     </div>
                   ) : (
-                    <span className="text-slate-400 text-[12px]">—</span>
+                    <span className="text-muted-foreground text-[12px]">—</span>
                   )}
                 </td>
 
@@ -295,18 +296,18 @@ export function OwnerTenants() {
                 <td className="px-4 py-3">
                   {lastPayroll ? (
                     <div className="space-y-0.5">
-                      <p className="text-[12px] text-slate-700">{lastPayroll.month}</p>
-                      <p className={`text-[10px] font-medium ${payrollStatusColor[lastPayroll.status] ?? 'text-slate-500'}`}>
+                      <p className="text-[12px] text-foreground">{lastPayroll.month}</p>
+                      <p className={`text-[10px] font-medium ${payrollStatusColor[lastPayroll.status] ?? 'text-muted-foreground'}`}>
                         {lastPayroll.status}
                       </p>
                     </div>
                   ) : (
-                    <span className="text-slate-400 text-[12px]">—</span>
+                    <span className="text-muted-foreground text-[12px]">—</span>
                   )}
                 </td>
 
                 <td className="px-4 py-3">
-                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </td>
               </tr>
               )
@@ -318,14 +319,14 @@ export function OwnerTenants() {
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={open => { setCreateOpen(open); if (!open) setShowPwd(false) }}>
-        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-lg">
+        <DialogContent className="bg-card border-border text-foreground max-w-lg">
           <DialogHeader>
             <DialogTitle>Create New Tenant</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto pr-1">
 
             {/* ── Tenant details ── */}
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Tenant Details</p>
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Tenant Details</p>
 
             {[
               { key: 'name',              label: 'Company Name *',        type: 'text',   placeholder: 'Acme Corp' },
@@ -333,81 +334,88 @@ export function OwnerTenants() {
               { key: 'per_employee_rate', label: 'Per-Employee Rate (₹)', type: 'number', placeholder: '299' },
             ].map(({ key, label, type, placeholder }) => (
               <div key={key} className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-700">{label}</label>
+                <label htmlFor={`new-tenant-${key}`} className="text-xs font-medium text-foreground">{label}</label>
                 <Input
+                  id={`new-tenant-${key}`}
                   type={type}
                   placeholder={placeholder}
                   value={(form as any)[key]}
                   onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                  className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm"
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-sm"
                 />
               </div>
             ))}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-700">Plan</label>
+                <label htmlFor="new-tenant-plan" className="text-xs font-medium text-foreground">Plan</label>
                 <select
+                  id="new-tenant-plan"
                   value={form.plan}
                   onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
-                  className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-1.5 text-sm text-slate-900"
+                  className="w-full bg-muted border border-border rounded-md px-3 py-1.5 text-sm text-foreground"
                 >
                   <option value="standard">Standard</option>
                   <option value="enterprise">Enterprise</option>
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-700">Country</label>
+                <label htmlFor="new-tenant-country" className="text-xs font-medium text-foreground">Country</label>
                 <Input
+                  id="new-tenant-country"
                   placeholder="IN"
                   value={form.country}
                   onChange={e => setForm(f => ({ ...f, country: e.target.value.toUpperCase().slice(0, 2) }))}
-                  className="bg-slate-100 border-slate-200 text-slate-900 h-8 text-sm"
+                  className="bg-muted border-border text-foreground h-8 text-sm"
                 />
               </div>
             </div>
 
             {/* ── Initial Admin (optional) ── */}
-            <div className="border-t border-slate-200 pt-3">
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-3">
-                Initial Admin Account <span className="text-slate-400 normal-case font-normal">(optional — can provision later)</span>
+            <div className="border-t border-border pt-3">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                Initial Admin Account <span className="text-muted-foreground normal-case font-normal">(optional — can provision later)</span>
               </p>
 
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700">Admin Name</label>
+                  <label htmlFor="new-tenant-admin-name" className="text-xs font-medium text-foreground">Admin Name</label>
                   <Input
+                    id="new-tenant-admin-name"
                     placeholder="John Smith"
                     value={form.admin_name}
                     onChange={e => setForm(f => ({ ...f, admin_name: e.target.value }))}
-                    className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm"
+                    className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700">Admin Email</label>
+                  <label htmlFor="new-tenant-admin-email" className="text-xs font-medium text-foreground">Admin Email</label>
                   <Input
+                    id="new-tenant-admin-email"
                     type="email"
                     placeholder="admin@acmecorp.com"
                     value={form.admin_email}
                     onChange={e => setForm(f => ({ ...f, admin_email: e.target.value }))}
-                    className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm"
+                    className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700">Temporary Password</label>
+                  <label htmlFor="new-tenant-admin-password" className="text-xs font-medium text-foreground">Temporary Password</label>
                   <div className="flex gap-1.5">
                     <div className="relative flex-1">
                       <Input
+                        id="new-tenant-admin-password"
                         type={showPwd ? 'text' : 'password'}
                         placeholder="Min 8 characters"
                         value={form.admin_password}
                         onChange={e => setForm(f => ({ ...f, admin_password: e.target.value }))}
-                        className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400 h-8 text-sm pr-8"
+                        className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-sm pr-8"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPwd(v => !v)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label={showPwd ? 'Hide password' : 'Show password'}
                       >
                         {showPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                       </button>
@@ -417,12 +425,12 @@ export function OwnerTenants() {
                       variant="outline"
                       size="sm"
                       onClick={generatePassword}
-                      className="h-8 border-slate-200 text-slate-500 hover:text-slate-900 gap-1 px-2"
+                      className="h-8 border-border text-muted-foreground hover:text-foreground gap-1 px-2"
                     >
                       <RefreshCw className="h-3 w-3" /> Generate
                     </Button>
                   </div>
-                  <p className="text-[10px] text-slate-400">This password will be shown once — save it before creating.</p>
+                  <p className="text-[10px] text-muted-foreground">This password will be shown once — save it before creating.</p>
                 </div>
               </div>
             </div>
@@ -437,7 +445,7 @@ export function OwnerTenants() {
           )}
 
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)} className="text-slate-500">Cancel</Button>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)} className="text-muted-foreground">Cancel</Button>
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.name.trim() || createMut.isPending}

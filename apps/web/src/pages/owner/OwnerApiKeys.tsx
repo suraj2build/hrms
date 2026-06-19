@@ -82,8 +82,8 @@ export function OwnerApiKeys() {
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">API Keys</h1>
-          <p className="text-sm text-slate-500">{keys.filter(k => k.is_active).length} active keys</p>
+          <h1 className="text-2xl font-bold text-foreground">API Keys</h1>
+          <p className="text-sm text-muted-foreground">{keys.filter(k => k.is_active).length} active keys</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 gap-1.5">
           <Plus className="h-4 w-4" /> Generate Key
@@ -93,56 +93,58 @@ export function OwnerApiKeys() {
       {/* Keys grouped by tenant */}
       {isLoading && (
         <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 bg-slate-100 animate-pulse rounded-xl" />)}
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 bg-muted animate-pulse rounded-xl" />)}
         </div>
       )}
 
       {!isLoading && keys.length === 0 && (
-        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-slate-500">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-muted-foreground">
           No API keys yet. Generate one for a tenant.
         </div>
       )}
 
       {Object.entries(byTenant).map(([tenantId, tKeys]) => (
-        <div key={tenantId} className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-slate-200 flex items-center gap-2">
-            <Key className="h-3.5 w-3.5 text-slate-500" />
-            <span className="text-sm font-semibold text-slate-700">{tenantNameMap[tenantId] ?? tenantId}</span>
-            <span className="text-[11px] text-slate-400 ml-auto">{tKeys.filter(k => k.is_active).length} active</span>
+        <div key={tenantId} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border flex items-center gap-2">
+            <Key className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">{tenantNameMap[tenantId] ?? tenantId}</span>
+            <span className="text-[11px] text-muted-foreground ml-auto">{tKeys.filter(k => k.is_active).length} active</span>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-white/50">
+            <thead className="bg-card">
               <tr>
                 {['Name', 'Prefix', 'Scopes', 'Last Used', 'Status', ''].map(h => (
-                  <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2">{h}</th>
+                  <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-4 py-2">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {tKeys.map(k => (
-                <tr key={k.id} className="hover:bg-slate-100/30">
-                  <td className="px-4 py-2.5 text-slate-700 text-[13px]">{k.name}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-slate-500">{k.key_prefix}…</td>
+                <tr key={k.id} className="hover:bg-muted">
+                  <td className="px-4 py-2.5 text-foreground text-[13px]">{k.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-muted-foreground">{k.key_prefix}…</td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap gap-1">
                       {k.scopes.map(s => (
-                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{s}</span>
+                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{s}</span>
                       ))}
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 text-[12px] text-slate-500">{fmtDate(k.last_used_at)}</td>
+                  <td className="px-4 py-2.5 text-[12px] text-muted-foreground">{fmtDate(k.last_used_at)}</td>
                   <td className="px-4 py-2.5">
                     {k.is_active
                       ? <span className="flex items-center gap-1 text-[11px] text-emerald-600"><CheckCircle2 className="h-3 w-3" /> Active</span>
-                      : <span className="flex items-center gap-1 text-[11px] text-slate-400"><Clock className="h-3 w-3" /> Revoked</span>
+                      : <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="h-3 w-3" /> Revoked</span>
                     }
                   </td>
                   <td className="px-4 py-2.5">
                     {k.is_active && (
                       <button
                         onClick={() => revokeMut.mutate(k.id)}
-                        className="text-slate-400 hover:text-red-600 transition-colors"
+                        className="text-muted-foreground hover:text-red-600 transition-colors"
                         title="Revoke key"
+                        aria-label="Revoke key"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -152,44 +154,47 @@ export function OwnerApiKeys() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-md">
+        <DialogContent className="bg-card border-border text-foreground max-w-md">
           <DialogHeader><DialogTitle>Generate API Key</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Tenant *</label>
+              <label htmlFor="new-key-tenant" className="text-sm font-medium text-foreground">Tenant *</label>
               <select
+                id="new-key-tenant"
                 value={form.tenant_id}
                 onChange={e => setForm(f => ({ ...f, tenant_id: e.target.value }))}
-                className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-900"
+                className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm text-foreground"
               >
                 <option value="">Select tenant…</option>
                 {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Key Name</label>
+              <label htmlFor="new-key-name" className="text-sm font-medium text-foreground">Key Name</label>
               <Input
+                id="new-key-name"
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="Production"
-                className="bg-slate-100 border-slate-200 text-slate-900"
+                className="bg-muted border-border text-foreground"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Scopes</label>
+              <label className="text-sm font-medium text-foreground">Scopes</label>
               <div className="grid grid-cols-2 gap-2">
                 {ALL_SCOPES.map(s => (
-                  <label key={s} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <label key={s} className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
                     <input
                       type="checkbox"
                       checked={form.scopes.includes(s)}
                       onChange={() => toggleScope(s)}
-                      className="rounded border-slate-300"
+                      className="rounded border-border"
                     />
                     {s}
                   </label>
@@ -198,7 +203,7 @@ export function OwnerApiKeys() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)} className="text-slate-500">Cancel</Button>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)} className="text-muted-foreground">Cancel</Button>
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.tenant_id || !form.name || form.scopes.length === 0 || createMut.isPending}
@@ -212,7 +217,7 @@ export function OwnerApiKeys() {
 
       {/* New key revealed dialog — shown ONCE */}
       <Dialog open={!!newKey} onOpenChange={() => { setNewKey(null); setShowKey(false) }}>
-        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-lg">
+        <DialogContent className="bg-card border-border text-foreground max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-emerald-600">
               <CheckCircle2 className="h-5 w-5" /> API Key Generated
@@ -222,17 +227,18 @@ export function OwnerApiKeys() {
             <p className="text-sm text-amber-700 font-medium">
               ⚠ Save this key now — it will never be shown again.
             </p>
-            <div className="relative rounded-lg bg-slate-100 border border-slate-200 p-3">
+            <div className="relative rounded-lg bg-muted border border-border p-3">
               <p className="font-mono text-[12px] text-emerald-700 break-all pr-16">
                 {showKey ? newKey : '•'.repeat(Math.min((newKey?.length ?? 40), 40))}
               </p>
               <div className="absolute top-2 right-2 flex gap-1">
-                <button onClick={() => setShowKey(!showKey)} className="p-1.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700">
+                <button onClick={() => setShowKey(!showKey)} className="p-1.5 rounded bg-muted hover:bg-muted text-foreground" aria-label={showKey ? 'Hide key' : 'Show key'}>
                   {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </button>
                 <button
                   onClick={() => { navigator.clipboard.writeText(newKey ?? ''); toast.success('Copied!') }}
-                  className="p-1.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700"
+                  className="p-1.5 rounded bg-muted hover:bg-muted text-foreground"
+                  aria-label="Copy key"
                 >
                   <Copy className="h-3.5 w-3.5" />
                 </button>

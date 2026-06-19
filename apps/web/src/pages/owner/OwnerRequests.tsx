@@ -72,8 +72,8 @@ export function OwnerRequests() {
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">Signup Requests</h1>
-        <p className="text-sm text-slate-500">{data?.meta?.total ?? 0} total requests</p>
+        <h1 className="text-2xl font-bold text-foreground">Signup Requests</h1>
+        <p className="text-sm text-muted-foreground">{data?.meta?.total ?? 0} total requests</p>
       </div>
 
       {/* Status filter */}
@@ -82,10 +82,11 @@ export function OwnerRequests() {
           <button
             key={s}
             onClick={() => setStatusFilt(s)}
+            aria-pressed={statusFilt === s}
             className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
               statusFilt === s
                 ? 'bg-gradient-to-r from-teal-500 to-indigo-600 text-white shadow-md shadow-teal-500/20'
-                : 'bg-white/60 backdrop-blur border border-white/70 text-slate-600 hover:text-slate-900 hover:bg-white shadow-sm'
+                : 'bg-card backdrop-blur border border-border text-muted-foreground hover:text-foreground hover:bg-muted shadow-sm'
             }`}
           >
             {s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -96,30 +97,30 @@ export function OwnerRequests() {
       {/* Cards */}
       <div className="space-y-3">
         {isLoading && Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="h-28 bg-slate-100 animate-pulse rounded-xl" />
+          <div key={i} className="h-28 bg-muted animate-pulse rounded-xl" />
         ))}
         {!isLoading && requests.length === 0 && (
-          <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-slate-500">
+          <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-muted-foreground">
             No {statusFilt || ''} requests
           </div>
         )}
         {requests.map(r => (
-          <div key={r.id} className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4">
+          <div key={r.id} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3 min-w-0">
-                <div className="h-9 w-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center flex-shrink-0">
-                  <Building2 className="h-4 w-4 text-slate-500" />
+                <div className="h-9 w-9 rounded-lg bg-muted border border-border flex items-center justify-center flex-shrink-0">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-slate-900 text-[14px]">{r.company_name}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-[12px] text-slate-500">
+                  <p className="font-semibold text-foreground text-[14px]">{r.company_name}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-[12px] text-muted-foreground">
                     <span className="flex items-center gap-1"><Users className="h-3 w-3" />{r.contact_name}</span>
                     <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{r.contact_email}</span>
                     {r.industry   && <span>{r.industry}</span>}
                     {r.size_range && <span className="flex items-center gap-1"><Globe className="h-3 w-3" />{r.size_range} people</span>}
                   </div>
                   {r.message && (
-                    <p className="mt-1.5 text-[12px] text-slate-500 flex items-start gap-1">
+                    <p className="mt-1.5 text-[12px] text-muted-foreground flex items-start gap-1">
                       <MessageSquare className="h-3 w-3 mt-0.5 flex-shrink-0" />
                       <span className="line-clamp-2">{r.message}</span>
                     </p>
@@ -132,7 +133,7 @@ export function OwnerRequests() {
 
               <div className="flex items-center gap-2 flex-shrink-0">
                 <div className="text-right">
-                  <p className="text-[10px] text-slate-400">{fmtDate(r.created_at)}</p>
+                  <p className="text-[10px] text-muted-foreground">{fmtDate(r.created_at)}</p>
                   <span className={`text-[11px] font-medium ${
                     r.status === 'pending' ? 'text-amber-600' : r.status === 'approved' ? 'text-emerald-600' : 'text-red-600'
                   }`}>
@@ -153,7 +154,7 @@ export function OwnerRequests() {
                       onClick={() => { setRejectId(r.id); setRejectReason('') }}
                       size="sm"
                       variant="outline"
-                      className="bg-white/70 bg-none backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm h-7 text-xs gap-1"
+                      className="bg-card bg-none backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm h-7 text-xs gap-1"
                     >
                       <X className="h-3 w-3" /> Reject
                     </Button>
@@ -167,33 +168,35 @@ export function OwnerRequests() {
 
       {/* Approve dialog */}
       <Dialog open={!!approveId} onOpenChange={() => setApproveId(null)}>
-        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
+        <DialogContent className="bg-card border-border text-foreground max-w-sm">
           <DialogHeader><DialogTitle>Approve & Create Tenant</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Plan</label>
+              <label htmlFor="approve-plan" className="text-sm font-medium text-foreground">Plan</label>
               <select
+                id="approve-plan"
                 value={approveForm.plan}
                 onChange={e => setApproveForm(f => ({ ...f, plan: e.target.value }))}
-                className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-900"
+                className="w-full bg-muted border border-border rounded-md px-3 py-2 text-sm text-foreground"
               >
                 <option value="standard">Standard</option>
                 <option value="enterprise">Enterprise</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">Per-Employee Rate (₹)</label>
+              <label htmlFor="approve-rate" className="text-sm font-medium text-foreground">Per-Employee Rate (₹)</label>
               <Input
+                id="approve-rate"
                 type="number"
                 placeholder="299"
                 value={approveForm.per_employee_rate}
                 onChange={e => setApproveForm(f => ({ ...f, per_employee_rate: e.target.value }))}
-                className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400"
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setApproveId(null)} className="text-slate-500">Cancel</Button>
+            <Button variant="ghost" onClick={() => setApproveId(null)} className="text-muted-foreground">Cancel</Button>
             <Button
               onClick={() => approveId && approveMut.mutate(approveId)}
               disabled={approveMut.isPending}
@@ -207,19 +210,20 @@ export function OwnerRequests() {
 
       {/* Reject dialog */}
       <Dialog open={!!rejectId} onOpenChange={() => setRejectId(null)}>
-        <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-sm">
+        <DialogContent className="bg-card border-border text-foreground max-w-sm">
           <DialogHeader><DialogTitle>Reject Request</DialogTitle></DialogHeader>
           <div className="space-y-1.5 py-2">
-            <label className="text-sm font-medium text-slate-700">Reason *</label>
+            <label htmlFor="reject-reason" className="text-sm font-medium text-foreground">Reason *</label>
             <Input
+              id="reject-reason"
               placeholder="Not a good fit at this time"
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
-              className="bg-slate-100 border-slate-200 text-slate-900 placeholder:text-slate-400"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRejectId(null)} className="text-slate-500">Cancel</Button>
+            <Button variant="ghost" onClick={() => setRejectId(null)} className="text-muted-foreground">Cancel</Button>
             <Button
               onClick={() => rejectId && rejectMut.mutate(rejectId)}
               disabled={!rejectReason.trim() || rejectMut.isPending}

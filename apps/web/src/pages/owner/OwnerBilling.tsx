@@ -46,22 +46,22 @@ export function OwnerBilling() {
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">Billing</h1>
-        <p className="text-sm text-slate-500">Payroll-triggered billing snapshots</p>
+        <h1 className="text-2xl font-bold text-foreground">Billing</h1>
+        <p className="text-sm text-muted-foreground">Payroll-triggered billing snapshots</p>
       </div>
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
           <CreditCard className="h-8 w-8 text-emerald-600 flex-shrink-0" />
           <div>
-            <p className="text-[11px] text-slate-500 uppercase tracking-wide">Total (filtered)</p>
-            <p className="text-xl font-bold text-slate-900">{fmtCurrency(totalAmount)}</p>
+            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total (filtered)</p>
+            <p className="text-xl font-bold text-foreground">{fmtCurrency(totalAmount)}</p>
           </div>
         </div>
         {monthSummary.map(([month, amount]) => (
-          <div key={month} className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3">
-            <p className="text-[11px] text-slate-500 font-mono">{month}</p>
+          <div key={month} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-3">
+            <p className="text-[11px] text-muted-foreground font-mono">{month}</p>
             <p className="text-base font-semibold text-emerald-700 mt-0.5">{fmtCurrency(amount)}</p>
           </div>
         ))}
@@ -72,7 +72,8 @@ export function OwnerBilling() {
         <select
           value={tenantFilt}
           onChange={e => setTenantFilt(e.target.value)}
-          className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-900 min-w-[160px]"
+          aria-label="Filter by tenant"
+          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground min-w-[160px]"
         >
           <option value="">All Tenants</option>
           {tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -81,42 +82,44 @@ export function OwnerBilling() {
           type="month"
           value={monthFilt}
           onChange={e => setMonthFilt(e.target.value)}
-          className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-900"
+          aria-label="Filter by month"
+          className="bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground"
         />
         {(tenantFilt || monthFilt) && (
-          <button onClick={() => { setTenantFilt(''); setMonthFilt('') }} className="text-xs text-slate-500 hover:text-slate-800 px-2">
+          <button onClick={() => { setTenantFilt(''); setMonthFilt('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">
             Clear
           </button>
         )}
       </div>
 
       {/* Table */}
-      <div className="rounded-2xl border border-white/70 bg-white/55 backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-white border-b border-slate-200">
+          <thead className="bg-card border-b border-border">
             <tr>
               {['Month', 'Tenant', 'Employees', 'Rate', 'Amount Due', 'Plan'].map(h => (
-                <th key={h} className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide px-4 py-2.5">{h}</th>
+                <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-4 py-2.5">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 w-full bg-slate-100 animate-pulse rounded" /></td></tr>
+              <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 w-full bg-muted animate-pulse rounded" /></td></tr>
             ))}
             {!isLoading && rows.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No billing records yet. They appear automatically after payroll finalization.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No billing records yet. They appear automatically after payroll finalization.</td></tr>
             )}
             {rows.map(r => (
-              <tr key={r.id} className="hover:bg-slate-100/30">
-                <td className="px-4 py-2.5 font-mono text-[12px] text-slate-700">{r.snapshot_month}</td>
-                <td className="px-4 py-2.5 text-[13px] text-slate-800">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
-                <td className="px-4 py-2.5 text-slate-700">{r.employee_count}</td>
-                <td className="px-4 py-2.5 text-slate-500">{fmtCurrency(r.per_employee_rate)}</td>
+              <tr key={r.id} className="hover:bg-muted">
+                <td className="px-4 py-2.5 font-mono text-[12px] text-foreground">{r.snapshot_month}</td>
+                <td className="px-4 py-2.5 text-[13px] text-foreground">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
+                <td className="px-4 py-2.5 text-foreground">{r.employee_count}</td>
+                <td className="px-4 py-2.5 text-muted-foreground">{fmtCurrency(r.per_employee_rate)}</td>
                 <td className="px-4 py-2.5 font-semibold text-emerald-700">{fmtCurrency(r.amount_due)}</td>
                 <td className="px-4 py-2.5">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-700' : 'border-slate-200 text-slate-500'
+                    r.plan === 'enterprise' ? 'border-purple-500/40 text-purple-700' : 'border-border text-muted-foreground'
                   }`}>
                     {r.plan}
                   </span>
@@ -125,6 +128,7 @@ export function OwnerBilling() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

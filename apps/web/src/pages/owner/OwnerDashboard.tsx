@@ -55,14 +55,14 @@ function StatCard({
   }
   const c = colorMap[color]
   return (
-    <div className={`group relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 backdrop-blur-xl p-4 flex items-start gap-3.5 shadow-sm ring-1 ${c.ring} transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 before:absolute before:-right-6 before:-top-6 before:h-20 before:w-20 before:rounded-full before:blur-2xl ${c.glow}`}>
+    <div className={`group relative overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-xl p-4 flex items-start gap-3.5 shadow-sm ring-1 ${c.ring} transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 before:absolute before:-right-6 before:-top-6 before:h-20 before:w-20 before:rounded-full before:blur-2xl ${c.glow}`}>
       <div className={`relative h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${c.icon}`}>
         <Icon className="h-5 w-5" />
       </div>
       <div className="relative min-w-0">
-        <p className="text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.12em]">{label}</p>
-        <p className="text-[26px] leading-tight font-bold text-slate-900 mt-0.5 tabular-nums">{value}</p>
-        {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
+        <p className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-[0.12em]">{label}</p>
+        <p className="text-[26px] leading-tight font-bold text-foreground mt-0.5 tabular-nums">{value}</p>
+        {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
       </div>
     </div>
   )
@@ -108,12 +108,12 @@ export function OwnerDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
             Welcome back, {admin?.name?.split(' ')[0] ?? 'Owner'}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Live platform overview · auto-refreshing</p>
+          <p className="text-sm text-muted-foreground mt-1">Live platform overview · auto-refreshing</p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm backdrop-blur">
+        <div className="hidden sm:flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -125,7 +125,7 @@ export function OwnerDashboard() {
       {isLoading && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-2xl bg-white/60 ring-1 ring-slate-200/60 animate-pulse" />
+            <div key={i} className="h-24 rounded-2xl bg-card ring-1 ring-slate-200/60 animate-pulse" />
           ))}
         </div>
       )}
@@ -134,7 +134,7 @@ export function OwnerDashboard() {
         <>
           {/* Tenant stats */}
           <section>
-            <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.16em] mb-3">Tenants</h2>
+            <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.16em] mb-3">Tenants</h2>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard icon={Building2}    label="Total"     value={d.tenants.total}     color="slate" />
               <StatCard icon={CheckCircle2} label="Active"    value={d.tenants.active}    color="green" />
@@ -145,7 +145,7 @@ export function OwnerDashboard() {
 
           {/* Platform stats */}
           <section>
-            <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.16em] mb-3">Platform</h2>
+            <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.16em] mb-3">Platform</h2>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 icon={AlertTriangle}
@@ -169,7 +169,7 @@ export function OwnerDashboard() {
                   {d.requests.pending} signup request{d.requests.pending !== 1 ? 's' : ''} awaiting review
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 Go to <Link to="/owner/requests" className="font-medium text-teal-700 hover:underline">Requests</Link> to approve or reject.
               </p>
             </section>
@@ -181,17 +181,18 @@ export function OwnerDashboard() {
       {healthRows.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.16em]">Tenant Running Status</h2>
+            <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.16em]">Tenant Running Status</h2>
             <Link to="/owner/tenants" className="text-[11px] font-medium text-teal-700 hover:text-teal-800 flex items-center gap-0.5">
               View all <ChevronRight className="h-3 w-3" />
             </Link>
           </div>
-          <div className="rounded-2xl border border-slate-200/70 bg-white/70 backdrop-blur-xl overflow-hidden shadow-sm">
+          <div className="rounded-2xl border border-border bg-card backdrop-blur-xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50/80 border-b border-slate-200/70">
+              <thead className="bg-muted border-b border-border">
                 <tr>
                   {['Tenant', 'Status', 'Employees', 'Active Users', 'Last Login', 'Last Payroll'].map(h => (
-                    <th key={h} className="text-left text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.1em] px-4 py-3">{h}</th>
+                    <th key={h} className="text-left text-[10.5px] font-semibold text-muted-foreground uppercase tracking-[0.1em] px-4 py-3">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -215,7 +216,7 @@ export function OwnerDashboard() {
                       <td className="px-4 py-3">
                         <Link
                           to={`/owner/tenants/${t.id}`}
-                          className="font-semibold text-slate-800 text-[13px] hover:text-teal-700 transition-colors"
+                          className="font-semibold text-foreground text-[13px] hover:text-teal-700 transition-colors"
                           onClick={e => e.stopPropagation()}
                         >
                           {t.name}
@@ -224,36 +225,36 @@ export function OwnerDashboard() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
                           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[t.status] ?? 'bg-slate-400'}`} />
-                          <span className="text-[11px] text-slate-500 capitalize">{t.status}</span>
+                          <span className="text-[11px] text-muted-foreground capitalize">{t.status}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-[12px] text-slate-600">
-                          <Users2 className="h-3 w-3 text-slate-400" />
+                        <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                          <Users2 className="h-3 w-3 text-muted-foreground" />
                           {row.employee_count}
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-[12px]">
                           <span className={`h-1.5 w-1.5 rounded-full ${row.active_users > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                          <span className={row.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-slate-400'}>
+                          <span className={row.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}>
                             {row.active_users}
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-[12px] text-slate-500">
+                      <td className="px-4 py-3 text-[12px] text-muted-foreground">
                         {row.last_login_at ? timeAgo(row.last_login_at) : '—'}
                       </td>
                       <td className="px-4 py-3">
                         {row.last_payroll_run ? (
                           <div>
-                            <span className="text-[12px] text-slate-600">{row.last_payroll_run.month}</span>
+                            <span className="text-[12px] text-muted-foreground">{row.last_payroll_run.month}</span>
                             <span className={`ml-1.5 text-[10px] font-semibold ${payrollColor[row.last_payroll_run.status] ?? 'text-slate-400'}`}>
                               {row.last_payroll_run.status}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-slate-300 text-[12px]">—</span>
+                          <span className="text-muted-foreground text-[12px]">—</span>
                         )}
                       </td>
                     </tr>
@@ -261,6 +262,7 @@ export function OwnerDashboard() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </section>
       )}
