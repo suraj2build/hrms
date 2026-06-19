@@ -111,7 +111,7 @@ export function StatutoryPolicy() {
 
   const { data: epfData } = useQuery<EpfConfig>({
     queryKey: ['epf-config'],
-    queryFn:  () => api.get('/payroll/statutory/epf/config').then((r: any) => r?.data ?? r),
+    queryFn:  () => api.get<{ data?: EpfConfig } | EpfConfig>('/payroll/statutory/epf/config').then(r => (r as { data?: EpfConfig })?.data ?? (r as EpfConfig)),
     staleTime: 60_000,
   })
 
@@ -132,7 +132,7 @@ export function StatutoryPolicy() {
       toast.success('Statutory policy saved')
       qc.invalidateQueries({ queryKey: ['compensation-policy'] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to save policy'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to save policy'),
   })
 
   // ── Payroll statutory settings (TDS enable + default regime) ────────────────
@@ -154,7 +154,7 @@ export function StatutoryPolicy() {
       toast.success('TDS settings saved')
       qc.invalidateQueries({ queryKey: ['payroll-statutory-settings'] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to save TDS settings'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to save TDS settings'),
   })
 
   function handleSave() {

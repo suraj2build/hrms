@@ -219,7 +219,7 @@ export function Holidays() {
 
   // ── Seed govt holidays ─────────────────────────────────────────────────────
   const seedMutation = useMutation({
-    mutationFn: () => api.post('/masters/holidays/seed-standard', {}),
+    mutationFn: () => api.post<{ data?: { created?: number; skipped?: number } }>('/masters/holidays/seed-standard', {}),
     onSuccess: (res: { data?: { created?: number; skipped?: number } }) => {
       qc.invalidateQueries({ queryKey: MATRIX_KEY })
       const { created, skipped } = res?.data ?? {}

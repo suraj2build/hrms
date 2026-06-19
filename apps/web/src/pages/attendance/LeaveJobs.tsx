@@ -298,7 +298,7 @@ const RECOVERY_JOBS = [
 
 function AdvancedRecoveryPanel() {
   const [open, setOpen] = useState(false)
-  const [selectedJob, setSelectedJob]   = useState(RECOVERY_JOBS[0].id)
+  const [selectedJob, setSelectedJob]   = useState<typeof RECOVERY_JOBS[number]['id']>(RECOVERY_JOBS[0].id)
   const [reason,      setReason]        = useState('')
   const [dryRun,      setDryRun]        = useState(true)
   const [confirmed,   setConfirmed]     = useState(false)

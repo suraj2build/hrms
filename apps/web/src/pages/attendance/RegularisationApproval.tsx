@@ -429,8 +429,8 @@ export function RegularisationApproval() {
 
   const bulkLeaveMutation = useMutation({
     mutationFn: (body: { employee_ids: string[]; leave_type_id: string; from_date: string; to_date: string }) =>
-      api.post('/attendance/leave/bulk-assign', body),
-    onSuccess: (r: { employees_count: number; days_count: number }) => {
+      api.post<{ employees_count: number; days_count: number }>('/attendance/leave/bulk-assign', body),
+    onSuccess: (r) => {
       toast.success(`Leave assigned to ${r.employees_count} employee${r.employees_count !== 1 ? 's' : ''}`, {
         description: `${r.days_count} day${r.days_count !== 1 ? 's' : ''} of leave applied.`,
       })

@@ -239,7 +239,7 @@ export function PayrollPayoutReconciliationCenter() {
     },
     staleTime: 30_000,
   })
-  const allRecords = payoutsRaw?.data ?? []
+  const allRecords = useMemo(() => payoutsRaw?.data ?? [], [payoutsRaw])
   const total      = payoutsRaw?.total ?? 0
 
   // ── Mutation ───────────────────────────────────────────────────────────────
@@ -254,12 +254,15 @@ export function PayrollPayoutReconciliationCenter() {
   })
 
   const generateObligationsMutation = useMutation({
-    mutationFn: (runId: string) => api.post(`/payroll/runs/${runId}/payout-obligations`, {}),
-    onSuccess: (res: any) => {
+    mutationFn: (runId: string) => api.post<{ count?: number }>(`/payroll/runs/${runId}/payout-obligations`, {}),
+    onSuccess: (res) => {
       toast.success(`${res.count} payout obligations created`)
       queryClient.invalidateQueries({ queryKey: ['payout-reconciliation'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Failed to create obligations'),
+    onError: (e: unknown) => {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message
+      toast.error(msg ?? 'Failed to create obligations')
+    },
   })
 
   // ── Filtered ───────────────────────────────────────────────────────────────

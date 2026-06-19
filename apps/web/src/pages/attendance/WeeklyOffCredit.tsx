@@ -116,8 +116,8 @@ export function WeeklyOffCredit() {
   })
 
   const reconcile = useMutation({
-    mutationFn: () => api.post('/attendance/wo-credit/reconcile', { year, month }),
-    onSuccess: (r: { data?: { applied: number; pending: number; carried: number } }) => {
+    mutationFn: () => api.post<{ data?: { applied: number; pending: number; carried: number } }>('/attendance/wo-credit/reconcile', { year, month }),
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['wo-credit', 'review'] })
       const d = r?.data
       toast.success('Reconciliation complete', { description: d ? `${d.applied} applied · ${d.pending} pending · ${d.carried} carried` : undefined })
@@ -132,8 +132,8 @@ export function WeeklyOffCredit() {
   })
 
   const finalize = useMutation({
-    mutationFn: () => api.post('/attendance/wo-credit/finalize', { year, month }),
-    onSuccess: (r: { data?: { credited: number; lop: number } }) => {
+    mutationFn: () => api.post<{ data?: { credited: number; lop: number } }>('/attendance/wo-credit/finalize', { year, month }),
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['wo-credit', 'review'] })
       const d = r?.data
       toast.success('Month finalised', { description: d ? `${d.credited} carried-over · ${d.lop} LOP day(s)` : undefined })

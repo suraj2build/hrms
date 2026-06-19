@@ -439,13 +439,13 @@ export function PayrollResolutionCenter() {
       setResolvingBlocker(null)
       qc.invalidateQueries({ queryKey: ['payroll-blockers-center', runId] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to update blocker'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update blocker'),
   })
 
   // ── Retry failed employees ──────────────────────────────────────────────────
   const retryMutation = useMutation({
-    mutationFn: () => api.post(`/payroll/runs/${runId}/retry-failed`, {}),
-    onSuccess: (res: any) => {
+    mutationFn: () => api.post<{ succeeded_count?: number; failed_count?: number; new_run_status?: string }>(`/payroll/runs/${runId}/retry-failed`, {}),
+    onSuccess: (res) => {
       const succeeded = res?.succeeded_count ?? 0
       const failed    = res?.failed_count    ?? 0
       toast.success(
@@ -458,10 +458,10 @@ export function PayrollResolutionCenter() {
         navigate('/admin/payroll')
       }
     },
-    onError: (e: any) => {
-      const health = e?.data?.health as RunHealth | undefined
+    onError: (e: unknown) => {
+      const health = (e as { data?: { health?: RunHealth } })?.data?.health
       toast.error(
-        e?.message ?? 'Retry failed',
+        e instanceof Error ? e.message : 'Retry failed',
         { description: health ? health.health_label : undefined },
       )
     },
@@ -469,16 +469,16 @@ export function PayrollResolutionCenter() {
 
   // ── Freeze month ────────────────────────────────────────────────────────────
   const freezeMutation = useMutation({
-    mutationFn: () => api.post(`/payroll/runs/${runId}/freeze`, {
+    mutationFn: () => api.post<{ frozen_month?: string }>(`/payroll/runs/${runId}/freeze`, {
       reason: 'Frozen from Resolution Center — investigation in progress',
     }),
-    onSuccess: (res: any) => {
+    onSuccess: (res) => {
       toast.success(`Payroll for ${res?.frozen_month} frozen`, {
         description: 'No further payroll writes are allowed for this month.',
       })
       qc.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to freeze payroll month'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to freeze payroll month'),
   })
 
   // ── Derived ─────────────────────────────────────────────────────────────────

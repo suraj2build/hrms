@@ -166,8 +166,8 @@ export function LeaveTypes() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/masters/leave-types/${id}`),
-    onSuccess: (resp: { deactivated?: boolean }) => {
+    mutationFn: (id: string) => api.delete<{ deactivated?: boolean }>(`/masters/leave-types/${id}`),
+    onSuccess: (resp) => {
       qc.invalidateQueries({ queryKey: ['leave-types'] })
       if (resp?.deactivated) {
         setSuccess('Leave type deactivated (existing applications reference it).')

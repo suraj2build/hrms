@@ -1826,7 +1826,7 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
                   <Td>
                     <span className={cn(
                       'px-2 py-0.5 rounded-full text-[10px] font-medium border',
-                      STATUS_BADGE[r.status] ?? 'bg-muted text-muted-foreground border-border',
+                      STATUS_BADGE[r.status ?? ''] ?? 'bg-muted text-muted-foreground border-border',
                     )}>
                       {r.status}
                     </span>

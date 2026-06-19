@@ -22,17 +22,10 @@ import {
   MapPin, LayoutGrid, CalendarClock, GraduationCap,
   AlertTriangle, CheckCircle2, Banknote, TrendingUp,
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy,
-  ChevronDown, Info, RefreshCw, Package, Brain,
+  Info, Package,
   Phone, Fingerprint, Home,
 } from 'lucide-react'
 import { Employee360Tab } from '@/pages/intelligence/Employee360Tab'
-import {
-  SeverityBadge,
-  RiskIndicator,
-  IntelligenceEmptyState,
-  IntelligenceLoadingSkeleton,
-  ExplainabilityDrawer,
-} from '@/components/ui/intelligence/index.js'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -57,15 +50,6 @@ import { TooltipProvider } from '@/components/payroll/StatutoryBadges'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Section = 'core' | 'employment' | 'compensation' | 'documents' | 'relationships' | 'assets'
-
-const FIRST_SUB: Record<Section, string> = {
-  core:          'profile',
-  employment:    'workforce',
-  compensation:  'compensation',
-  documents:     'documents',
-  relationships: 'family',
-  assets:        'access-card',
-}
 
 // Mandatory document types — used to show missing-doc warnings
 const MANDATORY_DOC_TYPES = [
@@ -145,9 +129,6 @@ interface IdentityRow {
 interface OnboardingDocItem {
   id: string; document_type?: string | null; extraction_status?: string | null; uploaded_at?: string | null
 }
-interface VerificationRow {
-  verification_type: string; status: string; verified_at?: string | null; explanation?: string | null
-}
 interface JobHistoryRow {
   id: string; effective_from: string; effective_to?: string | null; is_current?: boolean
   employment_type?: string | null
@@ -186,7 +167,7 @@ interface CompHistoryRow {
 }
 interface ContractRow {
   id: string; contract_type?: string | null; start_date?: string | null; end_date?: string | null
-  status?: string | null; notes?: string | null
+  status?: string | null; notes?: string | null; storage_path?: string | null
 }
 interface PassportVisaRow {
   id: string; record_type?: string | null; doc_number?: string | null; country?: string | null
@@ -197,20 +178,24 @@ interface FamilyRow {
   occupation?: string | null; is_dependent?: boolean; relationship_type_id?: string | null
   relationship_types?: { name?: string | null } | null
 }
-interface NominationRow { id: string; scheme?: string | null; share_percentage?: number | string | null; nominee_name?: string | null }
+interface NominationRow {
+  id: string; scheme?: string | null; share_percentage?: number | string | null; nominee_name?: string | null
+  dob?: string | null; is_minor?: boolean; guardian_name?: string | null
+  relationship_types?: { name?: string | null } | null
+}
 interface AccessCardRow {
   id: string; card_number?: string | null; status?: string | null
   issued_date?: string | null; returned_date?: string | null
 }
-interface AssetRow { id: string; [k: string]: unknown }
-interface AssetHistoryRow { id: string; asset_id?: string | null; action?: string | null; [k: string]: unknown }
+interface AssetRow { id: string; asset_code?: string | null; name?: string | null; status?: string | null }
+interface AssetHistoryRow { id?: string; asset_id?: string | null; action?: string | null; action_date?: string | null }
 interface ShiftHistoryRow {
-  id: string; effective_from?: string | null; effective_to?: string | null
-  shifts?: { name?: string | null } | null; [k: string]: unknown
+  id: string; effective_from?: string | null; effective_to?: string | null; is_current?: boolean
+  shifts?: { name?: string | null; code?: string | null; start_time?: string | null; end_time?: string | null } | null
 }
 interface MasterOption { id: string; name: string; code?: string; city?: string; start_time?: string; end_time?: string }
 interface ManagerOption { id: string; first_name: string; last_name: string; employee_code: string }
-interface HolidayGroupRow { id: string; name?: string | null; is_active?: boolean }
+interface HolidayGroupRow { id: string; name?: string | null; is_active?: boolean; state_code?: string | null }
 interface StateRow { state_code: string; state_name: string; enabled: boolean }
 
 type BadgeVariant = React.ComponentProps<typeof Badge>['variant']
@@ -225,6 +210,14 @@ interface EmergencyContactForm {
 interface FamilyForm {
   id?: string; name?: string; relationship_type_id?: string; dob?: string
   gender?: string; occupation?: string; is_dependent?: boolean
+}
+interface JobFormState {
+  employment_type?: string | null
+  department_id?: string | null; designation_id?: string | null; grade_id?: string | null
+  manager_id?: string | null; work_location_id?: string | null; cost_center_id?: string | null
+  shift_id?: string | null
+  site_id?: string | null; roster_id?: string | null; rotation_policy_id?: string | null
+  effective_from?: string | null; reason_for_change?: string | null; is_current?: boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -272,195 +265,6 @@ function EmptySection({ icon: Icon, title, subtitle }: { icon: React.ElementType
   )
 }
 
-function AssignableField({
-  label, value, futureValue, futureDate, onAssign, canAssign,
-}: {
-  label: string
-  value?: string | null
-  futureValue?: string | null
-  futureDate?: string | null
-  onAssign: () => void
-  canAssign: boolean
-}) {
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground truncate">{value ?? '—'}</p>
-          {futureValue && (
-            <p className="text-[10px] text-warning mt-0.5 flex items-center gap-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-warning" />
-              {futureValue} from {futureDate}
-            </p>
-          )}
-        </div>
-        {canAssign && (
-          <button
-            onClick={onAssign}
-            className="flex-shrink-0 text-[10px] text-muted-foreground hover:text-foreground border border-border hover:border-primary/50 rounded px-1.5 py-0.5 transition-colors"
-          >
-            {value == null || value === '' || value === '—' ? 'Set' : 'Edit'}
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Intelligence Panel ────────────────────────────────────────────────────────
-
-function VerificationChip({ status }: { status: string }) {
-  const config: Record<string, { label: string; className: string }> = {
-    verified:      { label: 'Verified',      className: 'bg-success/10 text-success' },
-    pending:       { label: 'Pending',        className: 'bg-muted/50 text-muted-foreground' },
-    degraded:      { label: 'Degraded',       className: 'bg-warning/10 text-warning-foreground' },
-    failed:        { label: 'Failed',         className: 'bg-destructive/10 text-destructive' },
-    needs_review:  { label: 'Needs Review',   className: 'bg-orange-50 text-orange-600' },
-    partial_match: { label: 'Partial Match',  className: 'bg-amber-50 text-amber-700' },
-    expired:       { label: 'Expired',        className: 'bg-muted/40 text-muted-foreground' },
-    inconclusive:  { label: 'Inconclusive',   className: 'bg-muted/40 text-muted-foreground' },
-    skipped:       { label: 'Not verified',   className: 'bg-muted/30 text-muted-foreground' },
-  }
-  const c = config[status] ?? { label: status, className: 'bg-muted/30 text-muted-foreground' }
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${c.className}`}>
-      {c.label}
-    </span>
-  )
-}
-
-function IntelligencePanel({ employeeId, isAdmin }: { employeeId: string; isAdmin: boolean }) {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerItem, setDrawerItem] = useState<{ explainability?: unknown } | null>(null)
-
-  const { data: trustData, isLoading: trustLoading } = useQuery({
-    queryKey: ['employee-trust-score', employeeId],
-    queryFn: () => api.get(`/trust/scores/employee/${employeeId}`),
-    enabled: !!employeeId && open,
-    retry: false,
-  })
-
-  const { data: verData, isLoading: verLoading } = useQuery({
-    queryKey: ['employee-verifications', employeeId],
-    queryFn: () => api.get(`/trust/verifications/employee/${employeeId}`),
-    enabled: !!employeeId && open,
-    retry: false,
-  })
-
-  const retryMutation = useMutation({
-    mutationFn: () => api.post(`/trust/verifications/retry/${employeeId}`),
-    onSuccess: () => {
-      toast.success('Verification retry scheduled')
-      queryClient.invalidateQueries({ queryKey: ['employee-verifications', employeeId] })
-    },
-    onError: () => toast.error('Retry failed'),
-  })
-
-  const verifications: VerificationRow[] = (verData as { verifications?: VerificationRow[] } | undefined)?.verifications ?? []
-
-  const hasCritical = verifications.some((v) => v.status === 'failed')
-
-  return (
-    <div className="border rounded-lg overflow-hidden">
-      {/* Collapsed header */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 hover:bg-muted/40 text-sm transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground/60" />
-          <span className="font-medium text-foreground/80">Compliance Intelligence</span>
-          {hasCritical && (
-            <SeverityBadge severity="critical" className="ml-1" />
-          )}
-        </div>
-        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/40 transition-transform', open && 'rotate-180')} />
-      </button>
-
-      {/* Expanded content */}
-      {open && (
-        <div className="px-4 py-3 space-y-3 border-t">
-          {/* Section A: Trust Score */}
-          {trustLoading
-            ? <IntelligenceLoadingSkeleton rows={1} cardHeight="h-8" />
-            : (trustData as { score?: number } | undefined)?.score != null
-              ? (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Trust Score</span>
-                  <RiskIndicator score={(trustData as { score: number }).score} />
-                </div>
-              )
-              : null}
-
-          {/* Section B: Verification Status Chips */}
-          {verLoading
-            ? <IntelligenceLoadingSkeleton rows={2} cardHeight="h-7" />
-            : verifications.length > 0
-              ? (
-                <div className="space-y-1.5">
-                  {verifications.map((v) => (
-                    <div key={v.verification_type} className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground capitalize">
-                        {v.verification_type === 'bank_account' ? 'Bank Account' : v.verification_type.toUpperCase()}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <VerificationChip status={v.status} />
-                        {v.verified_at && (
-                          <span className="text-[10px] text-muted-foreground">
-                            {(() => { const _d = new Date(v.verified_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}` })()}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
-              : (
-                !verLoading && (
-                  <IntelligenceEmptyState
-                    title="No verification records yet"
-                    description="Records appear after the first verification run."
-                  />
-                )
-              )}
-
-          {/* Section C: Explainability text */}
-          {verifications.filter((v) => v.explanation).slice(0, 1).map((v) => (
-            <p key={v.verification_type} className="text-[11px] text-muted-foreground bg-muted/20 rounded px-2 py-1.5 leading-relaxed">
-              {v.explanation}
-            </p>
-          ))}
-
-          {/* Section D: Admin Retry Button */}
-          {isAdmin && verifications.some((v) => ['degraded', 'failed', 'pending'].includes(v.status)) && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 text-[10px] w-full gap-1.5"
-              onClick={() => retryMutation.mutate()}
-              disabled={retryMutation.isPending}
-            >
-              {retryMutation.isPending
-                ? <Loader2 className="h-3 w-3 animate-spin" />
-                : <RefreshCw className="h-3 w-3" />}
-              Re-verify
-            </Button>
-          )}
-        </div>
-      )}
-
-      <ExplainabilityDrawer
-        open={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setDrawerItem(null) }}
-        title="Intelligence Detail"
-        explainability={drawerItem?.explainability}
-      />
-    </div>
-  )
-}
 
 // ── Compensation Revision Drawer ──────────────────────────────────────────────
 
@@ -665,15 +469,9 @@ export function EmployeeProfile() {
   const tenantId     = (authProfile as { tenant_id?: string } | null)?.tenant_id ?? ''
   const isAdmin      = ['super_admin', 'hr_admin'].includes(authProfile?.role ?? '')
 
-  const [section,  setSection]  = useState<Section>('core')
+  const [, setSection]  = useState<Section>('core')
   const [subTab,   setSubTab]   = useState('profile')
   const [visited,  setVisited]  = useState(new Set<Section>(['core']))
-
-  function changeSection(s: Section) {
-    setSection(s)
-    setSubTab(FIRST_SUB[s])
-    setVisited(prev => new Set([...prev, s]))
-  }
 
   // ── Core query ─────────────────────────────────────────────────────────────
   const { data: fpData, isLoading } = useQuery<FullProfile>({
@@ -687,6 +485,7 @@ export function EmployeeProfile() {
   const job  = fpData?.job_info
   const comp = fpData?.compensation
   const bs   = fpData?.bank_statutory
+  const bsHolidayGroupId = (bs as { holiday_group_id?: string | null } | null | undefined)?.holiday_group_id ?? null
   const addresses: AddressRow[]          = (fpData as { addresses?: AddressRow[] } | undefined)?.addresses ?? []
   const emergencyContacts: EmergencyContactRow[]  = (fpData as { emergency_contacts?: EmergencyContactRow[] } | undefined)?.emergency_contacts ?? []
 
@@ -964,7 +763,7 @@ export function EmployeeProfile() {
   const [revisionOpen, setRevisionOpen]     = useState(false)
   const [rejectTarget, setRejectTarget]     = useState<string | null>(null)
   const [rejectReason, setRejectReason]     = useState('')
-  const [drawerRevision, setDrawerRevision] = useState<any | null>(null)
+  const [drawerRevision, setDrawerRevision] = useState<RevisionRow | null>(null)
   const [revisionForm, setRevisionForm] = useState({
     revision_type:    'increment',
     effective_date:   today,
@@ -1387,9 +1186,9 @@ export function EmployeeProfile() {
 
   // ── Job history ────────────────────────────────────────────────────────────
   // (addJobOpen is declared earlier — it's referenced by the master-list queries)
-  const [jobForm, setJobForm]       = useState<FormBag>({})
+  const [jobForm, setJobForm]       = useState<JobFormState>({})
   const addJobMutation = useMutation({
-    mutationFn: async (d: FormBag) => {
+    mutationFn: async (d: JobFormState) => {
       // One form writes to TWO backends (single-writer split preserved):
       //   • job fields            → job_history
       //   • site/roster/rotation  → org-context
@@ -1744,7 +1543,7 @@ export function EmployeeProfile() {
     contract_type: 'appointment', start_date: '', end_date: '',
     status: 'active', notes: '',
   })
-  function openContractDialog(c?: any) {
+  function openContractDialog(c?: ContractRow) {
     if (c) {
       setEditContractId(c.id)
       setContractForm({
@@ -1808,7 +1607,8 @@ export function EmployeeProfile() {
     onError:   (e: Error) => toast.error('Failed to remove nominee', { description: e.message }),
   })
 
-  const openSignedUrl = useCallback(async (path: string) => {
+  const openSignedUrl = useCallback(async (path: string | null | undefined) => {
+    if (!path) return
     try { window.open(await getSignedUrl(path), '_blank') }
     catch { toast.error('Could not open file') }
   }, [])
@@ -2006,12 +1806,12 @@ export function EmployeeProfile() {
                   {([{ label: 'First Name', key: 'first_name' }, { label: 'Last Name', key: 'last_name' }, { label: 'Email', key: 'email' }, { label: 'Phone', key: 'phone' }, { label: 'Joining Date', key: 'joining_date', type: 'date' }] as Array<{label:string;key:string;type?:string}>).map(f => (
                     <div key={f.key}>
                       <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
-                      <Input className="h-7 text-xs" type={f.type ?? 'text'} value={profileForm[f.key] ?? ''} onChange={e => setProfileForm((p: any) => ({ ...p, [f.key]: e.target.value }))} />
+                      <Input className="h-7 text-xs" type={f.type ?? 'text'} value={profileForm[f.key] ?? ''} onChange={e => setProfileForm((p) => ({ ...p, [f.key]: e.target.value }))} />
                     </div>
                   ))}
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">Status</p>
-                    <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={profileForm.status ?? ''} onChange={e => setProfileForm((p: any) => ({ ...p, status: e.target.value }))}>
+                    <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={profileForm.status ?? ''} onChange={e => setProfileForm((p) => ({ ...p, status: e.target.value }))}>
                       {['active','inactive','on_notice','separated'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)}
                     </select>
                   </div>
@@ -2052,9 +1852,9 @@ export function EmployeeProfile() {
                           <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
                           {editPI
                             ? f.opts
-                              ? <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={piForm[f.key] ?? ''} onChange={e => setPiForm((p: any) => ({ ...p, [f.key]: e.target.value }))}>{f.opts.map(([v,l]) => <option key={v} value={v}>{l || '—'}</option>)}</select>
-                              : <Input className="h-7 text-xs" type={f.type ?? 'text'} value={piForm[f.key] ?? ''} onChange={e => setPiForm((p: any) => ({ ...p, [f.key]: e.target.value }))} />
-                            : <p className="text-sm font-medium">{fmt((pi as any)?.[f.key])}</p>}
+                              ? <select className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={piForm[f.key] ?? ''} onChange={e => setPiForm((p) => ({ ...p, [f.key]: e.target.value }))}>{f.opts.map(([v,l]) => <option key={v} value={v}>{l || '—'}</option>)}</select>
+                              : <Input className="h-7 text-xs" type={f.type ?? 'text'} value={piForm[f.key] ?? ''} onChange={e => setPiForm((p) => ({ ...p, [f.key]: e.target.value }))} />
+                            : <p className="text-sm font-medium">{fmt((pi as Record<string, string | null> | null | undefined)?.[f.key])}</p>}
                         </div>
                       ))}
                     </Grid2>
@@ -2076,7 +1876,7 @@ export function EmployeeProfile() {
               )}
               {!addresses.length
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Home} title="No addresses on record" subtitle={isAdmin ? 'Click Add Address to record one.' : undefined} /></CardContent></Card>
-                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{addresses.map((a: any) => (
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{addresses.map((a) => (
                     <Card key={a.id}>
                       <CardContent className="pt-4 pb-4">
                         <div className="flex items-start justify-between">
@@ -2112,7 +1912,7 @@ export function EmployeeProfile() {
               )}
               {!emergencyContacts.length
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Phone} title="No emergency contacts" subtitle={isAdmin ? 'Click Add Contact to record one.' : undefined} /></CardContent></Card>
-                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{emergencyContacts.map((c: any) => (
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{emergencyContacts.map((c) => (
                     <Card key={c.id}>
                       <CardContent className="pt-4 pb-4 flex items-start justify-between">
                         <div>
@@ -2140,7 +1940,7 @@ export function EmployeeProfile() {
             <div className="space-y-4">
               {/* Missing mandatory docs warning */}
               {(() => {
-                const uploadedTypes = (docsData?.data ?? []).map((d: any) => (d.doc_type ?? '').trim())
+                const uploadedTypes = (docsData?.data ?? []).map((d) => (d.doc_type ?? '').trim())
                 const missing = MANDATORY_DOC_TYPES.filter(
                   t => !uploadedTypes.some((u: string) => u.toLowerCase().includes(t.toLowerCase()))
                 )
@@ -2178,7 +1978,7 @@ export function EmployeeProfile() {
                       <table className="w-full text-xs">
                         <thead><tr className="border-b border-border">{['Name','Type','Mandatory','Uploaded',''].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2">{h}</th>)}</tr></thead>
                         <tbody>
-                          {docsData!.data.map((d: any) => {
+                          {docsData!.data.map((d) => {
                             const isMandatory = MANDATORY_DOC_TYPES.some(
                               t => (d.doc_type ?? '').toLowerCase().includes(t.toLowerCase())
                             )
@@ -2222,7 +2022,7 @@ export function EmployeeProfile() {
               </div>
               {!(identityData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Fingerprint} title="No identity documents" subtitle={isAdmin ? 'Click Add Identity Document to record one.' : undefined} /></CardContent></Card>
-                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{identityData!.data.map((it: any) => (
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{identityData!.data.map((it) => (
                     <Card key={it.id}>
                       <CardContent className="pt-4 pb-4 flex items-start justify-between">
                         <div>
@@ -2277,7 +2077,7 @@ export function EmployeeProfile() {
                         </tr>
                       </thead>
                       <tbody>
-                        {onboardingStatus.documents.items.map((doc: any) => (
+                        {onboardingStatus.documents.items.map((doc) => (
                           <tr key={doc.id} className="border-b border-border/50">
                             <td className="px-3 py-2 capitalize font-medium">{(doc.document_type ?? '—').replace(/_/g, ' ')}</td>
                             <td className="px-3 py-2">
@@ -2779,7 +2579,7 @@ export function EmployeeProfile() {
                             </tr>
                           </thead>
                           <tbody>
-                            {shiftHistoryData!.data.map((row: any) => (
+                            {shiftHistoryData!.data.map((row) => (
                               <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20">
                                 <td className="px-4 py-2 font-medium">{row.shifts?.name ?? '—'}</td>
                                 <td className="px-4 py-2 font-mono text-muted-foreground">{row.shifts?.code ?? '—'}</td>
@@ -2829,7 +2629,7 @@ export function EmployeeProfile() {
                       <table className="w-full text-xs">
                         <thead><tr className="border-b border-border">{['Dept','Designation','Work Location','Cost Center','Manager','Eff. From','Eff. To', ...(isAdmin ? [''] : [])].map((h,i)=><th key={h||`act${i}`} className="text-left text-muted-foreground font-semibold px-4 py-2 whitespace-nowrap">{h}</th>)}</tr></thead>
                         <tbody>
-                          {jobHistoryData!.data.map((row: any) => (
+                          {jobHistoryData!.data.map((row) => (
                             <tr key={row.id} className="border-b border-border/50 hover:bg-muted/20">
                               <td className="px-4 py-2">{row.departments?.name ?? '—'}</td>
                               <td className="px-4 py-2">{row.designations?.name ?? '—'}</td>
@@ -2866,7 +2666,7 @@ export function EmployeeProfile() {
               )}
               {!(prevEmpData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Building2} title="No previous employment records" /></CardContent></Card>
-                : prevEmpData!.data.map((pe: any) => (
+                : prevEmpData!.data.map((pe) => (
                   <Card key={pe.id}>
                     <CardContent className="pt-4 pb-4 flex items-start justify-between">
                       <div>
@@ -2931,20 +2731,20 @@ export function EmployeeProfile() {
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-medium text-muted-foreground">Clearance Progress</span>
                             <span className="text-foreground font-semibold">
-                              {separationData.data.clearances.filter((c: any) => c.status === 'cleared').length}/5 departments cleared
+                              {separationData.data.clearances.filter((c) => c.status === 'cleared').length}/5 departments cleared
                             </span>
                           </div>
                           <div className="h-1.5 rounded-full bg-border overflow-hidden">
                             <div
                               className={cn(
                                 'h-full rounded-full transition-all',
-                                (() => { const p = (separationData.data.clearances.filter((c: any) => c.status === 'cleared').length / 5) * 100; return p >= 95 ? 'bg-success' : p >= 50 ? 'bg-warning' : 'bg-destructive' })(),
+                                (() => { const p = (separationData.data.clearances.filter((c) => c.status === 'cleared').length / 5) * 100; return p >= 95 ? 'bg-success' : p >= 50 ? 'bg-warning' : 'bg-destructive' })(),
                               )}
-                              style={{ width: `${(separationData.data.clearances.filter((c: any) => c.status === 'cleared').length / 5) * 100}%` }}
+                              style={{ width: `${(separationData.data.clearances.filter((c) => c.status === 'cleared').length / 5) * 100}%` }}
                             />
                           </div>
                           <div className="flex gap-1 flex-wrap">
-                            {(separationData.data.clearances as any[]).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).map((cl: any) => (
+                            {(separationData.data.clearances ?? []).slice().sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)).map((cl) => (
                               <span
                                 key={cl.id ?? cl.department}
                                 className={cn(
@@ -3037,7 +2837,7 @@ export function EmployeeProfile() {
                     {pendingRevisions.length} pending revision{pendingRevisions.length > 1 ? 's' : ''} awaiting approval
                   </span>
                 </div>
-                {pendingRevisions.map((r: any) => (
+                {pendingRevisions.map((r) => (
                   <div key={r.id} className="flex items-center justify-between gap-2 bg-background/60 rounded-lg px-3 py-2 text-xs">
                     <div className="flex-1 min-w-0">
                       <span className="capitalize font-medium">{(r.revision_type ?? '—').replace(/_/g, ' ')}</span>
@@ -3128,7 +2928,7 @@ export function EmployeeProfile() {
 
                 {/* ── Full CTC structure breakup ─────────────────────────── */}
                 {comp && Array.isArray(comp.components) && comp.components.length > 0 && (() => {
-                  const rateLabel = (c: any) =>
+                  const rateLabel = (c: CompComponentRow) =>
                     c.calculation_type === 'balance'      ? 'Balance'
                     : c.calculation_type === 'fixed'       ? 'Fixed'
                     : c.calculation_type === 'pct_of_basic' ? `${c.value}% of Basic`
@@ -3154,15 +2954,15 @@ export function EmployeeProfile() {
                         </thead>
                         {groups.map(g => {
                           const rows = comp.components
-                            .filter((c: any) => c.component_type === g.key)
-                            .sort((a: any, b: any) => (a.sequence ?? 0) - (b.sequence ?? 0))
+                            .filter((c) => c.component_type === g.key)
+                            .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
                           if (rows.length === 0) return null
                           return (
                             <tbody key={g.key}>
                               <tr className="bg-muted/20">
                                 <td colSpan={4} className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{g.title}</td>
                               </tr>
-                              {rows.map((c: any) => (
+                              {rows.map((c) => (
                                 <tr key={c.id} className="border-b border-border/40">
                                   <td className="px-3 py-2 text-foreground">
                                     {c.name}{c.is_basic && <span className="ml-1.5 text-[9px] font-bold text-primary">BASIC</span>}
@@ -3259,7 +3059,7 @@ export function EmployeeProfile() {
                   )
                   : (
                     <div className="pl-1">
-                      {payrollRevisionsData!.data.map((r: any) => {
+                      {payrollRevisionsData!.data.map((r) => {
                         const statusVariant =
                           r.status === 'approved' ? 'success' :
                           r.status === 'rejected' ? 'destructive' :
@@ -3328,7 +3128,7 @@ export function EmployeeProfile() {
                         </tr>
                       </thead>
                       <tbody>
-                        {compensationHistoryData!.data.map((h: any) => (
+                        {compensationHistoryData!.data.map((h) => (
                           <tr key={h.id} className={cn('border-b border-border/50 hover:bg-muted/20', h.is_active && 'bg-success/5')}>
                             <td className="px-4 py-2 whitespace-nowrap">{fmtDate(h.effective_from)}</td>
                             <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">{h.effective_to ? fmtDate(h.effective_to) : '—'}</td>
@@ -3661,9 +3461,9 @@ export function EmployeeProfile() {
                           value={bs.lwf_state_code || (bs.site_state_code ? `Auto from site (${bs.site_state_code})` : 'Not configured')}
                         />
                         {/* Holiday group */}
-                        {(bs as any).holiday_group_id && holidayGroups.length > 0 && (
+                        {bsHolidayGroupId && holidayGroups.length > 0 && (
                           <KV label="Holiday Group"
-                            value={holidayGroups.find((g: any) => g.id === (bs as any).holiday_group_id)?.name ?? (bs as any).holiday_group_id} />
+                            value={holidayGroups.find((g) => g.id === bsHolidayGroupId)?.name ?? bsHolidayGroupId} />
                         )}
                       </Grid2>
 
@@ -3729,7 +3529,7 @@ export function EmployeeProfile() {
                       <table className="w-full text-xs">
                         <thead><tr className="border-b border-border">{['Type','Start','End','Status','File', ...(isAdmin ? ['Actions'] : [])].map(h=><th key={h} className="text-left text-muted-foreground font-semibold px-4 py-2">{h}</th>)}</tr></thead>
                         <tbody>
-                          {contractsData!.data.map((c: any) => (
+                          {contractsData!.data.map((c) => (
                             <tr key={c.id} className="border-b border-border/50">
                               <td className="px-4 py-2 capitalize">{c.contract_type?.replace(/_/g, ' ')}</td>
                               <td className="px-4 py-2">{fmtDate(c.start_date)}</td>
@@ -3929,14 +3729,14 @@ export function EmployeeProfile() {
                 )}
               </div>
               {(['passport', 'visa'] as const).map(rt => {
-                const items = (pvData?.data ?? []).filter((p: any) => p.record_type === rt)
+                const items = (pvData?.data ?? []).filter((p) => p.record_type === rt)
                 return (
                   <Card key={rt}>
                     <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold capitalize">{rt}s</CardTitle></CardHeader>
                     <CardContent>
                       {!items.length
                         ? <p className="text-xs text-muted-foreground">No {rt} records.</p>
-                        : <div className="space-y-3">{items.map((pv: any) => {
+                        : <div className="space-y-3">{items.map((pv) => {
                             const soon = pv.expiry_date && new Date(pv.expiry_date) < new Date(Date.now() + 90*24*60*60*1000)
                             return (
                               <div key={pv.id} className="flex items-start justify-between p-3 rounded-md border border-border bg-muted/20">
@@ -3967,7 +3767,7 @@ export function EmployeeProfile() {
               )}
               {!(familyData?.data?.length)
                 ? <Card><CardContent className="pt-6"><EmptySection icon={Users} title="No family members" /></CardContent></Card>
-                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{familyData!.data.map((fm: any) => (
+                : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{familyData!.data.map((fm) => (
                     <Card key={fm.id}>
                       <CardContent className="pt-4 pb-4 flex items-start justify-between">
                         <div>
@@ -3988,8 +3788,8 @@ export function EmployeeProfile() {
           {subTab === 'family' && (
             <div className="space-y-4">
               {(['pf', 'gratuity', 'esi', 'superannuation'] as const).map(scheme => {
-                const schemeNoms = (nominationsData?.data ?? []).filter((n: any) => n.scheme === scheme)
-                const schemeTotal = schemeNoms.reduce((s: number, n: any) => s + Number(n.share_percentage), 0)
+                const schemeNoms = (nominationsData?.data ?? []).filter((n) => n.scheme === scheme)
+                const schemeTotal = schemeNoms.reduce((s: number, n) => s + Number(n.share_percentage), 0)
                 return (
                   <Card key={scheme}>
                     <CardHeader className="pb-3">
@@ -4017,7 +3817,7 @@ export function EmployeeProfile() {
                     <CardContent>
                       {!schemeNoms.length
                         ? <p className="text-xs text-muted-foreground">{isAdmin ? 'No nominees yet — click Add Nominee.' : 'No nominations for this scheme.'}</p>
-                        : <div className="space-y-2">{schemeNoms.map((n: any) => (
+                        : <div className="space-y-2">{schemeNoms.map((n) => (
                           <div key={n.id} className="flex items-center justify-between text-xs p-2.5 rounded-md bg-muted/30">
                             <div>
                               <span className="font-medium">{n.nominee_name}</span>
@@ -4047,7 +3847,7 @@ export function EmployeeProfile() {
           {/* ASSETS › Access Card */}
           {subTab === 'access-card' && (
             <div className="space-y-3">
-              {isAdmin && !(accessCardsData?.data ?? []).some((c: any) => c.status === 'active') && (
+              {isAdmin && !(accessCardsData?.data ?? []).some((c) => c.status === 'active') && (
                 <div className="flex justify-end">
                   <Button size="sm" className="h-7 text-xs gap-1" onClick={() => { setCardForm({ issued_date: new Date().toISOString().slice(0,10) }); setAddCardOpen(true) }}><Plus className="h-3.5 w-3.5" />Issue Card</Button>
                 </div>
@@ -4095,9 +3895,9 @@ export function EmployeeProfile() {
                           </tr>
                         </thead>
                         <tbody>
-                          {empAssetsData!.data.assigned.map((a: any) => {
+                          {empAssetsData!.data.assigned.map((a) => {
                             const lastAssigned = (empAssetsData?.data?.history ?? [])
-                              .find((h: any) => h.asset_id === a.id && h.action === 'assigned')
+                              .find((h) => h.asset_id === a.id && h.action === 'assigned')
                             return (
                               <tr key={a.id} className="border-b border-border/50">
                                 <td className="px-3 py-2"><Badge variant="outline" className="rounded-full text-xs font-mono">{a.asset_code}</Badge></td>
@@ -4183,7 +3983,7 @@ export function EmployeeProfile() {
               <div className="px-4 pt-4 pb-4">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-3">Position History</p>
                 <ul className="space-y-3">
-                  {(jobHistoryData!.data ?? []).slice(0, 3).map((row: any, i: number) => (
+                  {(jobHistoryData!.data ?? []).slice(0, 3).map((row, i: number) => (
                     <li key={i} className="flex gap-3">
                       <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                         <Briefcase className="h-3.5 w-3.5 text-primary" />
@@ -4221,32 +4021,32 @@ export function EmployeeProfile() {
             {/* Employment Type */}
             <div>
               <Label className="text-xs">Employment Type</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.employment_type ?? 'permanent'} onChange={e => setJobForm((p:any)=>({...p,employment_type:e.target.value}))}>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.employment_type ?? 'permanent'} onChange={e => setJobForm((p)=>({...p,employment_type:e.target.value}))}>
                 {['permanent','contract','intern','probation','consultant'].map(o=><option key={o} value={o}>{o}</option>)}
               </select>
             </div>
             {/* Department */}
             <div>
               <Label className="text-xs">Department</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.department_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,department_id:e.target.value||null}))}>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.department_id ?? ''} onChange={e=>setJobForm((p)=>({...p,department_id:e.target.value||null}))}>
                 <option value="">— None —</option>
-                {(deptListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+                {(deptListData?.data ?? []).map((d)=><option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
             {/* Designation + Grade */}
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs">Designation</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.designation_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,designation_id:e.target.value||null}))}>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.designation_id ?? ''} onChange={e=>setJobForm((p)=>({...p,designation_id:e.target.value||null}))}>
                   <option value="">— None —</option>
-                  {(desigListData?.data ?? []).map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}
+                  {(desigListData?.data ?? []).map((d)=><option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
               <div>
                 <Label className="text-xs">Grade / Band</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.grade_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,grade_id:e.target.value||null}))}>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.grade_id ?? ''} onChange={e=>setJobForm((p)=>({...p,grade_id:e.target.value||null}))}>
                   <option value="">— None —</option>
-                  {(gradeListData?.data ?? []).map((g:any)=><option key={g.id} value={g.id}>{g.name} ({g.code})</option>)}
+                  {(gradeListData?.data ?? []).map((g)=><option key={g.id} value={g.id}>{g.name} ({g.code})</option>)}
                 </select>
               </div>
             </div>
@@ -4255,7 +4055,7 @@ export function EmployeeProfile() {
               <Label className="text-xs">Reporting Manager</Label>
               <EmployeeSelector
                 value={jobForm.manager_id ?? ''}
-                onChange={(v) => { const val = typeof v === 'string' ? v : (v[0] ?? ''); setJobForm((p:any)=>({ ...p, manager_id: val || null })) }}
+                onChange={(v) => { const val = typeof v === 'string' ? v : (v[0] ?? ''); setJobForm((p)=>({ ...p, manager_id: val || null })) }}
                 excludeIds={id ? [id] : []}
                 placeholder="Search manager by name or code…"
                 className="mt-1 w-full"
@@ -4265,16 +4065,16 @@ export function EmployeeProfile() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs">Work Location</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.work_location_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,work_location_id:e.target.value||null}))}>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.work_location_id ?? ''} onChange={e=>setJobForm((p)=>({...p,work_location_id:e.target.value||null}))}>
                   <option value="">— None —</option>
-                  {(wlListData?.data ?? []).map((w:any)=><option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
+                  {(wlListData?.data ?? []).map((w)=><option key={w.id} value={w.id}>{w.name}{w.city ? ` · ${w.city}` : ''}</option>)}
                 </select>
               </div>
               <div>
                 <Label className="text-xs">Cost Center</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.cost_center_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,cost_center_id:e.target.value||null}))}>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.cost_center_id ?? ''} onChange={e=>setJobForm((p)=>({...p,cost_center_id:e.target.value||null}))}>
                   <option value="">— None —</option>
-                  {(ccListData?.data ?? []).map((c:any)=><option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                  {(ccListData?.data ?? []).map((c)=><option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
                 </select>
               </div>
             </div>
@@ -4284,24 +4084,24 @@ export function EmployeeProfile() {
               <div className="space-y-2">
                 <div>
                   <Label className="text-xs">Site</Label>
-                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.site_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,site_id:e.target.value}))}>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.site_id ?? ''} onChange={e=>setJobForm((p)=>({...p,site_id:e.target.value}))}>
                     <option value="">— None —</option>
-                    {sitesList.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}
+                    {sitesList.map((s)=><option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label className="text-xs">Roster</Label>
-                    <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.roster_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,roster_id:e.target.value}))}>
+                    <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.roster_id ?? ''} onChange={e=>setJobForm((p)=>({...p,roster_id:e.target.value}))}>
                       <option value="">— Inherit from site —</option>
-                      {rostersList.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+                      {rostersList.map((r)=><option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <Label className="text-xs">Rotation Policy</Label>
-                    <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.rotation_policy_id ?? ''} onChange={e=>setJobForm((p:any)=>({...p,rotation_policy_id:e.target.value}))}>
+                    <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" value={jobForm.rotation_policy_id ?? ''} onChange={e=>setJobForm((p)=>({...p,rotation_policy_id:e.target.value}))}>
                       <option value="">— Inherit from site —</option>
-                      {rotationList.map((r:any)=><option key={r.id} value={r.id}>{r.name}</option>)}
+                      {rotationList.map((r)=><option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                   </div>
                 </div>
@@ -4310,12 +4110,12 @@ export function EmployeeProfile() {
             {/* Effective From */}
             <div>
               <Label className="text-xs">Effective From *</Label>
-              <DateInput className="mt-1 h-8 text-xs" value={jobForm.effective_from ?? ''} onChange={v=>setJobForm((p:any)=>({...p,effective_from:v}))} />
+              <DateInput className="mt-1 h-8 text-xs" value={jobForm.effective_from ?? ''} onChange={v=>setJobForm((p)=>({...p,effective_from:v}))} />
             </div>
             {/* Reason */}
             <div>
               <Label className="text-xs">Reason for Change</Label>
-              <Input className="mt-1 h-8 text-xs" value={jobForm.reason_for_change ?? ''} onChange={e=>setJobForm((p:any)=>({...p,reason_for_change:e.target.value}))} />
+              <Input className="mt-1 h-8 text-xs" value={jobForm.reason_for_change ?? ''} onChange={e=>setJobForm((p)=>({...p,reason_for_change:e.target.value}))} />
             </div>
           </div>
           <DialogFooter>
@@ -4354,16 +4154,16 @@ export function EmployeeProfile() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Type</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={addrForm.address_type ?? 'current'} onChange={e=>setAddrForm((p:any)=>({...p,address_type:e.target.value}))}>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={addrForm.address_type ?? 'current'} onChange={e=>setAddrForm((p)=>({...p,address_type:e.target.value}))}>
                 {[['current','Current'],['permanent','Permanent'],['correspondence','Correspondence']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
               </select>
             </div>
-            <div><Label className="text-xs">Pincode</Label><Input className="mt-1 h-8 text-xs" value={addrForm.pincode??''} onChange={e=>setAddrForm((p:any)=>({...p,pincode:e.target.value}))}/></div>
-            <div className="col-span-2"><Label className="text-xs">Address Line 1</Label><Input className="mt-1 h-8 text-xs" value={addrForm.line1??''} onChange={e=>setAddrForm((p:any)=>({...p,line1:e.target.value}))}/></div>
-            <div className="col-span-2"><Label className="text-xs">Address Line 2</Label><Input className="mt-1 h-8 text-xs" value={addrForm.line2??''} onChange={e=>setAddrForm((p:any)=>({...p,line2:e.target.value}))}/></div>
-            <div><Label className="text-xs">City</Label><Input className="mt-1 h-8 text-xs" value={addrForm.city??''} onChange={e=>setAddrForm((p:any)=>({...p,city:e.target.value}))}/></div>
-            <div><Label className="text-xs">State</Label><Input className="mt-1 h-8 text-xs" value={addrForm.state??''} onChange={e=>setAddrForm((p:any)=>({...p,state:e.target.value}))}/></div>
-            <div><Label className="text-xs">Country</Label><Input className="mt-1 h-8 text-xs" value={addrForm.country??'India'} onChange={e=>setAddrForm((p:any)=>({...p,country:e.target.value}))}/></div>
+            <div><Label className="text-xs">Pincode</Label><Input className="mt-1 h-8 text-xs" value={addrForm.pincode??''} onChange={e=>setAddrForm((p)=>({...p,pincode:e.target.value}))}/></div>
+            <div className="col-span-2"><Label className="text-xs">Address Line 1</Label><Input className="mt-1 h-8 text-xs" value={addrForm.line1??''} onChange={e=>setAddrForm((p)=>({...p,line1:e.target.value}))}/></div>
+            <div className="col-span-2"><Label className="text-xs">Address Line 2</Label><Input className="mt-1 h-8 text-xs" value={addrForm.line2??''} onChange={e=>setAddrForm((p)=>({...p,line2:e.target.value}))}/></div>
+            <div><Label className="text-xs">City</Label><Input className="mt-1 h-8 text-xs" value={addrForm.city??''} onChange={e=>setAddrForm((p)=>({...p,city:e.target.value}))}/></div>
+            <div><Label className="text-xs">State</Label><Input className="mt-1 h-8 text-xs" value={addrForm.state??''} onChange={e=>setAddrForm((p)=>({...p,state:e.target.value}))}/></div>
+            <div><Label className="text-xs">Country</Label><Input className="mt-1 h-8 text-xs" value={addrForm.country??'India'} onChange={e=>setAddrForm((p)=>({...p,country:e.target.value}))}/></div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>setAddrOpen(false)}>Cancel</Button>
@@ -4379,15 +4179,15 @@ export function EmployeeProfile() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Add Emergency Contact</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={emForm.name??''} onChange={e=>setEmForm((p:any)=>({...p,name:e.target.value}))}/></div>
+            <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={emForm.name??''} onChange={e=>setEmForm((p)=>({...p,name:e.target.value}))}/></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Relationship</Label><Input className="mt-1 h-8 text-xs" value={emForm.relationship??''} onChange={e=>setEmForm((p:any)=>({...p,relationship:e.target.value}))}/></div>
-              <div><Label className="text-xs">Phone</Label><Input className="mt-1 h-8 text-xs" value={emForm.phone??''} onChange={e=>setEmForm((p:any)=>({...p,phone:e.target.value}))}/></div>
-              <div><Label className="text-xs">Alternate Phone</Label><Input className="mt-1 h-8 text-xs" value={emForm.alternate_phone??''} onChange={e=>setEmForm((p:any)=>({...p,alternate_phone:e.target.value}))}/></div>
-              <div><Label className="text-xs">Email</Label><Input className="mt-1 h-8 text-xs" value={emForm.email??''} onChange={e=>setEmForm((p:any)=>({...p,email:e.target.value}))}/></div>
+              <div><Label className="text-xs">Relationship</Label><Input className="mt-1 h-8 text-xs" value={emForm.relationship??''} onChange={e=>setEmForm((p)=>({...p,relationship:e.target.value}))}/></div>
+              <div><Label className="text-xs">Phone</Label><Input className="mt-1 h-8 text-xs" value={emForm.phone??''} onChange={e=>setEmForm((p)=>({...p,phone:e.target.value}))}/></div>
+              <div><Label className="text-xs">Alternate Phone</Label><Input className="mt-1 h-8 text-xs" value={emForm.alternate_phone??''} onChange={e=>setEmForm((p)=>({...p,alternate_phone:e.target.value}))}/></div>
+              <div><Label className="text-xs">Email</Label><Input className="mt-1 h-8 text-xs" value={emForm.email??''} onChange={e=>setEmForm((p)=>({...p,email:e.target.value}))}/></div>
             </div>
             <div className="flex items-center gap-2">
-              <input type="checkbox" id="em_primary" checked={!!emForm.is_primary} onChange={e=>setEmForm((p:any)=>({...p,is_primary:e.target.checked}))} className="rounded" />
+              <input type="checkbox" id="em_primary" checked={!!emForm.is_primary} onChange={e=>setEmForm((p)=>({...p,is_primary:e.target.checked}))} className="rounded" />
               <Label htmlFor="em_primary" className="text-xs">Primary contact</Label>
             </div>
           </div>
@@ -4407,16 +4207,16 @@ export function EmployeeProfile() {
           <div className="space-y-3">
             <div>
               <Label className="text-xs">Identity Type</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={idForm.identity_type_id??''} onChange={e=>setIdForm((p:any)=>({...p,identity_type_id:e.target.value}))}>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={idForm.identity_type_id??''} onChange={e=>setIdForm((p)=>({...p,identity_type_id:e.target.value}))}>
                 <option value="">Select type…</option>
-                {(identityTypesData?.data ?? []).map((t:any)=><option key={t.id} value={t.id}>{t.name}</option>)}
+                {(identityTypesData?.data ?? []).map((t)=><option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
               {!(identityTypesData?.data?.length) && <p className="text-[10px] text-warning mt-1">No identity types configured. Add them under Masters first.</p>}
             </div>
-            <div><Label className="text-xs">Identity Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={idForm.identity_number??''} onChange={e=>setIdForm((p:any)=>({...p,identity_number:e.target.value}))}/></div>
+            <div><Label className="text-xs">Identity Number</Label><Input className="mt-1 h-8 text-xs font-mono" value={idForm.identity_number??''} onChange={e=>setIdForm((p)=>({...p,identity_number:e.target.value}))}/></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Issued By</Label><Input className="mt-1 h-8 text-xs" value={idForm.issued_by??''} onChange={e=>setIdForm((p:any)=>({...p,issued_by:e.target.value}))}/></div>
-              <div><Label className="text-xs">Expiry Date</Label><DateInput className="mt-1 h-8 text-xs" value={idForm.expiry_date??''} onChange={v=>setIdForm((p:any)=>({...p,expiry_date:v}))}/></div>
+              <div><Label className="text-xs">Issued By</Label><Input className="mt-1 h-8 text-xs" value={idForm.issued_by??''} onChange={e=>setIdForm((p)=>({...p,issued_by:e.target.value}))}/></div>
+              <div><Label className="text-xs">Expiry Date</Label><DateInput className="mt-1 h-8 text-xs" value={idForm.expiry_date??''} onChange={v=>setIdForm((p)=>({...p,expiry_date:v}))}/></div>
             </div>
           </div>
           <DialogFooter>
@@ -4434,11 +4234,11 @@ export function EmployeeProfile() {
           <DialogHeader><DialogTitle>Add Previous Employment</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {([{label:'Company',key:'company_name'},{label:'Designation',key:'designation'},{label:'Reason for Leaving',key:'reason_for_leaving'}] as const).map(f=>(
-              <div key={f.key}><Label className="text-xs">{f.label}</Label><Input className="mt-1 h-8 text-xs" value={prevForm[f.key]??''} onChange={e=>setPrevForm((p:any)=>({...p,[f.key]:e.target.value}))}/></div>
+              <div key={f.key}><Label className="text-xs">{f.label}</Label><Input className="mt-1 h-8 text-xs" value={prevForm[f.key]??''} onChange={e=>setPrevForm((p)=>({...p,[f.key]:e.target.value}))}/></div>
             ))}
             <div className="grid grid-cols-2 gap-2">
-              <div><Label className="text-xs">From</Label><DateInput className="mt-1 h-8 text-xs" value={prevForm.from_date??''} onChange={v=>setPrevForm((p:any)=>({...p,from_date:v}))}/></div>
-              <div><Label className="text-xs">To</Label><DateInput className="mt-1 h-8 text-xs" value={prevForm.to_date??''} onChange={v=>setPrevForm((p:any)=>({...p,to_date:v}))}/></div>
+              <div><Label className="text-xs">From</Label><DateInput className="mt-1 h-8 text-xs" value={prevForm.from_date??''} onChange={v=>setPrevForm((p)=>({...p,from_date:v}))}/></div>
+              <div><Label className="text-xs">To</Label><DateInput className="mt-1 h-8 text-xs" value={prevForm.to_date??''} onChange={v=>setPrevForm((p)=>({...p,to_date:v}))}/></div>
             </div>
           </div>
           <DialogFooter>
@@ -4456,11 +4256,11 @@ export function EmployeeProfile() {
           <DialogHeader><DialogTitle>Add {pvForm.record_type === 'visa' ? 'Visa' : 'Passport'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {([{label:'Document Number',key:'doc_number'},{label:'Country',key:'country'},{label:'Place of Issue',key:'place_of_issue'},...(pvForm.record_type==='visa'?[{label:'Visa Type',key:'visa_type'}]:[])] as Array<{label:string;key:string}>).map(f=>(
-              <div key={f.key}><Label className="text-xs">{f.label}</Label><Input className="mt-1 h-8 text-xs" value={pvForm[f.key]??''} onChange={e=>setPvForm((p:any)=>({...p,[f.key]:e.target.value}))}/></div>
+              <div key={f.key}><Label className="text-xs">{f.label}</Label><Input className="mt-1 h-8 text-xs" value={pvForm[f.key]??''} onChange={e=>setPvForm((p)=>({...p,[f.key]:e.target.value}))}/></div>
             ))}
             <div className="grid grid-cols-2 gap-2">
-              <div><Label className="text-xs">Issue Date</Label><DateInput className="mt-1 h-8 text-xs" value={pvForm.issue_date??''} onChange={v=>setPvForm((p:any)=>({...p,issue_date:v}))}/></div>
-              <div><Label className="text-xs">Expiry Date</Label><DateInput className="mt-1 h-8 text-xs" value={pvForm.expiry_date??''} onChange={v=>setPvForm((p:any)=>({...p,expiry_date:v}))}/></div>
+              <div><Label className="text-xs">Issue Date</Label><DateInput className="mt-1 h-8 text-xs" value={pvForm.issue_date??''} onChange={v=>setPvForm((p)=>({...p,issue_date:v}))}/></div>
+              <div><Label className="text-xs">Expiry Date</Label><DateInput className="mt-1 h-8 text-xs" value={pvForm.expiry_date??''} onChange={v=>setPvForm((p)=>({...p,expiry_date:v}))}/></div>
             </div>
           </div>
           <DialogFooter>
@@ -4477,27 +4277,27 @@ export function EmployeeProfile() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Add Family Member</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={famForm.name??''} onChange={e=>setFamForm((p:any)=>({...p,name:e.target.value}))}/></div>
+            <div><Label className="text-xs">Name</Label><Input className="mt-1 h-8 text-xs" value={famForm.name??''} onChange={e=>setFamForm((p)=>({...p,name:e.target.value}))}/></div>
             <div>
               <Label className="text-xs">Relationship</Label>
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={famForm.relationship_type_id??''} onChange={e=>setFamForm((p:any)=>({...p,relationship_type_id:e.target.value}))}>
+              <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={famForm.relationship_type_id??''} onChange={e=>setFamForm((p)=>({...p,relationship_type_id:e.target.value}))}>
                 <option value="">Select relationship…</option>
-                {(relTypesData?.data ?? []).map((rt:any)=><option key={rt.id} value={rt.id}>{rt.name}</option>)}
+                {(relTypesData?.data ?? []).map((rt)=><option key={rt.id} value={rt.id}>{rt.name}</option>)}
               </select>
               {!(relTypesData?.data?.length) && <p className="text-[10px] text-warning mt-1">No relationship types configured. Add them under Masters first.</p>}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Date of Birth</Label><DateInput className="mt-1 h-8 text-xs" value={famForm.dob??''} onChange={v=>setFamForm((p:any)=>({...p,dob:v}))}/></div>
+              <div><Label className="text-xs">Date of Birth</Label><DateInput className="mt-1 h-8 text-xs" value={famForm.dob??''} onChange={v=>setFamForm((p)=>({...p,dob:v}))}/></div>
               <div>
                 <Label className="text-xs">Gender</Label>
-                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={famForm.gender??''} onChange={e=>setFamForm((p:any)=>({...p,gender:e.target.value}))}>
+                <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={famForm.gender??''} onChange={e=>setFamForm((p)=>({...p,gender:e.target.value}))}>
                   {[['',''],['male','Male'],['female','Female'],['other','Other']].map(([v,l])=><option key={v} value={v}>{l||'—'}</option>)}
                 </select>
               </div>
             </div>
-            <div><Label className="text-xs">Occupation</Label><Input className="mt-1 h-8 text-xs" value={famForm.occupation??''} onChange={e=>setFamForm((p:any)=>({...p,occupation:e.target.value}))}/></div>
+            <div><Label className="text-xs">Occupation</Label><Input className="mt-1 h-8 text-xs" value={famForm.occupation??''} onChange={e=>setFamForm((p)=>({...p,occupation:e.target.value}))}/></div>
             <div className="flex items-center gap-2">
-              <input type="checkbox" id="fam_dep" checked={!!famForm.is_dependent} onChange={e=>setFamForm((p:any)=>({...p,is_dependent:e.target.checked}))} className="rounded" />
+              <input type="checkbox" id="fam_dep" checked={!!famForm.is_dependent} onChange={e=>setFamForm((p)=>({...p,is_dependent:e.target.checked}))} className="rounded" />
               <Label htmlFor="fam_dep" className="text-xs">Dependent</Label>
             </div>
           </div>
@@ -4515,8 +4315,8 @@ export function EmployeeProfile() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Issue Access Card</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label className="text-xs">Card Number</Label><Input className="mt-1 h-8 text-xs" value={cardForm.card_number??''} onChange={e=>setCardForm((p:any)=>({...p,card_number:e.target.value}))}/></div>
-            <div><Label className="text-xs">Issued Date</Label><DateInput className="mt-1 h-8 text-xs" value={cardForm.issued_date??''} onChange={v=>setCardForm((p:any)=>({...p,issued_date:v}))}/></div>
+            <div><Label className="text-xs">Card Number</Label><Input className="mt-1 h-8 text-xs" value={cardForm.card_number??''} onChange={e=>setCardForm((p)=>({...p,card_number:e.target.value}))}/></div>
+            <div><Label className="text-xs">Issued Date</Label><DateInput className="mt-1 h-8 text-xs" value={cardForm.issued_date??''} onChange={v=>setCardForm((p)=>({...p,issued_date:v}))}/></div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>setAddCardOpen(false)}>Cancel</Button>
@@ -4538,7 +4338,7 @@ export function EmployeeProfile() {
               : jobAssignMutation.isPending
 
             // Recent history for this field (last 4 job_history rows)
-            const historyRows: any[] = (jobHistoryData?.data ?? []).slice(0, 4)
+            const historyRows: JobHistoryRow[] = (jobHistoryData?.data ?? []).slice(0, 4)
 
             // Past effective date warning
             const today = new Date().toISOString().slice(0, 10)
@@ -4618,7 +4418,7 @@ export function EmployeeProfile() {
                     <div>
                       <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-1.5">Recent Changes</p>
                       <div className="space-y-1">
-                        {historyRows.map((row: any, i: number) => {
+                        {historyRows.map((row, i: number) => {
                           const val =
                             assignTarget === 'department'      ? row.departments?.name      :
                             assignTarget === 'designation'     ? row.designations?.name     :
@@ -4644,7 +4444,7 @@ export function EmployeeProfile() {
                     <div>
                       <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-1.5">Shift History</p>
                       <div className="space-y-1">
-                        {(shiftHistoryData!.data ?? []).slice(0, 4).map((row: any) => (
+                        {(shiftHistoryData!.data ?? []).slice(0, 4).map((row) => (
                           <div key={row.id} className="flex items-center justify-between text-[10px] py-1 border-b border-border/40 last:border-0">
                             <span className="text-foreground font-medium">{row.shifts?.name ?? '—'}</span>
                             <div className="flex items-center gap-2">
@@ -4863,8 +4663,8 @@ export function EmployeeProfile() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Document Details</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label className="text-xs">Document Name</Label><Input className="mt-1 h-8 text-xs" value={docMeta?.name??''} onChange={e=>setDocMeta((p:any)=>({...p,name:e.target.value}))}/></div>
-            <div><Label className="text-xs">Document Type</Label><Input className="mt-1 h-8 text-xs" placeholder="e.g. Offer Letter, ID Proof" value={docMeta?.doc_type??''} onChange={e=>setDocMeta((p:any)=>({...p,doc_type:e.target.value}))}/></div>
+            <div><Label className="text-xs">Document Name</Label><Input className="mt-1 h-8 text-xs" value={docMeta?.name??''} onChange={e=>setDocMeta((p)=>({doc_type:p?.doc_type??'',name:e.target.value}))}/></div>
+            <div><Label className="text-xs">Document Type</Label><Input className="mt-1 h-8 text-xs" placeholder="e.g. Offer Letter, ID Proof" value={docMeta?.doc_type??''} onChange={e=>setDocMeta((p)=>({name:p?.name??'',doc_type:e.target.value}))}/></div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>{setDocMetaOpen(false);setDocFile(null)}}>Cancel</Button>
@@ -4896,7 +4696,7 @@ export function EmployeeProfile() {
                 <div><Label className="text-xs text-muted-foreground">Bank Name</Label><Input className="mt-1 h-8 text-xs" value={bankForm.bank_name} onChange={e=>setBankForm(f=>({...f,bank_name:e.target.value}))}/></div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Account Type</Label>
-                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.account_type} onChange={e=>setBankForm(f=>({...f,account_type:e.target.value as any}))}>
+                  <select className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none" value={bankForm.account_type} onChange={e=>setBankForm(f=>({...f,account_type:e.target.value as 'savings' | 'current' | 'salary' | ''}))}>
                     <option value="">— Select —</option>
                     {['savings','current','salary'].map(t=><option key={t} value={t} className="capitalize">{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
                   </select>
@@ -5002,7 +4802,7 @@ export function EmployeeProfile() {
                 <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none"
                   value={bankForm.holiday_group_id} onChange={e => setBankForm(f => ({ ...f, holiday_group_id: e.target.value }))}>
                   <option value="">Inherit from site</option>
-                  {holidayGroups.map((g: any) => (
+                  {holidayGroups.map((g) => (
                     <option key={g.id} value={g.id}>{g.name}{g.state_code ? ` (${g.state_code})` : ''}</option>
                   ))}
                 </select>

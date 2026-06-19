@@ -119,8 +119,8 @@ export function PTAXManagement() {
 
   // ── Manual contribution compute (FY auto-derived from month server-side) ──────
   const computeMutation = useMutation({
-    mutationFn: (month: string) => api.post('/payroll/statutory/ptax/contributions/compute', { month }),
-    onSuccess: (res: PTaxComputeResult, month) => {
+    mutationFn: (month: string) => api.post<PTaxComputeResult>('/payroll/statutory/ptax/contributions/compute', { month }),
+    onSuccess: (res, month) => {
       qc.invalidateQueries({ queryKey: ['ptax-contributions'] })
       const d = res?.data ?? res ?? {}
       const nonZero = d.computed_nonzero ?? d.computed_count ?? 0

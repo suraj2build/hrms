@@ -403,8 +403,8 @@ export function PayrollFinalizationCenter() {
   })
 
   const exportMutation = useMutation({
-    mutationFn: () => api.get(`/payroll/runs/${run!.id}/export`),
-    onSuccess: (data: { data?: Array<{ employee_code?: string; employee_name?: string; account_number_masked?: string; ifsc_code?: string; net_pay?: number }> }) => {
+    mutationFn: () => api.get<{ data?: Array<{ employee_code?: string; employee_name?: string; account_number_masked?: string; ifsc_code?: string; net_pay?: number }> }>(`/payroll/runs/${run!.id}/export`),
+    onSuccess: (data) => {
       // Build CSV from export data
       const rows: string[][] = [['Employee Code', 'Employee Name', 'Account (Masked)', 'IFSC', 'Net Pay']]
       for (const s of (data?.data ?? [])) {

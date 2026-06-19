@@ -200,13 +200,17 @@ function ValidationRulesTab() {
 
   const { data: rules, isLoading } = useQuery<ValidationRule[]>({
     queryKey: ['validation-rules'],
-    queryFn:  () =>
-      api.get('/payroll/validation-rules').then((r: any) => r.data?.data ?? r.data ?? []),
+    queryFn:  (): Promise<ValidationRule[]> =>
+      api.get<{ data?: { data?: ValidationRule[] } | ValidationRule[] }>('/payroll/validation-rules').then(r => {
+        const d = r.data
+        if (Array.isArray(d)) return d
+        return d?.data ?? []
+      }),
   })
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      api.patch(`/payroll/validation-rules/${id}`, { enabled }).then((r: any) => r.data),
+      api.patch<{ data: unknown }>(`/payroll/validation-rules/${id}`, { enabled }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules'] })
       toast.success('Rule updated')
@@ -440,7 +444,7 @@ function RunHistoryTab() {
 
   const { data: runs = [], isLoading } = useQuery<PayrollRun[]>({
     queryKey: ['payroll-runs-history'],
-    queryFn:  () => api.get('/payroll/runs').then((r: any) => r.data ?? []),
+    queryFn:  () => api.get<{ data?: PayrollRun[] }>('/payroll/runs').then(r => r.data ?? []),
   })
 
   return (
