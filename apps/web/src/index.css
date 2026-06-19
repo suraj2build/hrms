@@ -949,3 +949,177 @@
 /* Colored shadows */
 :root[data-theme="petrol"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #0F3D44 25%, transparent); }
 :root[data-theme="petrol"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #0F3D44 30%, transparent); }
+
+/* ── Bordeaux + Wine theme ─────────────────────────────────────────────────── */
+:root[data-theme="bordeaux"] {
+  --background:            #FAF5F7;
+  --foreground:            #1F0712;
+  --card:                  #FFFFFF;
+  --card-foreground:       #1F0712;
+  --popover:               #FFFFFF;
+  --popover-foreground:    #1F0712;
+
+  --primary:               #33091B;
+  --primary-foreground:    #FFFFFF;
+
+  --secondary:             #F3E1E8;
+  --secondary-foreground:  #4A1126;
+  --muted:                 #F4E8EC;
+  --muted-foreground:      #8A6470;
+  --accent:                #F3E1E8;
+  --accent-foreground:     #4A1126;
+
+  --destructive:             #C93535;
+  --destructive-foreground:  #FFFFFF;
+  --success:                 #1A8050;
+  --success-foreground:      #FFFFFF;
+  --warning:                 #B07B18;
+  --warning-foreground:      #FFFFFF;
+  --info:                    #33091B;
+  --info-foreground:         #FFFFFF;
+
+  --border:  #ECD9E0;
+  --input:   #ECD9E0;
+  --ring:    #33091B;
+
+  --chart-1: #33091B;
+  --chart-2: #1A8050;
+  --chart-3: #B07B18;
+  --chart-4: #C93535;
+  --chart-5: #7A2547;
+
+  --sidebar:                    #FFFFFF;
+  --sidebar-foreground:         #1F0712;
+  --sidebar-primary:            #33091B;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent:             #F3E1E8;
+  --sidebar-accent-foreground:  #4A1126;
+  --sidebar-border:             #ECD9E0;
+  --sidebar-ring:               #33091B;
+
+  --grad-hero:    linear-gradient(135deg, #1E0610 0%, #4A1126 100%);
+  --grad-primary: linear-gradient(135deg, #33091B 0%, #5C1730 100%);
+  --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #FAF5F7 100%);
+  --gradient-nav: linear-gradient(to right, #2A0716, #33091B, #4A1430);
+
+  /* Primary button gradient + shadow — bordeaux */
+  --grad-btn:   linear-gradient(to bottom, #5C1730, #4A1126, #33091B);
+  --shadow-btn: 0 6px 16px -6px rgba(51,9,27,0.55);
+
+  --brand-navy:      #33091B;
+  --brand-navy-deep: #1E0610;
+  --brand-navy-soft: #5C1730;
+  --primary-glow:    oklch(0.50 0.17 358);
+
+  --elev-1: 0 1px 2px rgba(31,7,18,0.05), 0 8px 20px -12px rgba(31,7,18,0.12), 0 0 0 1px rgba(31,7,18,0.035);
+  --elev-2: 0 2px 6px rgba(31,7,18,0.06), 0 14px 32px -14px rgba(31,7,18,0.16), 0 0 0 1px rgba(31,7,18,0.03);
+  --elev-3: 0 10px 24px rgba(31,7,18,0.08), 0 32px 60px -24px rgba(31,7,18,0.22), 0 0 0 1px rgba(31,7,18,0.03);
+}
+
+:root[data-theme="bordeaux"] .app-canvas {
+  background:
+    radial-gradient(60% 48% at 100% 0%,  rgba(51,9,27,0.07), transparent 70%),
+    radial-gradient(48% 40% at 0% 100%,  rgba(122,37,71,0.055), transparent 72%),
+    var(--color-background);
+}
+
+:root[data-theme="bordeaux"] .hero-band {
+  background: linear-gradient(135deg, #1E0610 0%, #33091B 55%, #170510 100%);
+  box-shadow: 0 24px 56px -22px rgba(51,9,27,0.55);
+}
+:root[data-theme="bordeaux"] .hero-band::after {
+  background: rgba(90,23,48,0.28);
+}
+
+:root[data-theme="bordeaux"] .chip-grad {
+  background: linear-gradient(145deg, #5C1730 0%, #33091B 100%);
+  box-shadow: 0 6px 14px -6px rgba(51,9,27,0.55), inset 0 1px 0 rgba(255,255,255,0.35);
+}
+
+:root[data-theme="bordeaux"] .brand-gradient-text {
+  background: linear-gradient(135deg, #33091B 0%, #5C1730 45%, #7A2547 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:root[data-theme="bordeaux"] .op-pill-active {
+  background: #33091B;
+  box-shadow: 0 1px 3px rgba(51,9,27,0.30);
+}
+:root[data-theme="bordeaux"] .op-pill-inactive:hover {
+  border-color: #E0B8C6;
+  background: #F3E1E8;
+  color: #33091B;
+}
+:root[data-theme="bordeaux"] .op-accent-bar      { background: #33091B; }
+:root[data-theme="bordeaux"] .op-heading          { color: #33091B; }
+:root[data-theme="bordeaux"] .op-section-bg       { border-color: rgba(51,9,27,0.07); }
+:root[data-theme="bordeaux"] .op-meta-pill        { background: rgba(51,9,27,0.07); color: #33091B; }
+:root[data-theme="bordeaux"] .op-tint-medium      { background: rgba(243,225,232,0.90) !important; }
+:root[data-theme="bordeaux"] .op-lane-medium      { border-left-color: rgba(51,9,27,0.40); background: rgba(243,225,232,0.50); }
+:root[data-theme="bordeaux"] .op-lane-default     { border-left-color: rgba(51,9,27,0.15); }
+:root[data-theme="bordeaux"] .mission-lane-active { background: rgba(243,225,232,0.75); border-left-color: rgba(51,9,27,0.40); color: #33091B; }
+:root[data-theme="bordeaux"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(51,9,27,0.28), 0 4px 12px rgba(0,0,0,0.08) !important; }
+:root[data-theme="bordeaux"] .op-row-selected     { background: rgba(243,225,232,0.85) !important; box-shadow: inset 2px 0 0 rgba(51,9,27,0.50), 0 0 0 1px rgba(51,9,27,0.14) !important; }
+:root[data-theme="bordeaux"] .op-row-processing::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(51,9,27,0.035) 35%,
+    rgba(51,9,27,0.070) 50%,
+    rgba(51,9,27,0.035) 65%,
+    transparent 100%
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Bordeaux theme — global remap of hardcoded brand-blue utility classes.
+   Same single-source approach as petrol: blue → wine, everywhere, at once.
+
+   Bordeaux palette:
+     #2E6FE6 / #1A4D8F  → #33091B   (primary)
+     #2260A8            → #5C1730   (gradient mid)
+     #1E5BA8            → #4A1126   (gradient via)
+     #163F75            → #2A0716   (gradient deep)
+     #3B82F6            → #7A2547   (lighter accent)
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Solid backgrounds */
+:root[data-theme="bordeaux"] .bg-\[\#2E6FE6\],
+:root[data-theme="bordeaux"] .bg-\[\#1A4D8F\],
+:root[data-theme="bordeaux"] .bg-\[\#1E5BA8\]   { background-color: #33091B; }
+:root[data-theme="bordeaux"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #2A0716 90%, transparent); }
+:root[data-theme="bordeaux"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #33091B 40%, transparent); }
+:root[data-theme="bordeaux"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #33091B 10%, transparent); }
+:root[data-theme="bordeaux"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #33091B 5%,  transparent); }
+:root[data-theme="bordeaux"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #7A2547 30%, transparent); }
+:root[data-theme="bordeaux"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #2A0716; }
+:root[data-theme="bordeaux"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #33091B 10%, transparent); }
+
+/* Text */
+:root[data-theme="bordeaux"] .text-\[\#2E6FE6\],
+:root[data-theme="bordeaux"] .text-\[\#1A4D8F\]          { color: #33091B; }
+:root[data-theme="bordeaux"] .hover\:text-\[\#2E6FE6\]:hover { color: #33091B; }
+
+/* Borders */
+:root[data-theme="bordeaux"] .border-\[\#2E6FE6\],
+:root[data-theme="bordeaux"] .border-\[\#1A4D8F\]            { border-color: #33091B; }
+:root[data-theme="bordeaux"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #33091B 40%, transparent); }
+
+/* Gradient stops */
+:root[data-theme="bordeaux"] .from-\[\#1A4D8F\] { --tw-gradient-from: #33091B; }
+:root[data-theme="bordeaux"] .from-\[\#2E6FE6\] { --tw-gradient-from: #33091B; }
+:root[data-theme="bordeaux"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #4A1126; }
+:root[data-theme="bordeaux"] .to-\[\#2260A8\]   { --tw-gradient-to: #5C1730; }
+:root[data-theme="bordeaux"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #5C1730; }
+
+/* Rings */
+:root[data-theme="bordeaux"] .ring-\[\#1A4D8F\]\/15 { --tw-ring-color: color-mix(in oklab, #33091B 15%, transparent); }
+:root[data-theme="bordeaux"] .ring-\[\#2E6FE6\]\/20 { --tw-ring-color: color-mix(in oklab, #33091B 20%, transparent); }
+:root[data-theme="bordeaux"] .ring-\[\#2E6FE6\]\/30 { --tw-ring-color: color-mix(in oklab, #33091B 30%, transparent); }
+:root[data-theme="bordeaux"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #33091B; }
+
+/* Colored shadows */
+:root[data-theme="bordeaux"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #33091B 25%, transparent); }
+:root[data-theme="bordeaux"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #33091B 30%, transparent); }

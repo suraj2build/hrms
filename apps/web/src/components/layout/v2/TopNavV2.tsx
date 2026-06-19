@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Sun, Waves, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
+import { Sun, Waves, Wine, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -47,8 +47,13 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const executiveMode        = useUIStore(s => s.executiveMode)
   const toggleExecutiveMode  = useUIStore(s => s.toggleExecutiveMode)
   const [notifOpen, setNotifOpen]  = useState(false)
-  const { theme, setTheme } = useTheme()
-  const isPetrol = theme === 'petrol'
+  const { theme, cycleTheme } = useTheme()
+  const themeMeta = {
+    light:    { Icon: Sun,   label: 'Blue',     next: 'Petrol'   },
+    petrol:   { Icon: Waves, label: 'Petrol',   next: 'Bordeaux' },
+    bordeaux: { Icon: Wine,  label: 'Bordeaux', next: 'Blue'     },
+  }[theme]
+  const ThemeIcon = themeMeta.Icon
 
   // In Executive Mode show only the curated exec domain set; otherwise role-filtered full set.
   const activeDomain   = executiveMode
@@ -188,14 +193,15 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         </div>
         <NotificationCenter open={notifOpen} onClose={() => setNotifOpen(false)} />
 
-        {/* Theme toggle: Blue ↔ Petrol */}
+        {/* Theme toggle: cycle Blue → Petrol → Bordeaux */}
         <button
           type="button"
-          onClick={() => setTheme(isPetrol ? 'light' : 'petrol')}
+          onClick={cycleTheme}
           className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/90 hover:text-white"
-          title={isPetrol ? 'Switch to Blue theme' : 'Switch to Petrol theme'}
+          title={`Theme: ${themeMeta.label} · click for ${themeMeta.next}`}
+          aria-label={`Theme: ${themeMeta.label}. Switch to ${themeMeta.next}`}
         >
-          {isPetrol ? <Sun className="h-4 w-4" /> : <Waves className="h-4 w-4" />}
+          <ThemeIcon className="h-4 w-4" />
         </button>
 
         {/* User dropdown */}
