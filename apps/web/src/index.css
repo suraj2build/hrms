@@ -1783,3 +1783,56 @@
 :root[data-theme="dark"] .text-background\/50   { color: color-mix(in oklab, var(--foreground) 50%, transparent); }
 :root[data-theme="dark"] .text-background\/40   { color: color-mix(in oklab, var(--foreground) 40%, transparent); }
 :root[data-theme="dark"] .text-background\/20   { color: color-mix(in oklab, var(--foreground) 20%, transparent); }
+
+/* ════════ Dark theme — remaining gaps (final sweep) ════════ */
+
+/* ── Base-layer op-* classes that hardcode light backgrounds ── */
+:root[data-theme="dark"] .op-table thead tr th {
+  background: color-mix(in oklab, var(--card) 80%, transparent);
+  border-bottom-color: var(--border);
+  color: var(--muted-foreground);
+}
+:root[data-theme="dark"] .op-table-container {
+  background: color-mix(in oklab, var(--card) 40%, transparent);
+  border-color: var(--border);
+}
+:root[data-theme="dark"] .op-row-payroll-critical       { background: rgba(248,113,113,0.12); }
+:root[data-theme="dark"] .op-row-payroll-critical:hover { background: rgba(248,113,113,0.18); }
+:root[data-theme="dark"] .op-tint-critical { background: rgba(248,113,113,0.12) !important; }
+:root[data-theme="dark"] .op-tint-high     { background: rgba(251,191,36,0.12)  !important; }
+:root[data-theme="dark"] .op-tint-low      { background: rgba(34,211,238,0.10)   !important; }
+:root[data-theme="dark"] .sev-bar-medium   { background: #64748B; }
+:root[data-theme="dark"] .sev-bar-info     { background: #5B7088; }
+:root[data-theme="dark"] .sev-bar-snoozed  { background: #5A5C6E; }
+
+/* ── Glass-card white backgrounds (opacity ≥40 = card surfaces, not overlays) ──
+   Low-opacity whites (/5–/30) are intentional highlight overlays on dark bars,
+   so they're left alone. /40+ are frosted light cards (owner portal, v2 side
+   panel) that must go dark. */
+:root[data-theme="dark"] .bg-white\/40,
+:root[data-theme="dark"] .bg-white\/50,
+:root[data-theme="dark"] .bg-white\/55,
+:root[data-theme="dark"] .bg-white\/60,
+:root[data-theme="dark"] .bg-white\/70,
+:root[data-theme="dark"] .bg-white\/80,
+:root[data-theme="dark"] .bg-white\/90,
+:root[data-theme="dark"] .bg-white\/95 { background-color: var(--card); }
+:root[data-theme="dark"] .border-white\/70,
+:root[data-theme="dark"] .border-white\/60,
+:root[data-theme="dark"] .border-white\/50 { border-color: var(--border); }
+
+/* ── Auth page light canvases ── */
+:root[data-theme="dark"] .bg-\[\#f5f7fb\],
+:root[data-theme="dark"] .bg-\[\#EEF3FB\] { background-color: var(--background); }
+
+/* ── v2 WorkspacePanel arbitrary light hexes (persistent side chrome) ── */
+:root[data-theme="dark"] .bg-\[\#F8F7FF\],
+:root[data-theme="dark"] .bg-\[\#EEEDF7\],
+:root[data-theme="dark"] .bg-\[\#EAE8F8\],
+:root[data-theme="dark"] .bg-\[\#F0EFF8\] { background-color: var(--accent); }
+:root[data-theme="dark"] .text-\[\#1C1B2E\] { color: var(--foreground); }
+:root[data-theme="dark"] .text-\[\#A8A4C8\],
+:root[data-theme="dark"] .text-\[\#5C5A7C\] { color: var(--muted-foreground); }
+:root[data-theme="dark"] .text-\[\#3730A3\] { color: #8FA0FF; }
+:root[data-theme="dark"] .border-\[\#E8E6F5\],
+:root[data-theme="dark"] .border-\[\#E5E7EB\] { border-color: var(--border); }
