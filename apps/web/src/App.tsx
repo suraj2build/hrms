@@ -58,6 +58,7 @@ import type { Profile, Tenant } from '@/types'
 // Each uses .then(m => ({ default: m.X })) to unwrap named exports.
 
 const Organization      = lazy(() => import('@/pages/organization/Organization').then(m => ({ default: m.Organization })))
+const Billing           = lazy(() => import('@/pages/billing/Billing').then(m => ({ default: m.Billing })))
 const TermsPage         = lazy(() => import('@/pages/legal/LegalPages').then(m => ({ default: m.TermsPage })))
 const PrivacyPage       = lazy(() => import('@/pages/legal/LegalPages').then(m => ({ default: m.PrivacyPage })))
 const Positions         = lazy(() => import('@/pages/positions/Positions').then(m => ({ default: m.Positions })))
@@ -599,6 +600,9 @@ export default function App() {
 
                 {/* Control Center — primary admin home */}
                 <Route path="/admin/control-center" element={<ControlCenter />} />
+
+                {/* Subscription & billing */}
+                <Route path="/admin/billing" element={<Billing />} />
 
                 {/* Dashboard — redirects to primary admin home (Control Center) */}
                 <Route path="/admin/dashboard" element={<Navigate to="/admin/control-center" replace />} />

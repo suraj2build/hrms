@@ -263,6 +263,7 @@ import fabricRoutes from './routes/fabric/index.js'
 
 // Routes — Public (no JWT required)
 import setupRoute from './routes/setup.js'
+import billingRoutes from './routes/billing/index.js'
 
 // Routes — Owner Panel (platform admin only — separate auth)
 import ownerRoutes from './routes/owner/index.js'
@@ -485,6 +486,13 @@ async function start() {
   await fastify.register(attendanceIngestRoute) // POST /attendance/ingest (device api_key auth)
   await fastify.register(authPlugin)
   await fastify.register(ownerAuthPlugin)       // platform_admins JWT check (separate from tenant auth)
+
+  // Raw-body capture (opt-in per route via config.rawBody) — needed for Razorpay
+  // webhook signature verification. global:false leaves all other routes untouched.
+  await fastify.register(import('fastify-raw-body'), {
+    field: 'rawBody', global: false, runFirst: true, encoding: 'utf8',
+  })
+  await fastify.register(billingRoutes)         // /billing/status|checkout|webhook (Razorpay)
 
   // ── Sprint 1 Routes ─────────────────────────────────────────
   // Static sub-paths MUST come before /:id to avoid route shadowing
