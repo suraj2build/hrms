@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="640" viewBox="0 0 1180 640" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <!-- shared gorgeous gradient (kept identical in all 3) -->
+    <linearGradient id="nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6E4F9E"/><stop offset="0.5" stop-color="#8364B5"/><stop offset="1" stop-color="#6E78C2"/></linearGradient>
+    <linearGradient id="btn1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9B7BCB"/><stop offset="1" stop-color="#7C5CAE"/></linearGradient>
+    <linearGradient id="btn2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8A6FB8"/><stop offset="1" stop-color="#6E5499"/></linearGradient>
+    <linearGradient id="btn3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#735AA0"/><stop offset="1" stop-color="#564080"/></linearGradient>
+  </defs>
+
+  <rect width="1180" height="640" fill="#F4F4F6"/>
+  <text x="40" y="46" font-size="24" font-weight="700" fill="#1A1A22">Pastel Dreamland — brightness levels</text>
+  <text x="40" y="72" font-size="14" fill="#6B6B78">Same outstanding gradient in all three. Difference is canvas depth + accent saturation.</text>
+
+  <!-- ===== 1 CURRENT (VIVID) ===== -->
+  <g transform="translate(40,100)">
+    <rect width="350" height="500" rx="16" fill="#FBF7FD" stroke="#E9DEF3"/>
+    <rect width="350" height="48" rx="16" fill="url(#nav)"/><rect y="30" width="350" height="18" fill="url(#nav)"/>
+    <circle cx="30" cy="24" r="12" fill="#FFF"/><text x="24" y="29" font-size="13" font-weight="800" fill="#7C5CAE">C</text>
+    <text x="50" y="29" font-size="13" font-weight="700" fill="#FFF">Cognix</text><text x="106" y="29" font-size="13" font-weight="700" fill="#CDB4DB">HR</text>
+    <text x="20" y="86" font-size="17" font-weight="700" fill="#2E2440">1 · Current (Vivid)</text>
+    <text x="20" y="106" font-size="11.5" fill="#6B5E80">canvas #FBF7FD · bright accents</text>
+
+    <rect x="20" y="122" width="150" height="64" rx="11" fill="url(#btn1)"/><text x="34" y="150" font-size="12" font-weight="700" fill="#FFF">Run Payroll</text><text x="34" y="170" font-size="9.5" fill="#E0D2F0">primary #7C5CAE</text>
+    <rect x="180" y="122" width="68" height="64" rx="11" fill="#FFAFCC"/><text x="190" y="158" font-size="10" font-weight="700" fill="#5C2A3E">#FFAFCC</text>
+    <rect x="256" y="122" width="76" height="64" rx="11" fill="#A2D2FF"/><text x="266" y="158" font-size="10" font-weight="700" fill="#1E3A52">#A2D2FF</text>
+
+    <rect x="20" y="200" width="312" height="70" rx="11" fill="#FBF7FD" stroke="#E9DEF3"/>
+    <rect x="20" y="200" width="3" height="70" rx="2" fill="#7C5CAE"/>
+    <text x="36" y="228" font-size="13" font-weight="700" fill="#2E2440">Team Reports</text>
+    <text x="36" y="248" font-size="10.5" fill="#7E7193">Operational HR reporting</text>
+    <rect x="20" y="286" width="84" height="26" rx="13" fill="#FFAFCC"/><text x="34" y="303" font-size="10" fill="#5C2A3E">Pink chip</text>
+    <rect x="114" y="286" width="80" height="26" rx="13" fill="#A2D2FF"/><text x="128" y="303" font-size="10" fill="#1E3A52">Sky chip</text>
+    <text x="20" y="356" font-size="11.5" fill="#9A8FAE">Feels: airy but can read "candy / very bright"</text>
+  </g>
+
+  <!-- ===== 2 DUSTY (RECOMMENDED) ===== -->
+  <g transform="translate(415,100)">
+    <rect width="350" height="500" rx="16" fill="#F3EFF6" stroke="#E2DAEA"/>
+    <rect width="350" height="48" rx="16" fill="url(#nav)"/><rect y="30" width="350" height="18" fill="url(#nav)"/>
+    <circle cx="30" cy="24" r="12" fill="#FFF"/><text x="24" y="29" font-size="13" font-weight="800" fill="#6E5499">C</text>
+    <text x="50" y="29" font-size="13" font-weight="700" fill="#FFF">Cognix</text><text x="106" y="29" font-size="13" font-weight="700" fill="#C6B2D6">HR</text>
+    <text x="20" y="86" font-size="17" font-weight="700" fill="#2A2138">2 · Dusty ⭐ (Recommended)</text>
+    <text x="20" y="106" font-size="11.5" fill="#5F5474">canvas #F3EFF6 · muted accents</text>
+
+    <rect x="20" y="122" width="150" height="64" rx="11" fill="url(#btn2)"/><text x="34" y="150" font-size="12" font-weight="700" fill="#FFF">Run Payroll</text><text x="34" y="170" font-size="9.5" fill="#DDD0EC">primary #6E5499</text>
+    <rect x="180" y="122" width="68" height="64" rx="11" fill="#D9A6BE"/><text x="190" y="158" font-size="10" font-weight="700" fill="#4A2233">#D9A6BE</text>
+    <rect x="256" y="122" width="76" height="64" rx="11" fill="#9DB6D6"/><text x="266" y="158" font-size="10" font-weight="700" fill="#1E2E45">#9DB6D6</text>
+
+    <rect x="20" y="200" width="312" height="70" rx="11" fill="#F8F5FB" stroke="#E2DAEA"/>
+    <rect x="20" y="200" width="3" height="70" rx="2" fill="#6E5499"/>
+    <text x="36" y="228" font-size="13" font-weight="700" fill="#2A2138">Team Reports</text>
+    <text x="36" y="248" font-size="10.5" fill="#645873">Operational HR reporting</text>
+    <rect x="20" y="286" width="84" height="26" rx="13" fill="#EAD9E2"/><text x="34" y="303" font-size="10" fill="#7A4259">Rose chip</text>
+    <rect x="114" y="286" width="80" height="26" rx="13" fill="#DCE6F1"/><text x="128" y="303" font-size="10" fill="#34506E">Blue chip</text>
+    <text x="20" y="356" font-size="11.5" fill="#7E7193">Feels: soft &amp; dreamy, but grounded &amp; premium</text>
+    <text x="20" y="378" font-size="11" fill="#8A7F9E">Same gradient, less "bright" — best of both</text>
+  </g>
+
+  <!-- ===== 3 TWILIGHT (DEEPER) ===== -->
+  <g transform="translate(790,100)">
+    <rect width="350" height="500" rx="16" fill="#ECE7F2" stroke="#DBD2E6"/>
+    <rect width="350" height="48" rx="16" fill="url(#nav)"/><rect y="30" width="350" height="18" fill="url(#nav)"/>
+    <circle cx="30" cy="24" r="12" fill="#FFF"/><text x="24" y="29" font-size="13" font-weight="800" fill="#564080">C</text>
+    <text x="50" y="29" font-size="13" font-weight="700" fill="#FFF">Cognix</text><text x="106" y="29" font-size="13" font-weight="700" fill="#BCA8D0">HR</text>
+    <text x="20" y="86" font-size="17" font-weight="700" fill="#231B33">3 · Twilight (Deeper)</text>
+    <text x="20" y="106" font-size="11.5" fill="#574B6E">canvas #ECE7F2 · richest, moodiest</text>
+
+    <rect x="20" y="122" width="150" height="64" rx="11" fill="url(#btn3)"/><text x="34" y="150" font-size="12" font-weight="700" fill="#FFF">Run Payroll</text><text x="34" y="170" font-size="9.5" fill="#D6C8EA">primary #564080</text>
+    <rect x="180" y="122" width="68" height="64" rx="11" fill="#C195AE"/><text x="190" y="158" font-size="10" font-weight="700" fill="#3E1C2C">#C195AE</text>
+    <rect x="256" y="122" width="76" height="64" rx="11" fill="#8AA0C4"/><text x="266" y="158" font-size="10" font-weight="700" fill="#172539">#8AA0C4</text>
+
+    <rect x="20" y="200" width="312" height="70" rx="11" fill="#F4F0F9" stroke="#DBD2E6"/>
+    <rect x="20" y="200" width="3" height="70" rx="2" fill="#564080"/>
+    <text x="36" y="228" font-size="13" font-weight="700" fill="#231B33">Team Reports</text>
+    <text x="36" y="248" font-size="10.5" fill="#574B6E">Operational HR reporting</text>
+    <rect x="20" y="286" width="84" height="26" rx="13" fill="#E0CEDA"/><text x="34" y="303" font-size="10" fill="#6E3A52">Rose chip</text>
+    <rect x="114" y="286" width="80" height="26" rx="13" fill="#D2DCEC"/><text x="128" y="303" font-size="10" fill="#2C4666">Blue chip</text>
+    <text x="20" y="356" font-size="11.5" fill="#6E6189">Feels: elegant, twilight-mauve — least bright</text>
+    <text x="20" y="378" font-size="11" fill="#7E7298">Leans away from "pastel", toward refined violet</text>
+  </g>
+</svg>
