@@ -115,19 +115,19 @@ const T = {
 interface CellCfg { bg: string; color: string; label: string; exception?: boolean }
 
 const CELL: Record<string, CellCfg> = {
-  present:       { bg: '#ecfdf5', color: '#059669', label: 'P'  },
-  late:          { bg: '#ecfdf5', color: '#059669', label: 'P',  exception: true },
-  absent:        { bg: '#fff1f2', color: '#e11d48', label: 'A'  },
-  lop:           { bg: '#fff1f2', color: '#e11d48', label: 'A'  },
-  leave:         { bg: '#eff6ff', color: '#2563eb', label: 'L'  },
-  on_leave:      { bg: '#eff6ff', color: '#2563eb', label: 'L'  },
-  weekly_off:    { bg: '#f3f4f8', color: '#9ca3af', label: 'WO' },
-  off:           { bg: '#f3f4f8', color: '#9ca3af', label: 'WO' },
-  holiday:       { bg: '#f3e8ff', color: '#7c3aed', label: 'H'  },
-  not_marked:    { bg: '#f8f9fa', color: '#d1d5db', label: '—'  },
-  missing_punch: { bg: '#ecfdf5', color: '#059669', label: 'P',  exception: true },
+  present:       { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', label: 'P'  },
+  late:          { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', label: 'P',  exception: true },
+  absent:        { bg: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', label: 'A'  },
+  lop:           { bg: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', label: 'A'  },
+  leave:         { bg: 'var(--tint-blue-bg)', color: 'var(--tint-blue-fg)', label: 'L'  },
+  on_leave:      { bg: 'var(--tint-blue-bg)', color: 'var(--tint-blue-fg)', label: 'L'  },
+  weekly_off:    { bg: 'var(--tint-neutral-bg)', color: '#9ca3af', label: 'WO' },
+  off:           { bg: 'var(--tint-neutral-bg)', color: '#9ca3af', label: 'WO' },
+  holiday:       { bg: 'var(--tint-violet-bg)', color: '#7c3aed', label: 'H'  },
+  not_marked:    { bg: 'var(--tint-neutral-bg)', color: '#d1d5db', label: '—'  },
+  missing_punch: { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', label: 'P',  exception: true },
   half_day:      { bg: '#fef9c3', color: '#d97706', label: 'HD' },
-  early_out:     { bg: '#ecfdf5', color: '#059669', label: 'P',  exception: true },
+  early_out:     { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', label: 'P',  exception: true },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -308,7 +308,7 @@ function CoreIdentity({ emp, teamSize, pendingCount }: {
           <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-.015em', color: T.text }}>{name}</span>
           {grade && (
             <span style={{
-              border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1d4ed8',
+              border: '1px solid #bfdbfe', background: 'var(--tint-blue-bg)', color: '#1d4ed8',
               padding: '2px 9px', borderRadius: 999, fontSize: 10.5, fontWeight: 700,
               letterSpacing: '.1em', textTransform: 'uppercase',
             }}>{grade}</span>
@@ -365,11 +365,11 @@ function KPIStrip({ summary, pendingLeave, pendingReg }: {
   const tiles = [
     {
       icon: Users,       label: 'Team Size',        value: total,
-      sub: 'Active members', color: '#1d4ed8', bg: '#eff6ff',
+      sub: 'Active members', color: '#1d4ed8', bg: 'var(--tint-blue-bg)',
     },
     {
       icon: UserCheck,   label: 'Present Today',    value: present,
-      sub: `${pctPres}% of team`, color: '#059669', bg: '#ecfdf5',
+      sub: `${pctPres}% of team`, color: 'var(--tint-green-fg)', bg: 'var(--tint-green-bg)',
     },
     {
       icon: Calendar,    label: 'On Leave',          value: summary.leave,
@@ -378,13 +378,13 @@ function KPIStrip({ summary, pendingLeave, pendingReg }: {
     {
       icon: AlertCircle, label: 'Absent',            value: summary.absent,
       sub: summary.not_marked > 0 ? `${summary.not_marked} not marked` : 'Today',
-      color: '#e11d48', bg: '#fff1f2',
+      color: 'var(--tint-red-fg)', bg: 'var(--tint-red-bg)',
     },
     {
       icon: ClipboardList, label: 'Pending Approvals', value: pendingLeave + pendingReg,
       sub: `${pendingLeave} leave · ${pendingReg} reg`,
       color: pendingLeave + pendingReg > 0 ? '#f59e0b' : T.muted,
-      bg: pendingLeave + pendingReg > 0 ? '#fffbeb' : '#f8f9fa',
+      bg: pendingLeave + pendingReg > 0 ? 'var(--tint-amber-bg)' : 'var(--tint-neutral-bg)',
     },
   ]
 
@@ -520,7 +520,7 @@ function ApprovalsQueue({
           </span>
           {total > 0 && (
             <span style={{
-              background: '#fffbeb', color: '#92400e', fontWeight: 700,
+              background: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)', fontWeight: 700,
               fontSize: 10, padding: '2px 7px', borderRadius: 999,
             }}>{total} pending</span>
           )}
@@ -543,7 +543,7 @@ function ApprovalsQueue({
               padding: '4px 12px', borderRadius: 999, fontSize: 11.5, fontWeight: 600,
               cursor: 'pointer', fontFamily: 'inherit', transition: 'all .1s',
               border: `1px solid ${filter === c.key ? '#1d4ed8' : 'var(--border)'}`,
-              background: filter === c.key ? '#eff6ff' : 'transparent',
+              background: filter === c.key ? 'var(--tint-blue-bg)' : 'transparent',
               color: filter === c.key ? '#1d4ed8' : T.sub,
             }}
           >
@@ -559,7 +559,7 @@ function ApprovalsQueue({
       <div style={{ padding: '0 8px 8px' }}>
         {combined.length === 0 ? (
           <div style={{ textAlign: 'center', color: T.muted, padding: '24px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 9, background: '#ecfdf5', display: 'grid', placeItems: 'center' }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--tint-green-bg)', display: 'grid', placeItems: 'center' }}>
               <Check style={{ width: 18, height: 18, color: '#10b981' }} />
             </div>
             <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>All caught up!</span>
@@ -623,7 +623,7 @@ function ApprovalsQueue({
                 <div style={{ flexShrink: 0 }}>
                   <span style={{
                     fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
-                    background: '#fffbeb', color: '#92400e',
+                    background: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)',
                     letterSpacing: '.04em', textTransform: 'capitalize',
                   }}>Submitted</span>
                 </div>
@@ -636,7 +636,7 @@ function ApprovalsQueue({
                     title="Approve"
                     style={{
                       width: 28, height: 28, borderRadius: 7, border: '1px solid #cdebd9',
-                      background: '#ecfdf5', color: '#059669', cursor: isBusy ? 'not-allowed' : 'pointer',
+                      background: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', cursor: isBusy ? 'not-allowed' : 'pointer',
                       display: 'grid', placeItems: 'center', opacity: isBusy ? .5 : 1, transition: 'opacity .1s',
                     }}
                   >
@@ -648,7 +648,7 @@ function ApprovalsQueue({
                     title="Reject"
                     style={{
                       width: 28, height: 28, borderRadius: 7, border: '1px solid #ffd0d7',
-                      background: '#fff0f2', color: '#e11d48', cursor: isBusy ? 'not-allowed' : 'pointer',
+                      background: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', cursor: isBusy ? 'not-allowed' : 'pointer',
                       display: 'grid', placeItems: 'center', opacity: isBusy ? .5 : 1, transition: 'opacity .1s',
                     }}
                   >
@@ -702,11 +702,11 @@ function TeamHeatmap({
     : ''
 
   const LEGEND = [
-    { bg: '#ecfdf5', color: '#059669', label: 'Present' },
-    { bg: '#eff6ff', color: '#2563eb', label: 'On Leave' },
-    { bg: '#fff1f2', color: '#e11d48', label: 'Absent'  },
-    { bg: '#f3f4f8', color: '#9ca3af', label: 'Weekly Off' },
-    { bg: '#f3e8ff', color: '#7c3aed', label: 'Holiday' },
+    { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)', label: 'Present' },
+    { bg: 'var(--tint-blue-bg)', color: 'var(--tint-blue-fg)', label: 'On Leave' },
+    { bg: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', label: 'Absent'  },
+    { bg: 'var(--tint-neutral-bg)', color: '#9ca3af', label: 'Weekly Off' },
+    { bg: 'var(--tint-violet-bg)', color: '#7c3aed', label: 'Holiday' },
     { exception: true, label: 'Exception' },
   ]
 
@@ -834,8 +834,8 @@ function TeamHeatmap({
         {LEGEND.map(l => (
           <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: T.sub }}>
             {l.exception ? (
-              <span style={{ position: 'relative', display: 'inline-flex', width: 12, height: 12, borderRadius: 3, background: '#ecfdf5', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: 7, fontWeight: 700, color: '#059669' }}>P</span>
+              <span style={{ position: 'relative', display: 'inline-flex', width: 12, height: 12, borderRadius: 3, background: 'var(--tint-green-bg)', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: 7, fontWeight: 700, color: 'var(--tint-green-fg)' }}>P</span>
                 <span style={{ position: 'absolute', top: 1, right: 1, width: 3, height: 3, borderRadius: '50%', background: '#f59e0b' }} />
               </span>
             ) : (
@@ -887,14 +887,14 @@ function TeamAttendanceTodayCard({ summary, navigate }: {
     { value: summary.late,                   color: '#f59e0b' },
     { value: summary.leave,                  color: '#3b82f6' },
     { value: summary.absent,                 color: '#f43f5e' },
-    { value: summary.not_marked,             color: '#e4e5f0' },
+    { value: summary.not_marked,             color: 'var(--tint-faint)' },
   ]
 
   const rows = [
     { label: 'Present',     n: summary.present,    color: '#10b981' },
     { label: 'On Leave',    n: summary.leave,       color: '#3b82f6' },
     { label: 'Absent',      n: summary.absent,      color: '#f43f5e' },
-    { label: 'Weekly Off',  n: 0,                   color: '#e4e5f0' },
+    { label: 'Weekly Off',  n: 0,                   color: 'var(--tint-faint)' },
     { label: 'Holiday',     n: 0,                   color: '#a78bfa' },
   ]
 
@@ -951,9 +951,9 @@ function WhosOutCard({ teamMembers, navigate }: {
   )
 
   const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-    leave:      { bg: '#eff6ff', color: '#2563eb', label: 'On Leave' },
-    absent:     { bg: '#fff1f2', color: '#e11d48', label: 'Absent'   },
-    not_marked: { bg: '#f8f9fa', color: T.muted,   label: 'Not Marked' },
+    leave:      { bg: 'var(--tint-blue-bg)', color: 'var(--tint-blue-fg)', label: 'On Leave' },
+    absent:     { bg: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', label: 'Absent'   },
+    not_marked: { bg: 'var(--tint-neutral-bg)', color: T.muted,   label: 'Not Marked' },
   }
 
   return (
@@ -964,7 +964,7 @@ function WhosOutCard({ teamMembers, navigate }: {
         </span>
         {out.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ background: '#fff1f2', color: '#e11d48', fontWeight: 700, fontSize: 10, padding: '2px 7px', borderRadius: 999 }}>{out.length}</span>
+            <span style={{ background: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)', fontWeight: 700, fontSize: 10, padding: '2px 7px', borderRadius: 999 }}>{out.length}</span>
             <button
               onClick={() => navigate('/manager/team/attendance')}
               style={{ fontSize: 11, color: '#1d4ed8', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 2 }}
@@ -1015,12 +1015,12 @@ function WhosOutCard({ teamMembers, navigate }: {
 // ── Quick Actions ─────────────────────────────────────────────────────────────
 
 const QA_ITEMS = [
-  { icon: ClipboardList, label: 'Approvals',      sub: 'Inbox',     tone: { bg: '#fffbeb', color: '#f59e0b' }, to: '/manager/approvals'            },
-  { icon: Users,         label: 'Muster',          sub: 'Today',     tone: { bg: '#ecfdf5', color: '#10b981' }, to: '/manager/team/attendance'      },
-  { icon: Calendar,      label: 'Roster',          sub: 'Planner',   tone: { bg: '#eff6ff', color: '#3b82f6' }, to: '/manager/team/roster'          },
-  { icon: Clock,         label: 'Regularisation',  sub: 'Requests',  tone: { bg: '#f3e8ff', color: '#7c3aed' }, to: '/manager/approvals'            },
+  { icon: ClipboardList, label: 'Approvals',      sub: 'Inbox',     tone: { bg: 'var(--tint-amber-bg)', color: '#f59e0b' }, to: '/manager/approvals'            },
+  { icon: Users,         label: 'Muster',          sub: 'Today',     tone: { bg: 'var(--tint-green-bg)', color: '#10b981' }, to: '/manager/team/attendance'      },
+  { icon: Calendar,      label: 'Roster',          sub: 'Planner',   tone: { bg: 'var(--tint-blue-bg)', color: '#3b82f6' }, to: '/manager/team/roster'          },
+  { icon: Clock,         label: 'Regularisation',  sub: 'Requests',  tone: { bg: 'var(--tint-violet-bg)', color: '#7c3aed' }, to: '/manager/approvals'            },
   { icon: MapPin,        label: 'Leave Calendar',  sub: 'Team view', tone: { bg: '#e3f3fc', color: '#0ea5e9' }, to: '/manager/team/leave-balances'  },
-  { icon: BarChart2,     label: 'Reports',         sub: 'Analytics', tone: { bg: '#fff1f2', color: '#f43f5e' }, to: '/manager/reports/team'         },
+  { icon: BarChart2,     label: 'Reports',         sub: 'Analytics', tone: { bg: 'var(--tint-red-bg)', color: '#f43f5e' }, to: '/manager/reports/team'         },
 ]
 
 function QuickActionsCard({ navigate }: { navigate: ReturnType<typeof useNavigate> }) {
@@ -1113,7 +1113,7 @@ function PendingRegularisationCard({ regularisations, navigate }: {
                 </div>
                 <span style={{
                   fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 999,
-                  background: '#fffbeb', color: '#92400e', flexShrink: 0, marginLeft: 8,
+                  background: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)', flexShrink: 0, marginLeft: 8,
                 }}>
                   Submitted
                 </span>

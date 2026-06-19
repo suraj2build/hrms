@@ -1836,3 +1836,26 @@
 :root[data-theme="dark"] .text-\[\#3730A3\] { color: #8FA0FF; }
 :root[data-theme="dark"] .border-\[\#E8E6F5\],
 :root[data-theme="dark"] .border-\[\#E5E7EB\] { border-color: var(--border); }
+
+/* ════════ Semantic status-tint tokens (for inline-styled status pills/heatmaps) ════════
+   The dashboards render status chips via inline styles (which CSS class remaps
+   can't reach), so they need theme-aware CSS variables. Light values match the
+   original palette; dark values are low-opacity tints with bright foregrounds. */
+:root {
+  --tint-green-bg:  #ecfdf5; --tint-green-fg:  #059669;
+  --tint-red-bg:    #fff1f2; --tint-red-fg:    #e11d48;
+  --tint-blue-bg:   #eff6ff; --tint-blue-fg:   #2563eb;
+  --tint-amber-bg:  #fffbeb; --tint-amber-fg:  #b45309;
+  --tint-violet-bg: #f3e8ff; --tint-violet-fg: #7c3aed;
+  --tint-neutral-bg:#f3f4f8; --tint-neutral-fg:#6b7280;
+  --tint-faint:     #e4e5f0;
+}
+:root[data-theme="dark"] {
+  --tint-green-bg:  rgba(52,208,138,0.14); --tint-green-fg:  #5BE0A8;
+  --tint-red-bg:    rgba(248,113,113,0.14); --tint-red-fg:    #FB8C8C;
+  --tint-blue-bg:   rgba(79,143,247,0.16);  --tint-blue-fg:   #8FB6FF;
+  --tint-amber-bg:  rgba(229,172,77,0.14);  --tint-amber-fg:  #F0C46A;
+  --tint-violet-bg: rgba(167,139,250,0.16); --tint-violet-fg: #C4B5FD;
+  --tint-neutral-bg:rgba(255,255,255,0.06); --tint-neutral-fg:#9AA0B4;
+  --tint-faint:     rgba(255,255,255,0.14);
+}

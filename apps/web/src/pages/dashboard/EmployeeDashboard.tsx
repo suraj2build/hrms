@@ -370,7 +370,7 @@ function AttKpiCard({ data, navigate }: { data: DayData[]; navigate: (to: string
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#10b981' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <CardLabel>Attendance</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: '#ecfbf3', display: 'grid', placeItems: 'center' }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--tint-green-bg)', display: 'grid', placeItems: 'center' }}>
           <Check style={{ width: 12, height: 12, color: '#10b981' }} />
         </div>
       </div>
@@ -425,7 +425,7 @@ function NetPayKpiCard({ slips, navigate }: { slips: PayslipSummary[]; navigate:
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#f59e0b' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <CardLabel>Net Pay</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: '#fff3da', display: 'grid', placeItems: 'center' }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--tint-amber-bg)', display: 'grid', placeItems: 'center' }}>
           <Wallet style={{ width: 12, height: 12, color: '#f59e0b' }} />
         </div>
       </div>
@@ -483,7 +483,7 @@ function OpenActionsKpiCard({
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: total > 0 ? '#f59e0b' : 'var(--border)' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <CardLabel>Open Actions</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: total > 0 ? '#fff3da' : 'var(--muted)', display: 'grid', placeItems: 'center' }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: total > 0 ? 'var(--tint-amber-bg)' : 'var(--muted)', display: 'grid', placeItems: 'center' }}>
           <AlertCircle style={{ width: 12, height: 12, color: total > 0 ? '#f59e0b' : 'var(--muted-foreground)' }} />
         </div>
       </div>
@@ -492,7 +492,7 @@ function OpenActionsKpiCard({
         <div style={{ fontSize: 32, fontWeight: 700, color: total > 0 ? '#f59e0b' : 'var(--foreground)', letterSpacing: '-.03em', lineHeight: 1, ...MONO }}>
           {total}
         </div>
-        <div style={{ fontSize: 11, color: total > 0 ? '#835500' : 'var(--muted-foreground)' }}>
+        <div style={{ fontSize: 11, color: total > 0 ? 'var(--tint-amber-fg)' : 'var(--muted-foreground)' }}>
           {awaitingInput > 0 ? `${awaitingInput} awaiting input` : 'All clear'}
         </div>
       </div>
@@ -675,9 +675,9 @@ function MyRequests({
   }, [requests, regRequests])
 
   const statusStyle: Record<string, { bg: string; color: string }> = {
-    pending:  { bg: '#fff3da', color: '#835500' },
-    approved: { bg: '#ecfbf3', color: '#0a6d4a' },
-    rejected: { bg: '#ffe7eb', color: '#a8233b' },
+    pending:  { bg: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)' },
+    approved: { bg: 'var(--tint-green-bg)', color: 'var(--tint-green-fg)' },
+    rejected: { bg: 'var(--tint-red-bg)', color: 'var(--tint-red-fg)' },
   }
 
   return (
@@ -875,8 +875,8 @@ function Upcoming({ holidays, navigate }: { holidays: Holiday[]; navigate: (to: 
               </div>
               <div style={{
                 fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 999, flexShrink: 0,
-                background: du === 0 ? '#ecfbf3' : du <= 7 ? '#fff3da' : 'var(--muted)',
-                color:      du === 0 ? '#0a6d4a' : du <= 7 ? '#835500' : 'var(--muted-foreground)',
+                background: du === 0 ? 'var(--tint-green-bg)' : du <= 7 ? 'var(--tint-amber-bg)' : 'var(--muted)',
+                color:      du === 0 ? 'var(--tint-green-fg)' : du <= 7 ? 'var(--tint-amber-fg)' : 'var(--muted-foreground)',
               }}>
                 {du === 0 ? 'Today' : du === 1 ? 'Tomorrow' : `${du}d`}
               </div>
@@ -927,10 +927,10 @@ function ExpiryAlerts({ items, navigate }: { items: DashExpiryItem[]; navigate: 
             }}>
               <div style={{
                 width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                background: overdue ? '#fdecec' : soon ? '#fff3da' : 'var(--muted)',
+                background: overdue ? 'var(--tint-red-bg)' : soon ? 'var(--tint-amber-bg)' : 'var(--muted)',
                 display: 'grid', placeItems: 'center',
               }}>
-                <CalendarClock style={{ width: 12, height: 12, color: overdue ? '#b42318' : soon ? '#835500' : 'var(--muted-foreground)' }} />
+                <CalendarClock style={{ width: 12, height: 12, color: overdue ? '#b42318' : soon ? 'var(--tint-amber-fg)' : 'var(--muted-foreground)' }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
@@ -940,8 +940,8 @@ function ExpiryAlerts({ items, navigate }: { items: DashExpiryItem[]; navigate: 
               </div>
               <div style={{
                 fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 999, flexShrink: 0,
-                background: overdue ? '#fdecec' : soon ? '#fff3da' : 'var(--muted)',
-                color:      overdue ? '#b42318' : soon ? '#835500' : 'var(--muted-foreground)',
+                background: overdue ? 'var(--tint-red-bg)' : soon ? 'var(--tint-amber-bg)' : 'var(--muted)',
+                color:      overdue ? '#b42318' : soon ? 'var(--tint-amber-fg)' : 'var(--muted-foreground)',
               }}>
                 {overdue ? 'Expired' : `${it.days_to_due}d`}
               </div>
@@ -949,7 +949,7 @@ function ExpiryAlerts({ items, navigate }: { items: DashExpiryItem[]; navigate: 
           )
         }) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
-            <ShieldCheck style={{ width: 14, height: 14, color: '#0a6d4a' }} />
+            <ShieldCheck style={{ width: 14, height: 14, color: 'var(--tint-green-fg)' }} />
             Nothing expiring soon
           </div>
         )}
@@ -976,10 +976,10 @@ function buildQaItems(base: string): QaItem[] {
 
 const TONE: Record<string, { bg: string; color: string }> = {
   gn: { bg: '#e8f7ef', color: '#10b981' },
-  am: { bg: '#fff3da', color: '#f59e0b' },
+  am: { bg: 'var(--tint-amber-bg)', color: '#f59e0b' },
   sk: { bg: '#e3f3fc', color: '#0ea5e9' },
   vl: { bg: '#efeafe', color: '#8b5cf6' },
-  rs: { bg: '#ffe7eb', color: '#f43f5e' },
+  rs: { bg: 'var(--tint-red-bg)', color: '#f43f5e' },
   '': { bg: '#e9f0f8', color: '#1A4D8F' },
 }
 
