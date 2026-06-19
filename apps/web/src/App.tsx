@@ -20,14 +20,16 @@ import { AuthCallback } from '@/pages/auth/AuthCallback'
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
 import { Dashboard }         from '@/pages/dashboard/Dashboard'
 import { EmployeeDashboard } from '@/pages/dashboard/EmployeeDashboard'
-import { ManagerDashboardPage }     from '@/pages/dashboard/ManagerDashboard'
-import { ManagerTeamPerformance }   from '@/pages/dashboard/ManagerTeamPerformance'
+// Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
+const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
+const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamPerformance').then(m => ({ default: m.ManagerTeamPerformance })))
 
 // ── People — eager (frequent navigation targets) ──────────────────────────────
 import { EmployeeList }    from '@/pages/employees/EmployeeList'
 import { AddEmployee }     from '@/pages/employees/AddEmployee'
-import { EmployeeProfile } from '@/pages/employees/EmployeeProfile'
 import { ProfilePlatform } from '@/pages/profile/ProfilePlatform'
+// EmployeeProfile is a heavy detail page (~184 KB) — lazy so it leaves the main chunk.
+const EmployeeProfile = lazy(() => import('@/pages/employees/EmployeeProfile').then(m => ({ default: m.EmployeeProfile })))
 
 // ── Core attendance (eager — high-traffic admin views) ────────────────────────
 import { Attendance }             from '@/pages/attendance/Attendance'
@@ -339,16 +341,17 @@ const GovernancePrivacyWorkspace = lazy(() => import('@/pages/admin/GovernancePr
 // Program 4 — Security Operations Workspace
 const SecurityOpsWorkspace = lazy(() => import('@/pages/admin/SecurityOpsWorkspace').then(m => ({ default: m.SecurityOpsWorkspace })))
 
-// ── Owner Panel (platform admin — completely separate from tenant app) ─────────
-import { OwnerLogin }        from '@/pages/owner/OwnerLogin'
-import { OwnerLayout }       from '@/pages/owner/OwnerLayout'
-import { OwnerDashboard }    from '@/pages/owner/OwnerDashboard'
-import { OwnerTenants }      from '@/pages/owner/OwnerTenants'
-import { OwnerTenantDetail } from '@/pages/owner/OwnerTenantDetail'
-import { OwnerRequests }     from '@/pages/owner/OwnerRequests'
-import { OwnerApiKeys }      from '@/pages/owner/OwnerApiKeys'
-import { OwnerBilling }      from '@/pages/owner/OwnerBilling'
-import { OwnerAdmins }       from '@/pages/owner/OwnerAdmins'
+// ── Owner Panel (platform admin — separate from tenant app, lazy-loaded so it
+//    never weighs down a normal tenant user's bundle) ──────────────────────────
+const OwnerLogin        = lazy(() => import('@/pages/owner/OwnerLogin').then(m => ({ default: m.OwnerLogin })))
+const OwnerLayout       = lazy(() => import('@/pages/owner/OwnerLayout').then(m => ({ default: m.OwnerLayout })))
+const OwnerDashboard    = lazy(() => import('@/pages/owner/OwnerDashboard').then(m => ({ default: m.OwnerDashboard })))
+const OwnerTenants      = lazy(() => import('@/pages/owner/OwnerTenants').then(m => ({ default: m.OwnerTenants })))
+const OwnerTenantDetail = lazy(() => import('@/pages/owner/OwnerTenantDetail').then(m => ({ default: m.OwnerTenantDetail })))
+const OwnerRequests     = lazy(() => import('@/pages/owner/OwnerRequests').then(m => ({ default: m.OwnerRequests })))
+const OwnerApiKeys      = lazy(() => import('@/pages/owner/OwnerApiKeys').then(m => ({ default: m.OwnerApiKeys })))
+const OwnerBilling      = lazy(() => import('@/pages/owner/OwnerBilling').then(m => ({ default: m.OwnerBilling })))
+const OwnerAdmins       = lazy(() => import('@/pages/owner/OwnerAdmins').then(m => ({ default: m.OwnerAdmins })))
 
 // ── Page loading fallback ─────────────────────────────────────────────────────
 
