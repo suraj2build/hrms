@@ -60,6 +60,35 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       request.tenantId = profile.tenant_id
       request.userRole = profile.role
       request.employeeId = (profile as any).employee_id ?? null
+
+      // ── Subscription / trial gate ──────────────────────────────────────────
+      // Suspended / expired / cancelled tenants (and trials past their end date)
+      // keep READ access — so they can still see the app and the billing page —
+      // but cannot MUTATE. Billing routes are always allowed so an admin can
+      // re-subscribe to recover. Owner routes use a separate auth and are
+      // unaffected.
+      const method = request.method
+      const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE'
+      if (isWrite && !request.url.startsWith('/billing') && !request.url.startsWith('/support')) {
+        const { data: tenant } = await fastify.supabase
+          .from('tenants')
+          .select('status, trial_ends_at')
+          .eq('id', profile.tenant_id)
+          .single()
+        if (tenant) {
+          const trialExpired = tenant.status === 'trial' && tenant.trial_ends_at != null &&
+            new Date(tenant.trial_ends_at).getTime() < Date.now()
+          const blocked = ['suspended', 'expired', 'cancelled'].includes(tenant.status) || trialExpired
+          if (blocked) {
+            return reply.code(402).send({
+              error: 'SUBSCRIPTION_REQUIRED',
+              message: trialExpired
+                ? 'Your free trial has ended. Please subscribe to continue.'
+                : `Your workspace is ${tenant.status}. Please update your subscription to continue.`,
+            })
+          }
+        }
+      }
     } catch {
       return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' })
     }

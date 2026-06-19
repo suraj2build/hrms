@@ -73,7 +73,7 @@ export function OwnerTenantDetail() {
   const [showResetPwd, setShowResetPwd]   = useState(false)
   const [copiedPwd, setCopiedPwd]         = useState(false)
 
-  const { data, isLoading } = useQuery<{ data: TenantDetail }>({
+  const { data, isLoading, isError, refetch } = useQuery<{ data: TenantDetail }>({
     queryKey: ['owner-tenant', id],
     queryFn:  () => ownerApi.get(`/owner/tenants/${id}`),
   })
@@ -154,6 +154,9 @@ export function OwnerTenantDetail() {
   })
 
   function statusAction(action: 'activate' | 'suspend' | 'cancel') {
+    const name = t?.name ?? 'this tenant'
+    if (action === 'suspend' && !window.confirm(`Suspend "${name}"? Their users will be blocked from making changes until reactivated.`)) return
+    if (action === 'cancel'  && !window.confirm(`Cancel "${name}"'s subscription? They will lose write access.`)) return
     ownerApi.post(`/owner/tenants/${id}/${action}`)
       .then(() => { toast.success(`Tenant ${action}d`); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) })
       .catch((e: any) => toast.error(e.message))
@@ -180,6 +183,14 @@ export function OwnerTenantDetail() {
   if (isLoading) return (
     <div className="p-6 space-y-4">
       {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-10 bg-muted rounded-lg animate-pulse" />)}
+    </div>
+  )
+  if (isError) return (
+    <div className="p-6">
+      <div className="flex flex-col items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+        <p className="text-sm text-destructive">Couldn’t load this tenant. Please try again.</p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
+      </div>
     </div>
   )
   if (!t) return <div className="p-6 text-muted-foreground">Tenant not found</div>

@@ -23,6 +23,7 @@ import type { UserRole }          from '@/types'
 import { EventToast }             from '@/components/notifications'
 import { CommandPaletteProvider } from '@/components/operational/CommandPalette'
 import { OperationalBanner }      from '@/components/operational/OperationalBanner'
+import { SubscriptionBanner }     from '@/components/layout/SubscriptionBanner'
 import { PayrollDeadlineBanner }  from '@/components/operational/PayrollDeadlineBanner'
 import { PreviewBanner }          from '@/components/layout/PreviewBanner'
 import { TopNavV2 }          from './v2/TopNavV2'
@@ -105,6 +106,7 @@ export function AdminShellV2() {
 
         {/* ── System banners (below header) ────────────────────────── */}
         <PreviewBanner />
+        <SubscriptionBanner />
         <OperationalBanner />
         <PayrollDeadlineBanner />
 

@@ -96,7 +96,7 @@ export function OwnerTenants() {
     setShowPwd(true)
   }, [])
 
-  const { data, isLoading } = useQuery<{ data: Tenant[]; meta: { total: number } }>({
+  const { data, isLoading, isError, refetch } = useQuery<{ data: Tenant[]; meta: { total: number } }>({
     queryKey: ['owner-tenants', search, statusFilt],
     queryFn:  () => ownerApi.get(`/owner/tenants?search=${search}&status=${statusFilt}&limit=50`),
     placeholderData: (prev) => prev,
@@ -208,11 +208,17 @@ export function OwnerTenants() {
               <th className="w-8" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-border">
             {isLoading && Array.from({ length: 5 }).map((_, i) => (
               <tr key={i}><td colSpan={8} className="px-4 py-3"><div className="h-4 w-full bg-muted animate-pulse rounded" /></td></tr>
             ))}
-            {!isLoading && tenants.length === 0 && (
+            {!isLoading && isError && (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-sm">
+                <span className="text-destructive">Couldn’t load tenants.</span>{' '}
+                <button onClick={() => refetch()} className="font-semibold text-foreground underline underline-offset-2">Retry</button>
+              </td></tr>
+            )}
+            {!isLoading && !isError && tenants.length === 0 && (
               <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">No tenants found</td></tr>
             )}
             {tenants.map(t => {
