@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Sun, Waves, Wine, CloudDrizzle, Sparkles, LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
+import { LogOut, ChevronDown, Menu, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -20,7 +20,7 @@ import { getVisibleDomains, getDomainForPath, getExecutiveDomainForPath, EXECUTI
 import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
 import { useAuthStore }        from '@/stores/authStore'
-import { useTheme }            from '@/components/theme-provider'
+import { ThemeMenu }           from '@/components/theme-toggle'
 import { getInitials }         from '@/lib/utils'
 import { supabase }            from '@/lib/supabase/client'
 import { toast }               from 'sonner'
@@ -47,15 +47,6 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
   const executiveMode        = useUIStore(s => s.executiveMode)
   const toggleExecutiveMode  = useUIStore(s => s.toggleExecutiveMode)
   const [notifOpen, setNotifOpen]  = useState(false)
-  const { theme, cycleTheme } = useTheme()
-  const themeMeta = {
-    light:    { Icon: Sun,          label: 'Blue',     next: 'Petrol'   },
-    petrol:   { Icon: Waves,        label: 'Petrol',   next: 'Bordeaux' },
-    bordeaux: { Icon: Wine,         label: 'Bordeaux', next: 'Slate'    },
-    slate:    { Icon: CloudDrizzle, label: 'Slate',    next: 'Pastel'   },
-    pastel:   { Icon: Sparkles,     label: 'Pastel',   next: 'Blue'     },
-  }[theme]
-  const ThemeIcon = themeMeta.Icon
 
   // In Executive Mode show only the curated exec domain set; otherwise role-filtered full set.
   const activeDomain   = executiveMode
@@ -195,16 +186,8 @@ export function TopNavV2({ onSearchOpen }: { onSearchOpen?: () => void } = {}) {
         </div>
         <NotificationCenter open={notifOpen} onClose={() => setNotifOpen(false)} />
 
-        {/* Theme toggle: cycle Blue → Petrol → Bordeaux */}
-        <button
-          type="button"
-          onClick={cycleTheme}
-          className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/90 hover:text-white"
-          title={`Theme: ${themeMeta.label} · click for ${themeMeta.next}`}
-          aria-label={`Theme: ${themeMeta.label}. Switch to ${themeMeta.next}`}
-        >
-          <ThemeIcon className="h-4 w-4" />
-        </button>
+        {/* Theme switcher dropdown (Blue · Petrol · Bordeaux · Slate · Pastel · Dark) */}
+        <ThemeMenu navStyle />
 
         {/* User dropdown */}
         <DropdownMenu>

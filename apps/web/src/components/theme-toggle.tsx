@@ -1,29 +1,86 @@
-import { Sun, Waves, Wine, CloudDrizzle, Sparkles } from 'lucide-react'
+import { Sun, Waves, Wine, CloudDrizzle, Sparkles, Moon, Check } from 'lucide-react'
 import { Button }     from '@/components/ui/button'
-import { useTheme }   from '@/components/theme-provider'
+import { cn }         from '@/lib/utils'
+import { useTheme, type Theme } from '@/components/theme-provider'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 
-const META = {
-  light:    { Icon: Sun,          label: 'Blue',     next: 'Petrol'   },
-  petrol:   { Icon: Waves,        label: 'Petrol',   next: 'Bordeaux' },
-  bordeaux: { Icon: Wine,         label: 'Bordeaux', next: 'Slate'    },
-  slate:    { Icon: CloudDrizzle, label: 'Slate',    next: 'Pastel'   },
-  pastel:   { Icon: Sparkles,     label: 'Pastel',   next: 'Blue'     },
-} as const
+type Option = { value: Theme; label: string; Icon: typeof Sun; hint: string }
 
-export function ThemeToggle({ className }: { className?: string }) {
-  const { theme, cycleTheme } = useTheme()
-  const { Icon, label, next } = META[theme]
+export const THEME_OPTIONS: Option[] = [
+  { value: 'light',    label: 'Blue',     Icon: Sun,          hint: 'Default royal blue' },
+  { value: 'petrol',   label: 'Petrol',   Icon: Waves,        hint: 'Deep teal'          },
+  { value: 'bordeaux', label: 'Bordeaux', Icon: Wine,         hint: 'Wine red'           },
+  { value: 'slate',    label: 'Slate',    Icon: CloudDrizzle, hint: 'Storm grey'         },
+  { value: 'pastel',   label: 'Pastel',   Icon: Sparkles,     hint: 'Soft violet'        },
+  { value: 'dark',     label: 'Dark',     Icon: Moon,         hint: 'Midnight navy'      },
+]
 
-  return (
+/**
+ * Theme switcher dropdown. `navStyle` renders a white-on-dark trigger for the
+ * navy top bar (TopNavV2); the default is a glass icon button for light shells.
+ */
+export function ThemeMenu({ navStyle, className }: { navStyle?: boolean; className?: string }) {
+  const { theme, setTheme } = useTheme()
+  const current = THEME_OPTIONS.find(o => o.value === theme) ?? THEME_OPTIONS[0]
+  const CurrentIcon = current.Icon
+
+  const trigger = navStyle ? (
+    <button
+      type="button"
+      aria-label={`Theme: ${current.label}. Change theme`}
+      title={`Theme: ${current.label}`}
+      className={cn(
+        'p-1.5 rounded-md hover:bg-white/10 transition-colors text-white/90 hover:text-white',
+        className,
+      )}
+    >
+      <CurrentIcon className="h-4 w-4" />
+    </button>
+  ) : (
     <Button
       variant="glass"
       size="icon"
-      aria-label={`Theme: ${label}. Switch to ${next}`}
-      title={`Theme: ${label} · click for ${next}`}
+      aria-label={`Theme: ${current.label}. Change theme`}
+      title={`Theme: ${current.label}`}
       className={className}
-      onClick={cycleTheme}
     >
-      <Icon className="h-4 w-4" />
+      <CurrentIcon className="h-4 w-4" />
     </Button>
   )
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {THEME_OPTIONS.map(({ value, label, Icon, hint }) => (
+          <DropdownMenuItem
+            key={value}
+            onClick={() => setTheme(value)}
+            className="gap-2.5 cursor-pointer"
+          >
+            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="flex flex-col leading-tight flex-1">
+              <span className="text-sm">{label}</span>
+              <span className="text-[10.5px] text-muted-foreground">{hint}</span>
+            </span>
+            {theme === value && <Check className="h-4 w-4 shrink-0 text-primary" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Back-compat wrapper used by the light-shell Topbar. */
+export function ThemeToggle({ className }: { className?: string }) {
+  return <ThemeMenu className={className} />
 }

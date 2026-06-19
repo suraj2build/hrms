@@ -1,31 +1,28 @@
 import * as React from 'react'
 
-type Theme = 'light' | 'petrol' | 'bordeaux' | 'slate' | 'pastel'
+type Theme = 'light' | 'petrol' | 'bordeaux' | 'slate' | 'pastel' | 'dark'
 
 type ThemeContextValue = {
   theme:     Theme
   setTheme:  (theme: Theme) => void
-  /** Advance to the next theme in the cycle: light → petrol → bordeaux → slate → pastel → light */
-  cycleTheme: () => void
 }
 
 const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefined)
 
 const STORAGE_KEY = 'aurora-theme'
 
-/** Order of the cycle-on-click toggle. */
-const THEME_ORDER: Theme[] = ['light', 'petrol', 'bordeaux', 'slate', 'pastel']
+const NON_DEFAULT: readonly Theme[] = ['petrol', 'bordeaux', 'slate', 'pastel', 'dark']
 
 function parseTheme(raw: string | null): Theme {
-  return raw === 'petrol' || raw === 'bordeaux' || raw === 'slate' || raw === 'pastel' ? raw : 'light'
+  return NON_DEFAULT.includes(raw as Theme) ? (raw as Theme) : 'light'
 }
 
 function applyTheme(theme: Theme): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  root.classList.remove('dark')
+  root.classList.remove('dark')                                  // legacy dark-mode class never used
   root.dataset.theme     = theme === 'light' ? '' : theme
-  root.style.colorScheme = 'light'
+  root.style.colorScheme = theme === 'dark' ? 'dark' : 'light'   // native controls / scrollbars
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -43,19 +40,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyTheme(next)
   }, [])
 
-  const cycleTheme = React.useCallback(() => {
-    setThemeState(prev => {
-      const next = THEME_ORDER[(THEME_ORDER.indexOf(prev) + 1) % THEME_ORDER.length]
-      localStorage.setItem(STORAGE_KEY, next)
-      applyTheme(next)
-      return next
-    })
-  }, [])
-
-  const value = React.useMemo(
-    () => ({ theme, setTheme, cycleTheme }),
-    [theme, setTheme, cycleTheme],
-  )
+  const value = React.useMemo(() => ({ theme, setTheme }), [theme, setTheme])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
