@@ -886,7 +886,7 @@ export function PayrollControlCenter(): JSX.Element {
       {/* Page header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-primary/[0.05] via-primary/[0.02] to-transparent">
         <div className="flex items-center gap-3">
-          <div className="gloss-sheen flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-elev-1" style={{ background: 'linear-gradient(145deg, #2260A8, #1A4D8F)' }}>
+          <div className="gloss-sheen flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-elev-1" style={{ background: 'var(--grad-primary)' }}>
             <PlayCircle className="h-5 w-5" />
           </div>
           <div>

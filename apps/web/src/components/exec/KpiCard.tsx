@@ -42,7 +42,7 @@ const toneText: Record<Tone, string> = {
 
 // Glossy gradient chip per tone
 const toneChip: Record<Tone, string> = {
-  primary:     'linear-gradient(145deg, #2260A8, #1A4D8F)',
+  primary:     'var(--grad-primary)',
   success:     'linear-gradient(145deg, #1FA968, #1A8050)',
   warning:     'linear-gradient(145deg, #E0A53B, #B07B18)',
   destructive: 'linear-gradient(145deg, #E5564B, #C93535)',

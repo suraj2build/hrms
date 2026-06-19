@@ -69,7 +69,7 @@ export function PageHeader({ title, subtitle, breadcrumb, actions, className }: 
         <div className="flex items-center gap-2.5">
           <span
             className="h-6 w-1 flex-shrink-0 rounded-full"
-            style={{ background: 'linear-gradient(180deg, #2260A8, #1A4D8F)' }}
+            style={{ background: 'var(--grad-primary)' }}
             aria-hidden
           />
           <h1 className="font-display text-2xl font-semibold leading-tight truncate text-foreground">
