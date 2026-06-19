@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <!-- A Violet Sunset -->
+    <linearGradient id="A-btn" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#A855F7"/><stop offset="1" stop-color="#EC4899"/></linearGradient>
+    <linearGradient id="A-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1A0F33"/><stop offset="0.5" stop-color="#3B1D63"/><stop offset="1" stop-color="#5A2A6E"/></linearGradient>
+    <!-- B Electric -->
+    <linearGradient id="B-btn" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366F1"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
+    <linearGradient id="B-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0F1240"/><stop offset="0.5" stop-color="#1E2A66"/><stop offset="1" stop-color="#164A66"/></linearGradient>
+    <!-- C Retro Sunset -->
+    <linearGradient id="C-btn" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FB923C"/><stop offset="0.5" stop-color="#F43F75"/><stop offset="1" stop-color="#A855F7"/></linearGradient>
+    <linearGradient id="C-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2A1230"/><stop offset="0.5" stop-color="#5A1F47"/><stop offset="1" stop-color="#7A3A2E"/></linearGradient>
+    <!-- D Aurora -->
+    <linearGradient id="D-btn" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22D3EE"/><stop offset="0.5" stop-color="#818CF8"/><stop offset="1" stop-color="#E879F9"/></linearGradient>
+    <linearGradient id="D-nav" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0C1A40"/><stop offset="0.5" stop-color="#2A2A66"/><stop offset="1" stop-color="#4A2A66"/></linearGradient>
+  </defs>
+
+  <rect width="1180" height="560" fill="#060410"/>
+  <text x="36" y="44" font-size="25" font-weight="700" fill="#ECE6FA">Synthwave — pick the gradient</text>
+  <text x="36" y="70" font-size="14" fill="#897EB4">Same indigo-black base (#0D0820). Different gradient for the top bar + primary buttons + brand sweep.</text>
+
+  <!-- A -->
+  <g transform="translate(36,96)">
+    <rect width="262" height="420" rx="16" fill="#0D0820" stroke="#2A1A52"/>
+    <rect width="262" height="44" rx="16" fill="url(#A-nav)"/><rect y="26" width="262" height="18" fill="url(#A-nav)"/>
+    <circle cx="28" cy="22" r="11" fill="#0D0820" stroke="#3E2A6E"/><text x="23" y="26" font-size="11" font-weight="800" fill="#C084FC">C</text>
+    <text x="46" y="26" font-size="12" font-weight="700" fill="#ECE6FA">Cognix</text><text x="96" y="26" font-size="12" font-weight="700" fill="#F0ABFC">HR</text>
+    <text x="20" y="78" font-size="17" font-weight="700" fill="#ECE6FA">A · Violet Sunset</text>
+    <text x="20" y="98" font-size="11" fill="#9A8FC4">purple → pink</text>
+    <rect x="20" y="116" width="150" height="46" rx="10" fill="url(#A-btn)"/><text x="44" y="144" font-size="13" font-weight="700" fill="#FFF">Run Payroll</text>
+    <rect x="20" y="176" width="100" height="22" rx="11" fill="#A855F7"/><text x="34" y="191" font-size="10" fill="#FFF">#A855F7</text>
+    <rect x="130" y="176" width="100" height="22" rx="11" fill="#EC4899"/><text x="144" y="191" font-size="10" fill="#FFF">#EC4899</text>
+    <text x="20" y="232" font-size="12" fill="#ECE6FA" font-weight="600">Rich, classic retrowave</text>
+    <text x="20" y="254" font-size="11" fill="#897EB4">Most balanced &amp; usable of the four</text>
+    <text x="20" y="276" font-size="11" font-weight="600" fill="#C084FC">★ My pick</text>
+  </g>
+
+  <!-- B -->
+  <g transform="translate(316,96)">
+    <rect width="262" height="420" rx="16" fill="#0D0820" stroke="#1F2A5C"/>
+    <rect width="262" height="44" rx="16" fill="url(#B-nav)"/><rect y="26" width="262" height="18" fill="url(#B-nav)"/>
+    <circle cx="28" cy="22" r="11" fill="#0D0820" stroke="#2A3A7E"/><text x="23" y="26" font-size="11" font-weight="800" fill="#818CF8">C</text>
+    <text x="46" y="26" font-size="12" font-weight="700" fill="#E6ECFA">Cognix</text><text x="96" y="26" font-size="12" font-weight="700" fill="#22D3EE">HR</text>
+    <text x="20" y="78" font-size="17" font-weight="700" fill="#E6ECFA">B · Electric</text>
+    <text x="20" y="98" font-size="11" fill="#8FA0D4">indigo → cyan</text>
+    <rect x="20" y="116" width="150" height="46" rx="10" fill="url(#B-btn)"/><text x="44" y="144" font-size="13" font-weight="700" fill="#FFF">Run Payroll</text>
+    <rect x="20" y="176" width="100" height="22" rx="11" fill="#6366F1"/><text x="34" y="191" font-size="10" fill="#FFF">#6366F1</text>
+    <rect x="130" y="176" width="100" height="22" rx="11" fill="#22D3EE"/><text x="144" y="191" font-size="10" fill="#062028">#22D3EE</text>
+    <text x="20" y="232" font-size="12" fill="#E6ECFA" font-weight="600">Cool, techy, "fintech"</text>
+    <text x="20" y="254" font-size="11" fill="#8488B4">Closest to a blue product — safest</text>
+  </g>
+
+  <!-- C -->
+  <g transform="translate(596,96)">
+    <rect width="262" height="420" rx="16" fill="#0D0820" stroke="#52204A"/>
+    <rect width="262" height="44" rx="16" fill="url(#C-nav)"/><rect y="26" width="262" height="18" fill="url(#C-nav)"/>
+    <circle cx="28" cy="22" r="11" fill="#0D0820" stroke="#7A3A4E"/><text x="23" y="26" font-size="11" font-weight="800" fill="#FB923C">C</text>
+    <text x="46" y="26" font-size="12" font-weight="700" fill="#FAE6EE">Cognix</text><text x="96" y="26" font-size="12" font-weight="700" fill="#F43F75">HR</text>
+    <text x="20" y="78" font-size="17" font-weight="700" fill="#FAE6EE">C · Retro Sunset</text>
+    <text x="20" y="98" font-size="11" fill="#C49AA8">amber → pink → purple</text>
+    <rect x="20" y="116" width="150" height="46" rx="10" fill="url(#C-btn)"/><text x="44" y="144" font-size="13" font-weight="700" fill="#FFF">Run Payroll</text>
+    <rect x="20" y="176" width="64" height="22" rx="11" fill="#FB923C"/><text x="28" y="191" font-size="9" fill="#2A1403">#FB923C</text>
+    <rect x="92" y="176" width="64" height="22" rx="11" fill="#F43F75"/><text x="100" y="191" font-size="9" fill="#FFF">#F43F75</text>
+    <rect x="164" y="176" width="64" height="22" rx="11" fill="#A855F7"/><text x="172" y="191" font-size="9" fill="#FFF">#A855F7</text>
+    <text x="20" y="232" font-size="12" fill="#FAE6EE" font-weight="600">Warm sunset, tri-colour</text>
+    <text x="20" y="254" font-size="11" fill="#B48898">Most "wow" — boldest gradient</text>
+  </g>
+
+  <!-- D -->
+  <g transform="translate(876,96)">
+    <rect width="262" height="420" rx="16" fill="#0D0820" stroke="#2A2A5C"/>
+    <rect width="262" height="44" rx="16" fill="url(#D-nav)"/><rect y="26" width="262" height="18" fill="url(#D-nav)"/>
+    <circle cx="28" cy="22" r="11" fill="#0D0820" stroke="#3A3A7E"/><text x="23" y="26" font-size="11" font-weight="800" fill="#22D3EE">C</text>
+    <text x="46" y="26" font-size="12" font-weight="700" fill="#E8E6FA">Cognix</text><text x="96" y="26" font-size="12" font-weight="700" fill="#E879F9">HR</text>
+    <text x="20" y="78" font-size="17" font-weight="700" fill="#E8E6FA">D · Aurora</text>
+    <text x="20" y="98" font-size="11" fill="#9A95C4">cyan → indigo → pink</text>
+    <rect x="20" y="116" width="150" height="46" rx="10" fill="url(#D-btn)"/><text x="44" y="144" font-size="13" font-weight="700" fill="#0A0420">Run Payroll</text>
+    <rect x="20" y="176" width="64" height="22" rx="11" fill="#22D3EE"/><text x="28" y="191" font-size="9" fill="#062028">#22D3EE</text>
+    <rect x="92" y="176" width="64" height="22" rx="11" fill="#818CF8"/><text x="100" y="191" font-size="9" fill="#FFF">#818CF8</text>
+    <rect x="164" y="176" width="64" height="22" rx="11" fill="#E879F9"/><text x="172" y="191" font-size="9" fill="#2A0A2E">#E879F9</text>
+    <text x="20" y="232" font-size="12" fill="#E8E6FA" font-weight="600">Soft aurora sweep</text>
+    <text x="20" y="254" font-size="11" fill="#8E89B4">Like the original but smoother / lighter</text>
+  </g>
+</svg>
