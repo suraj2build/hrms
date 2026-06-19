@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -79,11 +79,11 @@ export function StatusSelector({
     item?.scrollIntoView({ block: 'nearest' })
   }, [focusIndex])
 
-  const selectedValues: string[] = value === undefined
+  const selectedValues: string[] = useMemo(() => value === undefined
     ? []
     : Array.isArray(value)
     ? value
-    : [value]
+    : [value], [value])
 
   const isSelected = useCallback(
     (v: string) => selectedValues.includes(v),

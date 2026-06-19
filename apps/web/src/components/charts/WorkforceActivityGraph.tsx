@@ -394,7 +394,7 @@ export function WorkforceActivityGraph({
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-emerald-600">No open blockers</p>
+              <p className="text-xs text-success">No open blockers</p>
             )}
           </div>
         </Panel>

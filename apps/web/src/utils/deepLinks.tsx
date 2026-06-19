@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- deep-link helper module that co-exports getDeepLink/useDeepLink with the CrossLinkBadge component */
 import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'

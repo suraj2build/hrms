@@ -176,10 +176,10 @@ function DimensionRow({ dimKey, dim }: { dimKey: keyof ReadinessDimensions; dim:
           {dim.items.map((item, i) => (
             <div key={i} className="flex items-start gap-1.5 text-[11px]">
               {item.status === 'complete'
-                ? <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-500 mt-0.5" />
+                ? <CheckCircle2 className="h-3 w-3 shrink-0 text-success mt-0.5" />
                 : item.status === 'blocked'
-                ? <XCircle className="h-3 w-3 shrink-0 text-red-500 mt-0.5" />
-                : <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500 mt-0.5" />
+                ? <XCircle className="h-3 w-3 shrink-0 text-destructive mt-0.5" />
+                : <AlertTriangle className="h-3 w-3 shrink-0 text-warning mt-0.5" />
               }
               <span className={cn(
                 item.status === 'complete' ? 'text-foreground'
@@ -296,7 +296,7 @@ export function ReadinessCard({
               className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
             >
               {completedOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
               {data.completed_items.length} completed item{data.completed_items.length !== 1 ? 's' : ''}
             </button>
 
@@ -304,7 +304,7 @@ export function ReadinessCard({
               <div className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 space-y-1.5">
                 {data.completed_items.map((item, i) => (
                   <div key={i} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-                    <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-500 mt-0.5" />
+                    <CheckCircle2 className="h-3 w-3 shrink-0 text-success mt-0.5" />
                     <span>{item}</span>
                   </div>
                 ))}

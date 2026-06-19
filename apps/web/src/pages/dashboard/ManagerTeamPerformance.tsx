@@ -198,7 +198,7 @@ export function ManagerTeamPerformance() {
     staleTime: 2 * 60_000,
   })
 
-  const teamMembers = dashResp?.team_members ?? []
+  const teamMembers = useMemo(() => dashResp?.team_members ?? [], [dashResp])
 
   // ── Per-member attendance (parallel) ────────────────────────────────────────
   const { data: rawAttendance, isLoading: attLoading } = useQuery({
@@ -207,7 +207,7 @@ export function ManagerTeamPerformance() {
       const results = await Promise.all(
         teamMembers.map(m =>
           api.get<AttendanceResp>(`/attendance/${m.employee_id}?from=${from}&to=${to}`)
-            .then(r => ({ id: m.employee_id, daily: (r as any)?.daily ?? [] }))
+            .then(r => ({ id: m.employee_id, daily: r?.daily ?? [] }))
             .catch(() => ({ id: m.employee_id, daily: [] as DailyRow[] }))
         )
       )

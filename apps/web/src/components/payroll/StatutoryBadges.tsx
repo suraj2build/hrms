@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- shared badge module that intentionally co-exports its explainer constants and types */
 /**
  * StatutoryBadges — EPF & ESI status chips, explainers, tooltips, validation strip
  *

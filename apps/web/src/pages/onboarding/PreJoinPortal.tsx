@@ -83,9 +83,9 @@ function FieldRow({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium text-gray-700">
+      <label className="text-sm font-medium text-muted-foreground">
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {required && <span className="text-destructive ml-0.5">*</span>}
       </label>
       {children}
     </div>
@@ -186,7 +186,7 @@ function Step2({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
           Address
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -244,7 +244,7 @@ function Step2({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
           Emergency Contact
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -291,7 +291,7 @@ function Step3({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
           Bank Details
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -338,7 +338,7 @@ function Step3({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
           Compliance &amp; Tax
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -380,16 +380,16 @@ function Step3({
 function ReviewRow({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
-    <div className="flex justify-between py-2 border-b border-gray-100 last:border-0">
-      <span className="text-sm text-gray-500 shrink-0 w-44">{label}</span>
-      <span className="text-sm text-gray-900 text-right font-medium">{value}</span>
+    <div className="flex justify-between py-2 border-b border-border last:border-0">
+      <span className="text-sm text-muted-foreground shrink-0 w-44">{label}</span>
+      <span className="text-sm text-foreground text-right font-medium">{value}</span>
     </div>
   );
 }
 
 function ReviewSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-gray-50 rounded-xl p-4 space-y-0">
+    <div className="bg-muted rounded-xl p-4 space-y-0">
       <h4 className="text-xs font-semibold text-[#2E6FE6] uppercase tracking-wider mb-3">
         {title}
       </h4>
@@ -460,12 +460,12 @@ function Step4({
         <div className="mt-0.5 shrink-0">
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-gray-300 text-[#2E6FE6] focus:ring-[#2E6FE6]/30 cursor-pointer"
+            className="h-4 w-4 rounded border-border text-[#2E6FE6] focus:ring-[#2E6FE6]/30 cursor-pointer"
             checked={form.declaration}
             onChange={(e) => onDeclarationChange(e.target.checked)}
           />
         </div>
-        <span className="text-sm text-gray-600 group-hover:text-gray-800 transition">
+        <span className="text-sm text-muted-foreground group-hover:text-foreground transition">
           I confirm that all the information provided above is accurate and complete to the best of
           my knowledge. I understand that providing false information may result in termination of
           employment.
@@ -481,8 +481,8 @@ function Step4({
 
 function CenterScreen({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 max-w-md w-full text-center">
+    <div className="min-h-screen bg-muted flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-lg border border-border p-8 max-w-md w-full text-center">
         {children}
       </div>
     </div>
@@ -493,14 +493,14 @@ function ExpiredScreen() {
   return (
     <CenterScreen>
       <div className="mb-4 flex justify-center">
-        <div className="h-14 w-14 rounded-full bg-red-100 flex items-center justify-center">
-          <svg className="h-7 w-7 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="h-14 w-14 rounded-full bg-destructive/15 flex items-center justify-center">
+          <svg className="h-7 w-7 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
           </svg>
         </div>
       </div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-2">Link expired or invalid</h2>
-      <p className="text-gray-500 text-sm">
+      <h2 className="text-xl font-semibold text-foreground mb-2">Link expired or invalid</h2>
+      <p className="text-muted-foreground text-sm">
         This pre-onboarding link is no longer valid. Please contact your HR team for a new link.
       </p>
     </CenterScreen>
@@ -511,14 +511,14 @@ function AlreadySubmittedScreen() {
   return (
     <CenterScreen>
       <div className="mb-4 flex justify-center">
-        <div className="h-14 w-14 rounded-full bg-amber-100 flex items-center justify-center">
-          <svg className="h-7 w-7 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="h-14 w-14 rounded-full bg-warning/15 flex items-center justify-center">
+          <svg className="h-7 w-7 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
       </div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-2">Already submitted</h2>
-      <p className="text-gray-500 text-sm">
+      <h2 className="text-xl font-semibold text-foreground mb-2">Already submitted</h2>
+      <p className="text-muted-foreground text-sm">
         Your details have already been submitted. Our HR team will review your information and get
         in touch with you shortly.
       </p>
@@ -530,16 +530,16 @@ function SuccessScreen({ candidateName }: { candidateName?: string }) {
   return (
     <CenterScreen>
       <div className="mb-4 flex justify-center">
-        <div className="h-14 w-14 rounded-full bg-green-100 flex items-center justify-center">
-          <svg className="h-7 w-7 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="h-14 w-14 rounded-full bg-success/15 flex items-center justify-center">
+          <svg className="h-7 w-7 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
       </div>
-      <h2 className="text-xl font-semibold text-gray-900 mb-2">
+      <h2 className="text-xl font-semibold text-foreground mb-2">
         {candidateName ? `Thank you, ${candidateName.split(" ")[0]}!` : "Details submitted!"}
       </h2>
-      <p className="text-gray-500 text-sm">
+      <p className="text-muted-foreground text-sm">
         Your details have been submitted successfully. Our HR team will review everything and get
         in touch with you soon. We look forward to having you on board!
       </p>
@@ -556,7 +556,7 @@ function LoadingScreen() {
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
       </div>
-      <p className="text-gray-400 text-sm">Loading your onboarding form...</p>
+      <p className="text-muted-foreground text-sm">Loading your onboarding form...</p>
     </CenterScreen>
   );
 }
@@ -616,7 +616,7 @@ function ProgressBar({ current }: { current: number }) {
           );
         })}
       </div>
-      <div className="relative h-1.5 bg-gray-200 rounded-full overflow-hidden">
+      <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
         <div
           className="absolute left-0 top-0 h-full bg-[#2E6FE6] rounded-full transition-all duration-500"
           style={{ width: `${((current) / (STEPS.length - 1)) * 100}%` }}
@@ -668,23 +668,23 @@ function DocSlot({
 }) {
   const { status, fileName, error } = state;
   return (
-    <div className="rounded-xl border border-gray-200 p-4 flex items-center gap-4">
+    <div className="rounded-xl border border-border p-4 flex items-center gap-4">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-800">{def.label}</span>
-          {def.required && <span className="text-red-500">*</span>}
+          <span className="text-sm font-medium text-foreground">{def.label}</span>
+          {def.required && <span className="text-destructive">*</span>}
         </div>
         {status === "done" && fileName ? (
-          <p className="text-xs text-green-600 mt-0.5 truncate flex items-center gap-1">
+          <p className="text-xs text-success mt-0.5 truncate flex items-center gap-1">
             <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
             {fileName}
           </p>
         ) : status === "error" ? (
-          <p className="text-xs text-red-500 mt-0.5 truncate">{error ?? "Upload failed"}</p>
+          <p className="text-xs text-destructive mt-0.5 truncate">{error ?? "Upload failed"}</p>
         ) : (
-          <p className="text-xs text-gray-400 mt-0.5">{def.hint}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{def.hint}</p>
         )}
       </div>
 
@@ -957,18 +957,18 @@ export function PreJoinPortal() {
     : "";
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Top bar */}
-      <header className="bg-white border-b border-gray-100 shadow-sm">
+      <header className="bg-white border-b border-border shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
           <LogoMark size={36} tile />
           <div className="flex flex-col leading-tight">
             <Wordmark height={14} />
-            <span className="text-[10px] text-gray-400 mt-0.5">
+            <span className="text-[10px] text-muted-foreground mt-0.5">
               {meta?.company_name ?? brandConfig.productName}
             </span>
           </div>
-          <span className="ml-auto text-xs text-gray-400 hidden sm:block">
+          <span className="ml-auto text-xs text-muted-foreground hidden sm:block">
             Pre-Join Portal
           </span>
         </div>
@@ -1005,21 +1005,21 @@ export function PreJoinPortal() {
         )}
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-border p-6 sm:p-8">
           {/* Progress */}
           <div className="mb-8">
             <ProgressBar current={currentStep} />
           </div>
 
           {/* Step title */}
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">
+          <h2 className="text-lg font-semibold text-foreground mb-1">
             {currentStep === 0 && "Personal Information"}
             {currentStep === 1 && "Address & Emergency Contact"}
             {currentStep === 2 && "Bank & Compliance Details"}
             {currentStep === 3 && "Documents"}
             {currentStep === 4 && "Review & Submit"}
           </h2>
-          <p className="text-sm text-gray-500 mb-6">
+          <p className="text-sm text-muted-foreground mb-6">
             {currentStep === 0 && "Tell us a bit about yourself."}
             {currentStep === 1 && "Your current address and someone we can contact in emergencies."}
             {currentStep === 2 && "Needed for salary processing and statutory compliance."}
@@ -1055,11 +1055,11 @@ export function PreJoinPortal() {
 
           {/* Error */}
           {error && (
-            <div className="mt-5 flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
-              <svg className="h-4 w-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="mt-5 flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/30 px-4 py-3">
+              <svg className="h-4 w-4 text-destructive shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
-              <span className="text-sm text-red-700">{error}</span>
+              <span className="text-sm text-destructive">{error}</span>
             </div>
           )}
 
@@ -1132,7 +1132,7 @@ export function PreJoinPortal() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-6 pb-8">
+        <p className="text-center text-xs text-muted-foreground mt-6 pb-8">
           {brandConfig.portalHelpText}
         </p>
       </main>

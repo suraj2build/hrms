@@ -104,7 +104,7 @@ export function OperationalScorecard({
             </span>
             {showTrend && score.trend && (
               <>
-                {score.trend === 'up'     && <TrendingUp   className="h-4 w-4 text-emerald-600" />}
+                {score.trend === 'up'     && <TrendingUp   className="h-4 w-4 text-success" />}
                 {score.trend === 'down'   && <TrendingDown className="h-4 w-4 text-destructive" />}
                 {score.trend === 'stable' && <Minus        className="h-4 w-4 text-muted-foreground" />}
               </>

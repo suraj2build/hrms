@@ -9,7 +9,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
-  UserCheck, ArrowRight, Clock, CheckCircle2,
+  UserCheck, ArrowRight, CheckCircle2,
   RefreshCw, Mail, Calendar, Briefcase,
   AlertCircle,
 } from 'lucide-react'
@@ -26,9 +26,6 @@ import { Label }         from '@/components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 
@@ -101,7 +98,7 @@ export function AdminHiredPipeline() {
       setTargetApp(null)
       qc.invalidateQueries({ queryKey: ['recruitment', 'hired'] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to initiate preboarding'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to initiate preboarding'),
   })
 
   function openModal(app: HiredApplication) {
@@ -181,7 +178,7 @@ export function AdminHiredPipeline() {
               return (
                 <div key={app.id} className="py-3.5 flex items-center gap-4">
                   {/* Avatar */}
-                  <div className="h-9 w-9 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 text-sm font-semibold text-emerald-700">
+                  <div className="h-9 w-9 rounded-full bg-success/15 flex items-center justify-center flex-shrink-0 text-sm font-semibold text-success">
                     {cand?.first_name?.[0] ?? '?'}
                   </div>
 
@@ -225,7 +222,7 @@ export function AdminHiredPipeline() {
                         )}
                       </div>
                     ) : (
-                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[11px]">
+                      <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30 text-[11px]">
                         Preboarding Pending
                       </Badge>
                     )}
@@ -233,7 +230,7 @@ export function AdminHiredPipeline() {
                     {!pj ? (
                       <Button
                         size="sm"
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                        className="bg-success hover:bg-success/90 text-success-foreground gap-1.5"
                         onClick={() => openModal(app)}
                       >
                         <ArrowRight className="h-3.5 w-3.5" />
@@ -320,7 +317,7 @@ export function AdminHiredPipeline() {
             <Button
               disabled={!joiningDate || initiateMutation.isPending}
               onClick={() => targetApp && initiateMutation.mutate(targetApp.id)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="bg-success hover:bg-success/90 text-success-foreground"
             >
               {initiateMutation.isPending ? 'Sending...' : 'Send Invitation'}
             </Button>

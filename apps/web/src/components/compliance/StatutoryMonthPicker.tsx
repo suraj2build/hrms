@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates the useStatutoryMonth hook with its picker component */
 /**
  * StatutoryMonthPicker — shared month selector for all Compliance/statutory pages.
  *

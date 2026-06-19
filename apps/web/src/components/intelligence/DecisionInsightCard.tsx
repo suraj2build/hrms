@@ -170,7 +170,7 @@ export function DecisionInsightCard({
             </span>
           )}
           {impactEstimate.rollbackPossible && (
-            <span className="flex items-center gap-1 text-emerald-600">
+            <span className="flex items-center gap-1 text-success">
               <RotateCcw className="h-3 w-3" />
               {impactEstimate.rollbackWindowHours != null
                 ? `Undo ${impactEstimate.rollbackWindowHours}h`

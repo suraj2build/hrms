@@ -113,7 +113,10 @@ function EventGroup({ eventType, items }: { eventType: string; items: ActionObse
 export function ActionCenter() {
   const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery<ActionCenterResponse>({
     queryKey: ['intelligence', 'action-center'],
-    queryFn: () => api.get('/intelligence/action-center').then((r: any) => r.data ?? r),
+    queryFn: () =>
+      api
+        .get<ActionCenterResponse & { data?: ActionCenterResponse }>('/intelligence/action-center')
+        .then((r) => r.data ?? r),
     refetchInterval: 2 * 60 * 1000, // 2-minute auto-refetch
     staleTime:       90 * 1000,
   })

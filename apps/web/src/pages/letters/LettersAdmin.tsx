@@ -238,7 +238,7 @@ function TemplateEditorDialog({
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
-              <Select value={category} onValueChange={v => setCategory(v as any)}>
+              <Select value={category} onValueChange={v => setCategory(v as 'hr_initiated' | 'ess_requestable')}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -589,7 +589,7 @@ function LetterDetailDialog({
   const { data, isLoading } = useQuery({
     queryKey: ['letter-detail', letterId],
     queryFn: () => api.get<{ data: GeneratedLetter & {
-      template: LetterTemplate & { approval_chains: any[] }
+      template: LetterTemplate & { approval_chains: { level: number; approver_role: string; label: string }[] }
       approval_log: { level: number; action: string; comments: string; acted_at: string; actor: { full_name: string } }[]
     }}>(`/letters/issued/${letterId}`),
   })

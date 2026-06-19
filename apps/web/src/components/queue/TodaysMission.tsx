@@ -85,7 +85,7 @@ export function TodaysMission({ mission, onModeChange }: TodaysMissionProps) {
             {urgent_sites.map(site => (
               <span
                 key={site}
-                className="inline-flex items-center rounded-full bg-orange-100 text-orange-700 px-2 py-0.5 text-[11px] font-medium"
+                className="inline-flex items-center rounded-full bg-warning/15 text-warning px-2 py-0.5 text-[11px] font-medium"
               >
                 {site}
               </span>

@@ -96,7 +96,7 @@ function CheckItem({ label, done }: { label: string; done: boolean }) {
     <div className="flex items-center gap-1.5">
       {done ? (
         <CheckCircle2
-          className="w-3.5 h-3.5 text-green-500 shrink-0"
+          className="w-3.5 h-3.5 text-success shrink-0"
           aria-label="Complete"
         />
       ) : (

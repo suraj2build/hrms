@@ -26,7 +26,6 @@ import { SectionCard } from '@/components/layout/SectionCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { DateInput } from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -38,6 +37,19 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+
+// ── Helpers ─────────────────────────────────────────────────────────────────────
+
+/** Best-effort error message extraction from an unknown thrown value. */
+function errMessage(e: unknown): string {
+  if (e instanceof Error && e.message) return e.message
+  if (typeof e === 'object' && e !== null) {
+    const rec = e as { message?: unknown; body?: { message?: unknown } }
+    if (typeof rec.message === 'string' && rec.message) return rec.message
+    if (typeof rec.body?.message === 'string' && rec.body.message) return rec.body.message
+  }
+  return 'Unknown error'
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -240,7 +252,7 @@ function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <UserCheck className="h-5 w-5 text-amber-500" />
+            <UserCheck className="h-5 w-5 text-warning" />
             Existing Employee Found
           </DialogTitle>
           <DialogDescription>
@@ -279,7 +291,7 @@ function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }
           </div>
         </div>
 
-        <div className="space-y-2 text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-md p-3">
+        <div className="space-y-2 text-xs text-muted-foreground bg-warning/10 border border-warning/30 rounded-md p-3">
           <p><strong>Rehire:</strong> Reactivates this existing record. Employment history is preserved.</p>
           <p><strong>New Employee:</strong> Creates a separate record. Only use if this is truly a different person.</p>
         </div>
@@ -291,7 +303,7 @@ function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }
           <Button
             size="sm"
             variant="outline"
-            className="border-blue-300 text-blue-700 hover:bg-blue-50"
+            className="border-primary/30 text-primary hover:bg-primary/10"
             disabled={isPending}
             onClick={() => onNewEmployee(invitationId)}
           >
@@ -300,7 +312,7 @@ function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }
           </Button>
           <Button
             size="sm"
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-success hover:bg-success/90 text-success-foreground"
             disabled={isPending}
             onClick={() => onRehire(invitationId, emp.id)}
           >
@@ -585,8 +597,8 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
           : 'Invitation created — share the link below (email not sent)',
       )
     },
-    onError: (e: any) => toast.error('Failed to create invitation', {
-      description: e?.message ?? e?.body?.message ?? 'Unknown error',
+    onError: (e: unknown) => toast.error('Failed to create invitation', {
+      description: errMessage(e),
     }),
   })
 
@@ -709,9 +721,9 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       toast.success('Sent to AI Review')
       navigate(`/admin/onboarding/${sessionId}/review`)
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error('Failed to send to AI Review', {
-        description: e?.message ?? e?.body?.message ?? 'Unknown error',
+        description: errMessage(e),
       })
     } finally {
       setPushingId(null)
@@ -833,7 +845,7 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
                             className="h-7 px-2 text-xs"
                           >
                             {copied === inv.id ? (
-                              <Check className="mr-1 h-3 w-3 text-emerald-600" />
+                              <Check className="mr-1 h-3 w-3 text-success" />
                             ) : (
                               <Link className="mr-1 h-3 w-3" />
                             )}
@@ -905,7 +917,7 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
                   className="h-7 shrink-0 px-2 text-xs"
                 >
                   {copied === 'invite' ? (
-                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                    <Check className="h-3.5 w-3.5 text-success" />
                   ) : (
                     <Copy className="h-3.5 w-3.5" />
                   )}

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- shadcn pattern: badgeVariants (cva) is co-exported with the Badge component */
 import * as React from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'

@@ -257,7 +257,7 @@ export function RecommendationCenter({ embedded = false }: RecommendationCenterP
               </>
             ) : filteredInsights.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-                <CheckCircle2 className="h-10 w-10 text-emerald-500/60" />
+                <CheckCircle2 className="h-10 w-10 text-success/60" />
                 <p className="text-sm font-medium text-muted-foreground">
                   All clear — no recommendations
                 </p>
@@ -388,7 +388,7 @@ export function RecommendationCenter({ embedded = false }: RecommendationCenterP
               </div>
               <Badge
                 variant="outline"
-                className="text-amber-600 bg-amber-500/10 border-amber-500/30 text-[11px] font-semibold"
+                className="text-warning bg-warning/10 border-warning/30 text-[11px] font-semibold"
               >
                 {pendingBulkCount}
               </Badge>

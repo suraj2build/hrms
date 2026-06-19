@@ -15,7 +15,6 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { Input }         from '@/components/ui/input'
-import { Badge }         from '@/components/ui/badge'
 import { cn }            from '@/lib/utils'
 import { RunbookLink }   from '@/components/runbooks/RunbookLink'
 import { getRunbookCategories, searchRunbooks, type Runbook } from '@/lib/runbooks/registry'

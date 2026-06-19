@@ -446,8 +446,8 @@ export function OperationsTimeline({
         <span className="text-sm font-semibold text-foreground flex-1">
           Operations Timeline
         </span>
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold uppercase tracking-wide">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success/10 text-success text-[10px] font-bold uppercase tracking-wide">
+          <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
           LIVE
         </span>
         {lastUpdated && (
@@ -490,7 +490,7 @@ export function OperationsTimeline({
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="font-medium text-orange-600">{openCount}</span>
+          <span className="font-medium text-warning">{openCount}</span>
           open
         </div>
         {events.length !== allEvents.length && (

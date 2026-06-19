@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates the buildAttendanceDiff helper with the diff component that renders its output */
 /**
  * AttendanceDiff — reusable explainability diff component.
  *

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Check, ChevronDown, MapPin } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
@@ -64,11 +64,11 @@ export function SiteSelector({
     item?.scrollIntoView({ block: 'nearest' })
   }, [focusIndex])
 
-  const selectedIds: string[] = value === undefined
+  const selectedIds: string[] = useMemo(() => value === undefined
     ? []
     : Array.isArray(value)
     ? value
-    : [value]
+    : [value], [value])
 
   const isSelected = useCallback((id: string) => selectedIds.includes(id), [selectedIds])
 

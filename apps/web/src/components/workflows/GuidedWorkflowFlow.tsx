@@ -60,7 +60,7 @@ interface StepIndicatorProps {
 function StepIndicator({ status, index }: StepIndicatorProps) {
   if (status === 'completed') {
     return (
-      <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" aria-hidden="true" />
+      <CheckCircle2 className="h-5 w-5 text-success shrink-0" aria-hidden="true" />
     )
   }
   if (status === 'active') {
@@ -296,7 +296,7 @@ function GuidedWorkflowFlowImpl({
                     {isActive && (
                       <button
                         onClick={() => handleMarkComplete(step.id)}
-                        className="mt-1.5 text-xs text-green-600 font-medium hover:underline"
+                        className="mt-1.5 text-xs text-success font-medium hover:underline"
                         aria-label={`Mark step "${step.title}" as complete`}
                       >
                         Mark complete
@@ -307,7 +307,7 @@ function GuidedWorkflowFlowImpl({
                   {/* Right-side CTA or status */}
                   <div className="shrink-0 pt-0.5">
                     {step.status === 'completed' ? (
-                      <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
+                      <span className="flex items-center gap-1 text-xs text-success font-medium">
                         <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
                         Done
                       </span>

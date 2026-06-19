@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates the useTheme hook with its provider, standard context pattern */
 import * as React from 'react'
 
 type Theme = 'light' | 'petrol' | 'bordeaux' | 'slate' | 'pastel' | 'dark'

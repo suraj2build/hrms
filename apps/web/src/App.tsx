@@ -19,7 +19,6 @@ import { Signup }       from '@/pages/auth/Signup'
 import { AuthCallback } from '@/pages/auth/AuthCallback'
 
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
-import { Dashboard }         from '@/pages/dashboard/Dashboard'
 import { EmployeeDashboard } from '@/pages/dashboard/EmployeeDashboard'
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
@@ -29,12 +28,9 @@ const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamP
 import { EmployeeList }    from '@/pages/employees/EmployeeList'
 import { AddEmployee }     from '@/pages/employees/AddEmployee'
 import { ProfilePlatform } from '@/pages/profile/ProfilePlatform'
-// EmployeeProfile is a heavy detail page (~184 KB) — lazy so it leaves the main chunk.
-const EmployeeProfile = lazy(() => import('@/pages/employees/EmployeeProfile').then(m => ({ default: m.EmployeeProfile })))
 
 // ── Core attendance (eager — high-traffic admin views) ────────────────────────
 import { Attendance }             from '@/pages/attendance/Attendance'
-import { RegularisationApproval } from '@/pages/attendance/RegularisationApproval'
 import { ApprovalInbox }          from '@/pages/attendance/ApprovalInbox'
 import ManagerRegularisationQueue from '@/pages/admin/attendance/ManagerRegularisationQueue'
 
@@ -82,11 +78,9 @@ const DataExplorer      = lazy(() => import('@/pages/explorer/DataExplorer').the
 
 // Import + Onboarding
 const ImportWorkspace      = lazy(() => import('@/pages/import/ImportWorkspace').then(m => ({ default: m.ImportWorkspace })))
-const OnboardingDashboard  = lazy(() => import('@/pages/onboarding/OnboardingDashboard').then(m => ({ default: m.OnboardingDashboard })))
 const OnboardingHub        = lazy(() => import('@/pages/onboarding/OnboardingHub').then(m => ({ default: m.OnboardingHub })))
 const HRReviewWorkspace    = lazy(() => import('@/pages/onboarding/HRReviewWorkspace').then(m => ({ default: m.HRReviewWorkspace })))
 const OnboardingModule     = lazy(() => import('@/pages/onboarding/OnboardingModule').then(m => ({ default: m.OnboardingModule })))
-const PreOnboarding        = lazy(() => import('@/pages/onboarding/PreOnboarding').then(m => ({ default: m.PreOnboarding })))
 const PreJoinPortal        = lazy(() => import('@/pages/onboarding/PreJoinPortal').then(m => ({ default: m.PreJoinPortal })))
 const SeparationWorkflow   = lazy(() => import('@/pages/employees/SeparationWorkflow').then(m => ({ default: m.SeparationWorkflow })))
 
@@ -97,7 +91,6 @@ const ShiftMaster            = lazy(() => import('@/pages/attendance/ShiftMaster
 const EmployeeShifts         = lazy(() => import('@/pages/attendance/EmployeeShifts').then(m => ({ default: m.EmployeeShifts })))
 const ShiftRoster            = lazy(() => import('@/pages/attendance/ShiftRoster').then(m => ({ default: m.ShiftRoster })))
 const WhoIsIn                = lazy(() => import('@/pages/attendance/WhoIsIn').then(m => ({ default: m.WhoIsIn })))
-const AttendanceUpload           = lazy(() => import('@/pages/attendance/AttendanceUpload').then(m => ({ default: m.AttendanceUpload })))
 const MusterUpload               = lazy(() => import('@/pages/attendance/MusterUpload').then(m => ({ default: m.MusterUpload })))
 const AttendanceUploadWorkspace  = lazy(() => import('@/pages/attendance/AttendanceUploadWorkspace').then(m => ({ default: m.AttendanceUploadWorkspace })))
 const AttendancePeriods      = lazy(() => import('@/pages/attendance/AttendancePeriods').then(m => ({ default: m.AttendancePeriods })))
@@ -307,12 +300,10 @@ const RotationPolicies     = lazy(() => import('@/pages/masters/RotationPolicies
 const RotationPolicyEditor = lazy(() => import('@/pages/masters/RotationPolicyEditor'))
 const Grades               = lazy(() => import('@/pages/masters/Grades').then(m => ({ default: m.Grades })))
 const PayrollGroups        = lazy(() => import('@/pages/masters/PayrollGroups').then(m => ({ default: m.PayrollGroups })))
-const SalaryStructures     = lazy(() => import('@/pages/masters/SalaryStructures').then(m => ({ default: m.SalaryStructures })))
 const EmploymentCategories = lazy(() => import('@/pages/masters/EmploymentCategories').then(m => ({ default: m.EmploymentCategories })))
 const StatutoryGroups      = lazy(() => import('@/pages/masters/StatutoryGroups').then(m => ({ default: m.StatutoryGroups })))
 const AssetCategories      = lazy(() => import('@/pages/masters/AssetCategories').then(m => ({ default: m.AssetCategories })))
 const AssetMaster          = lazy(() => import('@/pages/assets/AssetMaster').then(m => ({ default: m.AssetMaster })))
-const AdminComingSoon      = lazy(() => import('@/pages/admin/AdminComingSoon').then(m => ({ default: m.AdminComingSoon })))
 // Intelligence — AI Workforce OS Phase 1
 const WorkforceCommand     = lazy(() => import('@/pages/intelligence/WorkforceCommand').then(m => ({ default: m.WorkforceCommand })))
 const OrgHealth            = lazy(() => import('@/pages/intelligence/OrgHealth').then(m => ({ default: m.OrgHealth })))

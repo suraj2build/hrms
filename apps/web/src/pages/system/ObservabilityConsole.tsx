@@ -1180,7 +1180,7 @@ export function ObservabilityConsole() {
                               {s.file_name ?? '—'}
                             </td>
                             <td className="px-3 py-2">
-                              <AsyncStatusBadge status={s.status as any} />
+                              <AsyncStatusBadge status={s.status} />
                             </td>
                             <td className="px-3 py-2 tabular-nums text-muted-foreground">{sizeKb}</td>
                             <td className="px-3 py-2 tabular-nums text-muted-foreground">
@@ -1232,7 +1232,7 @@ export function ObservabilityConsole() {
                           {entry.event_type.replace(/_/g, ' ')}
                         </td>
                         <td className="px-3 py-2">
-                          <AsyncStatusBadge status={entry.status as any} />
+                          <AsyncStatusBadge status={entry.status} />
                         </td>
                         <td className="px-3 py-2 text-muted-foreground">
                           {entry.actor_name ?? <span className="italic opacity-50">system</span>}
@@ -1328,7 +1328,7 @@ export function ObservabilityConsole() {
                             <td className="px-3 py-1.5 tabular-nums text-muted-foreground whitespace-nowrap">{fmtTs(f.created_at)}</td>
                             <td className="px-3 py-1.5 text-destructive max-w-xs truncate">{f.error_message ?? '—'}</td>
                             <td className="px-3 py-1.5 text-muted-foreground">
-                              {f.result_summary ? `${(f.result_summary as any).failed_rows ?? 0} failed` : '—'}
+                              {f.result_summary ? `${(f.result_summary.failed_rows as number | undefined) ?? 0} failed` : '—'}
                             </td>
                           </tr>
                         ))}

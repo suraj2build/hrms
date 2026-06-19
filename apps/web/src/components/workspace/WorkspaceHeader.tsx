@@ -152,28 +152,28 @@ export const WorkspaceHeader = React.memo(function WorkspaceHeader({
           )}
 
           {pendingCount !== undefined && pendingCount > 0 ? (
-            <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-full px-2.5 py-0.5 border border-amber-200 dark:border-amber-800">
+            <span className="inline-flex items-center gap-1 text-xs text-warning bg-warning/10 rounded-full px-2.5 py-0.5 border border-warning/30">
               <Clock className="h-3 w-3" aria-hidden="true" />
               {pendingCount} pending
             </span>
           ) : null}
 
           {operationalStatus === 'warning' && (
-            <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-full px-2.5 py-0.5 border border-amber-200 dark:border-amber-800">
+            <span className="inline-flex items-center gap-1 text-xs text-warning bg-warning/10 rounded-full px-2.5 py-0.5 border border-warning/30">
               <AlertTriangle className="h-3 w-3" aria-hidden="true" />
               Needs attention
             </span>
           )}
 
           {operationalStatus === 'critical' && (
-            <span className="inline-flex items-center gap-1 text-xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-full px-2.5 py-0.5 border border-red-200 dark:border-red-800">
+            <span className="inline-flex items-center gap-1 text-xs text-destructive bg-destructive/10 rounded-full px-2.5 py-0.5 border border-destructive/30">
               <AlertTriangle className="h-3 w-3" aria-hidden="true" />
               Critical issues
             </span>
           )}
 
           {operationalStatus === 'healthy' && (
-            <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 rounded-full px-2.5 py-0.5 border border-green-200 dark:border-green-800">
+            <span className="inline-flex items-center gap-1 text-xs text-success bg-success/10 rounded-full px-2.5 py-0.5 border border-success/30">
               <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
               All clear
             </span>

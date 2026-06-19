@@ -18,7 +18,7 @@ export function PredictiveWarningsStrip({ warnings, isLoading = false }: Predict
   // All-clear state
   if (warnings.length === 0 && !isLoading) {
     return (
-      <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-3 py-1 text-xs font-medium w-fit">
+      <div className="flex items-center gap-1.5 rounded-full bg-success/10 text-success border border-success/20 px-3 py-1 text-xs font-medium w-fit">
         <CheckCircle2 className="h-3 w-3" />
         No predictive warnings
       </div>

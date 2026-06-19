@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates getCachedEmployeeLabel helper with the label component that shares its cache */
 import { useEffect, useReducer } from 'react'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'

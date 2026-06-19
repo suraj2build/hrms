@@ -14,6 +14,7 @@ import {
   AlertTriangle, Clock, CalendarClock, CalendarDays, Loader2, AlertCircle,
   FileText, Fingerprint, Plane, StickyNote, FileSignature, UserCheck, Search,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -56,7 +57,7 @@ interface ExpiryResp {
 const fmtDate = (iso: string) =>
   new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
-const BUCKET_META: Record<Bucket, { label: string; icon: any; cls: string; chip: string }> = {
+const BUCKET_META: Record<Bucket, { label: string; icon: LucideIcon; cls: string; chip: string }> = {
   overdue: { label: 'Overdue',     icon: AlertTriangle, cls: 'text-red-600',   chip: 'bg-red-50 text-red-700 border-red-200' },
   due_7:   { label: 'Due in 7 days',  icon: Clock,         cls: 'text-amber-600', chip: 'bg-amber-50 text-amber-700 border-amber-200' },
   due_30:  { label: 'Due in 30 days', icon: CalendarClock, cls: 'text-blue-600',  chip: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -64,7 +65,7 @@ const BUCKET_META: Record<Bucket, { label: string; icon: any; cls: string; chip:
 }
 const BUCKET_ORDER: Bucket[] = ['overdue', 'due_7', 'due_30', 'due_90']
 
-const CATEGORY_META: Record<Category, { label: string; icon: any }> = {
+const CATEGORY_META: Record<Category, { label: string; icon: LucideIcon }> = {
   document:  { label: 'Documents', icon: FileText },
   identity:  { label: 'Identity',  icon: Fingerprint },
   passport:  { label: 'Passport',  icon: StickyNote },
@@ -85,7 +86,7 @@ export function ExpiryManagement() {
   const [deptId, setDeptId]     = useState<string>('all')
   const [search, setSearch]     = useState('')
 
-  const all = res?.data ?? []
+  const all = useMemo(() => res?.data ?? [], [res?.data])
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return all.filter(i =>

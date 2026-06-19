@@ -246,13 +246,13 @@ function ProfileBar({ emp, profile: fp }: { emp: Employee | null; profile?: Dash
   const initials = name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2)
   const photo    = fp?.personal_info?.profile_photo ?? null
   const designation = job?.designations?.name ?? null
-  const dept     = job?.departments?.name ?? (emp as any)?.department?.name ?? '—'
+  const dept     = job?.departments?.name ?? emp?.department?.name ?? '—'
   const grade    = job?.grades?.name ?? null
   const manager  = job?.manager ? `${job.manager.first_name} ${job.manager.last_name}`
                  : emp?.manager ? `${emp.manager.first_name} ${emp.manager.last_name}` : '—'
-  const location = job?.work_locations?.name ?? (emp as any)?.work_location?.name ?? '—'
+  const location = job?.work_locations?.name ?? (emp as { work_location?: { name?: string } } | null)?.work_location?.name ?? '—'
   const empCode  = pEmp?.employee_code ?? emp?.employee_code ?? '—'
-  const joiningDate = pEmp?.joining_date ?? (emp as any)?.joining_date
+  const joiningDate = pEmp?.joining_date ?? emp?.joining_date
   const tenure   = calcTenure(joiningDate)
   const joinedStr   = (() => {
     if (!joiningDate) return null
@@ -471,7 +471,7 @@ function OpenActionsKpiCard({
   const { total, awaitingInput } = useMemo(() => {
     let total = 0, awaitingInput = 0
     for (const r of [...requests, ...regRequests]) {
-      const s = (r as any).status?.toLowerCase()
+      const s = (r as { status?: string }).status?.toLowerCase()
       if (s === 'pending') { total++; awaitingInput++ }
     }
     return { total, awaitingInput }
@@ -647,7 +647,7 @@ function MyRequests({
   const { pending, approved, rejected } = useMemo(() => {
     let pending = 0, approved = 0, rejected = 0
     for (const r of [...requests, ...regRequests]) {
-      const s = (r as any).status?.toLowerCase()
+      const s = (r as { status?: string }).status?.toLowerCase()
       if (s === 'pending')  pending++
       if (s === 'approved') approved++
       if (s === 'rejected') rejected++
@@ -1133,7 +1133,7 @@ export function EmployeeDashboard() {
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
-  const emp = (empResp as any)?.data ?? (empResp as any) ?? null
+  const emp = empResp?.data ?? (empResp as Employee | undefined) ?? null
 
   const heatmapData = useMemo<DayData[]>(() => {
     const records = attResp?.daily ?? []
@@ -1141,13 +1141,13 @@ export function EmployeeDashboard() {
     return buildMonthData(cursor.y, cursor.m, today, records, logs)
   }, [attResp, cursor, today])
 
-  const requests    = (leaveResp    as any)?.data ?? []
-  const regRequests = (regResp      as any)?.data ?? []
-  const balances    = (balanceResp  as any)?.data ?? []
-  const slips       = (slipsResp    as any)?.data ?? (Array.isArray(slipsResp) ? slipsResp : [])
-  const comp        = (compResp     as any)?.data ?? null
-  const holidays    = (holidaysResp as any)?.data ?? (Array.isArray(holidaysResp) ? holidaysResp : [])
-  const expiryItems = (expiryResp   as any)?.data ?? []
+  const requests    = leaveResp?.data ?? []
+  const regRequests = regResp?.data ?? []
+  const balances    = balanceResp?.data ?? []
+  const slips       = slipsResp?.data ?? (Array.isArray(slipsResp) ? slipsResp : [])
+  const comp        = compResp?.data ?? null
+  const holidays    = (holidaysResp as { data?: Holiday[] } | undefined)?.data ?? (Array.isArray(holidaysResp) ? holidaysResp : [])
+  const expiryItems = expiryResp?.data ?? []
 
   // ─────────────────────────────────────────────────────────────────────────
 

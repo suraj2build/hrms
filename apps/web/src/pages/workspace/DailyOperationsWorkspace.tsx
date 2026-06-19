@@ -106,7 +106,7 @@ function TabTable({
 function EmptyState({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 gap-2">
-      <CheckCircle2 className="h-8 w-8 text-emerald-500/50" />
+      <CheckCircle2 className="h-8 w-8 text-success/50" />
       <p className="text-sm font-medium text-foreground">All clear</p>
       <p className="text-xs text-muted-foreground">No {label} issues found</p>
     </div>
@@ -232,7 +232,7 @@ function TodayTab({
             : !todayAnomalies || todayAnomalies.length === 0
               ? (
                 <div className="flex flex-col items-center justify-center py-10 gap-1">
-                  <CheckCircle2 className="h-6 w-6 text-emerald-500/50" />
+                  <CheckCircle2 className="h-6 w-6 text-success/50" />
                   <p className="text-xs text-muted-foreground">No open anomalies</p>
                 </div>
               )
@@ -243,7 +243,7 @@ function TodayTab({
                     return (
                       <li key={d.id ?? i} className="px-4 py-2.5 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
-                          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
                           <span className="text-sm text-foreground truncate">{d.employee_name || d.employeeName || '—'}</span>
                           <span className="text-xs text-muted-foreground truncate">{d.anomaly_type || d.type || ''}</span>
                         </div>
@@ -266,7 +266,7 @@ function TodayTab({
             : recentActivity.length === 0
               ? (
                 <div className="flex flex-col items-center justify-center py-10 gap-1">
-                  <CheckCircle2 className="h-6 w-6 text-emerald-500/50" />
+                  <CheckCircle2 className="h-6 w-6 text-success/50" />
                   <p className="text-xs text-muted-foreground">No recent activity</p>
                 </div>
               )
@@ -1107,7 +1107,7 @@ function PayrollBlockersTab({
         <div className="flex items-center gap-2">
           {payrollBlockers.length > 0
             ? <ShieldAlert className="h-4 w-4 text-destructive shrink-0" />
-            : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+            : <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
           }
           <p className={cn('text-sm font-medium', payrollBlockers.length > 0 ? 'text-destructive' : 'text-emerald-700')}>
             {payrollBlockers.length > 0

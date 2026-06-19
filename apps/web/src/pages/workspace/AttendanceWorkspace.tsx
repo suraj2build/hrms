@@ -19,7 +19,7 @@
  *           Anomalies · Intelligence · Risks · Exceptions · Policies · Operations · Audit
  */
 
-import { lazy, Suspense, useMemo } from 'react'
+import { lazy, Suspense, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -201,11 +201,11 @@ function AttendanceIntelligencePanelContent() {
     retry:     false,
   })
 
-  function goTab(tab: string) {
+  const goTab = useCallback((tab: string) => {
     const p = new URLSearchParams()
     p.set('tab', tab)
     navigate({ search: p.toString() }, { replace: true })
-  }
+  }, [navigate])
 
   const groups: InsightGroup[] = useMemo(() => {
     const anomalyItems      = []
@@ -297,7 +297,7 @@ function AttendanceIntelligencePanelContent() {
       { id: 'corrections', label: 'Corrections',  icon: ClipboardEdit, items: correctionItems },
       { id: 'continuity',  label: 'Continuity',   icon: TrendingDown,  items: continuityItems },
     ]
-  }, [stats])
+  }, [stats, goTab])
 
   const timeline: TimelineEvent[] = useMemo(() => {
     if (!events?.data?.length) return []

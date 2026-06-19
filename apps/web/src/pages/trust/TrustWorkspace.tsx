@@ -290,7 +290,7 @@ function TrustSignalsTab() {
         {isLoading && <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>}
         {!isLoading && lowTrust.length === 0 && (
           <div className="py-8 text-center space-y-2">
-            <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto" />
+            <CheckCircle2 className="h-8 w-8 text-success mx-auto" />
             <p className="text-sm font-medium">All trust scores are healthy</p>
             <p className="text-xs text-muted-foreground">No employees with scores below 80.</p>
           </div>
@@ -350,10 +350,10 @@ function TrustSignalsTab() {
 
             {detail?.strengths && detail.strengths.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Strengths</p>
+                <p className="text-xs font-semibold text-success uppercase tracking-wide">Strengths</p>
                 {detail.strengths.map((s, i) => (
                   <p key={i} className="text-xs text-foreground flex gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />{s}
+                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0 mt-0.5" />{s}
                   </p>
                 ))}
               </div>
@@ -361,10 +361,10 @@ function TrustSignalsTab() {
 
             {detail?.risks && detail.risks.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Risks</p>
+                <p className="text-xs font-semibold text-warning uppercase tracking-wide">Risks</p>
                 {detail.risks.map((r, i) => (
                   <p key={i} className="text-xs text-foreground flex gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />{r}
+                    <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />{r}
                   </p>
                 ))}
               </div>
@@ -409,7 +409,7 @@ function DuplicatesTab() {
         {isLoading && <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>}
         {!isLoading && items.length === 0 && (
           <div className="py-8 text-center space-y-2">
-            <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto" />
+            <CheckCircle2 className="h-8 w-8 text-success mx-auto" />
             <p className="text-sm font-medium">No duplicate alerts detected</p>
             <p className="text-xs text-muted-foreground">Workforce identity data appears clean.</p>
           </div>

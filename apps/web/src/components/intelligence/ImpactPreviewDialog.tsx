@@ -130,7 +130,7 @@ export function ImpactPreviewDialog({
         {/* ── Step: done ── */}
         {step === 'done' && (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-            <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+            <CheckCircle2 className="h-12 w-12 text-success" />
             <p className="text-base font-semibold">Action Complete</p>
             <p className="text-sm text-muted-foreground">
               {result?.successCount ?? 0} records updated successfully
@@ -223,7 +223,7 @@ export function ImpactPreviewDialog({
 
                     <ImpactRow label="Rollback possible">
                       {impactEstimate.rollbackPossible ? (
-                        <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+                        <span className="flex items-center gap-1 text-xs font-medium text-success">
                           <RotateCcw className="h-3 w-3" />
                           Yes
                           {impactEstimate.rollbackWindowHours != null &&

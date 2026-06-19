@@ -268,7 +268,7 @@ export default function FabricWorkspace() {
   }
 
   function stepStatusIcon(status: string) {
-    if (status === 'completed') return <CheckCircle2 className="size-3.5 text-emerald-500" />
+    if (status === 'completed') return <CheckCircle2 className="size-3.5 text-success" />
     if (status === 'active')    return <Activity className="size-3.5 text-primary animate-pulse" />
     if (status === 'failed')    return <AlertTriangle className="size-3.5 text-destructive" />
     return <div className="size-3.5 rounded-full border-2 border-muted-foreground/30" />
@@ -430,7 +430,7 @@ export default function FabricWorkspace() {
                     <p className="text-xs font-medium text-muted-foreground mb-1.5">Contributing Factors</p>
                     <ul className="space-y-1">
                       {composeResult.factors.map((f, i) => (
-                        <li key={i} className="text-xs text-muted-foreground flex gap-1.5"><AlertTriangle className="size-3 mt-0.5 shrink-0 text-amber-500" />{f}</li>
+                        <li key={i} className="text-xs text-muted-foreground flex gap-1.5"><AlertTriangle className="size-3 mt-0.5 shrink-0 text-warning" />{f}</li>
                       ))}
                     </ul>
                   </div>

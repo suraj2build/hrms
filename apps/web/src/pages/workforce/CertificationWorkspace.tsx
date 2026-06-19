@@ -8,11 +8,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  BadgeCheck, Plus, RefreshCw, Search, AlertTriangle,
-  Calendar, Building2, Hash, Trash2, Edit2, X,
+  BadgeCheck, Plus, Search, AlertTriangle,
+  Calendar, Building2, Trash2, Edit2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { format, differenceInDays } from 'date-fns'
+import { format } from 'date-fns'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -106,7 +106,6 @@ export function CertificationWorkspace() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Certification | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
-  const [saving, setSaving] = useState(false)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -162,7 +161,7 @@ export function CertificationWorkspace() {
       qc.invalidateQueries({ queryKey: ['certifications-expiring'] })
       qc.invalidateQueries({ queryKey: ['certifications-expired'] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Save failed'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Save failed'),
   })
 
   const deleteMutation = useMutation({
@@ -453,7 +452,7 @@ function CertTable({
               <Edit2 className="h-3.5 w-3.5" />
             </Button>
             <Button
-              variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+              variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
               onClick={() => { if (confirm('Delete this certification?')) onDelete(c.id) }}
             >
               <Trash2 className="h-3.5 w-3.5" />

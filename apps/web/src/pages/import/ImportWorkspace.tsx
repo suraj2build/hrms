@@ -41,7 +41,6 @@ import {
   History,
   RefreshCw,
   Filter,
-  ArrowRight,
   Layers,
   Scale,
   Package,

@@ -38,6 +38,21 @@ interface Notification {
   actionLabel?: string
 }
 
+/** Raw backend notification row — fields are loosely typed and adapted to Notification. */
+interface RawNotification {
+  id:           string
+  type?:        string
+  title:        string
+  body?:        string | null
+  created_at?:  string | null
+  timestamp?:   string | null
+  is_read?:     boolean | null
+  read?:        boolean | null
+  link?:        string | null
+  actionRoute?: string | null
+  actionLabel?: string | null
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string): string {
@@ -222,7 +237,7 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
       // Map them onto the component's model so the unread badge, timestamps and
       // action links work (previously read `n.read`/`n.type`/`n.timestamp`, which
       // the API never sends — the badge counted every item as unread).
-      api.get<{ data: Array<Record<string, any>> }>('/notifications?limit=30').then(r =>
+      api.get<{ data: RawNotification[] }>('/notifications?limit=30').then(r =>
         (Array.isArray(r.data) ? r.data : []).map((n): Notification => ({
           id:          n.id,
           type:        (n.type as NotificationType) ?? 'info',
@@ -237,7 +252,10 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
     staleTime: 30_000,
     enabled:   open,
   })
-  const notifications: Notification[] = Array.isArray(rawNotifications) ? rawNotifications : []
+  const notifications: Notification[] = useMemo(
+    () => (Array.isArray(rawNotifications) ? rawNotifications : []),
+    [rawNotifications],
+  )
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 

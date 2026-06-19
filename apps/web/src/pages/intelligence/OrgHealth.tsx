@@ -34,8 +34,8 @@ function SignalBadge({ signal }: { signal: 'elevated' | 'normal' | 'low' }) {
 
 function NetChange({ joiners, exits }: { joiners: number; exits: number }) {
   const net = joiners - exits
-  if (net > 0) return <span className="text-emerald-600 font-medium inline-flex items-center gap-0.5"><TrendingUp className="h-3 w-3" /> +{net}</span>
-  if (net < 0) return <span className="text-red-600 font-medium inline-flex items-center gap-0.5"><TrendingDown className="h-3 w-3" /> {net}</span>
+  if (net > 0) return <span className="text-success font-medium inline-flex items-center gap-0.5"><TrendingUp className="h-3 w-3" /> +{net}</span>
+  if (net < 0) return <span className="text-destructive font-medium inline-flex items-center gap-0.5"><TrendingDown className="h-3 w-3" /> {net}</span>
   return <span className="text-muted-foreground inline-flex items-center gap-0.5"><Minus className="h-3 w-3" /> 0</span>
 }
 
@@ -133,12 +133,12 @@ export function OrgHealth() {
                   </thead>
                   <tbody>
                     {deptRows.map(row => (
-                      <tr key={row.id} className={'border-b border-border/50 ' + (row.probation_due > 3 ? 'bg-amber-50' : '')}>
+                      <tr key={row.id} className={'border-b border-border/50 ' + (row.probation_due > 3 ? 'bg-warning/10' : '')}>
                         <td className="px-4 py-2 font-medium text-foreground">{row.name}</td>
                         <td className="px-4 py-2 text-right">{row.headcount}</td>
-                        <td className="px-4 py-2 text-right text-emerald-600">+{row.joiners_30d}</td>
-                        <td className="px-4 py-2 text-right text-red-500">{row.exits_30d > 0 ? '-' + row.exits_30d : '0'}</td>
-                        <td className={'px-4 py-2 text-right ' + (row.probation_due > 3 ? 'text-amber-700 font-semibold' : 'text-muted-foreground')}>{row.probation_due}</td>
+                        <td className="px-4 py-2 text-right text-success">+{row.joiners_30d}</td>
+                        <td className="px-4 py-2 text-right text-destructive">{row.exits_30d > 0 ? '-' + row.exits_30d : '0'}</td>
+                        <td className={'px-4 py-2 text-right ' + (row.probation_due > 3 ? 'text-warning font-semibold' : 'text-muted-foreground')}>{row.probation_due}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -217,7 +217,7 @@ export function OrgHealth() {
                           <td className="px-4 py-2 text-muted-foreground">{row.region ?? '—'}</td>
                           <td className="px-4 py-2 text-muted-foreground capitalize">{row.site_type ?? '—'}</td>
                           <td className="px-4 py-2 text-right font-semibold">{row.headcount}</td>
-                          <td className="px-4 py-2 text-right text-emerald-600">+{row.joiners_30d}</td>
+                          <td className="px-4 py-2 text-right text-success">+{row.joiners_30d}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -252,8 +252,8 @@ export function OrgHealth() {
                       <tr key={row.period} className="border-b border-border/50">
                         <td className="px-4 py-2 font-medium text-foreground">{row.period}</td>
                         <td className="px-4 py-2 text-right font-semibold">{row.headcount}</td>
-                        <td className="px-4 py-2 text-right text-emerald-600">+{row.joiners}</td>
-                        <td className="px-4 py-2 text-right text-red-500">{row.exits > 0 ? '-' + row.exits : '0'}</td>
+                        <td className="px-4 py-2 text-right text-success">+{row.joiners}</td>
+                        <td className="px-4 py-2 text-right text-destructive">{row.exits > 0 ? '-' + row.exits : '0'}</td>
                         <td className="px-4 py-2 text-right"><NetChange joiners={row.joiners} exits={row.exits} /></td>
                       </tr>
                     ))}

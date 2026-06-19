@@ -287,7 +287,7 @@ function OtTab({ employeeId, activeTab }: { employeeId: string; activeTab: TabId
                 />
               </div>
               <span className="text-[11px] text-foreground w-10 text-right shrink-0">{hrs.toFixed(1)}h</span>
-              {flagged && <span className="text-[10px] text-amber-600 font-medium">flagged</span>}
+              {flagged && <span className="text-[10px] text-warning font-medium">flagged</span>}
             </div>
           )
         })}
@@ -344,7 +344,7 @@ function LeaveTab({
                 {row['leave_type'] ?? row['type'] ?? 'Leave'}
               </span>
               {conflict && (
-                <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+                <span className="text-[10px] font-semibold text-warning bg-warning/15 rounded-full px-2 py-0.5">
                   Conflict detected
                 </span>
               )}

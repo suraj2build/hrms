@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- standard context pattern: provider, context object, and useOperationalContext hook co-located */
 /**
  * OperationalContext — central shared context provider for cross-module
  * operational state: selections, active months, live counts, and workspace tracking.

@@ -33,8 +33,8 @@ function MetricChip({ label, value, delta }: { label: string; value: number; del
     <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
       <span className="text-xl font-bold text-foreground">{value}</span>
       <span className="text-xs text-muted-foreground">{label}</span>
-      {isUp   && <span className="text-[11px] text-emerald-600 flex items-center gap-0.5"><TrendingUp  className="h-3 w-3" /> +{delta}</span>}
-      {isDown && <span className="text-[11px] text-red-600    flex items-center gap-0.5"><TrendingDown className="h-3 w-3" /> {delta}</span>}
+      {isUp   && <span className="text-[11px] text-success flex items-center gap-0.5"><TrendingUp  className="h-3 w-3" /> +{delta}</span>}
+      {isDown && <span className="text-[11px] text-destructive    flex items-center gap-0.5"><TrendingDown className="h-3 w-3" /> {delta}</span>}
       {delta === 0 && <span className="text-[11px] text-muted-foreground flex items-center gap-0.5"><Minus className="h-3 w-3" /> No change</span>}
     </div>
   )

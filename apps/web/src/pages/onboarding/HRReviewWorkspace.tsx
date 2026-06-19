@@ -51,6 +51,7 @@ interface OnboardingDocument {
   file_name: string
   storage_path: string
   extraction_status: string
+  extraction_error?: string | null
   confidence_score: number | null
   extracted_fields?: ExtractedField[]
   created_at: string
@@ -1166,7 +1167,7 @@ export function HRReviewWorkspace() {
                           const opts = enumOpts ?? (masterKey ? masterOptions[masterKey] : undefined)
 
                           // Resolve UUID → human-readable name for master fields
-                          const rawVal = ((draft as any)?.[key] as string | null) ?? null
+                          const rawVal = (((draft as unknown) as Record<string, unknown>)?.[key] as string | null) ?? null
                           const displayVal = masterKey && rawVal
                             ? (masterOptions[masterKey]?.find((o) => o.value === rawVal)?.label ?? rawVal)
                             : undefined
@@ -1336,13 +1337,13 @@ export function HRReviewWorkspace() {
                   </div>
 
                   {/* Rejection reason */}
-                  {selectedDoc.extraction_status === 'rejected' && (selectedDoc as any).extraction_error && (
+                  {selectedDoc.extraction_status === 'rejected' && selectedDoc.extraction_error && (
                     <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2">
                       <p className="text-[10px] text-destructive font-medium mb-0.5 flex items-center gap-1">
                         <AlertTriangle className="h-3 w-3" /> Document Rejected
                       </p>
                       <p className="text-[10px] text-destructive/80 leading-relaxed">
-                        {(selectedDoc as any).extraction_error}
+                        {selectedDoc.extraction_error}
                       </p>
                       <p className="text-[10px] text-muted-foreground mt-1">
                         Re-upload the correct document for this candidate.

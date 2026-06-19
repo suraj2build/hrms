@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates the useEmployeeTrust hook with the summary component that renders its data */
 /**
  * TrustSummary — O5.7.
  *
@@ -140,15 +141,15 @@ export function TrustSummary({ employeeId }: { employeeId: string }) {
       {(strengths.length > 0 || risks.length > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {strengths.length > 0 && (
-            <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-2">
-              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">Strengths</p>
-              <BulletList items={strengths} icon={CheckCircle2} iconClass="text-emerald-500" />
+            <div className="rounded-lg border border-success/30 bg-success/10 p-3 space-y-2">
+              <p className="text-xs font-semibold text-success uppercase tracking-wide">Strengths</p>
+              <BulletList items={strengths} icon={CheckCircle2} iconClass="text-success" />
             </div>
           )}
           {risks.length > 0 && (
-            <div className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20 p-3 space-y-2">
-              <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide">Risks</p>
-              <BulletList items={risks} icon={AlertTriangle} iconClass="text-amber-500" />
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 space-y-2">
+              <p className="text-xs font-semibold text-warning uppercase tracking-wide">Risks</p>
+              <BulletList items={risks} icon={AlertTriangle} iconClass="text-warning" />
             </div>
           )}
         </div>

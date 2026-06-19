@@ -17,6 +17,9 @@
  *   const { open } = useCommandPalette()
  *   <Button onClick={open}>⌘K</Button>
  */
+/* eslint-disable react-refresh/only-export-components -- the useCommandPalette
+   hook is intentionally co-located with its provider/components; splitting it
+   out would fragment a single cohesive module. */
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -305,7 +308,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Database, Activity, BookOpen, ArrowRight, History, MapIcon,
 }
 
-function iconToName(icon: React.ComponentType<any>): string {
+function iconToName(icon: React.ComponentType<{ className?: string }>): string {
   return Object.entries(ICON_MAP).find(([, v]) => v === icon)?.[0] ?? 'ArrowRight'
 }
 
@@ -340,7 +343,9 @@ function saveRecent(item: CommandItem) {
       } catch { return [] }
     })().filter(r => r.id !== item.id)
     sessionStorage.setItem(RECENT_KEY, JSON.stringify([stored, ...existing].slice(0, MAX_RECENT)))
-  } catch {}
+  } catch {
+    // sessionStorage may be unavailable (private mode / quota) — recents are best-effort.
+  }
 }
 
 // ── Fuzzy filter ──────────────────────────────────────────────────────────────

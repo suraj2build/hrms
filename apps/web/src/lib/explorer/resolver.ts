@@ -30,7 +30,7 @@ export interface DrillStep {
 export interface ExplorerResult {
   rows:    ExplorerRow[]
   /** raw summary block from the canonical endpoint (surface-level totals) */
-  summary: Record<string, any> | null
+  summary: Record<string, unknown> | null
 }
 
 export interface EmployeeRow {
@@ -111,10 +111,12 @@ export async function resolveExplorer(
     buildDrillParams(drillStack),
   )
 
-  const res = await api.get<any>(`${surface.endpoint}${qs}`).catch(() => null)
+  const res = await api
+    .get<Record<string, unknown>>(`${surface.endpoint}${qs}`)
+    .catch(() => null)
   if (!res) return { rows: [], summary: null }
 
-  const rawRows: any[] = res[dimension.rowsKey] ?? []
+  const rawRows = (res[dimension.rowsKey] as Record<string, unknown>[] | undefined) ?? []
 
   const rows: ExplorerRow[] = rawRows.map(r => {
     const metrics: Record<string, number> = {}
@@ -126,7 +128,7 @@ export async function resolveExplorer(
     }
   })
 
-  return { rows, summary: res.summary ?? null }
+  return { rows, summary: (res.summary as Record<string, unknown> | undefined) ?? null }
 }
 
 // ── Summary statistics over a chosen metric column ──────────────────────────────
@@ -178,8 +180,20 @@ export async function resolveEmployeeList(drillStack: DrillStep[]): Promise<Empl
     if (empParam) params.push(`${empParam}=${encodeURIComponent(step.value)}`)
   }
 
-  const res = await api.get<any>(`/employees?${params.join('&')}`).catch(() => null)
-  const rows: any[] = res?.data ?? []
+  interface RawEmployee {
+    id: string
+    employee_code: string
+    first_name?: string | null
+    last_name?: string | null
+    email?: string | null
+    department?: { name?: string | null } | null
+    designation?: { name?: string | null } | null
+    status: string
+  }
+  const res = await api
+    .get<{ data?: RawEmployee[] }>(`/employees?${params.join('&')}`)
+    .catch(() => null)
+  const rows: RawEmployee[] = res?.data ?? []
 
   return rows.map(e => ({
     id:            e.id,

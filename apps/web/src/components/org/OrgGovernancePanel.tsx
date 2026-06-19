@@ -60,7 +60,7 @@ export function OrgGovernancePanel({ compact = false, className }: OrgGovernance
   })
 
   const sites     = sitesData?.data ?? []
-  const locs      = locsData?.data  ?? []
+  const locs      = useMemo(() => locsData?.data ?? [], [locsData?.data])
   const ccs       = ccData?.data    ?? []
 
   const unassigned = useMemo(() => locs.filter(l => !l.site_id).length, [locs])

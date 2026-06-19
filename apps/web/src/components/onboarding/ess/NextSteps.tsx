@@ -14,7 +14,7 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
-  isEmployeeActionable, isTaskDone, isDocVerified, docLabel, useToggleTask,
+  isEmployeeActionable, isTaskDone, docLabel, useToggleTask,
   type ChecklistTask, type OnboardingStatusDoc, type OnboardingNotification,
 } from './onboarding-data'
 
@@ -99,10 +99,10 @@ export function NextSteps({
 
   if (steps.length === 0) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 px-4 py-6 text-center">
-        <Sparkles className="mx-auto mb-2 h-7 w-7 text-emerald-500" />
-        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">You’re all caught up</p>
-        <p className="mt-0.5 text-xs text-emerald-600/80 dark:text-emerald-400/80">
+      <div className="rounded-xl border border-success/30 bg-success/10 px-4 py-6 text-center">
+        <Sparkles className="mx-auto mb-2 h-7 w-7 text-success" />
+        <p className="text-sm font-semibold text-success">You’re all caught up</p>
+        <p className="mt-0.5 text-xs text-success/80">
           Nothing needs your attention right now. Nice work!
         </p>
       </div>
@@ -113,7 +113,7 @@ export function NextSteps({
     toggle.mutate(
       { taskId: task.id, next: 'completed' },
       {
-        onError: (e: any) => toast.error(e?.message ?? 'Could not update task'),
+        onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not update task'),
         onSuccess: () => toast.success('Nice — one less thing to do'),
       },
     )

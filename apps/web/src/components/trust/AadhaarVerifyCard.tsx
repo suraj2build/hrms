@@ -161,7 +161,7 @@ export function AadhaarVerifyCard({
 
         {verify.isError && (
           <p className="text-[11px] text-destructive">
-            {(verify.error as any)?.message ?? 'Verification failed. Please try again.'}
+            {verify.error instanceof Error ? verify.error.message : 'Verification failed. Please try again.'}
           </p>
         )}
       </div>

@@ -27,7 +27,7 @@ function TaskRow({ task, employeeId }: { task: ChecklistTask; employeeId: string
     if (!actionable) return
     toggle.mutate(
       { taskId: task.id, next: done ? 'pending' : 'completed' },
-      { onError: (e: any) => toast.error(e?.message ?? 'Could not update task') },
+      { onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not update task') },
     )
   }
 
@@ -45,7 +45,7 @@ function TaskRow({ task, employeeId }: { task: ChecklistTask; employeeId: string
         {pending
           ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           : done
-          ? <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+          ? <CheckCircle2 className="h-5 w-5 text-success" />
           : actionable
           ? <Circle className="h-5 w-5 text-muted-foreground hover:text-[#2E6FE6]" />
           : <Lock className="mt-0.5 h-4 w-4 text-muted-foreground/60" />}

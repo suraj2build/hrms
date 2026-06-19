@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates the EXPLANATIONS lookup table with the panel component it documents; not a hot-reload boundary */
 /**
  * ExplainIssuePanel — contextual forensics Sheet panel.
  * Replaces standalone forensics/replay pages; triggered from queue item cards
@@ -271,7 +272,7 @@ export function ExplainIssuePanel({
                   Detected {timeAgo(item.created_at)}
                 </p>
                 {item.overdue && item.due_at && (
-                  <p className="text-[11px] text-amber-600 font-medium mt-1">
+                  <p className="text-[11px] text-warning font-medium mt-1">
                     ⚠ Overdue — {timeAgo(item.due_at)}
                   </p>
                 )}
@@ -307,8 +308,8 @@ export function ExplainIssuePanel({
 
                 {/* Recurring warning */}
                 {recentCount > 3 && (
-                  <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2">
-                    <p className="text-[11px] text-amber-700 font-medium">
+                  <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2">
+                    <p className="text-[11px] text-warning font-medium">
                       ⚠ Recurring pattern detected — this employee has had {recentCount} similar issues recently.
                     </p>
                   </div>

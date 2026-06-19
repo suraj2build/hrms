@@ -250,7 +250,7 @@ export function WorkforceCommand({ embedded = false }: { embedded?: boolean } = 
           {/* Observations */}
           {d.observations.length === 0 ? (
             <div className="rounded-lg border border-border bg-card p-8 text-center space-y-2">
-              <Shield className="h-8 w-8 text-emerald-500 mx-auto" />
+              <Shield className="h-8 w-8 text-success mx-auto" />
               <p className="text-sm font-medium text-foreground">All workforce signals within normal range</p>
               <p className="text-xs text-muted-foreground">No critical or high-priority items detected</p>
               <p className="text-xs text-muted-foreground/60 max-w-xs mx-auto leading-relaxed">

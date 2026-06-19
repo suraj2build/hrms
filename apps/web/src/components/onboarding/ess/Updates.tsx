@@ -8,7 +8,7 @@
 
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, Loader2, ChevronRight, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
+import { BellOff, Loader2, ChevronRight, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   useOnboardingNotifications, useMarkNotificationRead, isUnread,

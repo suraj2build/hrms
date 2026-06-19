@@ -4,6 +4,8 @@
  * Unified inbox aggregating pending items across all modules.
  * Full-page component for /admin/notifications/inbox.
  */
+/* eslint-disable react-refresh/only-export-components -- timeAgo is a tiny
+   inbox-local formatting helper kept beside its sole consumer; not worth a split. */
 
 import { useState, useMemo, useCallback } from 'react'
 import { useQuery }                        from '@tanstack/react-query'

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- standard context pattern: provider co-located with its usePayrollDeadline hook */
 /**
  * PayrollDeadlineContext — tracks whether the system is in "Payroll Deadline Mode".
  *

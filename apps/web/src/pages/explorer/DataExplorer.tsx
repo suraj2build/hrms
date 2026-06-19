@@ -203,7 +203,7 @@ export function DataExplorer() {
     retry: 1,
   })
 
-  const rows = result?.rows ?? []
+  const rows = useMemo(() => result?.rows ?? [], [result?.rows])
   const statValue = useMemo(() => computeStat(rows, metric, stat), [rows, metric, stat])
 
   // ── Share / save ───────────────────────────────────────────────────────────
@@ -300,7 +300,7 @@ export function DataExplorer() {
           onChange={selectGroupBy}
         />
         {surface.paramStyle !== 'none' && (
-          <Sel label="Period" value={range} options={DATE_RANGES as any} onChange={v => setRange(v as DateRangeId)} />
+          <Sel label="Period" value={range} options={DATE_RANGES as ReadonlyArray<{ id: DateRangeId; label: string }> as Array<{ id: DateRangeId; label: string }>} onChange={v => setRange(v as DateRangeId)} />
         )}
         <Sel
           label="Metric"

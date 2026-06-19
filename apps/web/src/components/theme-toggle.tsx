@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates the THEME_OPTIONS list with the toggle components that consume it */
 import { Sun, Waves, Wine, CloudDrizzle, Sparkles, Zap, Check } from 'lucide-react'
 import { Button }     from '@/components/ui/button'
 import { cn }         from '@/lib/utils'

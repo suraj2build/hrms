@@ -279,12 +279,12 @@ function ActionItem({ action, selected, onToggle, onExecute, isPending }: Action
         <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{action.description}</p>
         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
           {action.estimatedImpact.complianceRisk && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning">
               Compliance: {action.estimatedImpact.complianceRisk}
             </span>
           )}
           {action.isReversible && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
               Reversible
             </span>
           )}
@@ -320,7 +320,7 @@ function ResultRow({ result }: ResultRowProps) {
       {hasFailures ? (
         <XCircle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
       ) : (
-        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+        <CheckCircle2 className="h-3.5 w-3.5 text-success flex-shrink-0" />
       )}
       <span className="text-xs text-foreground truncate flex-1">{result.label}</span>
       <span className="text-[10px] text-muted-foreground whitespace-nowrap tabular-nums">

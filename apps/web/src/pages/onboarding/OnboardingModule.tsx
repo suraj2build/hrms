@@ -249,7 +249,7 @@ function TemplateRow({ template, onAddItem, onDeleteItem }: TemplateRowProps) {
                     </td>
                     <td className="px-4 py-2.5">
                       {item.is_mandatory ? (
-                        <CheckCircle2 className="w-4 h-4 text-green-600" />
+                        <CheckCircle2 className="w-4 h-4 text-success" />
                       ) : (
                         <Circle className="w-4 h-4 text-muted-foreground" />
                       )}
@@ -258,7 +258,7 @@ function TemplateRow({ template, onAddItem, onDeleteItem }: TemplateRowProps) {
                       <button
                         type="button"
                         onClick={() => onDeleteItem(item.id)}
-                        className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
+                        className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                         title="Delete item"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -313,8 +313,8 @@ function ChecklistTemplatesTab() {
   const templates = templatesResp?.data ?? []
 
   const seedTemplates = useMutation({
-    mutationFn: () => api.post('/onboarding/seed-default-templates', {}),
-    onSuccess: (res: any) => {
+    mutationFn: () => api.post<{ message?: string }>('/onboarding/seed-default-templates', {}),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['onboarding-templates'] })
       toast.success(res?.message ?? 'Default templates seeded')
     },
@@ -672,7 +672,7 @@ function EmployeeTasksDrawer({ checklist, open, onClose }: EmployeeTasksDrawerPr
                           title={task.status === 'completed' ? 'Mark incomplete' : 'Mark complete'}
                         >
                           {task.status === 'completed' ? (
-                            <CheckCircle2 className="w-5 h-5 text-green-600" />
+                            <CheckCircle2 className="w-5 h-5 text-success" />
                           ) : (
                             <Circle className="w-5 h-5 text-muted-foreground hover:text-primary transition-colors" />
                           )}

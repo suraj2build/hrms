@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- co-locates isTerminalStatus/isFailureStatus helpers with the badge that shares their status enum */
 /**
  * AsyncStatusBadge — unified status badge for all async workflow states.
  *
