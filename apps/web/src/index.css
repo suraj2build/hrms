@@ -1476,27 +1476,27 @@
 
 /* ── Synthwave (dark) theme — Electric ────────────────────────────────────────
    Indigo-black canvas with elevated indigo surfaces, an electric indigo→cyan
-   gradient (#6366F1 → #22D3EE) and a magenta pop (#E879F9). Cyan drives the
+   gradient (#3E78D0 → #22D3EE) and a magenta pop (#22D3EE). Cyan drives the
    focus ring/accents; the button gradient is capped at a mid teal-cyan so
    white text stays legible. Semantic colours brightened for dark; dark sidebar
    and color-scheme:dark (set in JS) theme native controls/scrollbars. */
 :root[data-theme="dark"] {
-  --background:            #0D0820;
-  --foreground:            #E8E6FA;
-  --card:                  #16102E;
-  --card-foreground:       #E8E6FA;
-  --popover:               #1A1336;
-  --popover-foreground:    #E8E6FA;
+  --background:            #0A0F1C;
+  --foreground:            #E6EAF3;
+  --card:                  #111726;
+  --card-foreground:       #E6EAF3;
+  --popover:               #131A2B;
+  --popover-foreground:    #E6EAF3;
 
-  --primary:               #7C8AFF;
-  --primary-foreground:    #0A0420;
+  --primary:               #5B8FD6;
+  --primary-foreground:    #07111F;
 
-  --secondary:             #221A40;
-  --secondary-foreground:  #C9C4E8;
-  --muted:                 #1C1638;
-  --muted-foreground:      #908AB8;
-  --accent:                #232048;
-  --accent-foreground:     #D6D2F0;
+  --secondary:             #1A2336;
+  --secondary-foreground:  #C2CDE0;
+  --muted:                 #161D2E;
+  --muted-foreground:      #8A95AB;
+  --accent:                #1E2840;
+  --accent-foreground:     #D2DAE8;
 
   --destructive:             #FB6B7C;
   --destructive-foreground:  #20060C;
@@ -1507,38 +1507,38 @@
   --info:                    #22D3EE;
   --info-foreground:         #04181C;
 
-  --border:  #2A2150;
-  --input:   #2A2150;
+  --border:  #243049;
+  --input:   #243049;
   --ring:    #22D3EE;
 
-  --chart-1: #818CF8;
+  --chart-1: #5B8FD6;
   --chart-2: #34D399;
   --chart-3: #F0B84E;
-  --chart-4: #E879F9;
+  --chart-4: #FB7185;
   --chart-5: #22D3EE;
 
-  --sidebar:                    #120C28;
-  --sidebar-foreground:         #E8E6FA;
-  --sidebar-primary:            #7C8AFF;
-  --sidebar-primary-foreground: #0A0420;
-  --sidebar-accent:             #1E1240;
-  --sidebar-accent-foreground:  #C9C4E8;
-  --sidebar-border:             #281A4E;
+  --sidebar:                    #0E1524;
+  --sidebar-foreground:         #E6EAF3;
+  --sidebar-primary:            #5B8FD6;
+  --sidebar-primary-foreground: #07111F;
+  --sidebar-accent:             #18223A;
+  --sidebar-accent-foreground:  #C2CDE0;
+  --sidebar-border:             #233049;
   --sidebar-ring:               #22D3EE;
 
   --grad-hero:    linear-gradient(135deg, #0F1240 0%, #164A66 100%);
-  --grad-primary: linear-gradient(135deg, #6366F1 0%, #22D3EE 100%);
-  --grad-sidebar: linear-gradient(180deg, #120C28 0%, #0D0820 100%);
+  --grad-primary: linear-gradient(135deg, #3E78D0 0%, #22D3EE 100%);
+  --grad-sidebar: linear-gradient(180deg, #0E1524 0%, #0A0F1C 100%);
   --gradient-nav: linear-gradient(to right, #0F1240, #1E2A66, #164A66);
 
   /* Primary button gradient + shadow — electric, capped so white text stays ≥3.4:1 */
-  --grad-btn:   linear-gradient(135deg, #5B5EE8 0%, #3E78D0 55%, #2A93C4 100%);
+  --grad-btn:   linear-gradient(135deg, #4F7FE0 0%, #3E8FCF 55%, #2A93C4 100%);
   --shadow-btn: 0 6px 16px -6px rgba(0,0,0,0.65);
 
-  --brand-navy:      #7C8AFF;
+  --brand-navy:      #5B8FD6;
   --brand-navy-deep: #0F1240;
   --brand-navy-soft: #22D3EE;
-  --primary-glow:    oklch(0.72 0.16 265);
+  --primary-glow:    oklch(0.72 0.16 255);
 
   --elev-1: 0 1px 2px rgba(0,0,0,0.40), 0 8px 20px -12px rgba(0,0,0,0.60), 0 0 0 1px rgba(255,255,255,0.04);
   --elev-2: 0 2px 6px rgba(0,0,0,0.45), 0 14px 32px -14px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05);
@@ -1547,7 +1547,7 @@
 
 :root[data-theme="dark"] .app-canvas {
   background:
-    radial-gradient(60% 48% at 100% 0%,  rgba(99,102,241,0.12), transparent 70%),
+    radial-gradient(60% 48% at 100% 0%,  rgba(62,120,208,0.12), transparent 70%),
     radial-gradient(48% 40% at 0% 100%,  rgba(34,211,238,0.08), transparent 72%),
     var(--color-background);
 }
@@ -1561,43 +1561,43 @@
 }
 
 :root[data-theme="dark"] .chip-grad {
-  background: linear-gradient(135deg, #5B5EE8 0%, #2A93C4 100%);
+  background: linear-gradient(135deg, #4F7FE0 0%, #2A93C4 100%);
   box-shadow: 0 6px 14px -6px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.12);
 }
 
 :root[data-theme="dark"] .brand-gradient-text {
-  background: linear-gradient(135deg, #818CF8 0%, #22D3EE 50%, #E879F9 100%);
+  background: linear-gradient(135deg, #5B8FD6 0%, #22D3EE 50%, #22D3EE 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 :root[data-theme="dark"] .op-pill-active {
-  background: #5B5EE8;
+  background: #4F7FE0;
   box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
 :root[data-theme="dark"] .op-pill-inactive:hover {
-  border-color: #322860;
-  background: #1E1240;
+  border-color: #2A3A57;
+  background: #18223A;
   color: #E8E6FA;
 }
-:root[data-theme="dark"] .op-accent-bar      { background: #6366F1; }
-:root[data-theme="dark"] .op-heading          { color: #8FA0FF; }
+:root[data-theme="dark"] .op-accent-bar      { background: #3E78D0; }
+:root[data-theme="dark"] .op-heading          { color: #8FB4E8; }
 :root[data-theme="dark"] .op-section-bg       { border-color: rgba(255,255,255,0.06); }
-:root[data-theme="dark"] .op-meta-pill        { background: rgba(99,102,241,0.16); color: #A5AEFF; }
-:root[data-theme="dark"] .op-tint-medium      { background: rgba(34,24,64,0.90) !important; }
-:root[data-theme="dark"] .op-lane-medium      { border-left-color: rgba(34,211,238,0.45); background: rgba(34,24,64,0.50); }
+:root[data-theme="dark"] .op-meta-pill        { background: rgba(62,120,208,0.16); color: #9FC0EC; }
+:root[data-theme="dark"] .op-tint-medium      { background: rgba(26,35,54,0.90) !important; }
+:root[data-theme="dark"] .op-lane-medium      { border-left-color: rgba(34,211,238,0.45); background: rgba(26,35,54,0.50); }
 :root[data-theme="dark"] .op-lane-default     { border-left-color: rgba(255,255,255,0.10); }
-:root[data-theme="dark"] .mission-lane-active { background: rgba(34,24,64,0.75); border-left-color: rgba(34,211,238,0.45); color: #8FA0FF; }
+:root[data-theme="dark"] .mission-lane-active { background: rgba(26,35,54,0.75); border-left-color: rgba(34,211,238,0.45); color: #8FB4E8; }
 :root[data-theme="dark"] .op-row-focused      { box-shadow: 0 0 0 2px rgba(34,211,238,0.40), 0 4px 12px rgba(0,0,0,0.4) !important; }
-:root[data-theme="dark"] .op-row-selected     { background: rgba(34,24,64,0.85) !important; box-shadow: inset 2px 0 0 rgba(34,211,238,0.60), 0 0 0 1px rgba(34,211,238,0.18) !important; }
+:root[data-theme="dark"] .op-row-selected     { background: rgba(26,35,54,0.85) !important; box-shadow: inset 2px 0 0 rgba(34,211,238,0.60), 0 0 0 1px rgba(34,211,238,0.18) !important; }
 :root[data-theme="dark"] .op-row-processing::after {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(99,102,241,0.06) 35%,
-    rgba(99,102,241,0.12) 50%,
-    rgba(99,102,241,0.06) 65%,
+    rgba(62,120,208,0.06) 35%,
+    rgba(62,120,208,0.12) 50%,
+    rgba(62,120,208,0.06) 65%,
     transparent 100%
   );
 }
@@ -1606,38 +1606,38 @@
    Synthwave — global remap of hardcoded brand-blue utility classes.
    Solids → indigo (white text ≥4:1); text/icons → bright indigo; rings and the
    lighter accent → electric cyan; gradients sweep indigo→cyan.
-     #2E6FE6 / #1A4D8F  → #6366F1   (solid indigo)  / text → #8FA0FF
+     #2E6FE6 / #1A4D8F  → #3E78D0   (solid indigo)  / text → #8FB4E8
      #2260A8            → cyan #22D3EE (gradient end)
      #1E5BA8            → #4F7FD0   (gradient via)
-     #163F75            → #4338CA   (gradient deep)
+     #163F75            → #1E3A8A   (gradient deep)
      #3B82F6            → #22D3EE   (cyan accent)
    ──────────────────────────────────────────────────────────────────────── */
 
 /* Solid backgrounds */
 :root[data-theme="dark"] .bg-\[\#2E6FE6\],
 :root[data-theme="dark"] .bg-\[\#1A4D8F\],
-:root[data-theme="dark"] .bg-\[\#1E5BA8\]   { background-color: #6366F1; }
-:root[data-theme="dark"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #4338CA 90%, transparent); }
-:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #6366F1 40%, transparent); }
-:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #6366F1 18%, transparent); }
-:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #6366F1 12%, transparent); }
+:root[data-theme="dark"] .bg-\[\#1E5BA8\]   { background-color: #3E78D0; }
+:root[data-theme="dark"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #1E3A8A 90%, transparent); }
+:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #3E78D0 40%, transparent); }
+:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #3E78D0 18%, transparent); }
+:root[data-theme="dark"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #3E78D0 12%, transparent); }
 :root[data-theme="dark"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #22D3EE 26%, transparent); }
-:root[data-theme="dark"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #4F46E5; }
-:root[data-theme="dark"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #6366F1 20%, transparent); }
+:root[data-theme="dark"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #3E78D0; }
+:root[data-theme="dark"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #3E78D0 20%, transparent); }
 
 /* Text */
 :root[data-theme="dark"] .text-\[\#2E6FE6\],
-:root[data-theme="dark"] .text-\[\#1A4D8F\]          { color: #8FA0FF; }
-:root[data-theme="dark"] .hover\:text-\[\#2E6FE6\]:hover { color: #A5B4FF; }
+:root[data-theme="dark"] .text-\[\#1A4D8F\]          { color: #8FB4E8; }
+:root[data-theme="dark"] .hover\:text-\[\#2E6FE6\]:hover { color: #9FC0EC; }
 
 /* Borders */
 :root[data-theme="dark"] .border-\[\#2E6FE6\],
-:root[data-theme="dark"] .border-\[\#1A4D8F\]            { border-color: #6366F1; }
-:root[data-theme="dark"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #6366F1 45%, transparent); }
+:root[data-theme="dark"] .border-\[\#1A4D8F\]            { border-color: #3E78D0; }
+:root[data-theme="dark"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #3E78D0 45%, transparent); }
 
 /* Gradient stops */
-:root[data-theme="dark"] .from-\[\#1A4D8F\] { --tw-gradient-from: #6366F1; }
-:root[data-theme="dark"] .from-\[\#2E6FE6\] { --tw-gradient-from: #6366F1; }
+:root[data-theme="dark"] .from-\[\#1A4D8F\] { --tw-gradient-from: #3E78D0; }
+:root[data-theme="dark"] .from-\[\#2E6FE6\] { --tw-gradient-from: #3E78D0; }
 :root[data-theme="dark"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #4F7FD0; }
 :root[data-theme="dark"] .to-\[\#2260A8\]   { --tw-gradient-to: #22D3EE; }
 :root[data-theme="dark"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #22D3EE; }
@@ -1649,8 +1649,8 @@
 :root[data-theme="dark"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #22D3EE; }
 
 /* Colored shadows */
-:root[data-theme="dark"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #6366F1 28%, transparent); }
-:root[data-theme="dark"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #6366F1 34%, transparent); }
+:root[data-theme="dark"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #3E78D0 28%, transparent); }
+:root[data-theme="dark"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #3E78D0 34%, transparent); }
 
 /* ════════════════════════════════════════════════════════════════════════════
    Dark theme — neutral remap.
@@ -1671,7 +1671,7 @@
 :root[data-theme="dark"] .bg-slate-200,
 :root[data-theme="dark"] .bg-gray-200    { background-color: var(--border); }
 :root[data-theme="dark"] .bg-slate-300,
-:root[data-theme="dark"] .bg-gray-300    { background-color: #322860; }
+:root[data-theme="dark"] .bg-gray-300    { background-color: #2A3A57; }
 
 /* ── Hover backgrounds ── */
 :root[data-theme="dark"] .hover\:bg-white:hover     { background-color: var(--accent); }
@@ -1697,7 +1697,7 @@
 :root[data-theme="dark"] .text-slate-700,
 :root[data-theme="dark"] .text-gray-700,
 :root[data-theme="dark"] .text-slate-600,
-:root[data-theme="dark"] .text-gray-600   { color: #C9C4E8; }
+:root[data-theme="dark"] .text-gray-600   { color: #C2CDE0; }
 :root[data-theme="dark"] .text-slate-500,
 :root[data-theme="dark"] .text-gray-500,
 :root[data-theme="dark"] .text-slate-400,
@@ -1712,7 +1712,7 @@
 :root[data-theme="dark"] .hover\:text-slate-700:hover,
 :root[data-theme="dark"] .hover\:text-slate-600:hover,
 :root[data-theme="dark"] .hover\:text-gray-600:hover,
-:root[data-theme="dark"] .hover\:text-slate-200:hover { color: #C9C4E8; }
+:root[data-theme="dark"] .hover\:text-slate-200:hover { color: #C2CDE0; }
 
 /* ── Gradient stops + placeholder ── */
 :root[data-theme="dark"] .from-white    { --tw-gradient-from: var(--card); }
@@ -1775,7 +1775,7 @@
    to render a dark card with light text in the light themes. Under dark the
    tokens flip and they invert to a light card. Pin them to a distinct elevated
    dark panel with light text instead. */
-:root[data-theme="dark"] .bg-foreground      { background-color: #241E48; }
+:root[data-theme="dark"] .bg-foreground      { background-color: #1C2740; }
 :root[data-theme="dark"] .bg-foreground\/95  { background-color: rgba(36,30,72,0.95); }
 :root[data-theme="dark"] .border-foreground  { border-color: rgba(255,255,255,0.10); }
 :root[data-theme="dark"] .text-background       { color: var(--foreground); }
@@ -1833,7 +1833,7 @@
 :root[data-theme="dark"] .text-\[\#1C1B2E\] { color: var(--foreground); }
 :root[data-theme="dark"] .text-\[\#A8A4C8\],
 :root[data-theme="dark"] .text-\[\#5C5A7C\] { color: var(--muted-foreground); }
-:root[data-theme="dark"] .text-\[\#3730A3\] { color: #8FA0FF; }
+:root[data-theme="dark"] .text-\[\#3730A3\] { color: #8FB4E8; }
 :root[data-theme="dark"] .border-\[\#E8E6F5\],
 :root[data-theme="dark"] .border-\[\#E5E7EB\] { border-color: var(--border); }
 
