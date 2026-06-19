@@ -893,3 +893,59 @@
     transparent 100%
   );
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+   Petrol theme — global remap of hardcoded brand-blue utility classes.
+
+   Many buttons / tiles / badges across the app (admin + ESS) hardcode the
+   brand blue (#2E6FE6) or navy (#1A4D8F) as Tailwind arbitrary values rather
+   than using `var(--primary)`. Under the petrol theme those would stay blue,
+   so we remap each generated utility class to its petrol equivalent here.
+   This is a single source of truth: blue → petrol, everywhere, at once.
+
+   Petrol palette:
+     #2E6FE6 / #1A4D8F  → #0F3D44   (primary)
+     #2260A8            → #14505A   (gradient mid)
+     #1E5BA8            → #12525C   (gradient via)
+     #163F75            → #0C3840   (gradient deep)
+     #3B82F6            → #14757A   (lighter accent)
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Solid backgrounds */
+:root[data-theme="petrol"] .bg-\[\#2E6FE6\],
+:root[data-theme="petrol"] .bg-\[\#1A4D8F\],
+:root[data-theme="petrol"] .bg-\[\#1E5BA8\]   { background-color: #0F3D44; }
+:root[data-theme="petrol"] .bg-\[\#163F75\]\/90 { background-color: color-mix(in oklab, #0C3840 90%, transparent); }
+:root[data-theme="petrol"] .bg-\[\#2E6FE6\]\/40 { background-color: color-mix(in oklab, #0F3D44 40%, transparent); }
+:root[data-theme="petrol"] .bg-\[\#2E6FE6\]\/10 { background-color: color-mix(in oklab, #0F3D44 10%, transparent); }
+:root[data-theme="petrol"] .bg-\[\#2E6FE6\]\/5  { background-color: color-mix(in oklab, #0F3D44 5%,  transparent); }
+:root[data-theme="petrol"] .bg-\[\#3B82F6\]\/30 { background-color: color-mix(in oklab, #14757A 30%, transparent); }
+:root[data-theme="petrol"] .hover\:bg-\[\#1A4D8F\]:hover   { background-color: #0C3840; }
+:root[data-theme="petrol"] .hover\:bg-\[\#2E6FE6\]\/10:hover { background-color: color-mix(in oklab, #0F3D44 10%, transparent); }
+
+/* Text */
+:root[data-theme="petrol"] .text-\[\#2E6FE6\],
+:root[data-theme="petrol"] .text-\[\#1A4D8F\]          { color: #0F3D44; }
+:root[data-theme="petrol"] .hover\:text-\[\#2E6FE6\]:hover { color: #0F3D44; }
+
+/* Borders */
+:root[data-theme="petrol"] .border-\[\#2E6FE6\],
+:root[data-theme="petrol"] .border-\[\#1A4D8F\]            { border-color: #0F3D44; }
+:root[data-theme="petrol"] .hover\:border-\[\#2E6FE6\]\/40:hover { border-color: color-mix(in oklab, #0F3D44 40%, transparent); }
+
+/* Gradient stops */
+:root[data-theme="petrol"] .from-\[\#1A4D8F\] { --tw-gradient-from: #0F3D44; }
+:root[data-theme="petrol"] .from-\[\#2E6FE6\] { --tw-gradient-from: #0F3D44; }
+:root[data-theme="petrol"] .via-\[\#1E5BA8\]  { --tw-gradient-via: #12525C; }
+:root[data-theme="petrol"] .to-\[\#2260A8\]   { --tw-gradient-to: #14505A; }
+:root[data-theme="petrol"] .to-\[\#2E6FE6\]   { --tw-gradient-to: #14505A; }
+
+/* Rings */
+:root[data-theme="petrol"] .ring-\[\#1A4D8F\]\/15 { --tw-ring-color: color-mix(in oklab, #0F3D44 15%, transparent); }
+:root[data-theme="petrol"] .ring-\[\#2E6FE6\]\/20 { --tw-ring-color: color-mix(in oklab, #0F3D44 20%, transparent); }
+:root[data-theme="petrol"] .ring-\[\#2E6FE6\]\/30 { --tw-ring-color: color-mix(in oklab, #0F3D44 30%, transparent); }
+:root[data-theme="petrol"] .ring-\[\#2E6FE6\]     { --tw-ring-color: #0F3D44; }
+
+/* Colored shadows */
+:root[data-theme="petrol"] .shadow-\[\#1A4D8F\]\/25 { --tw-shadow-color: color-mix(in oklab, #0F3D44 25%, transparent); }
+:root[data-theme="petrol"] .hover\:shadow-\[\#1A4D8F\]\/30:hover { --tw-shadow-color: color-mix(in oklab, #0F3D44 30%, transparent); }
