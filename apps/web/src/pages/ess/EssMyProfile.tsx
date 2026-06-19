@@ -1079,7 +1079,7 @@ export function EssMyProfile({ employeeId: propEmployeeId }: { employeeId?: stri
   const { data: holidaysData } =
     useQuery<Holiday[]>({
       queryKey: ['ess-holidays', new Date().getFullYear()],
-      queryFn:  () => api.get(`/masters/holidays?year=${new Date().getFullYear()}`).then((r: any) => Array.isArray(r) ? r : (r?.data ?? [])),
+      queryFn:  () => api.get<Holiday[] | { data?: Holiday[] }>(`/masters/holidays?year=${new Date().getFullYear()}`).then(r => Array.isArray(r) ? r : (r?.data ?? [])),
       enabled:  !!employeeId,
       staleTime: 60 * 60_000,
     })

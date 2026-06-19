@@ -152,7 +152,7 @@ export function PreviousEmployer() {
 
   const { data: records = [], isLoading, isError } = useQuery<PrevEmployerRecord[]>({
     queryKey: ['prev-employer-my', fy],
-    queryFn:  () => api.get(`/payroll/statutory/tds/previous-employment/my?financial_year=${fy}`).then((r: any) => r?.data ?? []),
+    queryFn:  () => api.get<{ data?: PrevEmployerRecord[] }>(`/payroll/statutory/tds/previous-employment/my?financial_year=${fy}`).then(r => r?.data ?? []),
   })
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ export function PreviousEmployer() {
       />
 
       {/* Info banner */}
-      <div className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm">
+      <div className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-info/30 bg-info/10 text-info text-sm">
         <Info className="h-4 w-4 mt-0.5 shrink-0" />
         <span>
           These details will be included in your annual tax computation.
@@ -359,7 +359,7 @@ export function PreviousEmployer() {
                       <div className="flex flex-col gap-1">
                         <StatusBadge status={r.status} />
                         {r.status === 'rejected' && r.rejection_reason && (
-                          <p className="text-xs text-red-600 max-w-[180px] truncate" title={r.rejection_reason}>
+                          <p className="text-xs text-destructive max-w-[180px] truncate" title={r.rejection_reason}>
                             {r.rejection_reason}
                           </p>
                         )}
@@ -390,7 +390,7 @@ export function PreviousEmployer() {
                           </Button>
                         )}
                         {r.status === 'verified' && (
-                          <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" />
+                          <CheckCircle2 className="h-4 w-4 text-success mx-auto" />
                         )}
                       </div>
                     </td>

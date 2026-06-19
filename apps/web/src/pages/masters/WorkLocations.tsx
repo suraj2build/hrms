@@ -497,9 +497,9 @@ export function WorkLocations() {
     staleTime: 120_000,
   })
 
-  const locations = locData?.data   ?? []
-  const sites     = sitesData?.data ?? []
-  const employees = empData?.data   ?? []
+  const locations = useMemo(() => locData?.data   ?? [], [locData])
+  const sites     = useMemo(() => sitesData?.data ?? [], [sitesData])
+  const employees = useMemo(() => empData?.data   ?? [], [empData])
 
   const isLoading = locsLoading || sitesLoading
 

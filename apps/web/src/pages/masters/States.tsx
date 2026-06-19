@@ -110,8 +110,8 @@ export function States() {
       setDlgOpen(false)
       toast.success(editItem ? 'State updated' : 'State created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save state')
     },
   })

@@ -95,8 +95,8 @@ export function EssTeamOff() {
     staleTime: 5 * 60_000,
   })
 
-  const members    = data?.data.members ?? []
-  const leave      = data?.data.leave ?? []
+  const members    = useMemo(() => data?.data.members ?? [], [data])
+  const leave      = useMemo(() => data?.data.leave ?? [], [data])
   const department = data?.data.department ?? null
 
   const memberById = useMemo(
@@ -161,10 +161,10 @@ export function EssTeamOff() {
           <CalendarOff className="h-3 w-3" /> {offThisMonth} off this month
         </Badge>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-200" /> On leave
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-primary/15" /> On leave
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-200" /> Holiday
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-warning/15" /> Holiday
         </span>
       </div>
 
@@ -216,12 +216,12 @@ export function EssTeamOff() {
                           {format(day, 'd')}
                         </span>
                         {holidayName && (
-                          <PartyPopper className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                          <PartyPopper className="h-3 w-3 text-warning flex-shrink-0" />
                         )}
                       </div>
 
                       {holidayName && (
-                        <p className="mt-0.5 truncate text-[9px] font-medium text-amber-600" title={holidayName}>
+                        <p className="mt-0.5 truncate text-[9px] font-medium text-warning" title={holidayName}>
                           {holidayName}
                         </p>
                       )}

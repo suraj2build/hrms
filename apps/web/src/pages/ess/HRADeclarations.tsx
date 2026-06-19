@@ -262,7 +262,7 @@ export function HRADeclarations() {
       />
 
       {/* Info banner */}
-      <div className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm">
+      <div className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-info/30 bg-info/10 text-info text-sm">
         <Info className="h-4 w-4 mt-0.5 shrink-0" />
         <span>
           HRA exemption will be computed based on your declarations, salary structure,
@@ -369,7 +369,7 @@ export function HRADeclarations() {
                         <div className="flex flex-col gap-1">
                           <StatusBadge status={r.status} />
                           {r.status === 'rejected' && r.rejection_reason && (
-                            <p className="text-xs text-red-600 max-w-[180px] truncate" title={r.rejection_reason}>
+                            <p className="text-xs text-destructive max-w-[180px] truncate" title={r.rejection_reason}>
                               {r.rejection_reason}
                             </p>
                           )}
@@ -405,7 +405,7 @@ export function HRADeclarations() {
                             </Button>
                           )}
                           {r.status === 'verified' && (
-                            <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto" />
+                            <CheckCircle2 className="h-4 w-4 text-success mx-auto" />
                           )}
                         </div>
                       </td>
@@ -500,7 +500,7 @@ export function HRADeclarations() {
                 className="font-mono"
               />
               {panWarning && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-700">
+                <div className="flex items-center gap-1.5 text-xs text-warning">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     PAN required if annual rent exceeds ₹1,00,000. Estimated annual rent

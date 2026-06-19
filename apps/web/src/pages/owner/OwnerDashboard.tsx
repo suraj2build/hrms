@@ -170,7 +170,7 @@ export function OwnerDashboard() {
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Go to <Link to="/owner/requests" className="font-medium text-teal-700 hover:underline">Requests</Link> to approve or reject.
+                Go to <Link to="/owner/requests" className="font-medium text-primary hover:underline">Requests</Link> to approve or reject.
               </p>
             </section>
           )}
@@ -182,7 +182,7 @@ export function OwnerDashboard() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.16em]">Tenant Running Status</h2>
-            <Link to="/owner/tenants" className="text-[11px] font-medium text-teal-700 hover:text-teal-800 flex items-center gap-0.5">
+            <Link to="/owner/tenants" className="text-[11px] font-medium text-primary hover:text-primary/80 flex items-center gap-0.5">
               View all <ChevronRight className="h-3 w-3" />
             </Link>
           </div>
@@ -196,7 +196,7 @@ export function OwnerDashboard() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-border">
                 {healthRows.map(row => {
                   const t = row.tenant!
                   const STATUS_DOT: Record<string, string> = {
@@ -212,11 +212,11 @@ export function OwnerDashboard() {
                     draft:      'text-slate-400',
                   }
                   return (
-                    <tr key={row.tenant_id} className="transition-colors hover:bg-teal-50/40">
+                    <tr key={row.tenant_id} className="transition-colors hover:bg-primary/[0.04]">
                       <td className="px-4 py-3">
                         <Link
                           to={`/owner/tenants/${t.id}`}
-                          className="font-semibold text-foreground text-[13px] hover:text-teal-700 transition-colors"
+                          className="font-semibold text-foreground text-[13px] hover:text-primary transition-colors"
                           onClick={e => e.stopPropagation()}
                         >
                           {t.name}

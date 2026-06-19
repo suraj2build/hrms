@@ -108,15 +108,15 @@ export function StatutoryGroups() {
       setDlgOpen(false)
       toast.success(editItem ? 'Statutory group updated' : 'Statutory group created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/masters/statutory-groups/${id}`),
-    onSuccess: (res: any) => {
+    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/statutory-groups/${id}`),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['statutory-groups'] })
       toast.success(res?.data?.deactivated ? 'Group deactivated (in use)' : 'Statutory group deleted')
     },

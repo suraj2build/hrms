@@ -19,8 +19,11 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
-import { Badge }         from '@/components/ui/badge'
+import { Badge, badgeVariants } from '@/components/ui/badge'
+import type { VariantProps } from 'class-variance-authority'
 import { cn }            from '@/lib/utils'
+
+type BadgeVariant = VariantProps<typeof badgeVariants>['variant']
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -210,15 +213,15 @@ export function EssHRSupport() {
         icon={<HeadphonesIcon className="h-4 w-4 text-muted-foreground" />}
       >
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[
+          {([
             { role: 'HR Helpdesk',    email: 'hr@company.com',       phone: '+91 1800-XXX-XXXX', badge: 'General' },
             { role: 'Payroll Team',   email: 'payroll@company.com',  phone: '+91 98XX-XXXXXX',   badge: 'Payroll' },
             { role: 'POSH Committee', email: 'posh@company.com',     phone: 'Confidential',       badge: 'Urgent', badgeVariant: 'destructive' },
-          ].map(c => (
+          ] as { role: string; email: string; phone: string; badge: string; badgeVariant?: BadgeVariant }[]).map(c => (
             <div key={c.role} className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-foreground">{c.role}</p>
-                <Badge variant={(c.badgeVariant ?? 'secondary') as any} className="rounded-full text-[9px]">{c.badge}</Badge>
+                <Badge variant={c.badgeVariant ?? 'secondary'} className="rounded-full text-[9px]">{c.badge}</Badge>
               </div>
               <div className="space-y-1">
                 <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-[10px] text-info hover:underline">

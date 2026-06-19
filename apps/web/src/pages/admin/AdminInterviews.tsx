@@ -471,7 +471,7 @@ export function AdminInterviews() {
                                 href={r.meet_link}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-blue-600 hover:underline text-[10px] flex items-center gap-0.5 mt-0.5"
+                                className="text-primary hover:underline text-[10px] flex items-center gap-0.5 mt-0.5"
                               >
                                 <Video className="h-2.5 w-2.5" />Join meeting
                               </a>
@@ -511,26 +511,26 @@ export function AdminInterviews() {
                                   <>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
-                                      className="text-emerald-600"
+                                      className="text-success"
                                       onClick={() => transition(r.id, 'complete', 'Marked as completed')}
                                     >
                                       <CheckCircle2 className="h-3.5 w-3.5 mr-2" />Mark Complete
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
-                                      className="text-amber-600"
+                                      className="text-warning"
                                       onClick={() => transition(r.id, 'no-show', 'Marked as no-show')}
                                     >
                                       <UserX className="h-3.5 w-3.5 mr-2" />No-show
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
-                                      className="text-red-600"
+                                      className="text-destructive"
                                       onClick={() => transition(r.id, 'cancel', 'Interview cancelled')}
                                     >
                                       <XCircle className="h-3.5 w-3.5 mr-2" />Cancel
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
-                                      className="text-red-600"
+                                      className="text-destructive"
                                       onClick={() => deleteMut.mutate(r.id)}
                                     >Delete</DropdownMenuItem>
                                   </>
@@ -562,7 +562,7 @@ export function AdminInterviews() {
                 <h2 className="text-white font-semibold text-lg leading-tight">
                   {editTarget ? 'Edit Interview' : 'Schedule Interview'}
                 </h2>
-                <p className="text-purple-100 text-sm mt-0.5">
+                <p className="text-[#f3e8ff] text-sm mt-0.5">
                   {editTarget ? 'Update interview round details' : 'Set up round, panel members, and schedule'}
                 </p>
               </div>
@@ -659,7 +659,7 @@ export function AdminInterviews() {
                 <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                   Interview Panel
                   {form.interviewer_ids.length > 0 && (
-                    <span className="ml-2 normal-case text-[#7c3aed] bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5">
+                    <span className="ml-2 normal-case text-[#7c3aed] bg-accent-violet/10 border border-accent-violet/30 rounded-full px-2 py-0.5">
                       {form.interviewer_ids.length} selected
                     </span>
                   )}
@@ -728,7 +728,7 @@ export function AdminInterviews() {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Star className="h-5 w-5 text-amber-500" />
+              <Star className="h-5 w-5 text-warning" />
               Scorecard — {scoreRound && (
                 <>R{scoreRound.round_number}{scoreRound.title ? ` · ${scoreRound.title}` : ''}
                   {scoreRound.applications?.candidates &&

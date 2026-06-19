@@ -131,7 +131,7 @@ export function EssTeam() {
   // Load my own full profile to get department + manager
   const { data: myProfile, isLoading: profileLoading } = useQuery<FullProfileResp>({
     queryKey: ['ess-team-my-profile', employeeId],
-    queryFn:  () => api.get(`/employees/${employeeId}/full-profile`).then((r: any) => r),
+    queryFn:  () => api.get<FullProfileResp>(`/employees/${employeeId}/full-profile`),
     enabled:  !!employeeId,
     staleTime: 120_000,
   })
@@ -149,7 +149,7 @@ export function EssTeam() {
   const me        = myProfile?.employee
   const manager   = myProfile?.job_info?.manager
   const deptName  = myProfile?.job_info?.department?.name ?? ''
-  const allMembers = deptEmps?.data ?? []
+  const allMembers = useMemo(() => deptEmps?.data ?? [], [deptEmps])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()

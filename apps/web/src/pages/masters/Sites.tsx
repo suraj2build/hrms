@@ -393,11 +393,11 @@ export function Sites() {
   const statesList   = statesData?.data   ?? []
   const clustersList = clustersData?.data ?? []
 
-  const sites            = sitesData?.data         ?? []
+  const sites            = useMemo(() => sitesData?.data   ?? [], [sitesData])
   const rosters          = rostersData?.data       ?? []
   const rotationPolicies = rotationData?.data      ?? []
   const leavePolicies    = leavePolicyData?.data   ?? []
-  const workLocs         = workLocData?.data       ?? []
+  const workLocs         = useMemo(() => workLocData?.data ?? [], [workLocData])
   const holidayGroups    = (holidayGroupData?.data ?? []).filter(g => g.is_active)
 
   /** site_id → [locations] */
@@ -511,8 +511,8 @@ export function Sites() {
       setDlgOpen(false)
       toast.success('Site saved')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save site', { description: e.message })
     },
   })

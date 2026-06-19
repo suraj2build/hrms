@@ -480,7 +480,7 @@ export function OwnerTenantDetail() {
                           variant="ghost"
                           onClick={() => { setResetAdminId(a.id); setResetPwd(''); setShowResetPwd(false) }}
                           disabled={resetPasswordMut.isPending}
-                          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-amber-700 hover:bg-amber-500/10 gap-1"
+                          className="h-6 px-2 text-[10px] text-muted-foreground hover:text-warning hover:bg-warning/10 gap-1"
                           title="Reset password"
                           aria-label="Reset password"
                         >
@@ -493,8 +493,8 @@ export function OwnerTenantDetail() {
                           disabled={toggleAdminMut.isPending}
                           className={`h-6 px-2 text-[10px] gap-1 ${
                             a.is_active
-                              ? 'text-muted-foreground hover:text-red-600 hover:bg-red-500/10'
-                              : 'text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10'
+                              ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
+                              : 'text-muted-foreground hover:text-success hover:bg-success/10'
                           }`}
                         >
                           {a.is_active ? <UserX className="h-3 w-3" /> : <UserCheck className="h-3 w-3" />}
@@ -517,7 +517,7 @@ export function OwnerTenantDetail() {
         <DialogContent className="bg-card border-border text-foreground max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-amber-600" />
+              <KeyRound className="h-4 w-4 text-warning" />
               Reset Admin Password
             </DialogTitle>
           </DialogHeader>
@@ -557,7 +557,7 @@ export function OwnerTenantDetail() {
                 </Button>
               </div>
               {resetPwd && resetPwd.trim().length > 0 && resetPwd.trim().length < 8 && (
-                <p className="text-[10px] text-red-600">Password must be at least 8 characters.</p>
+                <p className="text-[10px] text-destructive">Password must be at least 8 characters.</p>
               )}
             </div>
           </div>
@@ -566,7 +566,7 @@ export function OwnerTenantDetail() {
               size="sm"
               onClick={() => resetAdminId && resetPasswordMut.mutate({ adminId: resetAdminId, password: resetPwd })}
               disabled={resetPasswordMut.isPending || (resetPwd.trim().length > 0 && resetPwd.trim().length < 8)}
-              className="bg-amber-500 bg-none hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20"
+              className="bg-warning bg-none hover:bg-warning/90 text-warning-foreground shadow-sm shadow-warning/20"
             >
               {resetPasswordMut.isPending ? 'Resetting…' : (resetPwd.trim() ? 'Set Password' : 'Auto-Generate & Reset')}
             </Button>
@@ -659,9 +659,9 @@ export function OwnerTenantDetail() {
             </div>
 
             {adminForm.password && showAdminPwd && (
-              <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-xs">
-                <span className="text-amber-800 font-semibold">Save before submitting: </span>
-                <code className="text-amber-950 font-mono font-semibold select-all">{adminForm.password}</code>
+              <div className="rounded-md bg-warning/10 border border-warning/30 px-3 py-2 text-xs">
+                <span className="text-warning font-semibold">Save before submitting: </span>
+                <code className="text-foreground font-mono font-semibold select-all">{adminForm.password}</code>
               </div>
             )}
           </div>
@@ -683,7 +683,7 @@ export function OwnerTenantDetail() {
         <DialogContent className="bg-card border-border text-foreground max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-amber-600" />
+              <KeyRound className="h-4 w-4 text-warning" />
               Password Reset
             </DialogTitle>
           </DialogHeader>
@@ -697,10 +697,10 @@ export function OwnerTenantDetail() {
                   className="text-muted-foreground hover:text-foreground transition-colors"
                   aria-label="Copy password"
                 >
-                  {copiedPwd ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  {copiedPwd ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                 </button>
               </div>
-              <p className="text-[11px] text-amber-500">⚠ Share this with the admin now — it won't be shown again.</p>
+              <p className="text-[11px] text-warning">⚠ Share this with the admin now — it won't be shown again.</p>
             </div>
           )}
           <DialogFooter>

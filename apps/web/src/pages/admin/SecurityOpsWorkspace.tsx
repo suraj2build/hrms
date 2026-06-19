@@ -270,7 +270,7 @@ export function SecurityOpsWorkspace() {
           <TabsTrigger value="alerts">
             Alerts
             {health?.alerts_30d.open ? (
-              <span className="ml-1.5 h-4 w-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+              <span className="ml-1.5 h-4 w-4 rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center">
                 {health.alerts_30d.open > 9 ? '9+' : health.alerts_30d.open}
               </span>
             ) : null}
@@ -302,9 +302,9 @@ export function SecurityOpsWorkspace() {
                   ))}
                 </div>
                 {health.alerts_30d.critical_open > 0 && (
-                  <div className="mt-3 rounded-lg bg-red-50 border border-red-200 p-3 flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-red-700">
+                  <div className="mt-3 rounded-lg bg-destructive/10 border border-destructive/30 p-3 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-destructive">
                       <strong>{health.alerts_30d.critical_open}</strong> critical alert{health.alerts_30d.critical_open > 1 ? 's require' : ' requires'} immediate attention.
                     </p>
                   </div>
@@ -341,7 +341,7 @@ export function SecurityOpsWorkspace() {
               <SectionCard title="Detection Rules">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg border p-3">
-                    <p className="text-2xl font-bold text-emerald-600">{health.detection_rules.enabled}</p>
+                    <p className="text-2xl font-bold text-success">{health.detection_rules.enabled}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">Active Rules</p>
                   </div>
                   <div className="rounded-lg border p-3">
@@ -389,7 +389,7 @@ export function SecurityOpsWorkspace() {
               <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>
             ) : (alertsQ.data?.data ?? []).length === 0 ? (
               <div className="py-12 text-center">
-                <CheckCircle2 className="h-8 w-8 text-emerald-500/60 mx-auto mb-2" />
+                <CheckCircle2 className="h-8 w-8 text-success/60 mx-auto mb-2" />
                 <p className="text-sm text-muted-foreground">No alerts found</p>
               </div>
             ) : (
@@ -675,10 +675,10 @@ export function SecurityOpsWorkspace() {
                         isVerified ? 'bg-emerald-100' : isFailed ? 'bg-red-100' : 'bg-gray-100',
                       )}>
                         {isVerified
-                          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                           : isFailed
-                            ? <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
-                            : <Eye className="h-3.5 w-3.5 text-gray-500" />}
+                            ? <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                            : <Eye className="h-3.5 w-3.5 text-muted-foreground" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">

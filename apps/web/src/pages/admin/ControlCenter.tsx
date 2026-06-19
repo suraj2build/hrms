@@ -31,7 +31,7 @@ import {
   ExternalLink, GitMerge, Lock,
   ArrowUpRight, Inbox,
   UserCheck, UserPlus, UserX, Play, CheckSquare,
-  CalendarCheck, FileSearch, ClipboardList, ArrowRight,
+  CalendarCheck, ClipboardList, ArrowRight,
   Activity, BarChart3, TrendingUp, ChevronRight,
   CalendarDays, Server, LayoutGrid,
 } from 'lucide-react'
@@ -830,7 +830,7 @@ export function ControlCenter() {
             stat={payroll?.current_run?.status
               ? `${payroll.current_month} · ${payroll.current_run.status.charAt(0).toUpperCase() + payroll.current_run.status.slice(1)}`
               : (payroll?.current_month ?? 'No run yet')}
-            status={payrollHealth as any}
+            status={payrollHealth as ModuleStatus}
             iconBg="bg-amber-50" iconColor="text-amber-600"
             onClick={() => nav('/admin/payroll/center')}
           />
@@ -846,7 +846,7 @@ export function ControlCenter() {
             stat={schedulers.length > 0
               ? `${schedulers.filter(s => !s.is_stale).length}/${schedulers.length} engines healthy`
               : overallHealth.charAt(0).toUpperCase() + overallHealth.slice(1)}
-            status={(schedulers.some(s => s.is_stale) ? 'degraded' : overallHealth === 'healthy' ? 'healthy' : overallHealth) as any}
+            status={(schedulers.some(s => s.is_stale) ? 'degraded' : overallHealth === 'healthy' ? 'healthy' : overallHealth) as ModuleStatus}
             iconBg="bg-slate-50" iconColor="text-slate-600"
             badge={schedulers.filter(s => s.is_stale).length || null}
             onClick={() => nav('/admin/system/observability')}

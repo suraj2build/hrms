@@ -490,13 +490,13 @@ export function EssLeaveBalance() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const balances    = balData?.data   ?? []
-  const allLeaves   = leaveData?.data ?? []
+  const balances    = useMemo(() => balData?.data   ?? [], [balData])
+  const allLeaves   = useMemo(() => leaveData?.data ?? [], [leaveData])
   const ledgerRows  = ledgerData?.data  ?? []
   const ledgerTotal = ledgerData?.total ?? 0
   const ledgerPage  = Math.floor(offset / LEDGER_LIMIT) + 1
 
-  const heldCredits   = heldCreditsData?.data ?? []
+  const heldCredits   = useMemo(() => heldCreditsData?.data ?? [], [heldCreditsData])
   const totalHeldDays = useMemo(() =>
     heldCredits.reduce((s, r) => s + Number(r.days), 0),
     [heldCredits],
@@ -660,7 +660,7 @@ export function EssLeaveBalance() {
         actions={
           <Button
             onClick={() => setTab('apply')}
-            className="gap-2 bg-gradient-to-r from-primary to-violet-600 hover:brightness-105 text-primary-foreground font-semibold shadow-sm hover:shadow transition-all"
+            className="gap-2 bg-gradient-to-r from-primary to-primary hover:brightness-105 text-primary-foreground font-semibold shadow-sm hover:shadow transition-all"
           >
             <Plus className="h-3.5 w-3.5" />
             Apply for Leave

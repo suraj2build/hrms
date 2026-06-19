@@ -6,7 +6,8 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Badge, badgeVariants } from '@/components/ui/badge'
+import type { VariantProps } from 'class-variance-authority'
 import { Input } from '@/components/ui/input'
 import {
   Dialog,
@@ -16,6 +17,8 @@ import {
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api/client'
 import { useOpenOnParam } from '@/lib/runbooks/useOpenOnParam'
+
+type BadgeVariant = VariantProps<typeof badgeVariants>['variant']
 
 interface ReimbCategory {
   id: string
@@ -41,7 +44,7 @@ interface MyReimbClaim {
 
 type ClaimStatus = MyReimbClaim['status']
 
-function statusVariant(status: ClaimStatus): string {
+function statusVariant(status: ClaimStatus): BadgeVariant {
   switch (status) {
     case 'draft': return 'secondary'
     case 'submitted': return 'info'
@@ -86,12 +89,12 @@ export function EssReimbursements() {
 
   const { data: categories = [] } = useQuery<ReimbCategory[]>({
     queryKey: ['reimbursements', 'categories'],
-    queryFn: () => api.get('/payroll/reimbursements/categories').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: ReimbCategory[] }>('/payroll/reimbursements/categories').then(r => r.data),
   })
 
   const { data: claims = [], isLoading } = useQuery<MyReimbClaim[]>({
     queryKey: ['reimbursements', 'my'],
-    queryFn: () => api.get('/payroll/reimbursements/my').then((r: any) => r.data),
+    queryFn: () => api.get<{ data: MyReimbClaim[] }>('/payroll/reimbursements/my').then(r => r.data),
   })
 
   const createClaim = useMutation({
@@ -224,7 +227,7 @@ export function EssReimbursements() {
                         <p className="text-sm font-medium text-foreground">
                           {claim.category_name ?? categories.find(c => c.id === claim.category_id)?.name ?? 'Unknown Category'}
                         </p>
-                        <Badge variant={statusVariant(claim.status) as any}>
+                        <Badge variant={statusVariant(claim.status)}>
                           {statusLabel(claim.status)}
                         </Badge>
                       </div>

@@ -12,7 +12,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  ShieldCheck, Search, RefreshCw, AlertTriangle,
+  Search, RefreshCw, AlertTriangle,
   CheckCircle2, Clock, FileX2, Eye, XCircle,
   Plus, Database, Activity,
 } from 'lucide-react'
@@ -282,7 +282,7 @@ export function GovernancePrivacyWorkspace() {
           <TabsTrigger value="erasure">
             Erasure Requests
             {health?.erasure_requests.breached_sla ? (
-              <span className="ml-1.5 h-4 w-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+              <span className="ml-1.5 h-4 w-4 rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center">
                 {health.erasure_requests.breached_sla}
               </span>
             ) : null}
@@ -313,9 +313,9 @@ export function GovernancePrivacyWorkspace() {
                   ))}
                 </div>
                 {health.erasure_requests.breached_sla > 0 && (
-                  <div className="mt-3 rounded-lg bg-red-50 border border-red-200 p-3 flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-red-700">
+                  <div className="mt-3 rounded-lg bg-destructive/10 border border-destructive/30 p-3 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-destructive">
                       <strong>{health.erasure_requests.breached_sla}</strong> erasure request{health.erasure_requests.breached_sla > 1 ? 's have' : ' has'} exceeded the 30-day SLA.
                       Review the Erasure Requests tab immediately.
                     </p>
@@ -422,8 +422,8 @@ export function GovernancePrivacyWorkspace() {
                             c.latest_evidence.pass ? 'bg-emerald-100' : 'bg-red-100',
                           )}>
                             {c.latest_evidence.pass
-                              ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                              : <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+                              ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                              : <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
                             }
                           </div>
                         )}
@@ -483,7 +483,7 @@ export function GovernancePrivacyWorkspace() {
                       e.flagged ? 'bg-red-100' : 'bg-muted',
                     )}>
                       {e.flagged
-                        ? <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+                        ? <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
                         : <Eye className="h-3.5 w-3.5 text-muted-foreground" />
                       }
                     </div>
@@ -495,7 +495,7 @@ export function GovernancePrivacyWorkspace() {
                         </Badge>
                         <span className="text-xs text-muted-foreground">{e.accessor_role}</span>
                         {e.flagged && (
-                          <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700 border-red-200">
+                          <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
                             Flagged
                           </Badge>
                         )}
@@ -510,7 +510,7 @@ export function GovernancePrivacyWorkspace() {
                         <span className="text-xs text-muted-foreground">{format(new Date(e.accessed_at), 'dd MMM yyyy HH:mm')}</span>
                       </div>
                       {e.flag_reason && (
-                        <p className="text-xs text-red-600 mt-0.5">{e.flag_reason}</p>
+                        <p className="text-xs text-destructive mt-0.5">{e.flag_reason}</p>
                       )}
                     </div>
                   </div>
@@ -560,7 +560,7 @@ export function GovernancePrivacyWorkspace() {
                           {sm && <Badge variant="outline" className={cn('text-[10px]', sm.color)}>{sm.label}</Badge>}
                           <Badge variant="outline" className="text-[10px] capitalize">{r.request_source.replace('_', ' ')}</Badge>
                           {r.sla_breached && (
-                            <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700 border-red-200">
+                            <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
                               SLA Breached
                             </Badge>
                           )}
@@ -643,8 +643,8 @@ export function GovernancePrivacyWorkspace() {
                       <div className={cn('mt-0.5 h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0',
                         e.compliant ? 'bg-emerald-100' : 'bg-red-100')}>
                         {e.compliant
-                          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                          : <AlertTriangle className="h-3.5 w-3.5 text-red-600" />}
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                          : <AlertTriangle className="h-3.5 w-3.5 text-destructive" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -710,7 +710,7 @@ export function GovernancePrivacyWorkspace() {
                           </span>
                           <Badge variant="outline" className="text-[10px] capitalize">{r.triggered_by}</Badge>
                           {hasErrors && (
-                            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                            <Badge variant="outline" className="text-[10px] bg-warning/10 text-warning border-warning/30">
                               {r.errors.length} error{r.errors.length > 1 ? 's' : ''}
                             </Badge>
                           )}

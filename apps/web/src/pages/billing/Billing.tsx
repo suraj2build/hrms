@@ -14,6 +14,20 @@ import { Button } from '@/components/ui/button'
 
 type Tier = 'standard' | 'enterprise'
 
+interface RazorpayOptions {
+  key: string
+  subscription_id: string
+  name: string
+  description: string
+  theme: { color: string }
+  handler: () => void
+  modal: { ondismiss: () => void }
+}
+interface RazorpayInstance { open: () => void }
+interface RazorpayWindow {
+  Razorpay?: new (options: RazorpayOptions) => RazorpayInstance
+}
+
 interface BillingStatus {
   plan: string
   status: string
@@ -32,7 +46,7 @@ const PLANS: { id: Tier; name: string; blurb: string; features: string[] }[] = [
 
 function loadRazorpay(): Promise<boolean> {
   return new Promise((resolve) => {
-    if ((window as any).Razorpay) return resolve(true)
+    if ((window as unknown as RazorpayWindow).Razorpay) return resolve(true)
     const s = document.createElement('script')
     s.src = 'https://checkout.razorpay.com/v1/checkout.js'
     s.onload = () => resolve(true)
@@ -63,7 +77,8 @@ export function Billing() {
         toast.error('Could not start checkout. Please try again.')
         return
       }
-      const rzp = new (window as any).Razorpay({
+      const RazorpayCtor = (window as unknown as RazorpayWindow).Razorpay!
+      const rzp = new RazorpayCtor({
         key: res.keyId,
         subscription_id: res.subscriptionId,
         name: 'CognixHR',
@@ -73,8 +88,8 @@ export function Billing() {
         modal: { ondismiss: () => toast.message('Checkout cancelled') },
       })
       rzp.open()
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Checkout failed')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Checkout failed')
     } finally {
       setBusy(null)
     }

@@ -64,6 +64,11 @@ interface TaxRegimeElection {
   effective_from: string
 }
 
+interface GovSettings {
+  declaration_window_open?: string | null
+  declaration_window_close?: string | null
+}
+
 interface TDSProjection {
   id: string
   projection_month: string
@@ -107,7 +112,9 @@ function getPreviousFinancialYear(fy: string): string {
   return `${startYear - 1}-${String(startYear).slice(2)}`
 }
 
-function statusBadgeVariant(status: DeclarationStatus): string {
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success'
+
+function statusBadgeVariant(status: DeclarationStatus): BadgeVariant {
   switch (status) {
     case 'approved':        return 'success'
     case 'payroll_applied': return 'success'
@@ -135,7 +142,7 @@ function statusLabel(status: DeclarationStatus): string {
   }
 }
 
-function proofStateBadgeVariant(state: DocumentState): string {
+function proofStateBadgeVariant(state: DocumentState): BadgeVariant {
   switch (state) {
     case 'verified':    return 'success'
     case 'rejected':    return 'destructive'
@@ -188,30 +195,30 @@ export function TaxDeclarations() {
 
   const { data: regime } = useQuery<TaxRegimeElection | null>({
     queryKey: ['tds', 'regime', 'my', selectedFY],
-    queryFn:  () => api.get(`/payroll/statutory/tds/regime/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? null),
+    queryFn:  () => api.get<{ data?: TaxRegimeElection | null }>(`/payroll/statutory/tds/regime/my?financial_year=${selectedFY}`).then(r => r.data ?? null),
   })
 
   const { data: declarations = [] } = useQuery<Declaration[]>({
     queryKey: ['tds', 'declarations', 'my', selectedFY],
     queryFn:  () =>
-      api.get(`/payroll/statutory/tds/declarations/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? []),
+      api.get<{ data?: Declaration[] }>(`/payroll/statutory/tds/declarations/my?financial_year=${selectedFY}`).then(r => r.data ?? []),
   })
 
   const { data: projections = [] } = useQuery<TDSProjection[]>({
     queryKey: ['tds', 'projections', 'my', selectedFY],
     queryFn:  () =>
-      api.get(`/payroll/statutory/tds/projections/my?financial_year=${selectedFY}`).then((r: any) => r.data ?? []),
+      api.get<{ data?: TDSProjection[] }>(`/payroll/statutory/tds/projections/my?financial_year=${selectedFY}`).then(r => r.data ?? []),
   })
 
-  const { data: govSettings } = useQuery({
+  const { data: govSettings } = useQuery<GovSettings | null>({
     queryKey: ['statutory', 'governance', 'settings'],
-    queryFn:  () => api.get('/payroll/statutory/governance/settings').then((r: any) => r.data ?? null),
+    queryFn:  () => api.get<{ data?: GovSettings | null }>('/payroll/statutory/governance/settings').then(r => r.data ?? null),
     staleTime: 5 * 60 * 1000,
   })
 
   // ── Window status ─────────────────────────────────────────────────────────────
-  const windowOpen  = (govSettings as any)?.declaration_window_open  ?? null
-  const windowClose = (govSettings as any)?.declaration_window_close ?? null
+  const windowOpen  = govSettings?.declaration_window_open  ?? null
+  const windowClose = govSettings?.declaration_window_close ?? null
   const today       = new Date().toISOString().substring(0, 10)
   const windowConfigured  = windowOpen || windowClose
   const windowNotYetOpen  = windowConfigured && windowOpen  && today < windowOpen
@@ -389,37 +396,37 @@ export function TaxDeclarations() {
 
       {/* ── Declaration window banner ────────────────────────────────────────── */}
       {windowNotYetOpen && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 mb-4 flex items-start gap-2">
-          <Calendar className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+        <div className="rounded-md border border-info/30 bg-info/10 p-3 mb-4 flex items-start gap-2">
+          <Calendar className="h-4 w-4 text-info mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-medium text-blue-800">
+            <p className="text-sm font-medium text-info">
               Declaration window opens on {fmtDate(windowOpen!)} ({daysUntil(windowOpen!)} days)
             </p>
-            <p className="text-xs text-blue-600 mt-0.5">
+            <p className="text-xs text-info mt-0.5">
               You can review your previous declarations but cannot add new ones until the window opens.
             </p>
           </div>
         </div>
       )}
       {windowActive && windowClose && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 mb-4 flex items-start gap-2">
-          <Calendar className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+        <div className="rounded-md border border-success/30 bg-success/10 p-3 mb-4 flex items-start gap-2">
+          <Calendar className="h-4 w-4 text-success mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-medium text-emerald-800">
+            <p className="text-sm font-medium text-success">
               Declaration window is open — closes {fmtDate(windowClose)} ({daysUntil(windowClose)} days remaining)
             </p>
-            <p className="text-xs text-emerald-600 mt-0.5">Submit your declarations before the window closes.</p>
+            <p className="text-xs text-success mt-0.5">Submit your declarations before the window closes.</p>
           </div>
         </div>
       )}
       {windowClosed && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 mb-4 flex items-start gap-2">
-          <Lock className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+        <div className="rounded-md border border-warning/30 bg-warning/10 p-3 mb-4 flex items-start gap-2">
+          <Lock className="h-4 w-4 text-warning mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-medium text-amber-800">
+            <p className="text-sm font-medium text-warning">
               Declaration window closed on {fmtDate(windowClose!)}
             </p>
-            <p className="text-xs text-amber-600 mt-0.5">
+            <p className="text-xs text-warning mt-0.5">
               No new declarations can be added. Contact HR if you need to make changes.
             </p>
           </div>
@@ -569,7 +576,7 @@ export function TaxDeclarations() {
                               }
                             </td>
                             <td className="py-2 px-3">
-                              <Badge variant={statusBadgeVariant(d.status) as any} className="text-[10px] capitalize">
+                              <Badge variant={statusBadgeVariant(d.status)} className="text-[10px] capitalize">
                                 {statusLabel(d.status)}
                               </Badge>
                               {d.status === 'revision_requested' && d.rejection_reason && (
@@ -585,7 +592,7 @@ export function TaxDeclarations() {
                               ) : verifiedProof ? (
                                 <Badge variant="success" className="text-[10px]">Verified</Badge>
                               ) : (
-                                <Badge variant={proofStateBadgeVariant(d.declaration_proofs[0].document_state) as any} className="text-[10px] capitalize">
+                                <Badge variant={proofStateBadgeVariant(d.declaration_proofs[0].document_state)} className="text-[10px] capitalize">
                                   {d.declaration_proofs[0].document_state}
                                 </Badge>
                               )}

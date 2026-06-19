@@ -8,17 +8,16 @@
  * Access: hr_admin / super_admin.
  */
 
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Kanban, RefreshCw, Star, GripVertical, UserCircle2,
-  Building2, ChevronDown, Briefcase, Plus, ArrowRight,
+  Building2, Briefcase, Plus, ArrowRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
-import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -128,7 +127,7 @@ export function AdminPipeline() {
   const seedMut = useMutation({
     mutationFn: () => api.post('/recruitment/pipeline/stages/seed', {}),
     onSuccess:  () => { toast.success('Default pipeline stages created'); qc.invalidateQueries({ queryKey: ['recruitment', 'stages'] }) },
-    onError:    (e: any) => toast.error(e?.response?.data?.message ?? 'Seed failed'),
+    onError:    (e: unknown) => toast.error(e instanceof Error ? e.message : 'Seed failed'),
   })
 
   // ── Move mutation ──────────────────────────────────────────────────────────
@@ -139,7 +138,7 @@ export function AdminPipeline() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['recruitment', 'applications'] })
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Move failed'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Move failed'),
   })
 
   // ── Drag handlers ──────────────────────────────────────────────────────────
@@ -328,7 +327,7 @@ export function AdminPipeline() {
             >
               <div className="flex items-center justify-between px-3 py-2.5 border-b border-dashed border-border">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-gray-400" />
+                  <div className="w-2 h-2 rounded-full bg-muted-foreground" />
                   <span className="text-xs font-semibold text-muted-foreground">Unassigned</span>
                 </div>
                 <span className="text-xs text-muted-foreground font-medium">{unassigned.length}</span>

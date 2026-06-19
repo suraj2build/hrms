@@ -123,7 +123,7 @@ export function TDSRecovery() {
       />
 
       {/* Info banner */}
-      <div className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm">
+      <div className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-info/30 bg-info/10 text-info text-sm">
         <Info className="h-4 w-4 mt-0.5 shrink-0" />
         <span>
           Your monthly TDS is computed based on your active tax declaration, prior employer

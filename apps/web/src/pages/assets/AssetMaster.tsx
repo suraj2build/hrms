@@ -7,7 +7,7 @@ import { PageHeader }                             from '@/components/layout/Page
 import { SectionCard }                            from '@/components/layout/SectionCard'
 import { Button }                                 from '@/components/ui/button'
 import { Input }                                  from '@/components/ui/input'
-import { Badge }                                  from '@/components/ui/badge'
+import { Badge, type BadgeProps }                 from '@/components/ui/badge'
 import { DateInput }                              from '@/components/ui/date-input'
 import {
   Dialog, DialogContent, DialogHeader,
@@ -41,7 +41,7 @@ interface Asset {
 
 interface Category { id: string; name: string; is_active: boolean }
 
-const STATUS_VARIANT: Record<string, any> = {
+const STATUS_VARIANT: Record<string, BadgeProps['variant']> = {
   available: 'success',
   assigned:  'secondary',
   in_repair: 'outline',
@@ -130,13 +130,13 @@ export function AssetMaster() {
       setDlgOpen(false)
       toast.success(editItem ? 'Asset updated' : 'Asset created')
     },
-    onError: (e: any) => { setErr(e?.message ?? 'Failed to save'); toast.error('Save failed', { description: e?.message }) },
+    onError: (e: Error) => { setErr(e.message ?? 'Failed to save'); toast.error('Save failed', { description: e.message }) },
   })
 
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/assets/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['assets'] }); toast.success('Asset deleted') },
-    onError: (e: any) => toast.error('Delete failed', { description: e?.message }),
+    onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
 
   const assignMut = useMutation({
@@ -146,7 +146,7 @@ export function AssetMaster() {
       setAssignFor(null); setAssignEmp(''); setAssignNotes('')
       toast.success('Asset assigned')
     },
-    onError: (e: any) => toast.error('Assign failed', { description: e?.message }),
+    onError: (e: Error) => toast.error('Assign failed', { description: e.message }),
   })
 
   const returnMut = useMutation({
@@ -156,7 +156,7 @@ export function AssetMaster() {
       setReturnFor(null); setReturnCond('returned'); setReturnNotes('')
       toast.success('Asset returned')
     },
-    onError: (e: any) => toast.error('Return failed', { description: e?.message }),
+    onError: (e: Error) => toast.error('Return failed', { description: e.message }),
   })
 
   // ── Handlers ─────────────────────────────────────────────────────────────────

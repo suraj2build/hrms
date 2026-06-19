@@ -48,9 +48,6 @@ function buildOfferHtml(opts: {
   refNo:        string
   date:         string
 }): string {
-  const compLines = [opts.companyName, '[Company Address Line 1]', '[City, State – PIN]']
-    .join('<br/>')
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -379,7 +376,7 @@ export function OfferLetterDialog({
             </div>
 
             {/* Preview notice */}
-            <p className="text-xs text-muted-foreground bg-blue-50 text-blue-700 rounded-md px-3 py-2">
+            <p className="text-xs text-muted-foreground bg-info/10 text-info rounded-md px-3 py-2">
               Click <strong>Print / Save as PDF</strong> to open the letter in a new window — use your browser's "Save as PDF" option in the print dialog.
               <br />Items in [brackets] are placeholders to fill in before printing.
             </p>
