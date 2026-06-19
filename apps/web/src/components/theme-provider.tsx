@@ -14,7 +14,7 @@ const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefine
 const STORAGE_KEY = 'aurora-theme'
 
 /** Order of the cycle-on-click toggle. */
-export const THEME_ORDER: Theme[] = ['light', 'petrol', 'bordeaux', 'slate', 'pastel']
+const THEME_ORDER: Theme[] = ['light', 'petrol', 'bordeaux', 'slate', 'pastel']
 
 function parseTheme(raw: string | null): Theme {
   return raw === 'petrol' || raw === 'bordeaux' || raw === 'slate' || raw === 'pastel' ? raw : 'light'
