@@ -116,8 +116,8 @@ export function Clusters() {
       setDlgOpen(false)
       toast.success(editItem ? 'Cluster updated' : 'Cluster created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save cluster')
     },
   })

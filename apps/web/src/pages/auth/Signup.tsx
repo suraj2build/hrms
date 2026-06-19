@@ -45,12 +45,12 @@ const STEPS = [
 
 // ── Shared field styles (match Login) ───────────────────────────────────────────
 const inputCls =
-  'h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 ' +
-  'placeholder:text-slate-400 shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none ' +
+  'h-11 w-full rounded-xl border border-border bg-white pl-10 pr-3 text-sm text-foreground ' +
+  'placeholder:text-muted-foreground shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none ' +
   'focus:ring-2 focus:ring-[#1A4D8F]/15'
-const labelCls = 'mb-1.5 block text-sm font-medium text-slate-700'
+const labelCls = 'mb-1.5 block text-sm font-medium text-foreground'
 const selectCls =
-  'h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 ' +
+  'h-11 w-full appearance-none rounded-xl border border-border bg-white px-3 text-sm text-foreground ' +
   'shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none focus:ring-2 focus:ring-[#1A4D8F]/15'
 
 function PrimaryButton({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
@@ -117,14 +117,14 @@ export function Signup() {
             <LogoMark size={40} tile />
             <div>
               <Wordmark height={20} />
-              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.15em] text-slate-400">
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.15em] text-muted-foreground">
                 Smarter Workforce · Stronger Future
               </p>
             </div>
           </div>
 
-          <h1 className="text-[24px] font-bold tracking-tight text-slate-900">Set up your CognixHR workspace</h1>
-          <p className="mt-1.5 text-sm text-slate-500">Get started in 2 minutes</p>
+          <h1 className="text-[24px] font-bold tracking-tight text-foreground">Set up your CognixHR workspace</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Get started in 2 minutes</p>
 
           {/* Step indicators */}
           <div className="mt-6 flex items-center gap-1.5">
@@ -132,14 +132,14 @@ export function Signup() {
               <div key={s.id} className="flex items-center gap-1.5">
                 <span className={cn(
                   'flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold transition-colors',
-                  step >= s.id ? 'bg-[#1A4D8F] text-white' : 'bg-slate-200 text-slate-500',
+                  step >= s.id ? 'bg-[#1A4D8F] text-white' : 'bg-muted text-muted-foreground',
                 )}>
                   {step > s.id ? <Check className="h-3 w-3" /> : s.id}
                 </span>
-                <span className={cn('text-[11px]', step === s.id ? 'font-semibold text-slate-900' : 'text-slate-400')}>
+                <span className={cn('text-[11px]', step === s.id ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
                   {s.label}
                 </span>
-                {i < STEPS.length - 1 && <ChevronRight className="h-3 w-3 text-slate-300" />}
+                {i < STEPS.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
               </div>
             ))}
           </div>
@@ -151,8 +151,8 @@ export function Signup() {
               className="mt-6 space-y-4"
             >
               <div>
-                <p className="text-[15px] font-semibold text-slate-900">Create your account</p>
-                <p className="text-xs text-slate-500">You'll be the Super Admin of your company.</p>
+                <p className="text-[15px] font-semibold text-foreground">Create your account</p>
+                <p className="text-xs text-muted-foreground">You'll be the Super Admin of your company.</p>
               </div>
 
               <Field label="Full Name" icon={User} error={form1.formState.errors.full_name?.message}>
@@ -173,8 +173,8 @@ export function Signup() {
           {step === 2 && (
             <form onSubmit={form2.handleSubmit(onStep2Submit)} className="mt-6 space-y-4">
               <div>
-                <p className="text-[15px] font-semibold text-slate-900">Tell us about your company</p>
-                <p className="text-xs text-slate-500">This helps us configure CognixHR for your needs.</p>
+                <p className="text-[15px] font-semibold text-foreground">Tell us about your company</p>
+                <p className="text-xs text-muted-foreground">This helps us configure CognixHR for your needs.</p>
               </div>
 
               <Field label="Company Name" icon={Building2} error={form2.formState.errors.company_name?.message}>
@@ -182,28 +182,28 @@ export function Signup() {
               </Field>
 
               <div>
-                <label className={labelCls}>Industry <span className="text-rose-500">*</span></label>
+                <label className={labelCls}>Industry <span className="text-destructive">*</span></label>
                 <select className={selectCls} defaultValue="" {...form2.register('industry')}>
                   <option value="" disabled>Select industry</option>
                   {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
                 </select>
-                {form2.formState.errors.industry && <p className="mt-1 text-xs text-rose-500">{form2.formState.errors.industry.message}</p>}
+                {form2.formState.errors.industry && <p className="mt-1 text-xs text-destructive">{form2.formState.errors.industry.message}</p>}
               </div>
 
               <div>
-                <label className={labelCls}>Company Size <span className="text-rose-500">*</span></label>
+                <label className={labelCls}>Company Size <span className="text-destructive">*</span></label>
                 <select className={selectCls} defaultValue="" {...form2.register('size_range')}>
                   <option value="" disabled>How many employees?</option>
                   {SIZE_RANGES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
-                {form2.formState.errors.size_range && <p className="mt-1 text-xs text-rose-500">{form2.formState.errors.size_range.message}</p>}
+                {form2.formState.errors.size_range && <p className="mt-1 text-xs text-destructive">{form2.formState.errors.size_range.message}</p>}
               </div>
 
               <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={() => setStep(1)}
-                  className="h-11 flex-1 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  className="h-11 flex-1 rounded-xl border border-border bg-white text-sm font-medium text-foreground transition-colors hover:bg-muted"
                 >
                   Back
                 </button>
@@ -219,12 +219,12 @@ export function Signup() {
 
           {/* ── Step 3: Success ── */}
           {step === 3 && (
-            <div className="mt-8 rounded-2xl border border-slate-100 bg-white p-8 text-center shadow-sm">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
-                <Check className="h-8 w-8 text-emerald-600" />
+            <div className="mt-8 rounded-2xl border border-border bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/10">
+                <Check className="h-8 w-8 text-success" />
               </div>
-              <h3 className="mt-4 text-lg font-semibold text-slate-900">You're all set!</h3>
-              <p className="mt-1 text-sm text-slate-500">
+              <h3 className="mt-4 text-lg font-semibold text-foreground">You're all set!</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
                 Your CognixHR workspace is ready. Check your email to verify your account, then sign in.
               </p>
               <div className="mt-5">

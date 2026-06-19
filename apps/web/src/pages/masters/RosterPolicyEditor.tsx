@@ -351,15 +351,15 @@ function MatrixGrid({
         <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/50 text-xs text-muted-foreground">
           <span className="font-medium text-foreground/70">Legend:</span>
           <span className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-emerald-50 border-2 border-emerald-200 flex items-center justify-center text-[9px] font-bold text-emerald-700">W</span>
+            <span className="w-4 h-4 rounded bg-success/10 border-2 border-success/30 flex items-center justify-center text-[9px] font-bold text-success">W</span>
             Working
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-rose-50 border-2 border-rose-200 flex items-center justify-center text-[9px] font-bold text-rose-700">Off</span>
+            <span className="w-4 h-4 rounded bg-destructive/10 border-2 border-destructive/30 flex items-center justify-center text-[9px] font-bold text-destructive">Off</span>
             Off
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-amber-50 border-2 border-amber-200 flex items-center justify-center text-[9px] font-bold text-amber-700">½</span>
+            <span className="w-4 h-4 rounded bg-warning/10 border-2 border-warning/30 flex items-center justify-center text-[9px] font-bold text-warning">½</span>
             Half Day
           </span>
           <span className="ml-auto text-[10px] text-muted-foreground/60">
@@ -459,15 +459,15 @@ function MonthlyPreview({ matrix }: { matrix: PolicyMatrix }) {
       {/* Month stats */}
       <div className="grid grid-cols-3 gap-1 pt-2 border-t border-border/50">
         <div className="text-center">
-          <div className="text-sm font-semibold text-emerald-600">{workCount}</div>
+          <div className="text-sm font-semibold text-success">{workCount}</div>
           <div className="text-[9px] text-muted-foreground">Working</div>
         </div>
         <div className="text-center">
-          <div className="text-sm font-semibold text-rose-500">{offCount}</div>
+          <div className="text-sm font-semibold text-destructive">{offCount}</div>
           <div className="text-[9px] text-muted-foreground">Off</div>
         </div>
         <div className="text-center">
-          <div className="text-sm font-semibold text-amber-500">{halfCount}</div>
+          <div className="text-sm font-semibold text-warning">{halfCount}</div>
           <div className="text-[9px] text-muted-foreground">Half Day</div>
         </div>
       </div>

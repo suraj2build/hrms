@@ -91,8 +91,8 @@ export function CostCenters() {
       setDlgOpen(false)
       toast.success(editItem ? 'Cost center updated' : 'Cost center created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save cost center')
     },
   })

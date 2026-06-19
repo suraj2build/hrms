@@ -95,13 +95,13 @@ export function AdminBenefits() {
       toast.success(editing ? 'Plan updated' : 'Plan created')
       setShowForm(false); setEditing(null)
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Could not save plan'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not save plan'),
   })
 
   const deactivate = useMutation({
     mutationFn: (id: string) => api.delete(`/benefits/admin/plans/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-benefit-plans'] }); toast.success('Plan deactivated') },
-    onError: (e: any) => toast.error(e?.message ?? 'Could not deactivate'),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Could not deactivate'),
   })
 
   function openCreate() { setEditing(null); setForm(BLANK); setShowForm(true) }
@@ -112,7 +112,7 @@ export function AdminBenefits() {
   }
   function submit() {
     if (form.name.trim().length < 2) { toast.error('Plan name is required'); return }
-    save.mutate({ id: editing?.id, body: { ...form, provider: form.provider || undefined as any, description: form.description || undefined as any } })
+    save.mutate({ id: editing?.id, body: { ...form, provider: form.provider || null, description: form.description || null } })
   }
 
   if (!isAdmin) {
@@ -191,7 +191,7 @@ export function AdminBenefits() {
                       <td className="py-2 px-3 text-right whitespace-nowrap">
                         <Button size="sm" variant="ghost" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
                         {p.is_active && (
-                          <Button size="sm" variant="ghost" onClick={() => deactivate.mutate(p.id)}><Power className="h-3.5 w-3.5 text-red-500" /></Button>
+                          <Button size="sm" variant="ghost" onClick={() => deactivate.mutate(p.id)}><Power className="h-3.5 w-3.5 text-destructive" /></Button>
                         )}
                       </td>
                     </tr>

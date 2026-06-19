@@ -77,16 +77,16 @@ function fmtDate(iso: string | null, withTime = true) {
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-teal-50/40">
+    <div className="min-h-screen bg-gradient-to-br from-muted via-primary/5 to-success/5">
       {/* Header */}
-      <header className="bg-white/80 backdrop-blur border-b border-slate-200/60">
+      <header className="bg-white/80 backdrop-blur border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
           <LogoMark className="h-8 w-8" />
-          <span className="font-semibold text-slate-800 text-sm tracking-tight">
+          <span className="font-semibold text-foreground text-sm tracking-tight">
             Cognix<span className="text-[#15B8A6]">HR</span>
           </span>
-          <span className="text-slate-300 text-sm">·</span>
-          <span className="text-slate-500 text-sm">Candidate Portal</span>
+          <span className="text-muted-foreground text-sm">·</span>
+          <span className="text-muted-foreground text-sm">Candidate Portal</span>
         </div>
       </header>
 
@@ -94,7 +94,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <footer className="max-w-2xl mx-auto px-4 py-8 text-center text-xs text-slate-400">
+      <footer className="max-w-2xl mx-auto px-4 py-8 text-center text-xs text-muted-foreground">
         Powered by CognixHR — Smarter Workforce. Stronger Future.
       </footer>
     </div>
@@ -113,13 +113,13 @@ function StageProgress({ stages, currentStageId, appStatus }: {
   const isTerminal  = appStatus === 'rejected' || appStatus === 'withdrawn' || appStatus === 'hired'
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6">
-      <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-5">Application Progress</h2>
+    <div className="bg-white rounded-2xl border border-border shadow-sm p-6">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-5">Application Progress</h2>
       <div className="relative">
         {/* Connector line */}
-        <div className="absolute top-4 left-4 right-4 h-0.5 bg-slate-100" />
+        <div className="absolute top-4 left-4 right-4 h-0.5 bg-muted" />
         <div
-          className="absolute top-4 left-4 h-0.5 bg-gradient-to-r from-blue-500 to-teal-500 transition-all duration-700"
+          className="absolute top-4 left-4 h-0.5 bg-gradient-to-r from-primary to-success transition-all duration-700"
           style={{
             width: isTerminal
               ? '100%'
@@ -141,10 +141,10 @@ function StageProgress({ stages, currentStageId, appStatus }: {
                   className={[
                     'h-8 w-8 rounded-full border-2 flex items-center justify-center z-10 transition-all',
                     isCurrent
-                      ? 'border-blue-500 bg-blue-500 text-white shadow-md shadow-blue-200'
+                      ? 'border-primary bg-primary text-primary-foreground shadow-md shadow-primary/20'
                       : isPast
-                        ? 'border-teal-500 bg-teal-500 text-white'
-                        : 'border-slate-200 bg-white text-slate-300',
+                        ? 'border-success bg-success text-success-foreground'
+                        : 'border-border bg-white text-muted-foreground',
                   ].join(' ')}
                 >
                   {isPast || isCurrent
@@ -154,7 +154,7 @@ function StageProgress({ stages, currentStageId, appStatus }: {
                 </div>
                 <span className={[
                   'text-xs text-center leading-tight max-w-[64px]',
-                  isCurrent ? 'font-semibold text-blue-600' : isPast ? 'text-teal-600' : 'text-slate-400',
+                  isCurrent ? 'font-semibold text-primary' : isPast ? 'text-success' : 'text-muted-foreground',
                   isFuture && !isCurrent ? 'opacity-50' : '',
                 ].join(' ')}>
                   {stage.name}
@@ -174,30 +174,30 @@ function InterviewCard({ interview }: { interview: Interview }) {
   const isUpcoming = interview.scheduled_at && new Date(interview.scheduled_at) > new Date()
 
   const statusBadge: Record<string, string> = {
-    scheduled:  'bg-blue-50 text-blue-700',
-    completed:  'bg-teal-50 text-teal-700',
-    cancelled:  'bg-red-50 text-red-700',
-    rescheduled: 'bg-amber-50 text-amber-700',
+    scheduled:  'bg-primary/10 text-primary',
+    completed:  'bg-success/10 text-success',
+    cancelled:  'bg-destructive/10 text-destructive',
+    rescheduled: 'bg-warning/10 text-warning',
   }
 
   return (
-    <div className="flex gap-4 items-start p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-      <div className="h-9 w-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+    <div className="flex gap-4 items-start p-4 rounded-xl border border-border bg-muted/50">
+      <div className="h-9 w-9 rounded-lg bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
         {typeIcon}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-sm font-semibold text-slate-800">
+            <p className="text-sm font-semibold text-foreground">
               {interview.title || `Round ${interview.round_number}`}
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">{typeLabel}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{typeLabel}</p>
           </div>
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize flex-shrink-0 ${statusBadge[interview.status] ?? 'bg-slate-100 text-slate-600'}`}>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize flex-shrink-0 ${statusBadge[interview.status] ?? 'bg-muted text-muted-foreground'}`}>
             {interview.status}
           </span>
         </div>
-        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+        <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
           {interview.scheduled_at && (
             <span className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
@@ -209,7 +209,7 @@ function InterviewCard({ interview }: { interview: Interview }) {
             {interview.duration_mins} min
           </span>
           {isUpcoming && (
-            <span className="text-blue-600 font-medium">Upcoming</span>
+            <span className="text-primary font-medium">Upcoming</span>
           )}
         </div>
       </div>
@@ -227,7 +227,7 @@ export function CandidatePortal() {
 
   useEffect(() => {
     if (!token) { setNotFound(true); setLoading(false); return }
-    const API_URL = (import.meta as any).env?.VITE_API_URL || ''
+    const API_URL = (import.meta as ImportMeta & { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || ''
     fetch(`${API_URL}/recruitment/portal/candidate/${token}`)
       .then(r => {
         if (!r.ok) throw new Error('not_found')
@@ -240,7 +240,7 @@ export function CandidatePortal() {
   if (loading) {
     return (
       <PageShell>
-        <div className="flex flex-col items-center justify-center py-24 gap-4 text-slate-400">
+        <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
           <Loader2 className="h-8 w-8 animate-spin" />
           <p className="text-sm">Loading your application…</p>
         </div>
@@ -251,12 +251,12 @@ export function CandidatePortal() {
   if (notFound || !data) {
     return (
       <PageShell>
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-10 text-center">
-          <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
-            <XCircle className="h-8 w-8 text-slate-400" />
+        <div className="bg-white rounded-2xl border border-border shadow-sm p-10 text-center">
+          <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+            <XCircle className="h-8 w-8 text-muted-foreground" />
           </div>
-          <h2 className="text-lg font-semibold text-slate-800 mb-2">Application Not Found</h2>
-          <p className="text-slate-500 text-sm leading-relaxed">
+          <h2 className="text-lg font-semibold text-foreground mb-2">Application Not Found</h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">
             This link may have expired or the application doesn't exist.<br />
             Contact the recruiting team if you believe this is a mistake.
           </p>
@@ -271,16 +271,16 @@ export function CandidatePortal() {
   return (
     <PageShell>
       {/* Hero card */}
-      <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
         {/* Gradient strip */}
         <div className="h-1.5 bg-gradient-to-r from-[#2E6FE6] to-[#15B8A6]" />
         <div className="p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
                 {data.company_name}
               </p>
-              <h1 className="text-xl font-bold text-slate-900">
+              <h1 className="text-xl font-bold text-foreground">
                 Hi, {data.first_name || data.candidate_name}!
               </h1>
             </div>
@@ -293,18 +293,18 @@ export function CandidatePortal() {
             </span>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
-            <div className="flex items-center gap-2 text-sm text-slate-700">
-              <Briefcase className="h-4 w-4 text-slate-400 flex-shrink-0" />
+          <div className="mt-4 pt-4 border-t border-border space-y-2">
+            <div className="flex items-center gap-2 text-sm text-foreground">
+              <Briefcase className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <span className="font-semibold">{data.job_title}</span>
             </div>
             {data.department && (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
-                <MapPin className="h-4 w-4 text-slate-400 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <MapPin className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <span>{data.department}</span>
               </div>
             )}
-            <div className="flex items-center gap-2 text-sm text-slate-400">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Calendar className="h-4 w-4 flex-shrink-0" />
               <span>Applied on {appliedDate}</span>
             </div>
@@ -323,8 +323,8 @@ export function CandidatePortal() {
 
       {/* Interviews */}
       {data.interviews.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6">
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Interviews</h2>
+        <div className="bg-white rounded-2xl border border-border shadow-sm p-6">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Interviews</h2>
           <div className="space-y-3">
             {data.interviews.map(iv => (
               <InterviewCard key={iv.round_number} interview={iv} />
@@ -335,16 +335,16 @@ export function CandidatePortal() {
 
       {/* Status message for terminal states */}
       {(data.status === 'hired' || data.status === 'offer') && (
-        <div className="bg-teal-50 border border-teal-100 rounded-2xl p-5 text-center">
-          <p className="text-teal-800 font-semibold text-sm">🎉 Congratulations!</p>
-          <p className="text-teal-700 text-sm mt-1">
+        <div className="bg-success/10 border border-success/30 rounded-2xl p-5 text-center">
+          <p className="text-success font-semibold text-sm">🎉 Congratulations!</p>
+          <p className="text-success text-sm mt-1">
             Our team will reach out to you shortly with further details.
           </p>
         </div>
       )}
       {data.status === 'rejected' && (
-        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 text-center">
-          <p className="text-slate-600 text-sm leading-relaxed">
+        <div className="bg-muted border border-border rounded-2xl p-5 text-center">
+          <p className="text-muted-foreground text-sm leading-relaxed">
             Thank you for your time and interest. We wish you all the best in your career journey.
           </p>
         </div>

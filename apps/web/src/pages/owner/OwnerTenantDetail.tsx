@@ -30,8 +30,8 @@ interface ApiKeyRow   { id: string; name: string; key_prefix: string; scopes: st
 interface TenantAdmin { id: string; full_name: string; email: string | null; role: string; is_active: boolean; created_at: string }
 
 const STATUS_COLOR: Record<string, string> = {
-  active:    'text-emerald-600', trial: 'text-amber-600',
-  suspended: 'text-red-600',    expired: 'text-orange-600', cancelled: 'text-slate-500',
+  active:    'text-success', trial: 'text-warning',
+  suspended: 'text-destructive',    expired: 'text-warning', cancelled: 'text-muted-foreground',
 }
 
 function fmtDate(d: string | null) {
@@ -58,7 +58,7 @@ export function OwnerTenantDetail() {
   const qc               = useQueryClient()
   const { isOwner }      = useOwnerStore()
   const [editing, setEditing]       = useState(false)
-  const [editForm, setEditForm]     = useState<any>({})
+  const [editForm, setEditForm]     = useState<Record<string, string>>({})
   const [licenseMonths, setLicenseMonths] = useState('12')
 
   // Admin provisioning state
@@ -101,14 +101,14 @@ export function OwnerTenantDetail() {
       setShowAdminPwd(false)
       refetchAdmins()
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const toggleAdminMut = useMutation({
     mutationFn: ({ adminId, is_active }: { adminId: string; is_active: boolean }) =>
       ownerApi.patch(`/owner/tenants/${id}/admins/${adminId}`, { is_active }),
     onSuccess: () => { toast.success('Updated'); refetchAdmins() },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const resetPasswordMut = useMutation({
@@ -118,13 +118,13 @@ export function OwnerTenantDetail() {
         `/owner/tenants/${id}/admins/${adminId}/reset-password`,
         password && password.trim().length >= 8 ? { password: password.trim() } : {},
       ),
-    onSuccess: (res: any) => {
+    onSuccess: (res) => {
       setResetResult(res.data)
       setCopiedPwd(false)
       setResetAdminId(null)
       setResetPwd('')
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const copyPassword = useCallback((pwd: string) => {
@@ -150,7 +150,7 @@ export function OwnerTenantDetail() {
       ...editForm, per_employee_rate: Number(editForm.per_employee_rate) || 0,
     }),
     onSuccess: () => { toast.success('Tenant updated'); setEditing(false); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   function statusAction(action: 'activate' | 'suspend' | 'cancel') {
@@ -159,25 +159,25 @@ export function OwnerTenantDetail() {
     if (action === 'cancel'  && !window.confirm(`Cancel "${name}"'s subscription? They will lose write access.`)) return
     ownerApi.post(`/owner/tenants/${id}/${action}`)
       .then(() => { toast.success(`Tenant ${action}d`); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) })
-      .catch((e: any) => toast.error(e.message))
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 
   function issueLicense() {
     ownerApi.post(`/owner/tenants/${id}/license`, { months: Number(licenseMonths) })
       .then(() => { toast.success('License issued'); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }); qc.invalidateQueries({ queryKey: ['owner-tenants'] }) })
-      .catch((e: any) => toast.error(e.message))
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 
   function deleteTenant() {
     const name = t?.name ?? 'this tenant'
     if (!window.confirm(`Permanently DELETE "${name}" and ALL its data (employees, payroll, attendance, logins)?\n\nThis cannot be undone.`)) return
-    ownerApi.delete(`/owner/tenants/${id}`)
-      .then((res: any) => {
+    ownerApi.delete<{ message?: string }>(`/owner/tenants/${id}`)
+      .then((res) => {
         toast.success(res?.message ?? 'Tenant deleted')
         qc.invalidateQueries({ queryKey: ['owner-tenants'] })
         navigate('/owner/tenants')
       })
-      .catch((e: any) => toast.error(e.message))
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 
   if (isLoading) return (
@@ -198,7 +198,7 @@ export function OwnerTenantDetail() {
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
       {/* Back */}
-      <button onClick={() => navigate('/owner/tenants')} className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-teal-700 transition-colors">
+      <button onClick={() => navigate('/owner/tenants')} className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-primary transition-colors">
         <ArrowLeft className="h-4 w-4" /> Back to Tenants
       </button>
 
@@ -210,7 +210,7 @@ export function OwnerTenantDetail() {
             <span className="text-sm text-muted-foreground">{t.slug}</span>
             <span className={`text-[11px] font-semibold uppercase tracking-wide ${STATUS_COLOR[t.status]}`}>{t.status}</span>
             <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
-              t.plan === 'enterprise' ? 'border-purple-300 text-purple-700 bg-purple-100/70' : 'border-border text-muted-foreground bg-muted'
+              t.plan === 'enterprise' ? 'border-accent-violet/30 text-accent-violet bg-accent-violet/15' : 'border-border text-muted-foreground bg-muted'
             }`}>{t.plan}</span>
           </div>
         </div>
@@ -221,10 +221,10 @@ export function OwnerTenantDetail() {
                 <Edit2 className="h-3.5 w-3.5" /> Edit
               </Button>
             )}
-            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-emerald-600 bg-none hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20">Activate</Button>}
-            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" className="bg-amber-500 bg-none hover:bg-amber-600 text-white shadow-sm shadow-amber-500/20">Suspend</Button>}
+            {t.status !== 'active'    && <Button onClick={() => statusAction('activate')} size="sm" className="bg-success bg-none hover:bg-success/90 text-success-foreground shadow-sm shadow-success/20">Activate</Button>}
+            {t.status === 'active'    && <Button onClick={() => statusAction('suspend')}  size="sm" className="bg-warning bg-none hover:bg-warning/90 text-warning-foreground shadow-sm shadow-warning/20">Suspend</Button>}
             {t.status !== 'cancelled' && <Button onClick={() => statusAction('cancel')}   size="sm" className="bg-card bg-none backdrop-blur border border-border text-muted-foreground hover:bg-muted hover:text-foreground shadow-sm">Cancel</Button>}
-            <Button onClick={deleteTenant} size="sm" className="bg-card bg-none backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm gap-1.5">
+            <Button onClick={deleteTenant} size="sm" className="bg-card bg-none backdrop-blur border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive shadow-sm gap-1.5">
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
           </div>
@@ -233,7 +233,7 @@ export function OwnerTenantDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Details card */}
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4 space-y-4">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">Details</h2>
             {editing && (
@@ -261,7 +261,7 @@ export function OwnerTenantDetail() {
                     id={`edit-tenant-${key}`}
                     type={type}
                     value={editForm[key] ?? ''}
-                    onChange={e => setEditForm((f: any) => ({ ...f, [key]: e.target.value }))}
+                    onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
                     className="bg-muted border-border text-foreground h-8 text-sm"
                   />
                 </div>
@@ -271,7 +271,7 @@ export function OwnerTenantDetail() {
                 <select
                   id="edit-tenant-plan"
                   value={editForm.plan}
-                  onChange={e => setEditForm((f: any) => ({ ...f, plan: e.target.value }))}
+                  onChange={e => setEditForm(f => ({ ...f, plan: e.target.value }))}
                   className="w-full bg-muted border border-border rounded-md px-3 py-1.5 text-sm text-foreground"
                 >
                   <option value="standard">Standard</option>
@@ -302,7 +302,7 @@ export function OwnerTenantDetail() {
 
         {/* License management */}
         {isOwner() && (
-          <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4 space-y-4">
+          <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring p-4 space-y-4">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Award className="h-4 w-4 text-primary" /> License Management
             </h2>
@@ -331,7 +331,7 @@ export function OwnerTenantDetail() {
 
       {/* Billing snapshots */}
       {t.billing_snapshots.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-sm font-semibold text-foreground">Billing History</h2>
           </div>
@@ -362,7 +362,7 @@ export function OwnerTenantDetail() {
 
       {/* API keys */}
       {t.api_keys.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-sm font-semibold text-foreground">API Keys</h2>
           </div>
@@ -402,7 +402,7 @@ export function OwnerTenantDetail() {
       )}
 
       {/* ── Tenant Admins ──────────────────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-primary" />

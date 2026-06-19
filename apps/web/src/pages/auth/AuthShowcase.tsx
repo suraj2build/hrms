@@ -75,7 +75,7 @@ export function AuthShowcase() {
                 <p className="text-[10px] text-white/55">Attendance today</p>
               </div>
               <div className="text-right">
-                <p className="text-base font-semibold text-emerald-300">12</p>
+                <p className="text-base font-semibold text-success">12</p>
                 <p className="text-[10px] text-white/55">On leave</p>
               </div>
             </div>

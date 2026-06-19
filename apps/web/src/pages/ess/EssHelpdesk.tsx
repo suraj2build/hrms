@@ -66,7 +66,9 @@ const PRIORITIES = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function statusBadge(s: TicketStatus): { variant: string; label: string } {
+type BadgeVariant = 'default' | 'secondary' | 'outline' | 'success'
+
+function statusBadge(s: TicketStatus): { variant: BadgeVariant; label: string } {
   switch (s) {
     case 'open':              return { variant: 'secondary',   label: 'Open' }
     case 'in_progress':       return { variant: 'default',     label: 'In Progress' }
@@ -108,12 +110,12 @@ export function EssHelpdesk() {
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
     queryKey: ['helpdesk', 'my', statusFilter],
     queryFn:  () =>
-      api.get(`/helpdesk/tickets/my${statusFilter !== 'all' ? `?status=${statusFilter}` : ''}`).then((r: any) => r.data ?? []),
+      api.get<{ data?: Ticket[] }>(`/helpdesk/tickets/my${statusFilter !== 'all' ? `?status=${statusFilter}` : ''}`).then(r => r.data ?? []),
   })
 
   const { data: detail } = useQuery<Ticket | null>({
     queryKey: ['helpdesk', 'detail', openTicketId],
-    queryFn:  () => api.get(`/helpdesk/tickets/${openTicketId}`).then((r: any) => r.data ?? null),
+    queryFn:  () => api.get<{ data?: Ticket | null }>(`/helpdesk/tickets/${openTicketId}`).then(r => r.data ?? null),
     enabled:  !!openTicketId,
   })
 
@@ -203,13 +205,13 @@ export function EssHelpdesk() {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(t.priority))}>{t.priority}</Badge>
-                      <Badge variant={sb.variant as any} className="text-[10px]">{sb.label}</Badge>
+                      <Badge variant={sb.variant} className="text-[10px]">{sb.label}</Badge>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
                     <span className="capitalize">{t.category.replace('_', ' ')}</span>
                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{fmtDateTime(t.created_at)}</span>
-                    {breached && <span className="flex items-center gap-1 text-red-600"><AlertTriangle className="h-3 w-3" />SLA breached</span>}
+                    {breached && <span className="flex items-center gap-1 text-destructive"><AlertTriangle className="h-3 w-3" />SLA breached</span>}
                   </div>
                 </button>
               )
@@ -272,7 +274,7 @@ export function EssHelpdesk() {
               </DialogHeader>
               <div className="flex items-center gap-1.5 -mt-2">
                 <Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(detail.priority))}>{detail.priority}</Badge>
-                <Badge variant={statusBadge(detail.status).variant as any} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
+                <Badge variant={statusBadge(detail.status).variant} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
                 <span className="text-[10px] text-muted-foreground capitalize ml-1">{detail.category.replace('_', ' ')}</span>
               </div>
 

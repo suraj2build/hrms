@@ -14,7 +14,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
-import { Badge }         from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -57,7 +57,9 @@ interface SlaPolicy { priority: TicketPriority; response_hours: number; resoluti
 
 const STATUSES: TicketStatus[] = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed']
 
-function statusBadge(s: TicketStatus): { variant: string; label: string } {
+type BadgeVariant = NonNullable<BadgeProps['variant']>
+
+function statusBadge(s: TicketStatus): { variant: BadgeVariant; label: string } {
   switch (s) {
     case 'open':              return { variant: 'secondary', label: 'Open' }
     case 'in_progress':       return { variant: 'default',   label: 'In Progress' }
@@ -100,26 +102,26 @@ export function AdminHelpdesk() {
       if (statusF !== 'all')   params.set('status', statusF)
       if (priorityF !== 'all') params.set('priority', priorityF)
       const qsStr = params.toString()
-      return api.get(`/helpdesk/tickets${qsStr ? `?${qsStr}` : ''}`).then((r: any) => r.data ?? [])
+      return api.get<{ data: Ticket[] }>(`/helpdesk/tickets${qsStr ? `?${qsStr}` : ''}`).then(r => r.data ?? [])
     },
     enabled: isAdmin,
   })
 
   const { data: stats } = useQuery<Stats>({
     queryKey: ['admin-helpdesk', 'stats'],
-    queryFn:  () => api.get('/helpdesk/stats').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: Stats }>('/helpdesk/stats').then(r => r.data),
     enabled:  isAdmin,
   })
 
   const { data: agents = [] } = useQuery<Agent[]>({
     queryKey: ['admin-helpdesk', 'agents'],
-    queryFn:  () => api.get('/helpdesk/agents').then((r: any) => r.data ?? []),
+    queryFn:  () => api.get<{ data: Agent[] }>('/helpdesk/agents').then(r => r.data ?? []),
     enabled:  isAdmin,
   })
 
   const { data: detail } = useQuery<Ticket | null>({
     queryKey: ['admin-helpdesk', 'detail', openId],
-    queryFn:  () => api.get(`/helpdesk/tickets/${openId}`).then((r: any) => r.data ?? null),
+    queryFn:  () => api.get<{ data: Ticket | null }>(`/helpdesk/tickets/${openId}`).then(r => r.data ?? null),
     enabled:  !!openId,
   })
 
@@ -128,7 +130,7 @@ export function AdminHelpdesk() {
   const [slaDraft, setSlaDraft] = useState<SlaPolicy[] | null>(null)
   const { data: slaPolicies = [] } = useQuery<SlaPolicy[]>({
     queryKey: ['admin-helpdesk', 'sla-policies'],
-    queryFn:  () => api.get('/helpdesk/sla-policies').then((r: any) => r.data ?? []),
+    queryFn:  () => api.get<{ data: SlaPolicy[] }>('/helpdesk/sla-policies').then(r => r.data ?? []),
     enabled:  isAdmin,
   })
   const policyRows = slaDraft ?? slaPolicies
@@ -320,7 +322,7 @@ export function AdminHelpdesk() {
                       <td className="py-2 px-3 text-xs text-muted-foreground">{emp ? `${emp.first_name} ${emp.last_name}` : '—'}</td>
                       <td className="py-2 px-3 text-xs capitalize">{t.category.replace('_', ' ')}</td>
                       <td className="py-2 px-3"><Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(t.priority))}>{t.priority}</Badge></td>
-                      <td className="py-2 px-3"><Badge variant={sb.variant as any} className="text-[10px]">{sb.label}</Badge></td>
+                      <td className="py-2 px-3"><Badge variant={sb.variant} className="text-[10px]">{sb.label}</Badge></td>
                       <td className="py-2 px-3 text-xs text-muted-foreground">
                         {t.assigned_to ? (agents.find(a => a.id === t.assigned_to)?.full_name ?? 'Assigned') : <span className="text-muted-foreground/60">Unassigned</span>}
                       </td>
@@ -342,7 +344,7 @@ export function AdminHelpdesk() {
               <DialogHeader><DialogTitle className="pr-6">{detail.subject}</DialogTitle></DialogHeader>
               <div className="flex items-center gap-1.5 -mt-2 flex-wrap">
                 <Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(detail.priority))}>{detail.priority}</Badge>
-                <Badge variant={statusBadge(detail.status).variant as any} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
+                <Badge variant={statusBadge(detail.status).variant} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
                 <span className="text-[10px] text-muted-foreground capitalize">{detail.category.replace('_', ' ')}</span>
                 {detail.employees && <span className="text-[10px] text-muted-foreground">· {detail.employees.first_name} {detail.employees.last_name} ({detail.employees.employee_code})</span>}
                 {detail.sla_breached_at && !['resolved', 'closed'].includes(detail.status) && (

@@ -108,7 +108,7 @@ export function EssBenefits() {
       toast.success(vars.status === 'waived' ? 'Benefit waived' : 'Enrolled successfully')
       setOpenPlan(null)
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Could not save your election'),
+    onError: (e: Error) => toast.error(e?.message ?? 'Could not save your election'),
   })
 
   function startEnroll(plan: Plan) {

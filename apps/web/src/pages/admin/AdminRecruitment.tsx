@@ -11,7 +11,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Briefcase, Plus, RefreshCw, Search, ChevronDown,
+  Briefcase, Plus, RefreshCw, Search,
   CheckCircle2, PauseCircle, XCircle, MoreHorizontal,
   Users, CalendarClock, MapPin, Trash2,
 } from 'lucide-react'
@@ -98,9 +98,9 @@ const EMP_TYPE_LABELS: Record<string, string> = {
   full_time: 'Full-time', part_time: 'Part-time', contract: 'Contract', intern: 'Intern',
 }
 
-function fmt(n: number | null, prefix = '') {
-  if (n == null) return '—'
-  return prefix + n.toLocaleString('en-IN')
+function errMsg(e: unknown, fallback: string): string {
+  const apiErr = e as { response?: { data?: { message?: string } } }
+  return apiErr?.response?.data?.message ?? fallback
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -159,15 +159,15 @@ export function AdminRecruitment() {
       await api.post(endpoint, {})
       toast.success(successMsg)
       invalidate()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Action failed')
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Action failed'))
     }
   }
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/requisitions/${id}`),
     onSuccess: () => { toast.success('Requisition deleted'); invalidate() },
-    onError:   (e: any) => toast.error(e?.response?.data?.message ?? 'Delete failed'),
+    onError:   (e: unknown) => toast.error(errMsg(e, 'Delete failed')),
   })
 
   // ── Sheet helpers ──────────────────────────────────────────────────────────
@@ -201,7 +201,20 @@ export function AdminRecruitment() {
     if (!form.title.trim()) { toast.error('Title is required'); return }
     setSaving(true)
     try {
-      const payload: any = {
+      const payload: {
+        title: string
+        department_id: string | null
+        location: string | null
+        employment_type: string
+        openings: number
+        jd_text: string | null
+        required_skills: string[] | null
+        min_experience: number | null
+        max_experience: number | null
+        salary_min: number | null
+        salary_max: number | null
+        target_date: string | null
+      } = {
         title:           form.title.trim(),
         department_id:   form.department_id || null,
         location:        form.location || null,
@@ -224,8 +237,8 @@ export function AdminRecruitment() {
       }
       setSheetOpen(false)
       invalidate()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Save failed')
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Save failed'))
     } finally {
       setSaving(false)
     }
@@ -417,7 +430,7 @@ export function AdminRecruitment() {
                             )}
                             {canApprove && (
                               <DropdownMenuItem
-                                className="text-emerald-600"
+                                className="text-success"
                                 onClick={() => runAction(`/recruitment/requisitions/${r.id}/approve`, 'Approved and opened')}
                               >
                                 <CheckCircle2 className="h-3.5 w-3.5 mr-2" />Approve & Open

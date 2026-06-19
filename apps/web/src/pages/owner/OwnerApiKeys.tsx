@@ -53,13 +53,13 @@ export function OwnerApiKeys() {
       setForm({ tenant_id: '', name: 'Production', scopes: ['employees:read'] })
       qc.invalidateQueries({ queryKey: ['owner-api-keys'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const revokeMut = useMutation({
     mutationFn: (id: string) => ownerApi.delete(`/owner/api-keys/${id}`),
     onSuccess: () => { toast.success('Key revoked'); qc.invalidateQueries({ queryKey: ['owner-api-keys'] }) },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   function toggleScope(s: string) {
@@ -85,7 +85,7 @@ export function OwnerApiKeys() {
           <h1 className="text-2xl font-bold text-foreground">API Keys</h1>
           <p className="text-sm text-muted-foreground">{keys.filter(k => k.is_active).length} active keys</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 gap-1.5">
+        <Button onClick={() => setCreateOpen(true)} className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20 gap-1.5">
           <Plus className="h-4 w-4" /> Generate Key
         </Button>
       </div>
@@ -98,13 +98,13 @@ export function OwnerApiKeys() {
       )}
 
       {!isLoading && keys.length === 0 && (
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-muted-foreground">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] p-8 text-center text-muted-foreground">
           No API keys yet. Generate one for a tenant.
         </div>
       )}
 
       {Object.entries(byTenant).map(([tenantId, tKeys]) => (
-        <div key={tenantId} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+        <div key={tenantId} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border flex items-center gap-2">
             <Key className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-sm font-semibold text-foreground">{tenantNameMap[tenantId] ?? tenantId}</span>
@@ -119,7 +119,7 @@ export function OwnerApiKeys() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border">
               {tKeys.map(k => (
                 <tr key={k.id} className="hover:bg-muted">
                   <td className="px-4 py-2.5 text-foreground text-[13px]">{k.name}</td>
@@ -134,7 +134,7 @@ export function OwnerApiKeys() {
                   <td className="px-4 py-2.5 text-[12px] text-muted-foreground">{fmtDate(k.last_used_at)}</td>
                   <td className="px-4 py-2.5">
                     {k.is_active
-                      ? <span className="flex items-center gap-1 text-[11px] text-emerald-600"><CheckCircle2 className="h-3 w-3" /> Active</span>
+                      ? <span className="flex items-center gap-1 text-[11px] text-success"><CheckCircle2 className="h-3 w-3" /> Active</span>
                       : <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="h-3 w-3" /> Revoked</span>
                     }
                   </td>
@@ -142,7 +142,7 @@ export function OwnerApiKeys() {
                     {k.is_active && (
                       <button
                         onClick={() => revokeMut.mutate(k.id)}
-                        className="text-muted-foreground hover:text-red-600 transition-colors"
+                        className="text-muted-foreground hover:text-destructive transition-colors"
                         title="Revoke key"
                         aria-label="Revoke key"
                       >
@@ -207,7 +207,7 @@ export function OwnerApiKeys() {
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.tenant_id || !form.name || form.scopes.length === 0 || createMut.isPending}
-              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
+              className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20"
             >
               {createMut.isPending ? 'Generating…' : 'Generate Key'}
             </Button>
@@ -246,7 +246,7 @@ export function OwnerApiKeys() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => { setNewKey(null); setShowKey(false) }} className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20">
+            <Button onClick={() => { setNewKey(null); setShowKey(false) }} className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20">
               I've saved it
             </Button>
           </DialogFooter>

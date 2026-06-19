@@ -338,9 +338,9 @@ function LogoCard({
       onSaved(path)
       setPreview(signUrl)
       toast.success('Logo updated')
-    } catch (e: any) {
+    } catch (e: unknown) {
       setPreview(null)
-      toast.error('Upload failed', { description: e.message })
+      toast.error('Upload failed', { description: e instanceof Error ? e.message : String(e) })
     } finally {
       setUploading(false)
     }
@@ -447,8 +447,8 @@ function EmployeeCodeCard({ data, onSaved, activateTick }: {
       onSaved(prefix.toUpperCase())
       setEditing(false)
       toast.success('Employee code prefix updated')
-    } catch (e: any) {
-      toast.error('Failed to update prefix', { description: e.message })
+    } catch (e: unknown) {
+      toast.error('Failed to update prefix', { description: e instanceof Error ? e.message : String(e) })
     } finally {
       setSaving(false)
     }
@@ -577,8 +577,8 @@ function CompanyProfileCard({ data, onSaved, activateTick }: {
       onSaved(form)
       setEditing(false)
       toast.success('Company profile updated')
-    } catch (e: any) {
-      toast.error('Failed to save', { description: e.message })
+    } catch (e: unknown) {
+      toast.error('Failed to save', { description: e instanceof Error ? e.message : String(e) })
     } finally {
       setSaving(false)
     }
@@ -689,7 +689,7 @@ function CompanyProfileCard({ data, onSaved, activateTick }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function Settings() {
-  const { tenant, profile }  = useAuthStore()
+  const { tenant }  = useAuthStore()
   const qc          = useQueryClient()
 
   // tick-based activation: each key holds a counter; incrementing it fires
@@ -755,8 +755,8 @@ export function Settings() {
         data={company}
         activateTick={ticks.company}
         onSaved={(updated) => {
-          qc.setQueryData(['workspace-company'], (old: any) => ({
-            ...old, data: { ...old?.data, ...updated },
+          qc.setQueryData(['workspace-company'], (old: { data: CompanyData } | undefined) => ({
+            ...old, data: { ...old?.data, ...updated } as CompanyData,
           }))
         }}
       />
@@ -767,8 +767,8 @@ export function Settings() {
         tenantId={company.id ?? tenant?.id ?? ''}
         activateTick={ticks.logo}
         onSaved={(path) => {
-          qc.setQueryData(['workspace-company'], (old: any) => ({
-            ...old, data: { ...old?.data, logo_url: path },
+          qc.setQueryData(['workspace-company'], (old: { data: CompanyData } | undefined) => ({
+            ...old, data: { ...old?.data, logo_url: path } as CompanyData,
           }))
         }}
       />
@@ -778,11 +778,11 @@ export function Settings() {
         data={company.employee_code}
         activateTick={ticks.empcode}
         onSaved={(prefix) => {
-          qc.setQueryData(['workspace-company'], (old: any) => ({
+          qc.setQueryData(['workspace-company'], (old: { data: CompanyData } | undefined) => ({
             ...old, data: {
               ...old?.data,
               employee_code: { ...old?.data?.employee_code, prefix, example: `${prefix}${String((old?.data?.employee_code?.last_number ?? 0) + 1).padStart(4, '0')}` },
-            },
+            } as CompanyData,
           }))
         }}
       />

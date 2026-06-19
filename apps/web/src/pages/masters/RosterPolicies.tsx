@@ -326,14 +326,14 @@ export function RosterPolicies() {
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const duplicateMut = useMutation({
-    mutationFn: (id: string) => api.post(`/masters/rosters/${id}/duplicate`, {}),
-    onSuccess: (res: any) => {
+    mutationFn: (id: string) => api.post<{ data?: { id?: string } }>(`/masters/rosters/${id}/duplicate`, {}),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
       toast.success('Policy duplicated')
       // Navigate to the new copy
       if (res?.data?.id) navigate(`/admin/masters/rosters/${res.data.id}`)
     },
-    onError: (e: any) => toast.error('Failed to duplicate policy', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to duplicate policy', { description: e.message }),
   })
 
   const toggleActiveMut = useMutation({
@@ -343,7 +343,7 @@ export function RosterPolicies() {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
       toast.success(is_active ? 'Policy restored' : 'Policy archived')
     },
-    onError: (e: any) => toast.error('Failed to update policy', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to update policy', { description: e.message }),
   })
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -381,13 +381,13 @@ export function RosterPolicies() {
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground ml-6">
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500/70 inline-block" />Working
+            <span className="w-2.5 h-2.5 rounded-sm bg-success/70 inline-block" />Working
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-rose-500/70 inline-block" />Off
+            <span className="w-2.5 h-2.5 rounded-sm bg-destructive/70 inline-block" />Off
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-amber-400/70 inline-block" />Half Day
+            <span className="w-2.5 h-2.5 rounded-sm bg-warning/70 inline-block" />Half Day
           </span>
         </div>
       </div>

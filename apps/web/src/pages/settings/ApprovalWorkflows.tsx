@@ -29,7 +29,8 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
-import { Badge }         from '@/components/ui/badge'
+import { Badge, badgeVariants } from '@/components/ui/badge'
+import type { VariantProps } from 'class-variance-authority'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
@@ -99,14 +100,16 @@ const APPROVER_TYPE_LABELS: Record<ApproverType, string> = {
   specific_role:  'Specific Role',
 }
 
-const APPROVER_TYPE_VARIANT: Record<ApproverType, string> = {
+type BadgeVariant = VariantProps<typeof badgeVariants>['variant']
+
+const APPROVER_TYPE_VARIANT: Record<ApproverType, BadgeVariant> = {
   direct_manager: 'outline',
   hr_admin:       'secondary',
   super_admin:    'destructive',
   specific_role:  'info',
 }
 
-const STATUS_VARIANT: Record<InstanceStatus, string> = {
+const STATUS_VARIANT: Record<InstanceStatus, BadgeVariant> = {
   pending:       'warning',
   approved:      'success',
   rejected:      'destructive',
@@ -454,7 +457,7 @@ export function ApprovalWorkflows() {
                                   {cfg.label || APPROVER_TYPE_LABELS[cfg.approver_type]}
                                 </span>
                                 <Badge
-                                  variant={APPROVER_TYPE_VARIANT[cfg.approver_type] as any}
+                                  variant={APPROVER_TYPE_VARIANT[cfg.approver_type]}
                                   className="rounded-full text-[10px]"
                                 >
                                   {APPROVER_TYPE_LABELS[cfg.approver_type]}
@@ -550,7 +553,7 @@ export function ApprovalWorkflows() {
                       onClick={() => setExpandedInst(expandedInst === inst.id ? null : inst.id)}
                     >
                       <Badge
-                        variant={STATUS_VARIANT[inst.status] as any}
+                        variant={STATUS_VARIANT[inst.status]}
                         className="rounded-full text-[10px] flex-shrink-0"
                       >
                         {inst.status.replace('_', ' ')}

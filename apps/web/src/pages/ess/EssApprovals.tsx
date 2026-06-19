@@ -190,7 +190,7 @@ export function EssApprovals() {
   // ── Reimbursements ─────────────────────────────────────────────────────────
   const { data: reimbData, isLoading: reimbLoading } = useQuery<ReimbClaim[]>({
     queryKey: ['ess-approvals-reimb'],
-    queryFn:  () => api.get('/payroll/reimbursements/my').then((r: any) => r.data),
+    queryFn:  () => api.get<{ data: ReimbClaim[] }>('/payroll/reimbursements/my').then(r => r.data),
     enabled:  !!employeeId,
     staleTime: 30_000,
   })

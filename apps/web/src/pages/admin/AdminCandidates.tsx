@@ -8,11 +8,11 @@
  */
 
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Users2, Plus, RefreshCw, Search, Star, ExternalLink,
-  Mail, Phone, Building2, Briefcase, ChevronRight, X,
-  Globe, Linkedin, FileText, CalendarCheck, Video, MapPin,
+  Users2, Plus, RefreshCw, Search, Star,
+  Mail, Phone, Building2, Briefcase, ChevronRight,
+  Linkedin, FileText, CalendarCheck, Video, MapPin,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -32,7 +32,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { api }                from '@/lib/api/client'
+import { api, ApiError }      from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
 import { cn }                from '@/lib/utils'
 import { OfferLetterDialog } from './OfferLetterDialog'
@@ -184,7 +184,7 @@ export function AdminCandidates() {
     if (!form.email.trim()) { toast.error('Email is required'); return }
     setSaving(true)
     try {
-      const payload: any = {
+      const payload = {
         first_name:       form.first_name.trim(),
         last_name:        form.last_name.trim(),
         email:            form.email.trim(),
@@ -205,12 +205,11 @@ export function AdminCandidates() {
       }
       setSheetOpen(false)
       invalidate()
-    } catch (e: any) {
-      const msg = e?.response?.data?.message ?? 'Save failed'
-      if (e?.response?.data?.error === 'DUPLICATE_EMAIL') {
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.error === 'DUPLICATE_EMAIL') {
         toast.error('A candidate with this email already exists')
       } else {
-        toast.error(msg)
+        toast.error(e instanceof Error ? e.message : 'Save failed')
       }
     } finally {
       setSaving(false)
@@ -388,7 +387,7 @@ export function AdminCandidates() {
                               target="_blank"
                               rel="noreferrer"
                               onClick={e => e.stopPropagation()}
-                              className="text-muted-foreground hover:text-blue-600"
+                              className="text-muted-foreground hover:text-primary"
                               title="LinkedIn"
                             >
                               <Linkedin className="h-3.5 w-3.5" />
@@ -455,7 +454,7 @@ export function AdminCandidates() {
                 <h2 className="text-white font-semibold text-lg leading-tight">
                   {editTarget ? 'Edit Candidate' : 'Add New Candidate'}
                 </h2>
-                <p className="text-teal-100 text-sm mt-0.5">
+                <p className="text-[#ccfbf1] text-sm mt-0.5">
                   {editTarget ? 'Update candidate information' : 'Add a candidate to your talent pool'}
                 </p>
               </div>
@@ -603,7 +602,7 @@ export function AdminCandidates() {
                       {SOURCE_LABELS[detailCand.source] ?? detailCand.source}
                     </span>
                     {detailCand.linkedin_url && (
-                      <a href={detailCand.linkedin_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline flex items-center gap-1 text-xs">
+                      <a href={detailCand.linkedin_url} target="_blank" rel="noreferrer" className="text-primary hover:underline flex items-center gap-1 text-xs">
                         <Linkedin className="h-3 w-3" />LinkedIn
                       </a>
                     )}
@@ -697,7 +696,7 @@ export function AdminCandidates() {
                               </Badge>
                               {app.overall_score != null && (
                                 <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                                  <Star className="h-2.5 w-2.5 fill-current text-amber-500" />
+                                  <Star className="h-2.5 w-2.5 fill-current text-warning" />
                                   {app.overall_score}/10
                                 </span>
                               )}

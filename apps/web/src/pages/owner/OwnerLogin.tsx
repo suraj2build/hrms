@@ -66,16 +66,16 @@ export function OwnerLogin() {
       <div className="w-full max-w-sm space-y-7">
         {/* Branding */}
         <div className="text-center">
-          <div className="inline-grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-teal-500 to-indigo-600 shadow-xl shadow-teal-500/25 mb-5">
+          <div className="inline-grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-success to-primary shadow-xl shadow-success/25 mb-5">
             <LogoMark size={30} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-slate-900 to-slate-600 bg-clip-text text-transparent">
+          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
             Control Center
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5">Platform owner — sign in to continue</p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-xl p-6 shadow-xl shadow-slate-900/5">
+        <div className="rounded-2xl border border-border bg-card backdrop-blur-xl p-6 shadow-xl shadow-foreground/5">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="owner-login-email" className="text-sm font-medium text-foreground">Email</label>
@@ -83,10 +83,10 @@ export function OwnerLogin() {
                 id="owner-login-email"
                 type="email"
                 placeholder="owner@platform.local"
-                className="bg-card border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-teal-500/30"
+                className="bg-card border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-success/30"
                 {...register('email')}
               />
-              {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
 
             <div className="space-y-1.5">
@@ -96,7 +96,7 @@ export function OwnerLogin() {
                   id="owner-login-password"
                   type={showPw ? 'text' : 'password'}
                   placeholder="••••••••"
-                  className="bg-card border-border text-foreground placeholder:text-muted-foreground pr-10 focus-visible:ring-teal-500/30"
+                  className="bg-card border-border text-foreground placeholder:text-muted-foreground pr-10 focus-visible:ring-success/30"
                   {...register('password')}
                 />
                 <button
@@ -108,12 +108,12 @@ export function OwnerLogin() {
                   {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {errors.password && <p className="text-xs text-red-500">{errors.password.message}</p>}
+              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
 
             <Button
               type="submit"
-              className="w-full bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white shadow-lg shadow-teal-500/20 border-0"
+              className="w-full bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-white shadow-lg shadow-success/20 border-0"
               disabled={isSubmitting}
             >
               {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

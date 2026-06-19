@@ -21,7 +21,6 @@ import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
-import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
@@ -73,6 +72,11 @@ const DIFF_META: Record<string, { label: string; color: string }> = {
   easy:   { label: 'Easy',   color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
   medium: { label: 'Medium', color: 'text-amber-600   bg-amber-50   border-amber-200'  },
   hard:   { label: 'Hard',   color: 'text-red-600     bg-red-50     border-red-200'    },
+}
+
+function errMsg(e: unknown, fallback: string): string {
+  const apiErr = e as { response?: { data?: { message?: string } } }
+  return apiErr?.response?.data?.message ?? fallback
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -137,20 +141,20 @@ export function AdminQuestionBank() {
   const deleteCatMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/question-bank/categories/${id}`),
     onSuccess:  () => { toast.success('Category deleted'); qc.invalidateQueries({ queryKey: ['recruitment', 'qb-categories'] }) },
-    onError:    (e: any) => toast.error(e?.response?.data?.message ?? 'Delete failed'),
+    onError:    (e: unknown) => toast.error(errMsg(e, 'Delete failed')),
   })
 
   const deleteQMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/question-bank/items/${id}`),
     onSuccess:  () => { toast.success('Question deleted'); qc.invalidateQueries({ queryKey: ['recruitment', 'qb-items'] }) },
-    onError:    (e: any) => toast.error(e?.response?.data?.message ?? 'Delete failed'),
+    onError:    (e: unknown) => toast.error(errMsg(e, 'Delete failed')),
   })
 
   const toggleActiveMut = useMutation({
     mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
       api.put(`/recruitment/question-bank/items/${id}`, { is_active }),
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['recruitment', 'qb-items'] }),
-    onError:    (e: any) => toast.error(e?.response?.data?.message ?? 'Update failed'),
+    onError:    (e: unknown) => toast.error(errMsg(e, 'Update failed')),
   })
 
   // ── Category dialog handlers ───────────────────────────────────────────────
@@ -177,8 +181,8 @@ export function AdminQuestionBank() {
       }
       setCatDialog(false)
       qc.invalidateQueries({ queryKey: ['recruitment', 'qb-categories'] })
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Save failed')
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Save failed'))
     } finally { setCatSaving(false) }
   }
 
@@ -197,7 +201,12 @@ export function AdminQuestionBank() {
     if (!qText.trim()) { toast.error('Question text is required'); return }
     setQSaving(true)
     try {
-      const payload: any = {
+      const payload: {
+        question: string
+        model_answer: string | null
+        difficulty: string
+        tags: string[] | null
+      } = {
         question:     qText.trim(),
         model_answer: qAnswer.trim() || null,
         difficulty:   qDiff,
@@ -212,8 +221,8 @@ export function AdminQuestionBank() {
       }
       setQDialog(false)
       qc.invalidateQueries({ queryKey: ['recruitment', 'qb-items'] })
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message ?? 'Save failed')
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Save failed'))
     } finally { setQSaving(false) }
   }
 
@@ -303,7 +312,7 @@ export function AdminQuestionBank() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 px-2 text-xs text-red-600 hover:text-red-600"
+                          className="h-6 px-2 text-xs text-destructive hover:text-destructive"
                           onClick={() => deleteCatMut.mutate(cat.id)}
                           disabled={deleteCatMut.isPending}
                         >
@@ -433,7 +442,7 @@ export function AdminQuestionBank() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-xs text-red-600 hover:text-red-600 ml-auto"
+                              className="h-7 px-2 text-xs text-destructive hover:text-destructive ml-auto"
                               onClick={() => deleteQMut.mutate(q.id)}
                               disabled={deleteQMut.isPending}
                             >
@@ -459,7 +468,7 @@ export function AdminQuestionBank() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
-              <Label htmlFor="cat-name">Name <span className="text-red-500">*</span></Label>
+              <Label htmlFor="cat-name">Name <span className="text-destructive">*</span></Label>
               <Input id="cat-name" value={catName} onChange={e => setCatName(e.target.value)} placeholder="e.g. React & Frontend" className="mt-1" />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -506,7 +515,7 @@ export function AdminQuestionBank() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
-              <Label htmlFor="q-text">Question <span className="text-red-500">*</span></Label>
+              <Label htmlFor="q-text">Question <span className="text-destructive">*</span></Label>
               <textarea
                 id="q-text"
                 value={qText}

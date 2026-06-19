@@ -75,7 +75,7 @@ export function OwnerLayout() {
   if (!admin) return null
   if (!tokenReady) return (
     <div className="flex h-screen items-center justify-center bg-background">
-      <div className="h-5 w-5 rounded-full border-2 border-teal-500 border-t-transparent animate-spin" />
+      <div className="h-5 w-5 rounded-full border-2 border-success border-t-transparent animate-spin" />
     </div>
   )
 
@@ -89,7 +89,7 @@ export function OwnerLayout() {
       <aside className="w-60 flex-shrink-0 flex flex-col border-r border-border bg-card backdrop-blur-xl">
         {/* Logo */}
         <div className="h-16 flex items-center gap-3 px-5 border-b border-border">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-teal-500 to-indigo-600 shadow-lg shadow-teal-500/20">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-success to-primary shadow-lg shadow-success/20">
             <LogoMark size={20} className="text-white" />
           </div>
           <div className="min-w-0">
@@ -109,7 +109,7 @@ export function OwnerLayout() {
                 cn(
                   'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200',
                   isActive
-                    ? 'bg-gradient-to-r from-teal-500/10 to-indigo-500/10 text-teal-700 font-semibold shadow-sm ring-1 ring-teal-500/15'
+                    ? 'bg-gradient-to-r from-success/10 to-primary/10 text-success font-semibold shadow-sm ring-1 ring-success/15'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                 )
               }
@@ -117,12 +117,12 @@ export function OwnerLayout() {
               {({ isActive }) => (
                 <>
                   {isActive && (
-                    <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-teal-500 to-indigo-500" />
+                    <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-success to-primary" />
                   )}
-                  <Icon className={cn('h-[18px] w-[18px] flex-shrink-0 transition-colors', isActive ? 'text-teal-600' : 'text-muted-foreground group-hover:text-foreground')} />
+                  <Icon className={cn('h-[18px] w-[18px] flex-shrink-0 transition-colors', isActive ? 'text-success' : 'text-muted-foreground group-hover:text-foreground')} />
                   <span className="flex-1 truncate">{label}</span>
                   {badge && pendingCount > 0 && (
-                    <span className="h-5 min-w-5 px-1.5 rounded-full bg-amber-400 text-[10px] font-bold text-amber-950 flex items-center justify-center shadow-sm">
+                    <span className="h-5 min-w-5 px-1.5 rounded-full bg-warning text-[10px] font-bold text-warning-foreground flex items-center justify-center shadow-sm">
                       {pendingCount > 99 ? '99+' : pendingCount}
                     </span>
                   )}
@@ -138,7 +138,7 @@ export function OwnerLayout() {
             href="/login"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:text-teal-700 hover:bg-muted transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:text-success hover:bg-muted transition-colors"
           >
             <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
             <span>Open CognixHR App</span>
@@ -147,8 +147,8 @@ export function OwnerLayout() {
 
         {/* Bottom: admin info + logout */}
         <div className="border-t border-border p-3">
-          <div className="flex items-center gap-3 rounded-xl bg-muted px-3 py-2.5 ring-1 ring-slate-200/60">
-            <div className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-teal-500 flex-shrink-0 shadow-sm">
+          <div className="flex items-center gap-3 rounded-xl bg-muted px-3 py-2.5 ring-1 ring-border">
+            <div className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-primary to-success flex-shrink-0 shadow-sm">
               <span className="text-[11px] font-bold text-white">
                 {admin.name.charAt(0).toUpperCase()}
               </span>
@@ -159,7 +159,7 @@ export function OwnerLayout() {
             </div>
             <button
               onClick={handleLogout}
-              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
               title="Sign out"
               aria-label="Sign out"
             >

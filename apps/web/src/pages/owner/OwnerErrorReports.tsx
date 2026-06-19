@@ -66,7 +66,7 @@ export function OwnerErrorReports() {
       qc.invalidateQueries({ queryKey: ['owner-error-reports'] })
       qc.invalidateQueries({ queryKey: ['owner-error-report'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const d = detail?.data

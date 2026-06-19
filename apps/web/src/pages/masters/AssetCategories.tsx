@@ -106,15 +106,15 @@ export function AssetCategories() {
       setDlgOpen(false)
       toast.success(editItem ? 'Asset category updated' : 'Asset category created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/masters/asset-categories/${id}`),
-    onSuccess: (res: any) => {
+    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/asset-categories/${id}`),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['asset-categories'] })
       toast.success(res?.data?.deactivated ? 'Category deactivated (in use)' : 'Asset category deleted')
     },

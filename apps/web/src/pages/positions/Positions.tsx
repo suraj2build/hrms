@@ -127,17 +127,17 @@ export function Positions() {
   const createMut = useMutation({
     mutationFn: (f: FormState) => api.post('/positions', payload(f)),
     onSuccess: () => { toast.success('Position created'); invalidate(); setDialogOpen(false) },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to create position'),
+    onError: (e: Error) => toast.error(e.message ?? 'Failed to create position'),
   })
   const updateMut = useMutation({
     mutationFn: ({ id, f }: { id: string; f: FormState }) => api.put(`/positions/${id}`, payload(f)),
     onSuccess: () => { toast.success('Position updated'); invalidate(); setDialogOpen(false) },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to update position'),
+    onError: (e: Error) => toast.error(e.message ?? 'Failed to update position'),
   })
   const deleteMut = useMutation({
     mutationFn: ({ id, abolish }: { id: string; abolish: boolean }) => api.delete(`/positions/${id}`, abolish ? { abolish: true } : undefined),
     onSuccess: () => { toast.success('Position removed'); invalidate() },
-    onError: (e: any) => toast.error(e?.message ?? 'Failed to remove position'),
+    onError: (e: Error) => toast.error(e.message ?? 'Failed to remove position'),
   })
 
   function openCreate() {
@@ -318,7 +318,7 @@ export function Positions() {
             <RefSelect label="Work Location" value={form.work_location_id} options={locData?.data}  onChange={v => setForm(f => ({ ...f, work_location_id: v }))} />
             <div className="space-y-1.5">
               <Label>Status</Label>
-              <Select value={form.status} onValueChange={(v: any) => setForm(f => ({ ...f, status: v }))}>
+              <Select value={form.status} onValueChange={(v: FormState['status']) => setForm(f => ({ ...f, status: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="active">Active</SelectItem>

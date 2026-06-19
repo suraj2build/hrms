@@ -101,15 +101,15 @@ export function EmploymentCategories() {
       setDlgOpen(false)
       toast.success(editItem ? 'Category updated' : 'Category created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/masters/employment-categories/${id}`),
-    onSuccess: (res: any) => {
+    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/employment-categories/${id}`),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['employment-categories'] })
       toast.success(res?.data?.deactivated ? 'Category deactivated (in use)' : 'Category deleted')
     },

@@ -91,8 +91,8 @@ export function Grades() {
       setDlgOpen(false)
       toast.success(editItem ? 'Grade updated' : 'Grade created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
   })

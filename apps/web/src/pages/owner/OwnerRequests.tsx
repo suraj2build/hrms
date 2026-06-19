@@ -52,7 +52,7 @@ export function OwnerRequests() {
       qc.invalidateQueries({ queryKey: ['owner-tenants'] })
       qc.invalidateQueries({ queryKey: ['owner-dashboard'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const rejectMut = useMutation({
@@ -64,7 +64,7 @@ export function OwnerRequests() {
       qc.invalidateQueries({ queryKey: ['owner-requests'] })
       qc.invalidateQueries({ queryKey: ['owner-dashboard'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const requests = data?.data ?? []
@@ -85,7 +85,7 @@ export function OwnerRequests() {
             aria-pressed={statusFilt === s}
             className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
               statusFilt === s
-                ? 'bg-gradient-to-r from-teal-500 to-indigo-600 text-white shadow-md shadow-teal-500/20'
+                ? 'bg-gradient-to-r from-success to-primary text-white shadow-md shadow-success/20'
                 : 'bg-card backdrop-blur border border-border text-muted-foreground hover:text-foreground hover:bg-muted shadow-sm'
             }`}
           >
@@ -100,12 +100,12 @@ export function OwnerRequests() {
           <div key={i} className="h-28 bg-muted animate-pulse rounded-xl" />
         ))}
         {!isLoading && requests.length === 0 && (
-          <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-8 text-center text-muted-foreground">
+          <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-border p-8 text-center text-muted-foreground">
             No {statusFilt || ''} requests
           </div>
         )}
         {requests.map(r => (
-          <div key={r.id} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-slate-900/[0.04] p-4">
+          <div key={r.id} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-border p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3 min-w-0">
                 <div className="h-9 w-9 rounded-lg bg-muted border border-border flex items-center justify-center flex-shrink-0">
@@ -126,7 +126,7 @@ export function OwnerRequests() {
                     </p>
                   )}
                   {r.rejection_reason && (
-                    <p className="mt-1 text-[12px] text-red-600">Rejected: {r.rejection_reason}</p>
+                    <p className="mt-1 text-[12px] text-destructive">Rejected: {r.rejection_reason}</p>
                   )}
                 </div>
               </div>
@@ -135,7 +135,7 @@ export function OwnerRequests() {
                 <div className="text-right">
                   <p className="text-[10px] text-muted-foreground">{fmtDate(r.created_at)}</p>
                   <span className={`text-[11px] font-medium ${
-                    r.status === 'pending' ? 'text-amber-600' : r.status === 'approved' ? 'text-emerald-600' : 'text-red-600'
+                    r.status === 'pending' ? 'text-warning' : r.status === 'approved' ? 'text-success' : 'text-destructive'
                   }`}>
                     {r.status === 'pending' && <Clock className="h-3 w-3 inline mr-0.5" />}
                     {r.status}
@@ -146,7 +146,7 @@ export function OwnerRequests() {
                     <Button
                       onClick={() => { setApproveId(r.id); setApproveForm({ plan: 'standard', per_employee_rate: '' }) }}
                       size="sm"
-                      className="bg-emerald-600 bg-none hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20 h-7 text-xs gap-1"
+                      className="bg-success bg-none hover:bg-success/90 text-success-foreground shadow-sm shadow-success/20 h-7 text-xs gap-1"
                     >
                       <Check className="h-3 w-3" /> Approve
                     </Button>
@@ -154,7 +154,7 @@ export function OwnerRequests() {
                       onClick={() => { setRejectId(r.id); setRejectReason('') }}
                       size="sm"
                       variant="outline"
-                      className="bg-card bg-none backdrop-blur border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 shadow-sm h-7 text-xs gap-1"
+                      className="bg-card bg-none backdrop-blur border border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive shadow-sm h-7 text-xs gap-1"
                     >
                       <X className="h-3 w-3" /> Reject
                     </Button>
@@ -200,7 +200,7 @@ export function OwnerRequests() {
             <Button
               onClick={() => approveId && approveMut.mutate(approveId)}
               disabled={approveMut.isPending}
-              className="bg-emerald-600 bg-none hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20"
+              className="bg-success bg-none hover:bg-success/90 text-success-foreground shadow-sm shadow-success/20"
             >
               {approveMut.isPending ? 'Creating…' : 'Approve & Create'}
             </Button>
@@ -227,7 +227,7 @@ export function OwnerRequests() {
             <Button
               onClick={() => rejectId && rejectMut.mutate(rejectId)}
               disabled={!rejectReason.trim() || rejectMut.isPending}
-              className="bg-red-600 bg-none hover:bg-red-700 text-white shadow-sm shadow-red-600/20"
+              className="bg-destructive bg-none hover:bg-destructive/90 text-destructive-foreground shadow-sm shadow-destructive/20"
             >
               {rejectMut.isPending ? 'Rejecting…' : 'Reject'}
             </Button>

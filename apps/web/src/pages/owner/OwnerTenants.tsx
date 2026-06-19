@@ -35,19 +35,19 @@ interface TenantHealthResponse {
 }
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  active:    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />,
-  trial:     <Clock        className="h-3.5 w-3.5 text-amber-600" />,
-  suspended: <Ban          className="h-3.5 w-3.5 text-red-600" />,
-  expired:   <AlertTriangle className="h-3.5 w-3.5 text-orange-600" />,
-  cancelled: <XCircle      className="h-3.5 w-3.5 text-slate-500" />,
+  active:    <CheckCircle2 className="h-3.5 w-3.5 text-success" />,
+  trial:     <Clock        className="h-3.5 w-3.5 text-warning" />,
+  suspended: <Ban          className="h-3.5 w-3.5 text-destructive" />,
+  expired:   <AlertTriangle className="h-3.5 w-3.5 text-warning" />,
+  cancelled: <XCircle      className="h-3.5 w-3.5 text-muted-foreground" />,
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  active:    'border-emerald-300 text-emerald-700 bg-emerald-100/70',
-  trial:     'border-amber-300 text-amber-700 bg-amber-100/70',
-  suspended: 'border-red-300 text-red-700 bg-red-100/70',
-  expired:   'border-orange-300 text-orange-700 bg-orange-100/70',
-  cancelled: 'border-slate-200 text-slate-500 bg-slate-100',
+  active:    'border-success/30 text-success bg-success/15',
+  trial:     'border-warning/30 text-warning bg-warning/15',
+  suspended: 'border-destructive/30 text-destructive bg-destructive/15',
+  expired:   'border-warning/30 text-warning bg-warning/15',
+  cancelled: 'border-border text-muted-foreground bg-muted',
 }
 
 function fmtDate(d: string | null) {
@@ -146,7 +146,7 @@ export function OwnerTenants() {
       setShowPwd(false)
       qc.invalidateQueries({ queryKey: ['owner-tenants'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   const tenants = data?.data ?? []
@@ -162,7 +162,7 @@ export function OwnerTenants() {
         {isOwner() && (
           <Button
             onClick={() => setCreateOpen(true)}
-            className="shrink-0 bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-lg shadow-teal-500/20 gap-1.5"
+            className="shrink-0 bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-white border-0 shadow-lg shadow-success/20 gap-1.5"
           >
             <Plus className="h-4 w-4" /> New Tenant
           </Button>
@@ -187,7 +187,7 @@ export function OwnerTenants() {
             aria-pressed={statusFilt === s}
             className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
               statusFilt === s
-                ? 'bg-gradient-to-r from-teal-500 to-indigo-600 text-white shadow-md shadow-teal-500/20'
+                ? 'bg-gradient-to-r from-success to-primary text-white shadow-md shadow-success/20'
                 : 'bg-card backdrop-blur border border-border text-muted-foreground hover:text-foreground hover:bg-muted shadow-sm'
             }`}
           >
@@ -197,7 +197,7 @@ export function OwnerTenants() {
       </div>
 
       {/* Table */}
-      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.08)] ring-1 ring-border overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full min-w-[840px] text-sm">
           <thead className="bg-card border-b border-border">
@@ -225,9 +225,9 @@ export function OwnerTenants() {
               const h = healthMap.get(t.id)
               const lastPayroll = h?.last_payroll_run
               const payrollStatusColor: Record<string, string> = {
-                finalized: 'text-emerald-600',
-                processing: 'text-amber-600',
-                draft: 'text-slate-500',
+                finalized: 'text-success',
+                processing: 'text-warning',
+                draft: 'text-muted-foreground',
               }
               return (
               <tr
@@ -249,7 +249,7 @@ export function OwnerTenants() {
                 <td className="px-4 py-3">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${
                     t.plan === 'enterprise'
-                      ? 'border-purple-300 text-purple-700 bg-purple-100/70'
+                      ? 'border-primary/30 text-primary bg-primary/15'
                       : 'border-border text-muted-foreground bg-muted'
                   }`}>
                     {t.plan}
@@ -282,8 +282,8 @@ export function OwnerTenants() {
                   {h ? (
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-1.5 text-[12px]">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${h.active_users > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                        <span className={h.active_users > 0 ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}>
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${h.active_users > 0 ? 'bg-success' : 'bg-muted'}`} />
+                        <span className={h.active_users > 0 ? 'text-success font-medium' : 'text-muted-foreground'}>
                           {h.active_users} user{h.active_users !== 1 ? 's' : ''}
                         </span>
                       </div>
@@ -345,7 +345,7 @@ export function OwnerTenants() {
                   id={`new-tenant-${key}`}
                   type={type}
                   placeholder={placeholder}
-                  value={(form as any)[key]}
+                  value={form[key as keyof typeof form]}
                   onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                   className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-sm"
                 />
@@ -444,9 +444,9 @@ export function OwnerTenants() {
 
           {/* Show the generated password prominently before submit */}
           {form.admin_password && showPwd && (
-            <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-xs">
-              <span className="text-amber-800 font-semibold">Save this password: </span>
-              <code className="text-amber-950 font-mono font-semibold select-all">{form.admin_password}</code>
+            <div className="rounded-md bg-warning/10 border border-warning/30 px-3 py-2 text-xs">
+              <span className="text-warning font-semibold">Save this password: </span>
+              <code className="text-warning font-mono font-semibold select-all">{form.admin_password}</code>
             </div>
           )}
 
@@ -455,7 +455,7 @@ export function OwnerTenants() {
             <Button
               onClick={() => createMut.mutate()}
               disabled={!form.name.trim() || createMut.isPending}
-              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
+              className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-white border-0 shadow-md shadow-success/20"
             >
               {createMut.isPending ? 'Creating…' : 'Create Tenant'}
             </Button>

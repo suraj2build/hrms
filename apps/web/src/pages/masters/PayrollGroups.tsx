@@ -139,15 +139,15 @@ export function PayrollGroups() {
       setDlgOpen(false)
       toast.success(editItem ? 'Payroll group updated' : 'Payroll group created')
     },
-    onError: (e: any) => {
-      setErr(e?.message ?? 'Failed to save')
+    onError: (e: Error) => {
+      setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/masters/payroll-groups/${id}`),
-    onSuccess: (res: any) => {
+    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/payroll-groups/${id}`),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['payroll-groups'] })
       toast.success(res?.data?.deactivated ? 'Group deactivated (in use)' : 'Payroll group deleted')
     },

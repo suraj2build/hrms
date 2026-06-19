@@ -38,20 +38,20 @@ export function OwnerAdmins() {
   const admins = data?.data ?? []
 
   const inviteMut = useMutation({
-    mutationFn: () => ownerApi.post('/owner/admins', form),
-    onSuccess: (res: any) => {
+    mutationFn: () => ownerApi.post<{ message?: string }>('/owner/admins', form),
+    onSuccess: (res) => {
       toast.success(res.message ?? 'Invitation sent')
       setInviteOpen(false)
       setForm({ name: '', email: '', role: 'admin' })
       qc.invalidateQueries({ queryKey: ['owner-admins'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   function toggleActive(id: string, current: boolean) {
     ownerApi.patch(`/owner/admins/${id}`, { is_active: !current })
       .then(() => { toast.success(current ? 'Admin deactivated' : 'Admin activated'); qc.invalidateQueries({ queryKey: ['owner-admins'] }) })
-      .catch((e: any) => toast.error(e.message))
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 
   return (
@@ -62,7 +62,7 @@ export function OwnerAdmins() {
           <p className="text-sm text-muted-foreground">{admins.length} admin{admins.length !== 1 ? 's' : ''}</p>
         </div>
         {isOwner() && (
-          <Button onClick={() => setInviteOpen(true)} className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20 gap-1.5">
+          <Button onClick={() => setInviteOpen(true)} className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20 gap-1.5">
             <Plus className="h-4 w-4" /> Invite Admin
           </Button>
         )}
@@ -127,17 +127,17 @@ export function OwnerAdmins() {
         <DialogContent className="bg-card border-border text-foreground max-w-sm">
           <DialogHeader><DialogTitle>Invite Platform Admin</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            {[
+            {([
               { key: 'name',  label: 'Full Name *', type: 'text',  placeholder: 'Jane Smith' },
               { key: 'email', label: 'Email *',     type: 'email', placeholder: 'jane@platform.local' },
-            ].map(({ key, label, type, placeholder }) => (
+            ] as const).map(({ key, label, type, placeholder }) => (
               <div key={key} className="space-y-1.5">
                 <label htmlFor={`invite-admin-${key}`} className="text-sm font-medium text-foreground">{label}</label>
                 <Input
                   id={`invite-admin-${key}`}
                   type={type}
                   placeholder={placeholder}
-                  value={(form as any)[key]}
+                  value={form[key]}
                   onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                   className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                 />
@@ -164,7 +164,7 @@ export function OwnerAdmins() {
             <Button
               onClick={() => inviteMut.mutate()}
               disabled={!form.name.trim() || !form.email.trim() || inviteMut.isPending}
-              className="bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-teal-500/20"
+              className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20"
             >
               {inviteMut.isPending ? 'Sending…' : 'Send Invitation'}
             </Button>

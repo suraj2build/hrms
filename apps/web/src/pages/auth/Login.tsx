@@ -85,29 +85,29 @@ export function Login() {
             <LogoMark size={40} tile />
             <div>
               <Wordmark height={20} />
-              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.15em] text-slate-400">
+              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.15em] text-muted-foreground">
                 Smarter Workforce · Stronger Future
               </p>
             </div>
           </div>
 
           {/* Heading */}
-          <h1 className="text-[26px] font-bold tracking-tight text-slate-900">Welcome to CognixHR</h1>
-          <p className="mt-1.5 text-sm text-slate-500">
+          <h1 className="text-[26px] font-bold tracking-tight text-foreground">Welcome to CognixHR</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
             Sign in to your workforce workspace — payroll, attendance and people in one place.
           </p>
 
           {/* Sign in / Sign up segmented */}
-          <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+          <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl bg-muted p-1">
             <button
               type="button"
-              className="rounded-lg bg-white py-2 text-sm font-semibold text-slate-900 shadow-sm"
+              className="rounded-lg bg-white py-2 text-sm font-semibold text-foreground shadow-sm"
             >
               Sign In
             </button>
             <Link
               to="/signup"
-              className="rounded-lg py-2 text-center text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
+              className="rounded-lg py-2 text-center text-sm font-medium text-muted-foreground transition-colors hover:text-muted-foreground"
             >
               Sign Up
             </Link>
@@ -117,53 +117,53 @@ export function Login() {
           <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
             {/* Email */}
             <div>
-              <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-slate-700">
-                Email Address <span className="text-rose-500">*</span>
+              <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-foreground">
+                Email Address <span className="text-destructive">*</span>
               </label>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   id="email"
                   type="email"
                   placeholder="Enter your email address"
                   autoComplete="email"
                   {...register('email')}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none focus:ring-2 focus:ring-[#1A4D8F]/15"
+                  className="h-11 w-full rounded-xl border border-border bg-white pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none focus:ring-2 focus:ring-[#1A4D8F]/15"
                 />
               </div>
-              {errors.email && <p className="mt-1 text-xs text-rose-500">{errors.email.message}</p>}
+              {errors.email && <p className="mt-1 text-xs text-destructive">{errors.email.message}</p>}
             </div>
 
             {/* Password */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label htmlFor="password" className="text-sm font-medium text-slate-700">
-                  Password <span className="text-rose-500">*</span>
+                <label htmlFor="password" className="text-sm font-medium text-foreground">
+                  Password <span className="text-destructive">*</span>
                 </label>
                 <Link to="/forgot-password" className="text-xs font-medium text-[#1A4D8F] hover:underline">
                   Forgot password?
                 </Link>
               </div>
               <div className="relative">
-                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Enter your password"
                   autoComplete="current-password"
                   {...register('password')}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none focus:ring-2 focus:ring-[#1A4D8F]/15"
+                  className="h-11 w-full rounded-xl border border-border bg-white pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground shadow-sm transition-shadow focus:border-[#1A4D8F] focus:outline-none focus:ring-2 focus:ring-[#1A4D8F]/15"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-muted-foreground"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {errors.password && <p className="mt-1 text-xs text-rose-500">{errors.password.message}</p>}
+              {errors.password && <p className="mt-1 text-xs text-destructive">{errors.password.message}</p>}
             </div>
 
             {/* Sign in button — glossy */}
@@ -183,9 +183,9 @@ export function Login() {
 
           {/* Divider */}
           <div className="my-6 flex items-center gap-3">
-            <span className="h-px flex-1 bg-slate-200" />
-            <span className="text-xs text-slate-400">Or continue with</span>
-            <span className="h-px flex-1 bg-slate-200" />
+            <span className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">Or continue with</span>
+            <span className="h-px flex-1 bg-border" />
           </div>
 
           {/* Google SSO */}
@@ -193,7 +193,7 @@ export function Login() {
             type="button"
             onClick={signInWithGoogle}
             disabled={googleLoading}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-white text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:opacity-60"
           >
             {googleLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -209,10 +209,10 @@ export function Login() {
           </button>
 
           {/* Footer */}
-          <p className="mt-8 text-center text-[11px] text-slate-400">
+          <p className="mt-8 text-center text-[11px] text-muted-foreground">
             © {new Date().getFullYear()} CognixHR · All rights reserved ·{' '}
-            <Link to="/terms" className="hover:text-slate-600 hover:underline">Terms</Link> ·{' '}
-            <Link to="/privacy" className="hover:text-slate-600 hover:underline">Privacy Policy</Link>
+            <Link to="/terms" className="hover:text-foreground hover:underline">Terms</Link> ·{' '}
+            <Link to="/privacy" className="hover:text-foreground hover:underline">Privacy Policy</Link>
           </p>
         </div>
       </div>
