@@ -15,9 +15,9 @@ const buttonVariants = cva(
         // ── Core ─────────────────────────────────────────────────────────
         // Primary action = brand gradient (navy → azure)
         default:
-          'gloss-sheen bg-gradient-to-b from-[#2260A8] via-[#1E5BA8] to-[#163F75] text-white ' +
-          'shadow-[0_6px_16px_-6px_rgba(26,77,143,0.55)] ' +
-          'hover:brightness-[1.07] hover:shadow-[0_10px_22px_-8px_rgba(26,77,143,0.6)] active:brightness-95 transition-all',
+          'gloss-sheen bg-[image:var(--grad-btn)] text-white ' +
+          'shadow-[var(--shadow-btn)] ' +
+          'hover:brightness-[1.07] active:brightness-95 transition-all',
         secondary:
           'bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80',
         outline:
@@ -37,7 +37,7 @@ const buttonVariants = cva(
 
         // ── Legacy Aurora aliases — kept for backward compat ─────────────
         glass:   'bg-card border border-border text-foreground hover:bg-muted',
-        accent:  'gloss-sheen bg-gradient-to-b from-[#2260A8] via-[#1E5BA8] to-[#163F75] text-white shadow-[0_6px_16px_-6px_rgba(26,77,143,0.55)] hover:brightness-[1.07] active:brightness-95',
+        accent:  'gloss-sheen bg-[image:var(--grad-btn)] text-white shadow-[var(--shadow-btn)] hover:brightness-[1.07] active:brightness-95',
         magenta: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
         coral:   'bg-warning text-warning-foreground hover:bg-warning/90',
         teal:    'bg-info text-info-foreground hover:bg-info/90',

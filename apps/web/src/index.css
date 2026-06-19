@@ -184,6 +184,10 @@
   --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #F3F5F8 100%);
   --grad-orb-ring: linear-gradient(135deg, oklch(0.245 0.130 292), oklch(0.42 0.100 292));
 
+  /* Primary button gradient + shadow — theme-driven so petrol overrides cleanly */
+  --grad-btn:   linear-gradient(to bottom, #2260A8, #1E5BA8, #163F75);
+  --shadow-btn: 0 6px 16px -6px rgba(26,77,143,0.55);
+
   /* ── Operational severity surface tokens ────────────────── */
   --sev-critical-bg:   #FFF5F5;
   --sev-critical-bar:  #FCA5A5;
@@ -818,6 +822,10 @@
   --grad-primary: linear-gradient(135deg, #0F3D44 0%, #14505A 100%);
   --grad-sidebar: linear-gradient(180deg, #FFFFFF 0%, #F2F7F7 100%);
   --gradient-nav: linear-gradient(to right, #0C3840, #0F3D44, #145060);
+
+  /* Primary button gradient + shadow — petrol */
+  --grad-btn:   linear-gradient(to bottom, #14505A, #115059, #0C3840);
+  --shadow-btn: 0 6px 16px -6px rgba(15,61,68,0.55);
 
   --brand-navy:      #0F3D44;
   --brand-navy-deep: #062228;
