@@ -1769,3 +1769,17 @@
 :root[data-theme="dark"] .op-drawer { background: var(--card); border-left-color: var(--border); }
 :root[data-theme="dark"] .op-lane-critical { background: rgba(248,113,113,0.10); border-left-color: rgba(248,113,113,0.55); }
 :root[data-theme="dark"] .op-lane-high     { background: rgba(251,191,36,0.10);  border-left-color: rgba(251,191,36,0.50); }
+
+/* ── "Dark accent cards" (bg-foreground + text-background inversion) ──
+   Quick Actions panel, bulk-action bars etc. use bg-foreground/text-background
+   to render a dark card with light text in the light themes. Under dark the
+   tokens flip and they invert to a light card. Pin them to a distinct elevated
+   dark panel with light text instead. */
+:root[data-theme="dark"] .bg-foreground      { background-color: #241E48; }
+:root[data-theme="dark"] .bg-foreground\/95  { background-color: rgba(36,30,72,0.95); }
+:root[data-theme="dark"] .border-foreground  { border-color: rgba(255,255,255,0.10); }
+:root[data-theme="dark"] .text-background       { color: var(--foreground); }
+:root[data-theme="dark"] .text-background\/80   { color: color-mix(in oklab, var(--foreground) 80%, transparent); }
+:root[data-theme="dark"] .text-background\/50   { color: color-mix(in oklab, var(--foreground) 50%, transparent); }
+:root[data-theme="dark"] .text-background\/40   { color: color-mix(in oklab, var(--foreground) 40%, transparent); }
+:root[data-theme="dark"] .text-background\/20   { color: color-mix(in oklab, var(--foreground) 20%, transparent); }
