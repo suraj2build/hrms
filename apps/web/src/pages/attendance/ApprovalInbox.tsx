@@ -19,7 +19,6 @@ import {
   Inbox, CheckCircle2, XCircle, Loader2,
   CalendarDays, Clock, Filter, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, TrendingUp, ArrowUpDown, ArrowUp, ArrowDown,
-  GitBranch, CalendarClock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -305,8 +304,15 @@ function LeaveRequestsTable({
                 <tr
                   className={cn(
                     'border-b border-border/50 transition-colors hover:bg-muted/30',
-                    isActioning ? 'opacity-60 pointer-events-none' : '',
+                    isActioning ? 'opacity-60 pointer-events-none' : 'cursor-pointer',
                   )}
+                  title="View leave context — balance, team overlap & history"
+                  onClick={() => row.employees?.id && onLeaveContext({
+                    employeeId:   row.employees.id,
+                    from:         row.from_date,
+                    to:           row.to_date,
+                    employeeName: employeeName(row.employees),
+                  })}
                 >
                   {/* Employee */}
                   <td className="py-2 px-3">
@@ -364,7 +370,7 @@ function LeaveRequestsTable({
                       <button
                         className="text-left text-xs text-foreground line-clamp-2 hover:line-clamp-none"
                         title={row.reason}
-                        onClick={() => setExpandedRowId(isExpanded ? null : row.id)}
+                        onClick={(e) => { e.stopPropagation(); setExpandedRowId(isExpanded ? null : row.id) }}
                       >
                         {row.reason}
                         {row.reason.length > 60 && (
@@ -402,7 +408,8 @@ function LeaveRequestsTable({
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs gap-1 border-success/40 text-success hover:bg-success/10"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
                             setActionRowId(row.id)
                             setRejectRowId(null)
                             approveMutation.mutate(row.id)
@@ -415,28 +422,11 @@ function LeaveRequestsTable({
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
-                          onClick={() => setRejectRowId(isRejecting ? null : row.id)}
+                          onClick={(e) => { e.stopPropagation(); setRejectRowId(isRejecting ? null : row.id) }}
                         >
                           <XCircle className="h-3.5 w-3.5" />
                           Reject
                         </Button>
-                        {/* Leave-context trigger — balance, team overlap & history */}
-                        {row.employees?.id && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0 text-muted-foreground hover:text-info"
-                            title="View leave context — balance, team overlap & history"
-                            onClick={() => onLeaveContext({
-                              employeeId:   row.employees!.id,
-                              from:         row.from_date,
-                              to:           row.to_date,
-                              employeeName: employeeName(row.employees),
-                            })}
-                          >
-                            <CalendarClock className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
                       </div>
                     )}
                   </td>
@@ -547,8 +537,14 @@ function RegularisationTable({
                 <tr
                   className={cn(
                     'border-b border-border/50 transition-colors hover:bg-muted/30',
-                    isActioning ? 'opacity-60 pointer-events-none' : '',
+                    isActioning ? 'opacity-60 pointer-events-none' : 'cursor-pointer',
                   )}
+                  title="View attendance timeline for this date"
+                  onClick={() => row.employees?.id && onForensics({
+                    employeeId:   row.employees.id,
+                    date:         row.date,
+                    employeeName: employeeName(row.employees),
+                  })}
                 >
                   {/* Employee — Q4: payroll badge · Q7: rejection reason */}
                   <td className="py-2 px-3">
@@ -605,7 +601,7 @@ function RegularisationTable({
                       <button
                         className="text-left text-xs text-foreground line-clamp-2 hover:line-clamp-none"
                         title={row.reason}
-                        onClick={() => setExpandedRowId(isExpanded ? null : row.id)}
+                        onClick={(e) => { e.stopPropagation(); setExpandedRowId(isExpanded ? null : row.id) }}
                       >
                         {row.reason}
                         {row.reason.length > 60 && (
@@ -645,7 +641,8 @@ function RegularisationTable({
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs gap-1 border-success/40 text-success hover:bg-success/10"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
                             setActionRowId(row.id)
                             setRejectRowId(null)
                             approveMutation.mutate(row.id)
@@ -658,27 +655,11 @@ function RegularisationTable({
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
-                          onClick={() => setRejectRowId(isRejecting ? null : row.id)}
+                          onClick={(e) => { e.stopPropagation(); setRejectRowId(isRejecting ? null : row.id) }}
                         >
                           <XCircle className="h-3.5 w-3.5" />
                           Reject
                         </Button>
-                        {/* Q2 — forensics trigger in actions column */}
-                        {row.employees?.id && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0 text-muted-foreground hover:text-info"
-                            title="View attendance timeline"
-                            onClick={() => onForensics({
-                              employeeId:   row.employees!.id,
-                              date:         row.date,
-                              employeeName: employeeName(row.employees),
-                            })}
-                          >
-                            <GitBranch className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
                       </div>
                     )}
                   </td>
