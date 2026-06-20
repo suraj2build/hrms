@@ -116,6 +116,19 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/employees/org-tree') {
     return { data: fx.demoEmployeeList }
   }
+  // /employees/options — identity picker (RoleSwitcher → Employee Self Service)
+  if (path === '/employees/options') {
+    const s = (q.search || '').toLowerCase()
+    const opts = fx.demoEmployeeList
+      .filter(e =>
+        !s ||
+        `${e.first_name} ${e.last_name}`.toLowerCase().includes(s) ||
+        e.employee_code.toLowerCase().includes(s)
+      )
+      .slice(0, Number(q.limit) || 25)
+      .map(e => ({ id: e.id, first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code }))
+    return { data: opts }
+  }
   // /employees/:id/full-profile
   let mm = path.match(/^\/employees\/([^/]+)\/full-profile$/)
   if (mm) return fx.demoFullProfile(mm[1])
@@ -452,7 +465,15 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
         },
         compliance: { probation_due: false, separation_stage: null, assets_assigned: 0, assets: [] },
         compensation: emp ? { ctc_annual: fx.demoActiveComp(mm[1]).ctc_annual, effective_from: '2025-04-01' } : null,
-        leave: { balances: fx.demoLeaveBalances() },
+        leave: {
+          // Employee 360 reads lb.leave_type (the NAME) — map it explicitly so
+          // the widget never falls back to showing the raw id.
+          balances: fx.demoLeaveBalances().map(b => ({
+            leave_type: b.leave_types?.name ?? 'Leave',
+            balance: b.balance,
+            used: b.used,
+          })),
+        },
         attendance_signal: 'normal',
         onboarding: null,
         summary: 'Employee is performing well with no open compliance items.',
