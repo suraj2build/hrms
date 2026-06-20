@@ -90,9 +90,9 @@ export function AttendanceOperationsCenter() {
   // ── Critical alert ──────────────────────────────────────────────────────────
   const criticalAlert = !isLoading && (stats?.payroll_continuity_gaps ?? 0) > 0
     ? {
-        message:     `${stats!.payroll_continuity_gaps} attendance → payroll continuity gap${stats!.payroll_continuity_gaps === 1 ? '' : 's'} detected — payroll accuracy at risk.`,
-        actionLabel: 'Investigate',
-        onAction:    () => navigate('/admin/attendance/anomalies'),
+        message:     `${stats!.payroll_continuity_gaps} active employee${stats!.payroll_continuity_gaps === 1 ? '' : 's'} without an active salary structure — payroll cannot be computed for them.`,
+        actionLabel: 'Review payroll readiness',
+        onAction:    () => navigate('/admin/payroll-readiness'),
         severity:    'critical' as const,
       }
     : !isLoading && stats?.is_processing
@@ -152,10 +152,10 @@ export function AttendanceOperationsCenter() {
 
     if ((stats?.payroll_continuity_gaps ?? 0) > 0) {
       continuityItems.push({
-        id: 'payroll-gaps', title: 'Attendance → Payroll gaps',
-        description: "Attendance data doesn't match payroll inputs for some employees",
+        id: 'payroll-gaps', title: 'Missing compensation',
+        description: 'Active employees without an active salary structure — payroll cannot be computed for them.',
         severity: 'critical' as const, count: stats!.payroll_continuity_gaps,
-        action: 'Investigate gaps', onAction: () => navigate('/admin/attendance/anomalies'),
+        action: 'Review payroll readiness', onAction: () => navigate('/admin/payroll-readiness'),
       })
     }
     if ((stats?.staffing_pressure ?? 0) > 0) {
@@ -252,10 +252,10 @@ export function AttendanceOperationsCenter() {
             />
             <OperationalMetricChip
               value={isLoading ? '—' : (stats?.payroll_continuity_gaps ?? 0)}
-              label="Payroll Gaps"
+              label="Missing Comp"
               severity={(stats?.payroll_continuity_gaps ?? 0) > 0 ? 'critical' : 'success'}
               icon={TrendingDown}
-              onClick={() => navigate('/admin/attendance/anomalies')}
+              onClick={() => navigate('/admin/payroll-readiness')}
             />
             <div className="w-px h-8 bg-border/50 flex-shrink-0 mx-1" />
             <OperationalMetricChip

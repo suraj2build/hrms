@@ -138,7 +138,9 @@ const BASE_SECTIONS: NavSection[] = [
         items: [
           { label: 'Team Dashboard',  icon: LayoutDashboard, href: '/manager/dashboard',      exact: true },
           { label: 'Who Is In',       icon: Radio,           href: '/manager/team/who-is-in'              },
-          { label: 'Team Attendance', icon: CalendarDays,    href: '/manager/team/attendance'             },
+          // "Team Attendance" removed — it rendered the admin-style Attendance
+          // Operations command center, which is not appropriate for managers.
+          // Managers see team attendance via the Team Dashboard heatmap.
           // Single Approvals entry — Leave, Regularisation, Overtime, Comp-Off and
           // Loans are now sub-tabs inside the Approval Inbox (routes still exist
           // for deep-links).
