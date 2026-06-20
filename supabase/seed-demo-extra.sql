@@ -26,7 +26,11 @@ begin
     'advance_recovery_schedules','advance_salary_requests',
     'benefit_enrollments','benefit_plans',
     'generated_letters','letter_templates',
-    'documents'
+    'documents',
+    'employee_onboarding_tasks','employee_onboarding_checklists',
+    'onboarding_checklist_items','onboarding_checklist_templates',
+    'separation_clearances','separation_ff_summary','employee_separation',
+    'employee_nominations','employee_certifications'
   ] loop
     if to_regclass(t) is not null then
       execute format('delete from %I where tenant_id = $1', t) using tid;
@@ -121,9 +125,84 @@ insert into generated_letters (tenant_id, template_id, employee_id, subject, bod
  ('d0000000-0000-0000-0000-000000000001','b7000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001','Salary Certificate — Priya Sharma',      '<p>This is to certify that Priya Sharma (SAAR001) is employed with Demo as Chief HR Officer.</p>', 'issued', 0, now() - interval '15 days','e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001'),
  ('d0000000-0000-0000-0000-000000000001','b7000000-0000-0000-0000-000000000002','e0000000-0000-0000-0000-000000000003','Employment Verification — Deepak Chawla','<p>This letter confirms the employment of Deepak Chawla as Senior Software Engineer.</p>',         'issued', 0, now() - interval '8 days', 'e0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001');
 
+-- ============================================================================
+--  7. ONBOARDING  (template + checklist items + two in-flight employee journeys)
+-- ============================================================================
+insert into onboarding_checklist_templates (id, tenant_id, name, description, is_default, is_active) values
+ ('f1000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','Standard New Hire Onboarding','Default 2-week onboarding journey for all new joiners.', true, true);
+
+insert into onboarding_checklist_items (id, tenant_id, template_id, title, description, category, due_day_offset, assigned_to_role, is_mandatory, sort_order) values
+ ('f2000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','f1000000-0000-0000-0000-000000000001','Collect signed offer letter & ID proofs','Signed offer, PAN, Aadhaar and address proof on file.', 'document_collection',  1, 'hr',      true, 1),
+ ('f2000000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001','f1000000-0000-0000-0000-000000000001','Issue laptop & peripherals',            'Allocate hardware as per role and record the asset.',  'it_setup',             1, 'it',      true, 2),
+ ('f2000000-0000-0000-0000-000000000003','d0000000-0000-0000-0000-000000000001','f1000000-0000-0000-0000-000000000001','Create email & system accounts',        'Provision email, SSO and core application access.',    'access_provisioning',  1, 'it',      true, 3),
+ ('f2000000-0000-0000-0000-000000000004','d0000000-0000-0000-0000-000000000001','f1000000-0000-0000-0000-000000000001','HR induction & policy walkthrough',     'Cover leave, attendance, code of conduct and benefits.','induction',            2, 'hr',      true, 4),
+ ('f2000000-0000-0000-0000-000000000005','d0000000-0000-0000-0000-000000000001','f1000000-0000-0000-0000-000000000001','Statutory & compliance forms',          'PF, ESI and tax declaration forms completed.',         'compliance',           3, 'hr',      true, 5),
+ ('f2000000-0000-0000-0000-000000000006','d0000000-0000-0000-0000-000000000001','f1000000-0000-0000-0000-000000000001','Team introduction & buddy assignment',  'Introduce to the team and assign an onboarding buddy.','other',                5, 'manager', false,6);
+
+insert into employee_onboarding_checklists (id, tenant_id, employee_id, template_id, status, start_date, target_completion_date, completed_at) values
+ ('f3000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000a','f1000000-0000-0000-0000-000000000001','in_progress', current_date - 6, current_date + 8,  null),
+ ('f3000000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000b','f1000000-0000-0000-0000-000000000001','not_started', current_date,     current_date + 14, null);
+
+-- Rohan (in progress): first three done, induction underway, rest pending
+insert into employee_onboarding_tasks (tenant_id, checklist_id, item_id, title, category, due_date, assigned_to_role, is_mandatory, status, completed_by, completed_at, sort_order) values
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000001','Collect signed offer letter & ID proofs','document_collection',  current_date - 5, 'hr',      true, 'completed',   'd0000000-0000-0000-0000-0000000000a1', now() - interval '5 days', 1),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000002','Issue laptop & peripherals',            'it_setup',             current_date - 5, 'it',      true, 'completed',   'd0000000-0000-0000-0000-0000000000a1', now() - interval '4 days', 2),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000003','Create email & system accounts',        'access_provisioning',  current_date - 5, 'it',      true, 'completed',   'd0000000-0000-0000-0000-0000000000a1', now() - interval '4 days', 3),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000004','HR induction & policy walkthrough',     'induction',            current_date - 4, 'hr',      true, 'in_progress', null, null, 4),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000005','Statutory & compliance forms',          'compliance',           current_date - 3, 'hr',      true, 'pending',     null, null, 5),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000006','Team introduction & buddy assignment',  'other',                current_date - 1, 'manager', false,'pending',     null, null, 6);
+
+-- Ananya (not started): all tasks queued
+insert into employee_onboarding_tasks (tenant_id, checklist_id, item_id, title, category, due_date, assigned_to_role, is_mandatory, status, completed_by, completed_at, sort_order) values
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000002','f2000000-0000-0000-0000-000000000001','Collect signed offer letter & ID proofs','document_collection',  current_date + 1, 'hr',      true, 'pending', null, null, 1),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000002','f2000000-0000-0000-0000-000000000002','Issue laptop & peripherals',            'it_setup',             current_date + 1, 'it',      true, 'pending', null, null, 2),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000002','f2000000-0000-0000-0000-000000000003','Create email & system accounts',        'access_provisioning',  current_date + 1, 'it',      true, 'pending', null, null, 3),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000002','f2000000-0000-0000-0000-000000000004','HR induction & policy walkthrough',     'induction',            current_date + 2, 'hr',      true, 'pending', null, null, 4),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000002','f2000000-0000-0000-0000-000000000005','Statutory & compliance forms',          'compliance',           current_date + 3, 'hr',      true, 'pending', null, null, 5),
+ ('d0000000-0000-0000-0000-000000000001','f3000000-0000-0000-0000-000000000002','f2000000-0000-0000-0000-000000000006','Team introduction & buddy assignment',  'other',                current_date + 5, 'manager', false,'pending', null, null, 6);
+
+-- ============================================================================
+--  8. SEPARATION  (one in clearance, one in notice period) + clearances + F&F
+-- ============================================================================
+insert into employee_separation (id, tenant_id, employee_id, separation_type, initiated_by, notice_date, last_working_date, exit_reason, exit_interview_done, exit_interview_date, clearance_done, remarks, lifecycle_stage, approval_status, approved_by, approved_at, created_by) values
+ ('f4000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','resignation','employee', current_date - 20, current_date + 10, 'Accepted a senior role at another firm.', false, null, false, 'Serving a 30-day notice period; clearances in progress.', 'clearance',     'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '18 days', 'd0000000-0000-0000-0000-0000000000a1'),
+ ('f4000000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000b','resignation','employee', current_date - 3,  current_date + 27, 'Relocating to another city for family reasons.', false, null, false, 'Resignation submitted; pending HR approval.',          'notice_period', 'pending',  null, null, 'd0000000-0000-0000-0000-0000000000a1');
+
+-- Vikram's department clearances (HR & manager cleared, IT & finance pending)
+insert into separation_clearances (tenant_id, separation_id, employee_id, department, status, cleared_by, cleared_at, remarks) values
+ ('d0000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','hr',      'cleared', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '6 days', 'Full & final documentation verified.'),
+ ('d0000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','manager', 'cleared', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '5 days', 'Knowledge transfer completed.'),
+ ('d0000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','it',      'pending', null, null, null),
+ ('d0000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','finance', 'pending', null, null, null),
+ ('d0000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','admin',   'cleared', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '4 days', 'Access card and ID badge returned.');
+
+-- Vikram's draft full-and-final settlement
+insert into separation_ff_summary (tenant_id, separation_id, employee_id, last_payroll_amount, leave_encashment_amount, gratuity_amount, notice_period_deduction, other_deductions, other_additions, status, notes) values
+ ('d0000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008', 78000, 42000, 165000, 0, 5200, 0, 'draft', 'Gratuity for 4+ years of service; one outstanding asset recovery pending.');
+
+-- ============================================================================
+--  9. NOMINATIONS  (PF / gratuity nominees)
+-- ============================================================================
+insert into employee_nominations (tenant_id, employee_id, scheme, nominee_name, dob, share_percentage, address, is_minor, guardian_name) values
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001','pf',       'Aarav Sharma',  '1985-03-12', 100, 'Indiranagar, Bengaluru', false, null),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001','gratuity', 'Aarav Sharma',  '1985-03-12', 100, 'Indiranagar, Bengaluru', false, null),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000003','pf',       'Meena Chawla',  '1990-07-25',  60, 'Andheri West, Mumbai',   false, null),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000003','pf',       'Ishaan Chawla', '2016-09-01',  40, 'Andheri West, Mumbai',   true,  'Meena Chawla'),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','gratuity', 'Pooja Singh',   '1992-11-30', 100, 'Sector 21, Gurugram',    false, null);
+
+-- ============================================================================
+--  10. CERTIFICATIONS  (professional credentials, mix of active & expired)
+-- ============================================================================
+insert into employee_certifications (tenant_id, employee_id, cert_name, cert_type, issuing_body, cert_number, issue_date, expiry_date, status, notes) values
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001','SHRM-SCP',                              'certification','SHRM',                    'SHRM-2022-44817', '2022-05-15', '2025-05-15', 'active',  'Senior Certified Professional.'),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000003','AWS Certified Solutions Architect',     'certification','Amazon Web Services',     'AWS-SAA-99213',   '2023-06-01', '2026-06-01', 'active',  'Associate level.'),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000005','PMP',                                   'certification','Project Management Institute','PMP-7781234', '2021-09-20', '2024-09-20', 'expired', 'Renewal pending PDU submission.'),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000c','Certified Scrum Master',                'certification','Scrum Alliance',          'CSM-553120',      '2023-01-10', '2025-01-10', 'active',  null);
+
 commit;
 
 -- ============================================================================
---  DONE. Attendance exceptions, reimbursements, advances, documents, benefits
---  and letters now have demo data.
+--  DONE. Attendance exceptions, reimbursements, advances, documents, benefits,
+--  letters, onboarding journeys, separations/F&F, nominations and
+--  certifications now have demo data.
 -- ============================================================================
