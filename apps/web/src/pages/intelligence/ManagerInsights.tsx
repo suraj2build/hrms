@@ -5,7 +5,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
-import { Loader2, Users, Clock, AlertTriangle } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 
 interface ManagerSummaryData {
   summary:                 string
@@ -32,36 +32,17 @@ export function ManagerInsights() {
   )
   if (error || !d) return null
 
+  // Headline stats (team size, pending, probation, joiners) live in the identity
+  // header, the attendance strip and the lifecycle rails — so this panel is now a
+  // single AI-style insight line, not a repeated stat grid.
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-4">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Team Intelligence</p>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="space-y-0.5">
-          <p className="text-2xl font-bold text-foreground">{d.team_size}</p>
-          <p className="text-xs text-muted-foreground flex items-center gap-1">
-            <Users className="h-3 w-3" /> Team Size
-          </p>
-        </div>
-        <div className="space-y-0.5">
-          <p className="text-2xl font-bold text-foreground">{d.new_joiners_this_month}</p>
-          <p className="text-xs text-muted-foreground">New This Month</p>
-        </div>
-        <div className={d.probation_due > 0 ? 'text-accent-coral space-y-0.5' : 'space-y-0.5'}>
-          <p className="text-2xl font-bold">{d.probation_due}</p>
-          <p className="text-xs text-muted-foreground flex items-center gap-1">
-            <AlertTriangle className="h-3 w-3" /> Probation Due
-          </p>
-        </div>
-        <div className={d.pending_leave_approvals > 0 ? 'text-info space-y-0.5' : 'space-y-0.5'}>
-          <p className="text-2xl font-bold">{d.pending_leave_approvals}</p>
-          <p className="text-xs text-muted-foreground flex items-center gap-1">
-            <Clock className="h-3 w-3" /> Leave Pending
-          </p>
-        </div>
+    <div className="rounded-lg border border-border bg-card px-4 py-3 flex items-start gap-3">
+      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10">
+        <Sparkles className="h-3.5 w-3.5 text-primary" />
       </div>
-      <div className="rounded-md bg-muted/40 px-3 py-2">
-        <p className="text-xs leading-relaxed text-foreground">{d.summary}</p>
-        <p className="text-[10px] text-muted-foreground mt-1">Source: employees · leave_requests</p>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Team Intelligence</p>
+        <p className="mt-0.5 text-sm leading-relaxed text-foreground">{d.summary}</p>
       </div>
     </div>
   )
