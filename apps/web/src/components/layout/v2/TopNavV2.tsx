@@ -21,6 +21,7 @@ import { NotificationCenter } from '@/components/operational/NotificationCenter'
 import { NotificationBell }   from '@/components/notifications'
 import { useAuthStore }        from '@/stores/authStore'
 import { ThemeMenu }           from '@/components/theme-toggle'
+import { RoleSwitcher }        from '@/components/layout/RoleSwitcher'
 import { getInitials }         from '@/lib/utils'
 import { supabase }            from '@/lib/supabase/client'
 import { toast }               from 'sonner'
@@ -154,6 +155,10 @@ export function TopNavV2({ onSearchOpen: _onSearchOpen }: { onSearchOpen?: () =>
             </span>
           )}
         </div>
+
+        {/* Workspace switcher — Admin Portal · Manager · Employee Self Service.
+            Lets admins (incl. the public Demo Admin) preview the ESS experience. */}
+        <RoleSwitcher />
 
         {/* Executive Mode toggle — super_admin + hr_admin only */}
         {canExecMode && (
