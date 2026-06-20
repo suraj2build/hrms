@@ -18,8 +18,11 @@ import { useMemo, useState }      from 'react'
 import { useQuery }               from '@tanstack/react-query'
 import {
   TrendingUp, Users, Clock, AlertTriangle,
-  CheckCircle2, ChevronUp, ChevronDown, Minus,
+  CheckCircle2, ChevronUp, ChevronDown, Minus, CalendarDays,
 } from 'lucide-react'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetBody,
+} from '@/components/ui/sheet'
 import { api }          from '@/lib/api/client'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -182,12 +185,151 @@ function RateBar({ value, color }: { value: number; color: string }) {
 
 type SortKey = 'name' | 'attendanceRate' | 'punctualityRate' | 'avgDailyHours' | 'tier'
 
+// ── Day-status presentation (for the drill-down drawer) ───────────────────────
+
+const DAY_STATUS: Record<string, { label: string; color: string; bg: string }> = {
+  present:    { label: 'Present',    color: '#0a6d4a', bg: '#ecfdf5' },
+  late:       { label: 'Late',       color: '#92400e', bg: '#fffbeb' },
+  half_day:   { label: 'Half day',   color: '#1d4ed8', bg: '#eff6ff' },
+  early_out:  { label: 'Early out',  color: '#92400e', bg: '#fffbeb' },
+  on_duty:    { label: 'On duty',    color: '#1d4ed8', bg: '#eff6ff' },
+  leave:      { label: 'Leave',      color: '#6d28d9', bg: '#f5f3ff' },
+  absent:     { label: 'Absent',     color: '#9f1239', bg: '#fff0f2' },
+  lop:        { label: 'LOP',        color: '#9f1239', bg: '#fff0f2' },
+  holiday:    { label: 'Holiday',    color: '#475569', bg: '#f1f5f9' },
+  weekend:    { label: 'Weekend',    color: '#94a3b8', bg: '#f8fafc' },
+  weekly_off: { label: 'Weekly off', color: '#94a3b8', bg: '#f8fafc' },
+  not_marked: { label: 'Not marked', color: '#9f1239', bg: '#fff0f2' },
+}
+
+function dayStatusOf(row: DailyRow): { key: string; cfg: { label: string; color: string; bg: string } } {
+  let s = row.status?.toLowerCase() ?? ''
+  if (!s || s === 'missing_punch') s = 'not_marked'
+  if ((s === '' || s === 'not_marked') && isWeekend(row.date)) s = 'weekend'
+  const cfg = DAY_STATUS[s] ?? DAY_STATUS.not_marked
+  return { key: s, cfg }
+}
+
+function fmtDayLabel(dateStr: string): string {
+  try {
+    return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-IN', {
+      weekday: 'short', day: '2-digit', month: 'short',
+    })
+  } catch { return dateStr }
+}
+
+// ── Per-member day-wise drill-down drawer ─────────────────────────────────────
+
+function PerformanceDrawer({
+  metric, daily, onClose,
+}: {
+  metric: MemberMetrics | null
+  daily:  DailyRow[]
+  onClose: () => void
+}) {
+  // Most-recent first; working days (incl. exceptions) and off-days both shown,
+  // off-days rendered muted so a manager can scan the working pattern quickly.
+  const rows = useMemo(
+    () => [...daily].sort((a, b) => (a.date < b.date ? 1 : -1)),
+    [daily],
+  )
+  const tc = metric ? TIER_CONFIG[metric.tier] : null
+
+  const stat = (label: string, value: string | number, color = 'var(--foreground)') => (
+    <div style={{ textAlign: 'center', flex: 1 }}>
+      <div style={{ fontSize: 9.5, color: 'var(--muted-foreground)', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color, fontFamily: '"Geist Mono",ui-monospace,monospace', marginTop: 2 }}>{value}</div>
+    </div>
+  )
+
+  return (
+    <Sheet open={!!metric} onOpenChange={open => { if (!open) onClose() }}>
+      <SheetContent size="md">
+        <SheetHeader>
+          <div className="flex items-start justify-between pr-8">
+            <div>
+              <SheetTitle className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-primary" />
+                {metric?.name ?? 'Member'}
+              </SheetTitle>
+              <SheetDescription>
+                {metric?.employee_code} · day-wise attendance
+              </SheetDescription>
+            </div>
+            {tc && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', borderRadius: 999, background: tc.bg, color: tc.color,
+                fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: tc.dot }} />
+                {tc.label}
+              </span>
+            )}
+          </div>
+
+          {metric && (
+            <div style={{ display: 'flex', gap: 4, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+              {stat('Attend', `${fmt2(metric.attendanceRate)}%`, metric.attendanceRate >= 85 ? '#10b981' : metric.attendanceRate >= 70 ? '#f59e0b' : '#f43f5e')}
+              {stat('Punct',  `${fmt2(metric.punctualityRate)}%`, metric.punctualityRate >= 90 ? '#10b981' : metric.punctualityRate >= 75 ? '#f59e0b' : '#f43f5e')}
+              {stat('Present', `${metric.presentDays}/${metric.workingDays}`)}
+              {stat('Late',   metric.lateDays, metric.lateDays > 0 ? '#f59e0b' : 'var(--foreground)')}
+              {stat('Absent', metric.absentDays, metric.absentDays > 0 ? '#f43f5e' : 'var(--foreground)')}
+              {stat('Leave',  metric.leaveDays)}
+            </div>
+          )}
+        </SheetHeader>
+
+        <SheetBody>
+          {rows.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--muted-foreground)' }}>
+              <CalendarDays style={{ width: 28, height: 28, opacity: .25, margin: '0 auto 10px' }} />
+              <p style={{ fontSize: 12 }}>No attendance records in this window.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {rows.map(row => {
+                const { key, cfg } = dayStatusOf(row)
+                const isOff = key === 'weekend' || key === 'weekly_off' || key === 'holiday'
+                return (
+                  <div key={row.date} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 10px', borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: isOff ? 'var(--muted)' : 'var(--card)',
+                    opacity: isOff ? .7 : 1,
+                  }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', minWidth: 110 }}>
+                      {fmtDayLabel(row.date)}
+                    </span>
+                    <span style={{ flex: 1, textAlign: 'right', fontSize: 11.5, color: 'var(--muted-foreground)', fontFamily: '"Geist Mono",ui-monospace,monospace', marginRight: 12 }}>
+                      {row.work_hours > 0 ? `${fmt2(row.work_hours)}h` : '—'}
+                    </span>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 9px', borderRadius: 999,
+                      background: cfg.bg, color: cfg.color, fontSize: 10.5, fontWeight: 700,
+                      minWidth: 72, textAlign: 'center',
+                    }}>
+                      {cfg.label}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </SheetBody>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ManagerTeamPerformance() {
   const [win,     setWin]     = useState<Window>(30)
   const [sortKey, setSortKey] = useState<SortKey>('attendanceRate')
   const [sortAsc, setSortAsc] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const { from, to } = useMemo(() => buildDateRange(win), [win])
 
@@ -220,11 +362,20 @@ export function ManagerTeamPerformance() {
   const loading = dashLoading || attLoading
 
   // ── Compute metrics ─────────────────────────────────────────────────────────
+  const dailyByEmp = useMemo(
+    () => new Map((rawAttendance ?? []).map(r => [r.id, r.daily as DailyRow[]])),
+    [rawAttendance],
+  )
+
   const metrics: MemberMetrics[] = useMemo(() => {
     if (!rawAttendance || teamMembers.length === 0) return []
-    const attMap = new Map(rawAttendance.map(r => [r.id, r.daily as DailyRow[]]))
-    return teamMembers.map(m => computeMetrics(m, attMap.get(m.employee_id) ?? []))
-  }, [rawAttendance, teamMembers])
+    return teamMembers.map(m => computeMetrics(m, dailyByEmp.get(m.employee_id) ?? []))
+  }, [rawAttendance, teamMembers, dailyByEmp])
+
+  const selectedMetric = useMemo(
+    () => metrics.find(m => m.employee_id === selectedId) ?? null,
+    [metrics, selectedId],
+  )
 
   // ── Sort ────────────────────────────────────────────────────────────────────
   const sorted = useMemo(() => {
@@ -429,6 +580,11 @@ export function ManagerTeamPerformance() {
           return (
             <div
               key={m.employee_id}
+              role="button"
+              tabIndex={0}
+              title="View day-wise attendance"
+              onClick={() => setSelectedId(m.employee_id)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(m.employee_id) } }}
               style={{
                 display: 'grid',
                 gridTemplateColumns: '1fr 110px 140px 140px 110px 130px',
@@ -437,6 +593,7 @@ export function ManagerTeamPerformance() {
                 borderBottom: idx < sorted.length - 1 ? '1px solid var(--border)' : 'none',
                 alignItems: 'center',
                 transition: 'background .1s',
+                cursor: 'pointer',
               }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--muted)'}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = ''}
@@ -524,10 +681,17 @@ export function ManagerTeamPerformance() {
             </div>
           ))}
           <span style={{ marginLeft: 'auto', fontSize: 10.5 }}>
-            Weekends & public holidays excluded · Based on attendance records
+            Weekends & public holidays excluded · Based on attendance records · Click a row for the day-wise breakdown
           </span>
         </div>
       )}
+
+      {/* ── Day-wise drill-down drawer ─────────────────────────────────── */}
+      <PerformanceDrawer
+        metric={selectedMetric}
+        daily={selectedId ? (dailyByEmp.get(selectedId) ?? []) : []}
+        onClose={() => setSelectedId(null)}
+      />
 
     </div>
   )
