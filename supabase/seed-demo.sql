@@ -234,9 +234,8 @@ from employees e where e.tenant_id = 'd0000000-0000-0000-0000-000000000001';
 -- ============================================================================
 --  5. COMPENSATION  (one active comp per employee + component breakdown)
 -- ============================================================================
-insert into employee_compensations (id, tenant_id, employee_id, salary_structure_id, effective_from, ctc_annual, is_active)
-select ('c0000000-0000-0000-0000-0000000000' || substr(e.id, 35, 2))::uuid,
-       'd0000000-0000-0000-0000-000000000001', e.id, 'aa000000-0000-0000-0000-000000000001',
+insert into employee_compensations (tenant_id, employee_id, salary_structure_id, effective_from, ctc_annual, is_active)
+select 'd0000000-0000-0000-0000-000000000001', e.id, 'aa000000-0000-0000-0000-000000000001',
        e.joining_date, x.ctc, true
 from employees e
 join (values
