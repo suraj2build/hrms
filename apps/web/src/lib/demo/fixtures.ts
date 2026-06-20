@@ -939,6 +939,60 @@ export function demoProcessStatus() {
   return { is_running: false, started_at: null, started_by: null, lock_ttl_seconds: null }
 }
 
+// Processing runs history (Operational Health).
+export function demoProcessRuns() {
+  return [0, 1, 2, 3, 4].map(i => ({
+    id: `run-att-${i}`,
+    status: 'completed',
+    completed_at: ISO(daysAgo(i)),
+    started_at: ISO(daysAgo(i)),
+    processed_count: SEEDS.length,
+    skipped_count: 0,
+    incomplete_count: 0,
+    error_message: null,
+    duration_ms: 4000 + i * 120,
+  }))
+}
+
+// Attendance AI intelligence — returned BOTH flat and wrapped (.data) so
+// OperationalHealth (flat) and WorkforceIntelligence (.data) both work.
+export function demoAttendanceIntelligence() {
+  const summary = {
+    at_risk_count: 1,
+    open_anomalies: 0,
+    avg_risk_score: 22,
+    computed_at: new Date().toISOString(),
+  }
+  const at_risk = [
+    {
+      employee_id: demoEmployeeList[5].id,
+      name: `${demoEmployeeList[5].first_name} ${demoEmployeeList[5].last_name}`,
+      employee_code: demoEmployeeList[5].employee_code,
+      risk_score: 42,
+      reasons: ['2 late arrivals in last 14 days'],
+      anomaly_count: 0,
+      flag_types: ['punctuality'] as string[],
+    },
+  ]
+  const last14 = Array.from({ length: 14 }, (_, k) => {
+    const d = DAY(daysAgo(13 - k))
+    return { date: d, open: 0, resolved: k % 5 === 0 ? 1 : 0, total: k % 5 === 0 ? 1 : 0 }
+  })
+  const trends = {
+    daily: last14,
+    anomaly_by_type: { late_arrival: 3, missing_punch: 1 } as Record<string, number>,
+    anomaly_by_severity: { low: 3, medium: 1 } as Record<string, number>,
+  }
+  const patterns = {
+    repeat_offenders: [] as typeof at_risk,
+    top_anomaly_types: [
+      { type: 'late_arrival', count: 3, pct: 75 },
+      { type: 'missing_punch', count: 1, pct: 25 },
+    ],
+  }
+  return { summary, at_risk, trends, patterns, data: { summary, at_risk, trends, patterns }, cached: true, computed_at: new Date().toISOString() }
+}
+
 export function demoUploadHealth() {
   return {
     status: 'healthy' as const,

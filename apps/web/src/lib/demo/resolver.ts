@@ -33,6 +33,14 @@ const LIST_HINTS = [
   'documents', 'contracts', 'notifications', 'contributions', 'slips',
   'plans', 'schedule', 'claims', 'reimbursements', 'declarations',
   'advances', 'loans', 'approvals', 'clearances', 'updates',
+  'runs', 'failures', 'flags', 'conflicts', 'locks', 'rules', 'drafts',
+  'checklists', 'addresses', 'nominations', 'decisions', 'controls',
+  'evaluations', 'tickets', 'grants', 'freezes', 'cards', 'visas',
+  'banks', 'accounts', 'policies', 'pools', 'cycles', 'batches',
+  'exceptions', 'gaps', 'issues', 'warnings', 'offenders', 'flags',
+  'attachments', 'comments', 'notes', 'tasks', 'steps', 'stages',
+  'members', 'reportees', 'candidates', 'requisitions', 'interviews',
+  'offers', 'letters', 'families', 'identities', 'access-cards',
 ]
 
 function isListish(path: string): boolean {
@@ -176,6 +184,14 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     const rows = fx.demoAttendanceAudit()
     return { data: rows, total: rows.length }
   }
+  if (path === '/attendance/process/runs') return { data: fx.demoProcessRuns() }
+  if (path === '/attendance/anomalies/summary') return { open_count: 0, resolved_today: 0 }
+  if (path === '/attendance/regularisation/summary') {
+    return { pending_count: 0, approved_today: 0, oldest_pending_days: null }
+  }
+  if (path === '/attendance/intelligence') return fx.demoAttendanceIntelligence()
+  if (path === '/attendance/intelligence/flags') return { data: [], total: 0 }
+  if (path.startsWith('/attendance/intelligence/')) return { data: [], total: 0 }
   if (path === '/attendance/upload-health') return fx.demoUploadHealth()
   if (path === '/attendance/upload-sessions') return { data: fx.demoUploadSessions() }
   if (path === '/attendance/sample-csv') {
