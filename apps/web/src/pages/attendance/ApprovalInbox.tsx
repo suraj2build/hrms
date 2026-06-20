@@ -29,8 +29,8 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
-import { ForensicsDrawer } from '@/components/operational/ForensicsDrawer'
 import { LeaveContextDrawer, type LeaveContextTarget } from '@/components/operational/LeaveContextDrawer'
+import { RegularisationContextDrawer, type RegularisationContextTarget } from '@/components/operational/RegularisationContextDrawer'
 import {
   IntelligenceLoadingSkeleton,
   IntelligenceEmptyState,
@@ -146,13 +146,6 @@ function AgeBadge({ createdAt }: { createdAt: string }) {
   )
 }
 
-// ── Shared types ──────────────────────────────────────────────────────────────
-
-interface ForensicsTarget {
-  employeeId:   string
-  date:         string
-  employeeName?: string
-}
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -461,11 +454,11 @@ function LeaveRequestsTable({
 function RegularisationTable({
   items,
   onRefresh,
-  onForensics,
+  onRegContext,
 }: {
-  items:       RegularisationItem[]
-  onRefresh:   () => void
-  onForensics: (t: ForensicsTarget) => void
+  items:        RegularisationItem[]
+  onRefresh:    () => void
+  onRegContext: (t: RegularisationContextTarget) => void
 }) {
   const queryClient = useQueryClient()
   const [actionRowId,   setActionRowId]   = useState<string | null>(null)
@@ -539,11 +532,14 @@ function RegularisationTable({
                     'border-b border-border/50 transition-colors hover:bg-muted/30',
                     isActioning ? 'opacity-60 pointer-events-none' : 'cursor-pointer',
                   )}
-                  title="View attendance timeline for this date"
-                  onClick={() => row.employees?.id && onForensics({
+                  title="View regularisation context — attendance trend & history"
+                  onClick={() => row.employees?.id && onRegContext({
                     employeeId:   row.employees.id,
                     date:         row.date,
                     employeeName: employeeName(row.employees),
+                    requestedIn:  row.requested_check_in,
+                    requestedOut: row.requested_check_out,
+                    reason:       row.reason,
                   })}
                 >
                   {/* Employee — Q4: payroll badge · Q7: rejection reason */}
@@ -745,8 +741,8 @@ export function ApprovalInbox() {
   const [regPage,    setRegPage]    = useState(1)
   // Q3 — sort-by-age: cycles none → asc (oldest first) → desc (newest first)
   const [sortOrder,       setSortOrder]       = useState<SortOrder>('none')
-  // Q2 — forensics drawer target; null = closed (regularisation tab only)
-  const [forensicsTarget, setForensicsTarget] = useState<ForensicsTarget | null>(null)
+  // Regularisation-context drawer target; null = closed (regularisation tab)
+  const [regContextTarget, setRegContextTarget] = useState<RegularisationContextTarget | null>(null)
   // Leave-context drawer target; null = closed (leave tab)
   const [leaveContextTarget, setLeaveContextTarget] = useState<LeaveContextTarget | null>(null)
 
@@ -969,7 +965,7 @@ export function ApprovalInbox() {
             </div>
           }
         >
-          <RegularisationTable items={displayReg} onRefresh={refetch} onForensics={t => setForensicsTarget(t)} />
+          <RegularisationTable items={displayReg} onRefresh={refetch} onRegContext={t => setRegContextTarget(t)} />
 
           <PaginationBar
             page={regPage}
@@ -993,10 +989,10 @@ export function ApprovalInbox() {
         </div>
       )}
 
-      {/* Forensics drawer — regularisation tab (past-date punch trace) */}
-      <ForensicsDrawer
-        target={forensicsTarget}
-        onClose={() => setForensicsTarget(null)}
+      {/* Regularisation-context drawer — attendance trend, current record & history */}
+      <RegularisationContextDrawer
+        target={regContextTarget}
+        onClose={() => setRegContextTarget(null)}
       />
 
       {/* Leave-context drawer — leave tab (balance, team overlap & history) */}

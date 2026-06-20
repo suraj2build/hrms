@@ -162,6 +162,7 @@ import managerTeamAssetsRoute              from './routes/manager/team-assets.js
 import managerTeamHelpdeskRoute            from './routes/manager/team-helpdesk.js'
 import managerTeamPayrollCostRoute         from './routes/manager/team-payroll-cost.js'
 import managerTeamLeaveContextRoute        from './routes/manager/team-leave-context.js'
+import managerTeamRegularisationContextRoute from './routes/manager/team-regularisation-context.js'
 
 // Routes — Letter Generation
 import lettersRoutes                       from './routes/letters/index.js'
@@ -650,6 +651,7 @@ async function start() {
   await fastify.register(managerTeamHelpdeskRoute)         // GET /manager/team/helpdesk (P6.8)
   await fastify.register(managerTeamPayrollCostRoute)      // GET /manager/team/payroll-cost (P6.11)
   await fastify.register(managerTeamLeaveContextRoute)     // GET /manager/team/leave-context
+  await fastify.register(managerTeamRegularisationContextRoute) // GET /manager/team/regularisation-context
 
   // ── Letter Generation Routes (optional — isolated) ──────────────────────
   await safeRegisterModule('letters', async () => {

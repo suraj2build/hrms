@@ -22,6 +22,7 @@ import { z } from 'zod'
 import {
   isHrAdmin, resolveCallerEmployeeId, isDirectReport, getDirectReportIds,
 } from '../../lib/manager-scope.js'
+import { fetchAttendanceTrend } from '../../lib/attendance-trend.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -67,8 +68,8 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
       ? (await getDirectReportIds(fastify.supabase, tenantId, emp.manager_id)).filter(id => id !== employee_id)
       : []
 
-    // ── Parallel reads: balances, overlapping team leave, recent history ──────
-    const [{ data: balances }, { data: overlap }, { data: history }] = await Promise.all([
+    // ── Parallel reads: balances, overlapping team leave, history, trend ──────
+    const [{ data: balances }, { data: overlap }, { data: history }, attendance] = await Promise.all([
       fastify.supabase
         .from('employee_leave_balance')
         .select('leave_type_id, balance, leave_types(id, name, is_paid)')
@@ -95,6 +96,8 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
         .eq('employee_id', employee_id)
         .order('from_date', { ascending: false })
         .limit(6),
+
+      fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
     ])
 
     const flat = (rel: any) => (Array.isArray(rel) ? rel[0] : rel)
@@ -133,6 +136,7 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
         days:       Number(h.computed_days ?? 0),
         status:     h.status,
       })),
+      attendance,
     })
   })
 }

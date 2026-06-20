@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { api }   from '@/lib/api/client'
+import { AttendanceTrendCard, type AttendanceTrend } from './AttendanceTrendCard'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ interface LeaveContextResponse {
   balances: Array<{ leave_type_id: string; leave_type: string; is_paid: boolean; balance: number }>
   team_overlap: Array<{ name: string; employee_code: string | null; leave_type: string | null; from_date: string; to_date: string; days: number }>
   history:  Array<{ leave_type: string; from_date: string; to_date: string; days: number; status: string }>
+  attendance: AttendanceTrend
 }
 
 const STATUS_BADGE: Record<string, 'success' | 'warning' | 'destructive' | 'secondary' | 'outline'> = {
@@ -133,6 +135,9 @@ export function LeaveContextDrawer({ target, onClose }: Props) {
                   </div>
                 )}
               </section>
+
+              {/* ── Attendance trend (recent reliability) ────────────────── */}
+              {data.attendance && <AttendanceTrendCard trend={data.attendance} />}
 
               {/* ── Team overlap (coverage risk) ─────────────────────────── */}
               <section>
