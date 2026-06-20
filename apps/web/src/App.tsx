@@ -516,16 +516,23 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     )
 
     // ── DEMO LIVE — auto sign-in to the seeded "Demo" tenant against the REAL
-    // API (not the resolver). Enabled only on the demo deployment via env:
-    //   VITE_DEMO_LOGIN=true, VITE_DEMO_EMAIL, VITE_DEMO_PASSWORD, VITE_API_URL.
-    // The signInWithPassword below triggers SIGNED_IN, which the listener above
-    // handles like any normal login — landing the visitor pre-authenticated.
-    if (import.meta.env.VITE_DEMO_LOGIN === 'true') {
+    // API (not the resolver). Triggers when either:
+    //   • the build sets VITE_DEMO_LOGIN=true, OR
+    //   • the page is opened with `?demo-login` in the URL.
+    // The second form needs NO env changes — any deployment that already has the
+    // API + Supabase configured (e.g. the normal portal) will land a visitor on
+    // the seeded demo when sent to <portal-url>/?demo-login. (`?demo-login` does
+    // NOT match the resolver's `?demo` check, so DEMO_MODE stays false.)
+    const wantsDemoLogin =
+      import.meta.env.VITE_DEMO_LOGIN === 'true' ||
+      (typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).has('demo-login'))
+    if (wantsDemoLogin) {
       supabase.auth.getSession().then(({ data }) => {
         if (!data.session) {
           void supabase.auth.signInWithPassword({
-            email:    (import.meta.env.VITE_DEMO_EMAIL as string)    ?? 'demo@cognixhr.app',
-            password: (import.meta.env.VITE_DEMO_PASSWORD as string) ?? 'CognixDemo!1',
+            email:    (import.meta.env.VITE_DEMO_EMAIL as string)    || 'demo@cognixhr.app',
+            password: (import.meta.env.VITE_DEMO_PASSWORD as string) || 'CognixDemo!1',
           })
         }
       })
