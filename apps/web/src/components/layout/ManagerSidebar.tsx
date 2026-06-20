@@ -148,7 +148,6 @@ const BASE_SECTIONS: NavSection[] = [
       {
         label: 'Team Management',
         items: [
-          { label: 'Team Roster',    icon: CalendarDays, href: '/manager/team/roster'         },
           { label: 'Team Lifecycle', icon: UserCog,      href: '/manager/team/lifecycle'      },
           { label: 'Leave Balances', icon: Scale,        href: '/manager/team/leave-balances' },
           { label: 'Team Assets',    icon: Package,      href: '/manager/team/assets'         },
