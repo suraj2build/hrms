@@ -37,6 +37,12 @@ begin;
 do $$
 declare t text; tid uuid := 'd0000000-0000-0000-0000-000000000001';
 begin
+  -- Finalized payroll runs have a trigger that blocks slip deletion. Roll any
+  -- existing demo runs back to draft first so their slips can be cleared.
+  if to_regclass('payroll_runs') is not null then
+    update payroll_runs set status = 'draft' where tenant_id = tid;
+  end if;
+
   foreach t in array array[
     -- transactional / recruitment (children first)
     'interview_scores','interview_panel','interview_rounds','applications',
