@@ -200,7 +200,7 @@ function usePendingCount(employeeId: string | null) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function EmployeeSidebar() {
-  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen, activeRole } = useUIStore()
   const { profile }  = useAuthStore()
   const employeeId   = profile?.employee_id ?? null
   const location     = useLocation()
@@ -210,8 +210,12 @@ export function EmployeeSidebar() {
   // Close the mobile drawer on navigation
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
 
-  // Manager-only nav items — hidden for pure employee role
-  const isManager = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
+  // Manager-only nav items — hidden for pure employee role.
+  // Also hidden when an admin/manager is *previewing* the Employee Self Service
+  // workspace (activeRole === 'employee'): the preview should reflect the true
+  // employee experience, not the previewer's elevated permissions.
+  const hasManagerRole = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
+  const isManager = hasManagerRole && activeRole !== 'employee'
 
   // Filter manager-only items; inject live badge into Approvals
   const GROUPS = useMemo((): NavGroup[] =>
