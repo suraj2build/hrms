@@ -176,6 +176,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     const rows = fx.demoAttendanceAudit()
     return { data: rows, total: rows.length }
   }
+  if (path === '/attendance/upload-health') return fx.demoUploadHealth()
+  if (path === '/attendance/upload-sessions') return { data: fx.demoUploadSessions() }
+  if (path === '/attendance/sample-csv') {
+    return 'employee_code,date,check_in,check_out\nSAAR001,2026-06-01,09:02,18:10\nSAAR002,2026-06-01,09:15,18:30\n'
+  }
   if (path === '/attendance/events') return { data: [] }
   if (path === '/attendance/comp-off') return { data: [] }
   if (path === '/attendance/muster/latest-month') {

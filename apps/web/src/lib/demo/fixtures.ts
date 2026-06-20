@@ -939,6 +939,39 @@ export function demoProcessStatus() {
   return { is_running: false, started_at: null, started_by: null, lock_ttl_seconds: null }
 }
 
+export function demoUploadHealth() {
+  return {
+    status: 'healthy' as const,
+    summary: {
+      total_last_30d: 3,
+      completed: 3,
+      failed: 0,
+      orphaned: 0,
+      partial_failures: 0,
+      replay_uploads: 0,
+    },
+    recent_failures: [] as Array<{ id: string; file_name: string | null; created_at: string; error_message: string | null; result_summary: Record<string, unknown> | null }>,
+    stale_uploads: [] as Array<{ id: string; file_name: string | null; created_at: string }>,
+    last_successful_upload: ISO(daysAgo(1)),
+  }
+}
+
+export function demoUploadSessions() {
+  const mk = (i: number, name: string, total: number, ok: number, fail: number) => ({
+    id: `ups-${i}`,
+    status: fail > 0 ? 'completed_with_errors' : 'completed',
+    file_name: name,
+    file_size: 12000 + i * 800,
+    created_at: ISO(daysAgo(i * 7 + 1)),
+    result_summary: { total_rows: total, success_rows: ok, failed_rows: fail, is_replay: false },
+  })
+  return [
+    mk(0, 'attendance_jun_2026.csv', demoEmployeeList.length * 22, demoEmployeeList.length * 22, 0),
+    mk(1, 'attendance_may_2026.csv', demoEmployeeList.length * 21, demoEmployeeList.length * 21, 0),
+    mk(2, 'attendance_apr_2026.csv', demoEmployeeList.length * 22, demoEmployeeList.length * 22, 0),
+  ]
+}
+
 // ── Leave governance ─────────────────────────────────────────────────────────
 
 export function demoSessionAnalytics() {
