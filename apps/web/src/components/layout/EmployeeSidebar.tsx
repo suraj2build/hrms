@@ -119,8 +119,10 @@ const BASE_GROUPS: NavGroup[] = [
 // ── Manager quick-access items (rendered only for manager+ roles) ──────────────
 
 // Approvals now lives in Attendance & Leave group; My Team in Documents & Support.
-// Both remain filtered for non-managers via this set.
-const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team'])
+// "Who's Off" (team leave calendar) is a manager-facing view — a plain employee
+// should not see colleagues' absence patterns (relevance + DPDP privacy).
+// All three stay in the ESS nav structure but are filtered out for non-managers.
+const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team', '/ess/whos-off'])
 
 const MANAGER_QUICK_ITEMS: NavItem[] = [
   { label: 'Manager Console', icon: LayoutDashboard, href: '/manager/dashboard', exact: true },
