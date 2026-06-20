@@ -529,14 +529,25 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       (typeof window !== 'undefined' &&
         new URLSearchParams(window.location.search).has('demo-login'))
     if (wantsDemoLogin) {
-      supabase.auth.getSession().then(({ data }) => {
-        if (!data.session) {
-          void supabase.auth.signInWithPassword({
-            email:    (import.meta.env.VITE_DEMO_EMAIL as string)    || 'demo@cognixhr.app',
-            password: (import.meta.env.VITE_DEMO_PASSWORD as string) || 'CognixDemo!1',
-          })
+      const demoEmail    = (import.meta.env.VITE_DEMO_EMAIL as string)    || 'demo@cognixhr.app'
+      const demoPassword = (import.meta.env.VITE_DEMO_PASSWORD as string) || 'CognixDemo!1'
+      // Robust auto-login: a stored session may be DEAD — e.g. its refresh token
+      // belongs to a demo auth user that a re-seed rebuilt. Trusting it leaves the
+      // app stuck on "Invalid token". So validate any existing session and, if it
+      // fails, drop it and sign in fresh.
+      const ensureDemoSession = async () => {
+        const { data } = await supabase.auth.getSession()
+        if (data.session) {
+          const { error } = await supabase.auth.getUser()
+          if (!error) return                    // session is valid — nothing to do
+          await supabase.auth.signOut().catch(() => {})  // discard the dead session
         }
-      })
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: demoEmail, password: demoPassword,
+        })
+        if (signInError) console.warn('[demo-login] sign-in failed:', signInError.message)
+      }
+      void ensureDemoSession()
     }
 
     return () => subscription.unsubscribe()
