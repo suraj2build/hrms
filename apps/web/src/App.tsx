@@ -514,6 +514,23 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
     )
+
+    // ── DEMO LIVE — auto sign-in to the seeded "Demo" tenant against the REAL
+    // API (not the resolver). Enabled only on the demo deployment via env:
+    //   VITE_DEMO_LOGIN=true, VITE_DEMO_EMAIL, VITE_DEMO_PASSWORD, VITE_API_URL.
+    // The signInWithPassword below triggers SIGNED_IN, which the listener above
+    // handles like any normal login — landing the visitor pre-authenticated.
+    if (import.meta.env.VITE_DEMO_LOGIN === 'true') {
+      supabase.auth.getSession().then(({ data }) => {
+        if (!data.session) {
+          void supabase.auth.signInWithPassword({
+            email:    (import.meta.env.VITE_DEMO_EMAIL as string)    ?? 'demo@cognixhr.app',
+            password: (import.meta.env.VITE_DEMO_PASSWORD as string) ?? 'CognixDemo!1',
+          })
+        }
+      })
+    }
+
     return () => subscription.unsubscribe()
   }, [setProfile, setTenant, setLoading, setAccessToken, setBootstrapping])
 
