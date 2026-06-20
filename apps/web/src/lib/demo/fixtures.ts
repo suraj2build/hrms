@@ -883,3 +883,178 @@ export const demoRelationshipTypes = [
   { id: 'rt-mother', tenant_id: DEMO_TENANT_ID, name: 'Mother', code: 'MOTHER', is_active: true, created_at: ISO(daysAgo(800)) },
   { id: 'rt-child', tenant_id: DEMO_TENANT_ID, name: 'Child', code: 'CHILD', is_active: true, created_at: ISO(daysAgo(800)) },
 ]
+
+// ── Attendance ops / pipeline (flat shapes; pages read fields directly) ───────
+
+const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
+
+export function demoAttendanceOpsStats() {
+  const n = demoEmployeeList.length
+  return {
+    unresolved_anomalies: 0,
+    pending_corrections: 0,
+    staffing_pressure: 0,
+    overnight_issues: 0,
+    confidence_warnings: 0,
+    recompute_backlog: 0,
+    payroll_continuity_gaps: 0,
+    is_processing: false,
+    active_period_month: CURRENT_MONTH,
+    active_period_summary: {
+      active_month: CURRENT_MONTH,
+      is_historical: false,
+      present: n - 2,
+      late: 1,
+      absent: 1,
+      half_day: 0,
+      leave: 1,
+      payable_days: n * 22,
+      lop_days: 0,
+      missing_punch: 0,
+      total_employees: n,
+    },
+  }
+}
+
+export function demoPipelineStats() {
+  const today = new Date().toISOString().slice(0, 10)
+  return {
+    raw_log_count_30d: 0,
+    processing_runs_30d: 22,
+    last_batch_run_date: today,
+    last_batch_ran_at: ISO(daysAgo(0)),
+    batch_employees_last: demoEmployeeList.length,
+    batch_last_error: null,
+    punch_log_count_30d: demoEmployeeList.length * 22,
+    csv_employees_30d: demoEmployeeList.length,
+    daily_rows_from_csv: demoEmployeeList.length * 22,
+    csv_date_range: { from: `${CURRENT_MONTH}-01`, to: today },
+    upload_count_30d: 3,
+    last_upload_at: ISO(daysAgo(1)),
+    active_source: 'csv' as const,
+  }
+}
+
+export function demoProcessStatus() {
+  return { is_running: false, started_at: null, started_by: null, lock_ttl_seconds: null }
+}
+
+// ── Leave governance ─────────────────────────────────────────────────────────
+
+export function demoSessionAnalytics() {
+  return {
+    total_requests: 48,
+    half_day_count: 6,
+    cross_session_count: 2,
+    hourly_count: 3,
+    by_type: [
+      { leave_type: 'Casual Leave', count: 18, days: 22 },
+      { leave_type: 'Sick Leave', count: 14, days: 16 },
+      { leave_type: 'Earned Leave', count: 12, days: 40 },
+      { leave_type: 'Comp Off', count: 4, days: 4 },
+    ],
+  }
+}
+
+// ── Compliance / statutory ───────────────────────────────────────────────────
+
+export function demoComplianceStatsModule(covered: number) {
+  return {
+    employees_covered: covered,
+    employees_missing: 0,
+    filing_gaps: 0,
+    computation_errors: 0,
+    next_deadline: null as string | null,
+    days_to_deadline: null as number | null,
+    is_ready: true,
+  }
+}
+
+export function demoComplianceStats() {
+  const n = demoEmployeeList.length
+  return {
+    epf:  demoComplianceStatsModule(n),
+    esi:  demoComplianceStatsModule(0),
+    ptax: demoComplianceStatsModule(n),
+    tds:  demoComplianceStatsModule(n),
+    total_filing_gaps: 0,
+    total_coverage_gaps: 0,
+    total_computation_errors: 0,
+    critical_deadline_days: null as number | null,
+  }
+}
+
+export function demoStatutoryData() {
+  const n = demoEmployeeList.length
+  const epfRemit = Math.round(n * 3600)
+  const ptaxAmt  = n * 200
+  const tdsAmt   = Math.round(n * 4200)
+  return {
+    coverage: {
+      epf:  { enrolled: n, missing_uan: 0, has_registration: true },
+      esi:  { eligible: 0, has_registration: true },
+      ptax: { enrolled: n, states: ['Karnataka', 'Maharashtra'], missing_registrations: [] as string[] },
+      tds:  { employees_with_tds: n, missing_pan: 0 },
+      lwf:  { enrolled: n, states: ['Karnataka', 'Maharashtra'] },
+      payroll: { finalized: n, total: n, all_finalized: true },
+    },
+    totals: {
+      epf:  { total_remittance: epfRemit },
+      esi:  { total_remittance: 0 },
+      ptax: { amount: ptaxAmt },
+      tds:  { total_deducted: tdsAmt },
+      lwf:  { total_remittance: n * 20 },
+      grand_total: epfRemit + ptaxAmt + tdsAmt + n * 20,
+    },
+    readiness: { overall: true, issues: [] as string[] },
+  }
+}
+
+export function demoStatutoryExceptions() {
+  const n = demoEmployeeList.length
+  return {
+    summary: { total_employees: n, complete: n, incomplete: 0, completeness_pct: 100 },
+    by_field: [] as Array<{ field: string; label: string; missing: number }>,
+    employees: [] as Array<{ id: string; employee_code: string; name: string; department: string; missing: string[] }>,
+  }
+}
+
+export function demoExecutiveCompliance() {
+  return {
+    open_duplicates: 0,
+    compliance_risk_score: 18,
+    risk_status: 'low' as const,
+    posture_components: {
+      trust:         { score: 92, weight: 0.25 },
+      compliance:    { score: 96, weight: 0.25 },
+      governance:    { score: 90, weight: 0.15 },
+      security:      { score: 94, weight: 0.15 },
+      privacy:       { score: 95, weight: 0.10 },
+      certification: { score: 88, weight: 0.10 },
+    },
+    trust_distribution: { high: demoEmployeeList.length - 2, medium: 2, low: 0 },
+    trust_trend: ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06'].map((month, i) => ({
+      month, avg_score: 88 + i,
+    })),
+  }
+}
+
+export function demoComplianceCalendar() {
+  const mk = (id: string, label: string, type: string, jur: string, due: string, status: string, days: number) => ({
+    id, compliance_type: type, label,
+    jurisdiction: jur, period: CURRENT_MONTH, period_label: 'This month',
+    due_date: due, status, days_to_due: days, filed_at: null as string | null, reference: null as string | null,
+  })
+  const y = new Date().getFullYear()
+  const mo = String(new Date().getMonth() + 1).padStart(2, '0')
+  const data = [
+    mk('cal-epf', 'EPF ECR filing', 'EPF', 'Central', `${y}-${mo}-15`, 'upcoming', 9),
+    mk('cal-esi', 'ESI contribution', 'ESI', 'Central', `${y}-${mo}-15`, 'upcoming', 9),
+    mk('cal-pt',  'Professional Tax remittance', 'PT', 'Karnataka', `${y}-${mo}-20`, 'upcoming', 14),
+    mk('cal-tds', 'TDS deposit (Form 26Q)', 'TDS', 'Central', `${y}-${mo}-07`, 'due_soon', 2),
+  ]
+  return {
+    data,
+    counts: { upcoming: 3, due_soon: 1, overdue: 0, completed: 0 },
+  }
+}

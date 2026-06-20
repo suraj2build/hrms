@@ -94,6 +94,15 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
 
   // ── Employees ──────────────────────────────────────────────────────────────
   if (path === '/employees') {
+    // Ledger/governance search reads r.data.data → return nested envelope.
+    if (q.search) {
+      const s = q.search.toLowerCase()
+      const matched = fx.demoEmployeeList.filter(e =>
+        `${e.first_name} ${e.last_name}`.toLowerCase().includes(s) ||
+        e.employee_code.toLowerCase().includes(s)
+      ).slice(0, Number(q.limit) || 10)
+      return { data: { data: matched, total: matched.length } }
+    }
     return { data: fx.demoEmployeeList, total: fx.demoEmployeeList.length }
   }
   if (path === '/employees/org-tree') {
@@ -158,8 +167,12 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   }
   if (path === '/attendance/corrections' || path === '/attendance/corrections/my') return { data: [], total: 0 }
   if (path === '/attendance/regularisation/pending') return { data: fx.demoRegularisationPending() }
-  if (path === '/attendance/regularisation/my') return { data: [] }
-  if (path === '/attendance/stats') return { data: fx.demoExceptionsSummary() }
+  if (path === '/attendance/regularisation/my') return { data: [], total: 0 }
+  // /attendance/stats — flat ops stats (page reads fields directly, NOT via .data)
+  if (path === '/attendance/stats') return fx.demoAttendanceOpsStats()
+  if (path === '/attendance/pipeline-stats') return fx.demoPipelineStats()
+  if (path === '/attendance/process/status') return fx.demoProcessStatus()
+  if (path === '/attendance/audit') return { data: [], total: 0 }
   if (path === '/attendance/events') return { data: [] }
   if (path === '/attendance/comp-off') return { data: [] }
   if (path === '/attendance/muster/latest-month') {
@@ -201,8 +214,18 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/leave-requests') return { data: fx.demoMyLeaveRequests() }
   if (path.startsWith('/attendance/leave/balance')) return { data: fx.demoLeaveBalances() }
   if (path === '/attendance/leave/team-balances') return { data: [] }
-  if (path.startsWith('/attendance/leave/ledger/')) return { data: [] }
+  // ledger reads r.data.data → nested envelope
+  if (path.startsWith('/attendance/leave/ledger/')) return { data: { data: [] } }
   if (path === '/leave/optional-holidays') return { data: [] }
+  // /leave/my-requests — paginated; page reads .pagination.has_more
+  if (path === '/leave/my-requests') {
+    return { data: [], pagination: { page: Number(q.page) || 1, limit: Number(q.limit) || 20, total: 0, has_more: false } }
+  }
+  if (path === '/leave/governance/session-analytics') return fx.demoSessionAnalytics()
+  if (path === '/leave/event-grants') return { data: [] }
+  if (path === '/leave/scheduler/reconciliation') return { data: [] }
+  if (path === '/leave/lifecycle/all-freezes') return { data: [] }
+  if (path === '/leave/lifecycle/held-credits-summary') return { data: [] }
   if (path.startsWith('/leave/lifecycle/')) return { data: null }
 
   // ── Payroll — runs ─────────────────────────────────────────────────────────
@@ -531,7 +554,17 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/datasets/payroll-cost/anchor') {
     return { month: new Date().toISOString().slice(0, 7) }
   }
+  if (path === '/datasets/statutory/exceptions') return fx.demoStatutoryExceptions()
+  if (path === '/datasets/statutory') return fx.demoStatutoryData()
   if (path.startsWith('/datasets/')) return { data: {} }
+
+  // ── Compliance / statutory ──────────────────────────────────────────────────
+  if (path === '/payroll/compliance/stats') return fx.demoComplianceStats()
+  if (path === '/executive/compliance') return fx.demoExecutiveCompliance()
+  if (path === '/compliance/calendar') return fx.demoComplianceCalendar()
+  if (path === '/compliance/calendar/upcoming') return { data: fx.demoComplianceCalendar().data }
+  if (path.startsWith('/compliance/')) return { data: [] }
+  if (path.startsWith('/executive/')) return { data: {} }
 
   // ── Recruitment ────────────────────────────────────────────────────────────
   if (path === '/recruitment/hired') return { data: [], total: 0 }
