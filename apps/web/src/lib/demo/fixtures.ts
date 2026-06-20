@@ -948,12 +948,151 @@ export function demoSessionAnalytics() {
     cross_session_count: 2,
     hourly_count: 3,
     by_type: [
-      { leave_type: 'Casual Leave', count: 18, days: 22 },
-      { leave_type: 'Sick Leave', count: 14, days: 16 },
-      { leave_type: 'Earned Leave', count: 12, days: 40 },
-      { leave_type: 'Comp Off', count: 4, days: 4 },
+      { leave_type_name: 'Casual Leave', full_day: 14, first_half: 2, second_half: 2, cross_session: 0 },
+      { leave_type_name: 'Sick Leave',   full_day: 11, first_half: 2, second_half: 1, cross_session: 1 },
+      { leave_type_name: 'Earned Leave', full_day: 12, first_half: 0, second_half: 0, cross_session: 1 },
+      { leave_type_name: 'Comp Off',     full_day: 3,  first_half: 1, second_half: 0, cross_session: 0 },
     ],
   }
+}
+
+// Paginated "My leave requests" — richer history with mixed statuses.
+export function demoMyLeaveRequestsPaged(page: number, limit: number, status?: string) {
+  const lt = (id: string, name: string, is_paid = true) => ({ id, name, is_paid })
+  const all = [
+    { id: 'lr-01', leave_type_id: 'lt-cl', from_date: DAY(daysAgo(-6)), to_date: DAY(daysAgo(-4)), computed_days: 3, half_day: false, status: 'PENDING',   reason: 'Sister’s wedding', rejection_reason: null, created_at: ISO(daysAgo(1)),  leave_types: lt('lt-cl', 'Casual Leave') },
+    { id: 'lr-02', leave_type_id: 'lt-sl', from_date: DAY(daysAgo(4)),  to_date: DAY(daysAgo(4)),  computed_days: 0.5, half_day: true,  status: 'APPROVED',  reason: 'Doctor appointment', rejection_reason: null, created_at: ISO(daysAgo(6)),  leave_types: lt('lt-sl', 'Sick Leave') },
+    { id: 'lr-03', leave_type_id: 'lt-el', from_date: DAY(daysAgo(28)), to_date: DAY(daysAgo(24)), computed_days: 5, half_day: false, status: 'APPROVED',  reason: 'Goa vacation', rejection_reason: null, created_at: ISO(daysAgo(35)), leave_types: lt('lt-el', 'Earned Leave') },
+    { id: 'lr-04', leave_type_id: 'lt-cl', from_date: DAY(daysAgo(40)), to_date: DAY(daysAgo(40)), computed_days: 1, half_day: false, status: 'APPROVED',  reason: 'Personal work', rejection_reason: null, created_at: ISO(daysAgo(44)), leave_types: lt('lt-cl', 'Casual Leave') },
+    { id: 'lr-05', leave_type_id: 'lt-sl', from_date: DAY(daysAgo(55)), to_date: DAY(daysAgo(53)), computed_days: 3, half_day: false, status: 'APPROVED',  reason: 'Viral fever', rejection_reason: null, created_at: ISO(daysAgo(58)), leave_types: lt('lt-sl', 'Sick Leave') },
+    { id: 'lr-06', leave_type_id: 'lt-cl', from_date: DAY(daysAgo(62)), to_date: DAY(daysAgo(61)), computed_days: 2, half_day: false, status: 'REJECTED',  reason: 'Out of town', rejection_reason: 'Team release week — please re-plan', created_at: ISO(daysAgo(66)), leave_types: lt('lt-cl', 'Casual Leave') },
+    { id: 'lr-07', leave_type_id: 'lt-el', from_date: DAY(daysAgo(80)), to_date: DAY(daysAgo(78)), computed_days: 3, half_day: false, status: 'CANCELLED', reason: 'Plans changed', rejection_reason: null, created_at: ISO(daysAgo(85)), leave_types: lt('lt-el', 'Earned Leave') },
+    { id: 'lr-08', leave_type_id: 'lt-el', from_date: DAY(daysAgo(95)), to_date: DAY(daysAgo(91)), computed_days: 5, half_day: false, status: 'APPROVED',  reason: 'Festival break', rejection_reason: null, created_at: ISO(daysAgo(100)), leave_types: lt('lt-el', 'Earned Leave') },
+  ]
+  const filtered = status ? all.filter(r => r.status === status) : all
+  const start = (Math.max(1, page) - 1) * limit
+  const slice = filtered.slice(start, start + limit)
+  return { data: slice, pagination: { page: Math.max(1, page), limit, total: filtered.length, has_more: start + limit < filtered.length } }
+}
+
+// Attendance change audit trail.
+export function demoAttendanceAudit() {
+  const pick = (i: number) => demoEmployeeList[i % demoEmployeeList.length]
+  const mk = (i: number, before: string | null, after: string, source: string, byIdx: number) => {
+    const e = pick(i)
+    const by = demoEmployeeList[byIdx]
+    return {
+      id: `aud-${i}`,
+      date: DAY(daysAgo(i)),
+      source,
+      before_status: before,
+      after_status: after,
+      created_at: ISO(daysAgo(i)),
+      employee_name: `${e.first_name} ${e.last_name}`,
+      employee_code: e.employee_code,
+      changed_by_name: `${by.first_name} ${by.last_name}`,
+    }
+  }
+  return [
+    mk(0, 'absent',  'present',  'regularisation', 0),
+    mk(1, null,      'present',  'biometric',      2),
+    mk(2, 'absent',  'leave',    'leave_approval', 0),
+    mk(3, 'present', 'half_day', 'correction',     10),
+    mk(4, null,      'present',  'csv_upload',     0),
+    mk(5, 'late',    'present',  'regularisation', 6),
+    mk(6, null,      'present',  'biometric',      2),
+    mk(7, 'absent',  'present',  'correction',     0),
+  ]
+}
+
+// Hired pipeline (preboarding tracking).
+export function demoHiredPipeline() {
+  const mk = (
+    id: string, first: string, last: string, email: string, title: string, reqTitle: string, dept: string,
+    offer: number, joinDaysAhead: number, pjStatus: string | null, invitationId: string | null, submitted: boolean,
+  ) => ({
+    id, status: 'hired', offer_amount: offer,
+    expected_joining: DAY(daysAgo(-joinDaysAhead)),
+    preboarding_initiated_at: invitationId ? ISO(daysAgo(7)) : null,
+    pre_joinee_invitation_id: invitationId,
+    created_at: ISO(daysAgo(20)), updated_at: ISO(daysAgo(3)),
+    candidates: { id: `cand-${id}`, first_name: first, last_name: last, email, phone: '+91 98xxxxxx12', current_title: title },
+    job_requisitions: { id: `req-${id}`, title: reqTitle, departments: { name: dept } },
+    pre_joinee: pjStatus ? { id: `pj-${id}`, status: pjStatus, joining_date: DAY(daysAgo(-joinDaysAhead)), submitted_at: submitted ? ISO(daysAgo(2)) : null } : null,
+  })
+  return [
+    mk('h1', 'Nandini', 'Gupta',  'nandini.gupta@example.in',  'DevOps Engineer',     'Senior Software Engineer', 'Engineering', 2100000, 21, 'submitted', 'inv-h1', true),
+    mk('h2', 'Arjun',   'Rampal', 'arjun.rampal@example.in',   'UX/UI Designer',      'Senior Software Engineer', 'Engineering', 1850000, 30, 'pending',   'inv-h2', false),
+    mk('h3', 'Farhan',  'Qureshi','farhan.qureshi@example.in', 'Finance Analyst',     'Finance Analyst',          'Finance',     1150000, 14, 'approved',  'inv-h3', true),
+    mk('h4', 'Ishita',  'Roy',    'ishita.roy@example.in',     'Sales Executive',     'Sales Manager',            'Sales',       900000,  45, null,        null,    false),
+  ]
+}
+
+// Event-based leave grants (festival/birthday etc.).
+export function demoEventGrants() {
+  const e1 = demoEmployeeList[2], e2 = demoEmployeeList[6], e3 = demoEmployeeList[11]
+  const mk = (id: string, e: typeof e1, days: number, status: string, dt: string) => ({
+    id, employee_id: e.id, leave_type_id: 'lt-cl', date_type_id: 'dt-fest',
+    event_year: new Date().getFullYear(), grant_date: DAY(daysAgo(30)), days_granted: days,
+    expiry_date: DAY(daysAgo(-90)), status,
+    employees: { first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code },
+    leave_types: { name: 'Casual Leave' },
+    important_date_types: { name: dt, code: dt.slice(0, 4).toUpperCase() },
+  })
+  return [
+    mk('eg-1', e1, 1, 'active', 'Festival'),
+    mk('eg-2', e2, 1, 'used',   'Birthday'),
+    mk('eg-3', e3, 1, 'active', 'Work Anniversary'),
+  ]
+}
+
+export function demoReconciliationRuns() {
+  return [
+    { id: 'rec-1', run_date: ISO(daysAgo(1)),  year: new Date().getFullYear(), trigger: 'scheduled', issues_found: 0, employees_checked: demoEmployeeList.length, severity: 'ok' as const, report_data: { issue_breakdown: { critical: 0, high: 0, medium: 0, low: 0 }, details: [] } },
+    { id: 'rec-2', run_date: ISO(daysAgo(8)),  year: new Date().getFullYear(), trigger: 'scheduled', issues_found: 1, employees_checked: demoEmployeeList.length, severity: 'low' as const, report_data: { issue_breakdown: { critical: 0, high: 0, medium: 0, low: 1 }, details: [{ employee_id: demoEmployeeList[5].id, employee_name: `${demoEmployeeList[5].first_name} ${demoEmployeeList[5].last_name}`, issue_type: 'balance_drift', description: 'Carry-forward rounding of 0.5 day', severity: 'low' }] } },
+    { id: 'rec-3', run_date: ISO(daysAgo(31)), year: new Date().getFullYear(), trigger: 'manual',    issues_found: 0, employees_checked: demoEmployeeList.length, severity: 'ok' as const, report_data: { issue_breakdown: { critical: 0, high: 0, medium: 0, low: 0 }, details: [] } },
+  ]
+}
+
+// Workforce Command observations.
+export function demoWorkforceCommandData() {
+  const n = demoEmployeeList.length
+  return {
+    summary: 'Workforce is stable. One probation review is due this week and one employee is serving notice.',
+    critical_count: 0,
+    high_count: 1,
+    observations: [
+      {
+        id: 'obs-1', category: 'onboarding', severity: 'medium' as const,
+        title: 'Probation review due', body: 'Arjun Nair completes probation in 6 days. Schedule the confirmation review and update status.',
+        source_records: [{ table: 'employees', count: 1, sample: 'SAAR006' }], generated_at: new Date().toISOString(),
+      },
+      {
+        id: 'obs-2', category: 'separation', severity: 'high' as const,
+        title: 'Notice period in progress', body: 'Imran Khan is on notice. Initiate asset recovery and knowledge transfer checklist.',
+        source_records: [{ table: 'separations', count: 1, sample: 'SAAR022' }], generated_at: new Date().toISOString(),
+      },
+      {
+        id: 'obs-3', category: 'attendance', severity: 'info' as const,
+        title: 'Attendance healthy', body: `${n - 2} of ${n} employees are present today with no open anomalies.`,
+        source_records: [{ table: 'attendance_daily', count: n }], generated_at: new Date().toISOString(),
+      },
+    ],
+    kpis: {
+      on_notice: 1, stalled_onboarding: 0, pending_separations: 1,
+      assets_at_risk: 0, probation_due: 1, active_headcount: n, joiners_this_month: 1,
+    } as Record<string, number | string | null>,
+    generated_at: new Date().toISOString(),
+  }
+}
+
+// Action Center suggestions.
+export function demoActionObservations() {
+  return [
+    { id: 'ac-1', event_type: 'new_hire',           title: 'New joiner this week', suggestion: 'Aditya Kulkarni joined Sales. Confirm asset allocation and induction schedule.', source_table: 'employees',  source_count: 1, generated_at: new Date().toISOString() },
+    { id: 'ac-2', event_type: 'on_notice',          title: 'Employee on notice',    suggestion: 'Imran Khan is serving notice. Plan backfill and start clearance.', source_table: 'separations', source_count: 1, generated_at: new Date().toISOString() },
+    { id: 'ac-3', event_type: 'asset_assigned',     title: 'Assets pending return', suggestion: 'Review assets assigned to employees in separation to avoid overlap.', source_table: 'assets', source_count: 2, generated_at: new Date().toISOString() },
+  ]
 }
 
 // ── Compliance / statutory ───────────────────────────────────────────────────

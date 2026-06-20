@@ -172,7 +172,10 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/attendance/stats') return fx.demoAttendanceOpsStats()
   if (path === '/attendance/pipeline-stats') return fx.demoPipelineStats()
   if (path === '/attendance/process/status') return fx.demoProcessStatus()
-  if (path === '/attendance/audit') return { data: [], total: 0 }
+  if (path === '/attendance/audit') {
+    const rows = fx.demoAttendanceAudit()
+    return { data: rows, total: rows.length }
+  }
   if (path === '/attendance/events') return { data: [] }
   if (path === '/attendance/comp-off') return { data: [] }
   if (path === '/attendance/muster/latest-month') {
@@ -219,11 +222,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/leave/optional-holidays') return { data: [] }
   // /leave/my-requests — paginated; page reads .pagination.has_more
   if (path === '/leave/my-requests') {
-    return { data: [], pagination: { page: Number(q.page) || 1, limit: Number(q.limit) || 20, total: 0, has_more: false } }
+    return fx.demoMyLeaveRequestsPaged(Number(q.page) || 1, Number(q.limit) || 20, q.status)
   }
   if (path === '/leave/governance/session-analytics') return fx.demoSessionAnalytics()
-  if (path === '/leave/event-grants') return { data: [] }
-  if (path === '/leave/scheduler/reconciliation') return { data: [] }
+  if (path === '/leave/event-grants') return { data: fx.demoEventGrants() }
+  if (path === '/leave/scheduler/reconciliation') return { data: fx.demoReconciliationRuns() }
   if (path === '/leave/lifecycle/all-freezes') return { data: [] }
   if (path === '/leave/lifecycle/held-credits-summary') return { data: [] }
   if (path.startsWith('/leave/lifecycle/')) return { data: null }
@@ -374,7 +377,14 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     }
   }
   if (path === '/intelligence/org/attrition-signal') {
-    return { signal: 'normal', by_department: [], total: 0 }
+    return {
+      signal: 'normal',
+      by_department: [
+        { dept_name: 'Engineering', count: 1 },
+        { dept_name: 'Sales', count: 0 },
+      ],
+      total: 1,
+    }
   }
   if (path === '/intelligence/org/headcount-by-site') {
     return {
@@ -385,19 +395,7 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     }
   }
   if (path === '/intelligence/workforce-command') {
-    return {
-      data: {
-        summary: 'Workforce is stable. No critical issues detected.',
-        critical_count: 0, high_count: 0,
-        observations: [],
-        kpis: {
-          on_notice: 0, stalled_onboarding: 0, pending_separations: 0,
-          assets_at_risk: 0, probation_due: 1,
-          active_headcount: fx.demoEmployeeList.length, joiners_this_month: 1,
-        },
-        generated_at: new Date().toISOString(),
-      },
-    }
+    return { data: fx.demoWorkforceCommandData() }
   }
   if (path.startsWith('/intelligence/digest/')) {
     const period = path.split('/').pop() ?? 'daily'
@@ -415,7 +413,8 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     }
   }
   if (path === '/intelligence/action-center') {
-    return { observations: [], total: 0, generated_at: new Date().toISOString() }
+    const obs = fx.demoActionObservations()
+    return { observations: obs, total: obs.length, generated_at: new Date().toISOString() }
   }
   // /intelligence/employee/:id/360
   mm = path.match(/^\/intelligence\/employee\/([^/]+)\/360$/)
@@ -567,7 +566,14 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path.startsWith('/executive/')) return { data: {} }
 
   // ── Recruitment ────────────────────────────────────────────────────────────
-  if (path === '/recruitment/hired') return { data: [], total: 0 }
+  if (path === '/recruitment/hired') {
+    const all = fx.demoHiredPipeline()
+    const filter = q.preboarding_status || 'all'
+    const rows = filter === 'pending'   ? all.filter(a => !a.pre_joinee_invitation_id)
+               : filter === 'initiated' ? all.filter(a => a.pre_joinee_invitation_id)
+               : all
+    return { data: rows, total: rows.length }
+  }
   if (path.startsWith('/recruitment/')) return { data: [] }
 
   // ── Metrics (prometheus-style text) ────────────────────────────────────────
