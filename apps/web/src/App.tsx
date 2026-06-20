@@ -282,6 +282,7 @@ const YTDStatement          = lazy(() => import('@/pages/ess/YTDStatement').then
 const PreviousEmployer      = lazy(() => import('@/pages/ess/PreviousEmployer').then(m => ({ default: m.PreviousEmployer })))
 const HRADeclarations       = lazy(() => import('@/pages/ess/HRADeclarations').then(m => ({ default: m.HRADeclarations })))
 const TDSRecovery           = lazy(() => import('@/pages/ess/TDSRecovery').then(m => ({ default: m.TDSRecovery })))
+const SalaryTaxHub          = lazy(() => import('@/pages/ess/SalaryTaxHub').then(m => ({ default: m.SalaryTaxHub })))
 
 // Admin payroll — Tax Governance
 const TaxGovernance         = lazy(() => import('@/pages/payroll/TaxGovernance').then(m => ({ default: m.TaxGovernance })))
@@ -938,13 +939,17 @@ export default function App() {
                 <Route path="/manager/self/policies"                     element={<EssPolicies />} />
                 <Route path="/manager/self/runbooks"                     element={<EssRunbooks />} />
                 <Route path="/manager/self/hr-support"                   element={<EssHRSupport />} />
-                {/* Tax tools — rendered inside ManagerShell so sidebar stays amber */}
-                <Route path="/manager/self/salary/tax-planner"        element={<TaxPlanner />} />
-                <Route path="/manager/self/salary/it-statement"        element={<ITStatement />} />
-                <Route path="/manager/self/salary/ytd"                 element={<YTDStatement />} />
-                <Route path="/manager/self/salary/previous-employer"   element={<PreviousEmployer />} />
-                <Route path="/manager/self/salary/hra"                 element={<HRADeclarations />} />
-                <Route path="/manager/self/salary/tds-recovery"        element={<TDSRecovery />} />
+                {/* Tax tools — rendered inside ManagerShell so sidebar stays amber.
+                    Same Tax & Declarations hub as ESS, mounted under the self path. */}
+                <Route path="/manager/self/salary" element={<SalaryTaxHub />}>
+                  <Route index                  element={<Navigate to="tax-planner" replace />} />
+                  <Route path="tax-planner"       element={<TaxPlanner />} />
+                  <Route path="it-statement"      element={<ITStatement />} />
+                  <Route path="ytd"               element={<YTDStatement />} />
+                  <Route path="previous-employer" element={<PreviousEmployer />} />
+                  <Route path="hra"               element={<HRADeclarations />} />
+                  <Route path="tds-recovery"      element={<TDSRecovery />} />
+                </Route>
 
                 {/* Reports — the shared Reports surface exposes tenant-wide salary &
                     statutory data and is now HR-admin-only (B3). Managers use their
@@ -983,12 +988,16 @@ export default function App() {
                 <Route path="/ess/letters"                element={<EssLetters />} />
                 <Route path="/ess/operational-center"     element={<EssOperationalCenter />} />
                 <Route path="/ess/declarations"           element={<Navigate to="/ess/salary/tax-planner" replace />} />
-                <Route path="/ess/salary/tax-planner"         element={<TaxPlanner />} />
-                <Route path="/ess/salary/it-statement"        element={<ITStatement />} />
-                <Route path="/ess/salary/ytd"                 element={<YTDStatement />} />
-                <Route path="/ess/salary/previous-employer"   element={<PreviousEmployer />} />
-                <Route path="/ess/salary/hra"                 element={<HRADeclarations />} />
-                <Route path="/ess/salary/tds-recovery"        element={<TDSRecovery />} />
+                {/* Tax & Declarations hub — 6 income-tax pages consolidated under one tabbed route */}
+                <Route path="/ess/salary" element={<SalaryTaxHub />}>
+                  <Route index                  element={<Navigate to="tax-planner" replace />} />
+                  <Route path="tax-planner"       element={<TaxPlanner />} />
+                  <Route path="it-statement"      element={<ITStatement />} />
+                  <Route path="ytd"               element={<YTDStatement />} />
+                  <Route path="previous-employer" element={<PreviousEmployer />} />
+                  <Route path="hra"               element={<HRADeclarations />} />
+                  <Route path="tds-recovery"      element={<TDSRecovery />} />
+                </Route>
                 <Route path="/ess/reimbursements"         element={<EssReimbursements />} />
                 <Route path="/ess/loans"                  element={<EssLoansAdvances />} />
                 <Route path="/ess/approvals"              element={<EssApprovals />} />

@@ -27,7 +27,6 @@ import {
   CalendarDays,
   Scale,
   Receipt,
-  FileCheck,
   CreditCard,
   FileText,
   BookMarked,
@@ -42,7 +41,6 @@ import {
   ShieldCheck,
   Radio,
   Calculator,
-  ScrollText,
   Wallet,
   IndianRupee,
   UserCog,
@@ -107,22 +105,13 @@ const BASE_SECTIONS: NavSection[] = [
         ],
       },
       {
-        label: 'Payroll & Tax',
+        // Tax pages consolidated into the single Tax & Declarations hub.
+        label: 'Pay, Tax & Claims',
         items: [
-          { label: 'Pay & Comp',    icon: Receipt,    href: '/manager/self/compensation'               },
-          { label: 'Tax Planner',   icon: Calculator, href: '/manager/self/salary/tax-planner'         },
-          { label: 'IT Statement',  icon: ScrollText, href: '/manager/self/salary/it-statement'        },
-          { label: 'YTD Statement', icon: TrendingUp, href: '/manager/self/salary/ytd'                 },
-          { label: 'TDS Recovery',  icon: Receipt,    href: '/manager/self/salary/tds-recovery'        },
-        ],
-      },
-      {
-        label: 'Declarations & Claims',
-        items: [
-          { label: 'HRA Declaration',   icon: FileCheck,  href: '/manager/self/salary/hra'                      },
-          { label: 'Previous Employer', icon: FileText,   href: '/manager/self/salary/previous-employer'        },
-          { label: 'Reimbursements',    icon: CreditCard, href: '/manager/self/reimbursements'                  },
-          { label: 'Loans & Advances',  icon: Wallet,     href: '/manager/self/loans'                           },
+          { label: 'Pay & Comp',         icon: Receipt,    href: '/manager/self/compensation'  },
+          { label: 'Tax & Declarations', icon: Calculator, href: '/manager/self/salary'        },
+          { label: 'Reimbursements',     icon: CreditCard, href: '/manager/self/reimbursements' },
+          { label: 'Loans & Advances',   icon: Wallet,     href: '/manager/self/loans'          },
         ],
       },
       {
@@ -159,10 +148,11 @@ const BASE_SECTIONS: NavSection[] = [
       {
         label: 'Team Management',
         items: [
-          { label: 'Team Lifecycle', icon: UserCog,  href: '/manager/team/lifecycle'      },
-          { label: 'Leave Balances', icon: Scale,    href: '/manager/team/leave-balances' },
-          { label: 'Team Assets',    icon: Package,  href: '/manager/team/assets'         },
-          { label: 'Team Helpdesk',  icon: LifeBuoy, href: '/manager/team/helpdesk'       },
+          { label: 'Team Roster',    icon: CalendarDays, href: '/manager/team/roster'         },
+          { label: 'Team Lifecycle', icon: UserCog,      href: '/manager/team/lifecycle'      },
+          { label: 'Leave Balances', icon: Scale,        href: '/manager/team/leave-balances' },
+          { label: 'Team Assets',    icon: Package,      href: '/manager/team/assets'         },
+          { label: 'Team Helpdesk',  icon: LifeBuoy,     href: '/manager/team/helpdesk'       },
         ],
       },
       {

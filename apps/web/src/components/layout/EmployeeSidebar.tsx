@@ -13,7 +13,6 @@ import {
   CalendarOff,
   Scale,
   Receipt,
-  FileCheck,
   CreditCard,
   FileText,
   Mail,
@@ -31,7 +30,6 @@ import {
   ArrowUpRight,
   Calculator,
   ScrollText,
-  TrendingUp,
   Wallet,
   LogOut,
 } from 'lucide-react'
@@ -81,24 +79,16 @@ const BASE_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Payroll & Tax',
+    // Tax Planner / IT Statement / YTD / TDS Recovery / HRA / Previous Employer
+    // are consolidated into the single "Tax & Declarations" hub (/ess/salary).
+    label: 'Pay, Tax & Benefits',
     items: [
-      { label: 'Pay & Compensation', icon: Receipt,    href: '/ess/compensation'              },
-      { label: 'Tax Planner',        icon: Calculator, href: '/ess/salary/tax-planner'        },
-      { label: 'IT Statement',       icon: ScrollText, href: '/ess/salary/it-statement'       },
-      { label: 'YTD Statement',      icon: TrendingUp, href: '/ess/salary/ytd'                },
-      { label: 'TDS Recovery',       icon: Receipt,    href: '/ess/salary/tds-recovery'       },
-    ],
-  },
-  {
-    label: 'Declarations & Claims',
-    items: [
-      { label: 'HRA Declaration',   icon: FileCheck,  href: '/ess/salary/hra'                      },
-      { label: 'Previous Employer', icon: FileText,   href: '/ess/salary/previous-employer'        },
-      { label: 'Reimbursements',    icon: CreditCard, href: '/ess/reimbursements'                  },
-      { label: 'Loans & Advances',  icon: Wallet,     href: '/ess/loans'                           },
-      { label: 'Flexible Benefits', icon: Receipt,    href: '/ess/fbp'                             },
-      { label: 'Benefits',          icon: ShieldCheck, href: '/ess/benefits'                       },
+      { label: 'Pay & Compensation', icon: Receipt,     href: '/ess/compensation'   },
+      { label: 'Tax & Declarations', icon: Calculator,  href: '/ess/salary'         },
+      { label: 'Reimbursements',     icon: CreditCard,  href: '/ess/reimbursements' },
+      { label: 'Loans & Advances',   icon: Wallet,      href: '/ess/loans'          },
+      { label: 'Flexible Benefits',  icon: ScrollText,  href: '/ess/fbp'            },
+      { label: 'Benefits',           icon: ShieldCheck, href: '/ess/benefits'       },
     ],
   },
   {
