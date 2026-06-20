@@ -59,8 +59,8 @@ import {
 
 import ClockWidget from './ClockWidget';
 import PayslipModal from './PayslipModal';
-import CandidateATS from './CandidateATS';
-import AnalyticsCharts from './AnalyticsCharts';
+import RecruitmentPipeline from './RecruitmentPipeline';
+import AdminDashboardPreview from './AdminDashboardPreview';
 
 interface PlatformConsoleProps {
   initialPersona: 'admin' | 'employee';
@@ -658,8 +658,10 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
                     </div>
 
-                    {/* Integrated Recharts displays */}
-                    <AnalyticsCharts employees={employees} candidates={candidates} attendance={attendanceLogs} />
+                    {/* CognixHR Admin Dashboard preview */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                      <AdminDashboardPreview />
+                    </div>
 
                     {/* Announcements & Social Feed */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
@@ -999,11 +1001,9 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       <span className="text-xs text-slate-500 font-medium">Manage corporate pipelines, schedule screening logs, and transition candidates.</span>
                     </div>
 
-                    <CandidateATS 
-                      candidates={candidates} 
-                      onUpdateCandidate={handleUpdateCandidate} 
-                      onAddCandidate={handleAddCandidate} 
-                    />
+                    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                      <RecruitmentPipeline />
+                    </div>
                   </div>
                 )}
 
