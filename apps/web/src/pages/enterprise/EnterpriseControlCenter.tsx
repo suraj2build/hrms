@@ -71,6 +71,19 @@ function truncateId(id: string): string {
   return id.length > 13 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
 }
 
+/** Humanize an entity_type token, e.g. "payroll_run" → "Payroll Run". */
+function humanizeType(t?: string | null): string {
+  return (t ?? 'record').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/**
+ * User-facing label for an entity reference — NEVER a raw UUID.
+ * Prefers a resolved name from the API, falling back to the humanized type.
+ */
+function entityLabel(e: { entity_type?: string | null; entity_name?: string | null }): string {
+  return e.entity_name ?? humanizeType(e.entity_type)
+}
+
 function ScoreBar({ score, severity, invert = false }: { score: number; severity?: string; invert?: boolean }) {
   const colour = invert
     ? (score >= 75 ? 'bg-destructive' : score >= 50 ? 'bg-warning' : 'bg-success')
@@ -315,7 +328,7 @@ function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
     id:          ev.event_id ?? ev.id ?? ev.entity_id,
     timestamp:   ev.timestamp,
     title:       ev.event_type,
-    description: `${ev.entity_type} · ${ev.entity_id}`,
+    description: entityLabel(ev),
     severity:    ev.severity,
     module:      ev.module,
   }))
@@ -354,14 +367,14 @@ function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
                       title: al.event_type,
                       timestamp: al.timestamp,
                       explainability: {
-                        summary: `${al.event_type} — ${al.entity_type} ${al.entity_id}`,
+                        summary: `${al.event_type} — ${entityLabel(al)}`,
                         contributing_factors: al.governance_context?.compliance_flags,
                       },
                     })}
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-mono font-medium truncate">{al.event_type}</p>
-                      <p className="text-xs text-muted-foreground truncate">{al.entity_type} · {al.entity_id}</p>
+                      <p className="text-xs text-muted-foreground truncate">{entityLabel(al)}</p>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <SeverityBadge severity={al.severity ?? 'high'} />
@@ -387,7 +400,7 @@ function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
                   <div key={`${r.entity_type}:${r.entity_id}:${i}`} className="flex items-center gap-3 py-2.5">
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium capitalize">{r.entity_type}</p>
-                      <p className="text-xs text-muted-foreground font-mono truncate">{truncateId(r.entity_id)}</p>
+                      <p className="text-xs text-muted-foreground truncate">{entityLabel(r)}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <ScoreBar score={r.score} severity={r.severity} />
@@ -521,7 +534,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
                     key={s.id}
                     className="w-full text-left py-2.5 hover:bg-muted/30 transition-colors group"
                     onClick={() => onDrawerOpen({
-                      title:         `Trust ${s.score}/100 — ${s.entity_id}`,
+                      title:         `Trust ${s.score}/100 — ${entityLabel(s)}`,
                       timestamp:     s.computed_at,
                       explainability: s.explainability,
                     })}
@@ -529,7 +542,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
                     <div className="flex items-center gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-mono text-muted-foreground">{truncateId(s.entity_id)}</span>
+                          <span className="text-xs text-muted-foreground">{entityLabel(s)}</span>
                           <Badge variant="outline" className="text-xs capitalize">{s.score_type}</Badge>
                         </div>
                         <ScoreBar score={s.score} severity={s.severity} />
@@ -560,14 +573,14 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
                     key={v.id}
                     className="w-full text-left py-2.5 hover:bg-muted/30 transition-colors"
                     onClick={() => onDrawerOpen({
-                      title:         `${v.verification_type} — ${v.entity_id}`,
+                      title:         `${v.verification_type} — ${(v as { entity_name?: string }).entity_name ?? '—'}`,
                       timestamp:     v.verified_at,
                       explainability: v.explainability,
                     })}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <span className="text-xs font-mono text-muted-foreground">{truncateId(v.entity_id)}</span>
+                        <span className="text-xs text-muted-foreground">{(v as { entity_name?: string }).entity_name ?? '—'}</span>
                         <span className="mx-1.5 text-muted-foreground">·</span>
                         <span className="text-xs capitalize">{v.verification_type.replace(/_/g, ' ')}</span>
                       </div>
@@ -608,14 +621,14 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
                     key={d.id}
                     className="w-full text-left py-2.5 hover:bg-muted/30 transition-colors"
                     onClick={() => onDrawerOpen({
-                      title:         `Duplicate ${d.duplicate_type} — ${d.entity_id}`,
+                      title:         `Duplicate ${d.duplicate_type} — ${(d as { entity_name?: string }).entity_name ?? '—'}`,
                       timestamp:     d.detected_at,
                       explainability: d.explainability,
                     })}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex items-center gap-1.5">
-                        <span className="text-xs font-mono text-muted-foreground">{truncateId(d.entity_id)}</span>
+                        <span className="text-xs text-muted-foreground">{(d as { entity_name?: string }).entity_name ?? '—'}</span>
                         <Badge variant="outline" className="text-xs capitalize">{d.duplicate_type.replace(/_/g, ' ')}</Badge>
                         <span className="text-xs text-muted-foreground">{d.matching_entity_ids.length + 1} affected</span>
                       </div>
@@ -931,7 +944,7 @@ function SecurityTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => voi
                 <IntelligenceCard
                   key={i}
                   title={s.description}
-                  subtitle={`${s.signal_type.replace(/_/g, ' ')} · ${truncateId(s.entity_id)}`}
+                  subtitle={`${s.signal_type.replace(/_/g, ' ')} · ${entityLabel(s)}`}
                   severity={s.severity}
                   meta={[{ label: 'Type', value: s.entity_type }, { label: 'Detected', value: fmtTime(s.detected_at) }]}
                   onClick={() => onDrawerOpen({
@@ -1097,7 +1110,7 @@ function AuditReplayTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => 
                 <tbody className="divide-y">
                   {sessions.map((s, i) => (
                     <tr key={s.id ?? i} className="hover:bg-muted/20">
-                      <td className="py-2 pr-4 font-mono">{truncateId(s.entity_id)}</td>
+                      <td className="py-2 pr-4">{entityLabel(s)}</td>
                       <td className="py-2 pr-4 capitalize">{s.entity_type}</td>
                       <td className="py-2 pr-4 tabular-nums">{s.events_replayed}</td>
                       <td className="py-2 pr-4">

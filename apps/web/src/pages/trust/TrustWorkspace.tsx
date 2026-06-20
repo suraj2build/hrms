@@ -137,8 +137,14 @@ function ScoreBar({ score, severity }: { score: number; severity?: string }) {
   )
 }
 
-function truncateId(id: string): string {
-  return id.length > 13 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
+/** Humanize an entity_type token, e.g. "payroll_run" → "Payroll Run". */
+function humanizeType(t?: string | null): string {
+  return (t ?? 'record').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/** User-facing label for an entity reference — never a raw UUID. */
+function entityLabel(e: { entity_type?: string | null; entity_name?: string | null }): string {
+  return e.entity_name ?? humanizeType(e.entity_type)
 }
 
 function fmtDate(iso: string): string {
@@ -170,7 +176,7 @@ function VerificationTab() {
               <button
                 key={v.id}
                 onClick={() => setDrawerItem({
-                  label:          `${v.verification_type} verification — ${v.entity_id}`,
+                  label:          `${v.verification_type} verification — ${entityLabel(v)}`,
                   timestamp:      v.verified_at,
                   explainability: v.explainability,
                 })}
@@ -178,8 +184,8 @@ function VerificationTab() {
               >
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-xs font-mono text-muted-foreground shrink-0">
-                      {truncateId(v.entity_id)}
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {entityLabel(v)}
                     </span>
                     <Badge variant="outline" className="text-xs capitalize shrink-0">
                       {v.verification_type.replace('_', ' ')}
@@ -306,7 +312,7 @@ function TrustSignalsTab() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 space-y-1.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-muted-foreground">{truncateId(s.entity_id)}</span>
+                      <span className="text-xs text-muted-foreground">{entityLabel(s)}</span>
                       <Badge variant="outline" className="text-xs capitalize">{s.score_type}</Badge>
                       <SeverityBadge severity={s.severity} />
                     </div>
@@ -336,7 +342,7 @@ function TrustSignalsTab() {
       <ExplainabilityDrawer
         open={!!drilldown}
         onClose={() => setDrilldown(null)}
-        title={drilldown ? `Trust breakdown — ${truncateId(drilldown.entityId)}` : 'Trust Details'}
+        title={drilldown ? `Trust breakdown — ${entityLabel(drilldown.score)}` : 'Trust Details'}
         explainability={detail?.explainability}
       >
         {drilldown && (
@@ -420,7 +426,7 @@ function DuplicatesTab() {
               <button
                 key={d.id}
                 onClick={() => setDrawerItem({
-                  label:          `Duplicate ${d.duplicate_type} — ${d.entity_id}`,
+                  label:          `Duplicate ${d.duplicate_type} — ${(d as { entity_name?: string }).entity_name ?? '—'}`,
                   timestamp:      d.detected_at,
                   explainability: d.explainability,
                 })}
@@ -428,8 +434,8 @@ function DuplicatesTab() {
               >
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-xs font-mono text-muted-foreground shrink-0">
-                      {truncateId(d.entity_id)}
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {(d as { entity_name?: string }).entity_name ?? '—'}
                     </span>
                     <Badge variant="outline" className="text-xs capitalize shrink-0">
                       {d.duplicate_type.replace(/_/g, ' ')}

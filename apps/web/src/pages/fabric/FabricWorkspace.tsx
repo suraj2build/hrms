@@ -151,6 +151,11 @@ function scoreColor(score: number) {
   return 'text-destructive'
 }
 
+/** Humanize an entity_type token, e.g. "payroll_run" → "Payroll Run". */
+function humanizeType(t?: string | null): string {
+  return (t ?? 'record').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 function ScoreBar({ label, value, invert = false }: { label: string; value: number; invert?: boolean }) {
   // When invert=true, lower value is better (e.g. risk)
   const display = value ?? 0
@@ -411,7 +416,7 @@ export default function FabricWorkspace() {
               <div className="mt-6 rounded-lg border p-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium">{composeResult.entity_type} — {composeResult.entity_id.slice(0, 12)}…</p>
+                    <p className="text-sm font-medium">{(composeResult as { entity_name?: string }).entity_name ?? humanizeType(composeResult.entity_type)}</p>
                     <p className="text-xs text-muted-foreground">{new Date(composeResult.computed_at).toLocaleString()}</p>
                   </div>
                   <Badge variant={severityColor(composeResult.severity)}>{composeResult.severity.toUpperCase()}</Badge>
@@ -592,7 +597,7 @@ export default function FabricWorkspace() {
                   <div key={s.id ?? i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-muted/50 text-sm">
                     <Badge variant={s.status === 'completed' ? 'outline' : s.status === 'failed' ? 'destructive' : 'default'} className="text-xs shrink-0">{s.status}</Badge>
                     <span className="text-muted-foreground text-xs shrink-0">{s.entity_type}</span>
-                    <span className="font-mono text-xs flex-1 truncate">{s.entity_id.slice(0, 16)}…</span>
+                    <span className="text-xs flex-1 truncate text-muted-foreground">{(s as { entity_name?: string }).entity_name ?? '—'}</span>
                     <span className="text-xs tabular-nums text-muted-foreground shrink-0">{s.events_replayed} events</span>
                     <span className="text-xs text-muted-foreground shrink-0">{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</span>
                   </div>
