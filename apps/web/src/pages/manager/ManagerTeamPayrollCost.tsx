@@ -66,7 +66,7 @@ function VolatilityBadge({ vi }: { vi: number | null }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function ManagerTeamPayrollCost() {
+export function ManagerTeamPayrollCost({ embedded = false }: { embedded?: boolean }) {
   const [month, setMonth] = useState(currentMonth())
 
   const { data, isFetching, refetch } = useQuery<PayrollCostResponse>({
@@ -85,19 +85,8 @@ export function ManagerTeamPayrollCost() {
     return 'secondary' as const
   }
 
-  return (
-    <PageContainer>
-      <PageHeader
-        title="Team Payroll Cost"
-        subtitle="Gross pay, net pay, OT cost and LOP deduction for your team. HR manages payroll processing."
-        actions={
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={cn('h-4 w-4 mr-1', isFetching && 'animate-spin')} />
-            Refresh
-          </Button>
-        }
-      />
-
+  const body = (
+    <>
       {/* Month navigator */}
       <div className="mb-4 flex items-center gap-3">
         <div className="flex items-center gap-1 rounded-md border border-border">
@@ -121,6 +110,10 @@ export function ManagerTeamPayrollCost() {
             {data.run_status}
           </Badge>
         )}
+        <Button variant="outline" size="sm" className="ml-auto" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw className={cn('h-4 w-4 mr-1', isFetching && 'animate-spin')} />
+          Refresh
+        </Button>
       </div>
 
       {/* Team aggregates */}
@@ -207,6 +200,18 @@ export function ManagerTeamPayrollCost() {
           </div>
         )}
       </SectionCard>
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Team Payroll Cost"
+        subtitle="Gross pay, net pay, OT cost and LOP deduction for your team. HR manages payroll processing."
+      />
+      {body}
     </PageContainer>
   )
 }

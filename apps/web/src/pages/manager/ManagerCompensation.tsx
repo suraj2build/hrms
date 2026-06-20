@@ -245,7 +245,7 @@ function HistoryDialog({ member, onClose }: { member: TeamComp; onClose: () => v
 
 // ── Page ────────────────────────────────────────────────────────────────────────
 
-export function ManagerCompensation() {
+export function ManagerCompensation({ embedded = false }: { embedded?: boolean }) {
   const [q, setQ] = useState('')
   const [recommend, setRecommend] = useState<TeamComp | null>(null)
   const [history, setHistory]     = useState<TeamComp | null>(null)
@@ -265,18 +265,15 @@ export function ManagerCompensation() {
 
   const totalCtc = team.reduce((s, m) => s + (m.ctc_annual ?? 0), 0)
 
-  return (
-    <PageContainer>
-      <PageHeader
-        breadcrumb={[{ label: 'Manager' }, { label: 'Team Compensation' }]}
-        title="Team Compensation"
-        subtitle="Your direct reports' compensation · recommend increments for HR approval"
-        actions={
+  const body = (
+    <>
+      {embedded && (
+        <div className="mb-3 flex justify-end">
           <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => refetch()}>
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </Button>
-        }
-      />
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <SectionCard>
@@ -371,6 +368,24 @@ export function ManagerCompensation() {
 
       {recommend && <RecommendDialog member={recommend} onClose={() => setRecommend(null)} />}
       {history   && <HistoryDialog   member={history}   onClose={() => setHistory(null)} />}
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <PageContainer>
+      <PageHeader
+        breadcrumb={[{ label: 'Manager' }, { label: 'Team Compensation' }]}
+        title="Team Compensation"
+        subtitle="Your direct reports' compensation · recommend increments for HR approval"
+        actions={
+          <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => refetch()}>
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          </Button>
+        }
+      />
+      {body}
     </PageContainer>
   )
 }

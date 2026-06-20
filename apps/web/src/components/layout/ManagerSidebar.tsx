@@ -46,7 +46,6 @@ import {
   UserCog,
   Package,
   LifeBuoy,
-  Coins,
 } from 'lucide-react'
 import { cn }         from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -159,9 +158,8 @@ const BASE_SECTIONS: NavSection[] = [
       {
         label: 'Cost & Insights',
         items: [
-          { label: 'Team Compensation', icon: IndianRupee, href: '/manager/team/compensation' },
-          { label: 'Payroll Cost',      icon: Coins,       href: '/manager/team/payroll-cost' },
-          { label: 'Performance',       icon: TrendingUp,  href: '/manager/team/performance'  },
+          { label: 'Team Pay',     icon: IndianRupee, href: '/manager/team/pay'         },
+          { label: 'Performance',  icon: TrendingUp,  href: '/manager/team/performance' },
         ],
       },
     ],
