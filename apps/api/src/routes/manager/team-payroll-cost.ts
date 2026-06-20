@@ -74,7 +74,7 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
       .from('payroll_run_employees')
       .select(`
         employee_id, gross_pay, net_pay, ot_cost, lop_deduction, volatility_index,
-        employees!inner( id, first_name, last_name, employee_code, designation )
+        employees!inner( id, first_name, last_name, employee_code, designations(name) )
       `)
       .eq('tenant_id', req.tenantId)
       .eq('payroll_run_id', run.id)
@@ -87,7 +87,7 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
       employee_id:      r.employee_id,
       name:             r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
       employee_code:    r.employees?.employee_code ?? null,
-      designation:      r.employees?.designation ?? null,
+      designation:      (Array.isArray(r.employees?.designations) ? r.employees.designations[0]?.name : r.employees?.designations?.name) ?? null,
       gross_pay:        Number(r.gross_pay  ?? 0),
       net_pay:          Number(r.net_pay    ?? 0),
       ot_cost:          Number(r.ot_cost    ?? 0),

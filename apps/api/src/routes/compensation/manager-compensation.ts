@@ -49,10 +49,11 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
     const managerId = await resolveManagerId(req, parsed.data.manager_employee_id)
     if (!managerId) return reply.send({ data: [], manager_employee_id: null })
 
-    // Direct reports (active)
+    // Direct reports (active). designation/grade are FK lookups (designation_id /
+    // grade_id) embedded by name; joining_date is the canonical column.
     const { data: reports, error: repErr } = await fastify.supabase
       .from('employees')
-      .select('id, first_name, last_name, employee_code, designation, grade, date_of_joining')
+      .select('id, first_name, last_name, employee_code, joining_date, designations(name), grades(name)')
       .eq('tenant_id', req.tenantId)
       .eq('manager_id', managerId)
       .eq('status', 'active')
@@ -94,9 +95,9 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
         employee_id:    e.id,
         name:           `${e.first_name} ${e.last_name}`,
         employee_code:  e.employee_code,
-        designation:    e.designation ?? null,
-        grade:          e.grade ?? null,
-        date_of_joining: e.date_of_joining ?? null,
+        designation:    (Array.isArray(e.designations) ? e.designations[0]?.name : e.designations?.name) ?? null,
+        grade:          (Array.isArray(e.grades) ? e.grades[0]?.name : e.grades?.name) ?? null,
+        date_of_joining: e.joining_date ?? null,
         ctc_annual:     comp ? Number(comp.ctc_annual ?? 0) : null,
         ctc_monthly:    comp ? Number(comp.ctc_monthly ?? 0) : null,
         comp_effective_from: comp?.effective_from ?? null,
