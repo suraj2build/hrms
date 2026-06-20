@@ -53,12 +53,22 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
       const token = authHeader.slice(7)
 
-      // Verify JWT locally — zero network calls
+      // Verify JWT locally first (fast path, zero network) — valid for the legacy
+      // HS256 shared secret. If that fails (project signs tokens with asymmetric
+      // keys, or SUPABASE_JWT_SECRET is unset/rotated), fall back to validating
+      // against the Supabase Auth server so genuinely-valid tokens are not wrongly
+      // rejected as "Invalid token".
+      let userId: string
       const payload = verifySupabaseJwt(token, jwtSecret)
-      if (!payload) {
-        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid token' })
+      if (payload) {
+        userId = payload.sub
+      } else {
+        const { data: { user }, error } = await fastify.supabase.auth.getUser(token)
+        if (error || !user) {
+          return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid token' })
+        }
+        userId = user.id
       }
-      const userId = payload.sub
       request.userId   = userId
       request.userRole = 'authenticated'
       request.tenantId = ''

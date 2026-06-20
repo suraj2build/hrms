@@ -69,12 +69,20 @@ const ownerAuthPlugin: FastifyPluginAsync = async (fastify) => {
       }
       const token = authHeader.slice(7)
 
-      // Verify JWT locally — no network call
+      // Verify JWT locally first (fast path); fall back to the Supabase Auth
+      // server when local HS256 verification fails (asymmetric signing keys or a
+      // rotated/unset secret), so valid tokens are not wrongly rejected.
+      let userId: string
       const payload = verifySupabaseJwt(token, jwtSecret)
-      if (!payload) {
-        return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Invalid or expired token' })
+      if (payload) {
+        userId = payload.sub
+      } else {
+        const { data: { user }, error } = await fastify.supabase.auth.getUser(token)
+        if (error || !user) {
+          return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Invalid or expired token' })
+        }
+        userId = user.id
       }
-      const userId = payload.sub
 
       // Check in-memory cache first
       const cached = adminCache.get(userId)
