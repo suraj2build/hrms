@@ -1,12 +1,13 @@
 import fp from 'fastify-plugin'
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
+import { createHmac } from 'node:crypto'
 
 declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>
   }
   interface FastifyRequest {
-    userId: string
+    userId:   string
     tenantId: string
     userRole: string
     /** The employee record this user maps to (profiles.employee_id). Null for accounts not linked to an employee (e.g. some admins). */
@@ -14,7 +15,36 @@ declare module 'fastify' {
   }
 }
 
+interface ProfileCacheEntry {
+  tenantId:  string
+  role:      string
+  expiresAt: number
+}
+
+// Per-user profile cache (5-min TTL) — avoids DB hit on every request
+const profileCache = new Map<string, ProfileCacheEntry>()
+const CACHE_TTL    = 5 * 60 * 1000
+
+function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const [headerB64, payloadB64, sigB64] = parts
+    const expected = createHmac('sha256', secret)
+      .update(`${headerB64}.${payloadB64}`)
+      .digest('base64url')
+    if (expected !== sigB64) return null
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString())
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+    return { sub: payload.sub }
+  } catch {
+    return null
+  }
+}
+
 const authPlugin: FastifyPluginAsync = async (fastify) => {
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET ?? process.env.JWT_SECRET ?? ''
+
   fastify.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const authHeader = request.headers.authorization
@@ -23,39 +53,51 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
       const token = authHeader.slice(7)
 
-      const { data: { user }, error } = await fastify.supabase.auth.getUser(token)
-      if (error || !user) {
+      // Verify JWT locally — zero network calls
+      const payload = verifySupabaseJwt(token, jwtSecret)
+      if (!payload) {
         return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid token' })
       }
-
-      request.userId = user.id
+      const userId = payload.sub
+      request.userId   = userId
       request.userRole = 'authenticated'
       request.tenantId = ''
       request.employeeId = null
 
+      // Check cache first
+      const cached = profileCache.get(userId)
+      if (cached && cached.expiresAt > Date.now()) {
+        request.tenantId = cached.tenantId
+        request.userRole = cached.role
+        return
+      }
+
+      // Cache miss — one DB lookup
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('tenant_id, role, employee_id')
-        .eq('id', user.id)
+        .eq('id', userId)
         .single()
 
       if (!profile) {
         return reply.code(401).send({
-          error: 'Unauthorized',
+          error:   'Unauthorized',
           message: 'User profile not found. Please complete registration or contact your administrator.',
         })
       }
 
-      // A profile without a tenant (e.g. a platform-owner account, or a row
-      // provisioned with a null tenant_id) must NOT fall through with an empty
-      // tenantId — that produces confusing 500s (invalid-uuid / not-null) on
-      // every tenant-scoped write. Fail clearly instead.
       if (!profile.tenant_id) {
         return reply.code(403).send({
-          error: 'NO_TENANT',
+          error:   'NO_TENANT',
           message: 'This account is not linked to a tenant workspace.',
         })
       }
+
+      profileCache.set(userId, {
+        tenantId:  profile.tenant_id,
+        role:      profile.role,
+        expiresAt: Date.now() + CACHE_TTL,
+      })
 
       request.tenantId = profile.tenant_id
       request.userRole = profile.role
