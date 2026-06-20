@@ -883,3 +883,352 @@ export const demoRelationshipTypes = [
   { id: 'rt-mother', tenant_id: DEMO_TENANT_ID, name: 'Mother', code: 'MOTHER', is_active: true, created_at: ISO(daysAgo(800)) },
   { id: 'rt-child', tenant_id: DEMO_TENANT_ID, name: 'Child', code: 'CHILD', is_active: true, created_at: ISO(daysAgo(800)) },
 ]
+// ── Recruitment — pipeline stages ─────────────────────────────────────────────
+export function demoRecruitmentPipelineStages() {
+  return [
+    { id: 'stage-applied',   name: 'Applied',             color: '#64748b', stage_order: 1, stage_type: 'applied' },
+    { id: 'stage-screening', name: 'Screening',           color: '#3b82f6', stage_order: 2, stage_type: 'screening' },
+    { id: 'stage-interview', name: 'Technical Interview', color: '#8b5cf6', stage_order: 3, stage_type: 'interview' },
+    { id: 'stage-offer',     name: 'Offer',               color: '#f59e0b', stage_order: 4, stage_type: 'offer' },
+    { id: 'stage-hired',     name: 'Hired',               color: '#10b981', stage_order: 5, stage_type: 'hired' },
+  ]
+}
+
+// ── Recruitment — job requisitions ─────────────────────────────────────────────
+export function demoRecruitmentRequisitions() {
+  return [
+    {
+      id: 'req-001', title: 'Senior Software Engineer', department_id: 'dept-eng',
+      departments: { id: 'dept-eng', name: 'Engineering' },
+      location: 'Bengaluru', employment_type: 'full_time', openings: 2, status: 'open',
+      target_date: DAY(daysAgo(-30)), applicant_count: 7,
+      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
+      jd_text: 'We are looking for a Senior Software Engineer with 5+ years of experience in distributed systems and cloud-native architectures. Must have strong TypeScript/Node.js skills and ability to lead technical discussions.',
+      required_skills: ['TypeScript', 'Node.js', 'AWS', 'PostgreSQL', 'System Design'],
+      min_experience: 5, max_experience: 10, salary_min: 1800000, salary_max: 2800000,
+      created_at: ISO(daysAgo(60)),
+    },
+    {
+      id: 'req-002', title: 'Sales Manager', department_id: 'dept-sales',
+      departments: { id: 'dept-sales', name: 'Sales' },
+      location: 'Mumbai', employment_type: 'full_time', openings: 1, status: 'open',
+      target_date: DAY(daysAgo(-15)), applicant_count: 3,
+      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
+      jd_text: 'Seeking an experienced Sales Manager to lead our Mumbai team. 6+ years in B2B SaaS sales, strong hunter mentality, proven track record of ₹5Cr+ annual quota attainment.',
+      required_skills: ['B2B Sales', 'SaaS', 'CRM', 'Negotiation', 'Team Management'],
+      min_experience: 6, max_experience: 12, salary_min: 2200000, salary_max: 3200000,
+      created_at: ISO(daysAgo(45)),
+    },
+    {
+      id: 'req-003', title: 'HR Business Partner', department_id: 'dept-hr',
+      departments: { id: 'dept-hr', name: 'HR' },
+      location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'open',
+      target_date: DAY(daysAgo(-20)), applicant_count: 2,
+      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
+      jd_text: 'HRBP to support Engineering and Product teams. 4-7 years in HR, strong understanding of talent management, L&D, and employee relations in a tech startup context.',
+      required_skills: ['HRBP', 'Talent Management', 'L&D', 'Employee Relations', 'Performance Management'],
+      min_experience: 4, max_experience: 7, salary_min: 1400000, salary_max: 1900000,
+      created_at: ISO(daysAgo(35)),
+    },
+    {
+      id: 'req-004', title: 'Finance Analyst', department_id: 'dept-fin',
+      departments: { id: 'dept-fin', name: 'Finance' },
+      location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'filled',
+      target_date: DAY(daysAgo(30)), applicant_count: 5,
+      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
+      jd_text: 'Finance Analyst for FP&A and management reporting. CA/CMA preferred, 3-5 years in finance analysis in a mid-size tech company.',
+      required_skills: ['FP&A', 'Excel', 'Tally', 'MIS Reporting', 'GST'],
+      min_experience: 3, max_experience: 5, salary_min: 900000, salary_max: 1300000,
+      created_at: ISO(daysAgo(90)),
+    },
+    {
+      id: 'req-005', title: 'Operations Executive', department_id: 'dept-ops',
+      departments: { id: 'dept-ops', name: 'Operations' },
+      location: 'Delhi NCR', employment_type: 'full_time', openings: 1, status: 'on_hold',
+      target_date: DAY(daysAgo(-10)), applicant_count: 0,
+      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
+      jd_text: 'Operations Executive to manage vendor relationships and supply chain for our Delhi NCR office.',
+      required_skills: ['Vendor Management', 'Supply Chain', 'MS Office', 'Process Improvement'],
+      min_experience: 2, max_experience: 5, salary_min: 600000, salary_max: 900000,
+      created_at: ISO(daysAgo(40)),
+    },
+    {
+      id: 'req-006', title: 'Software Engineer', department_id: 'dept-eng',
+      departments: { id: 'dept-eng', name: 'Engineering' },
+      location: 'Bengaluru / Remote', employment_type: 'full_time', openings: 3, status: 'open',
+      target_date: DAY(daysAgo(-25)), applicant_count: 4,
+      raised_by_profile: { id: 'emp-0002', full_name: 'Rahul Verma' },
+      jd_text: 'Software Engineers for our platform team. 2-5 years experience, proficiency in React, TypeScript, and REST API design. Strong problem-solving skills required.',
+      required_skills: ['React', 'TypeScript', 'REST APIs', 'Git', 'SQL'],
+      min_experience: 2, max_experience: 5, salary_min: 900000, salary_max: 1600000,
+      created_at: ISO(daysAgo(50)),
+    },
+    {
+      id: 'req-007', title: 'Business Development Executive', department_id: 'dept-sales',
+      departments: { id: 'dept-sales', name: 'Sales' },
+      location: 'Mumbai / Delhi', employment_type: 'full_time', openings: 2, status: 'open',
+      target_date: DAY(daysAgo(-20)), applicant_count: 3,
+      raised_by_profile: { id: 'emp-0007', full_name: 'Kavya Menon' },
+      jd_text: 'BDE to drive new business acquisition in SMB and mid-market segment. 1-3 years sales experience, strong communication and persistence. Freshers with sales aptitude considered.',
+      required_skills: ['Lead Generation', 'Cold Calling', 'CRM', 'B2B Sales', 'Presentation Skills'],
+      min_experience: 1, max_experience: 3, salary_min: 600000, salary_max: 900000,
+      created_at: ISO(daysAgo(30)),
+    },
+    {
+      id: 'req-008', title: 'Product Designer (UX)', department_id: 'dept-eng',
+      departments: { id: 'dept-eng', name: 'Engineering' },
+      location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'draft',
+      target_date: null, applicant_count: 0,
+      raised_by_profile: { id: 'emp-0002', full_name: 'Rahul Verma' },
+      jd_text: null, required_skills: null,
+      min_experience: 3, max_experience: 7, salary_min: null, salary_max: null,
+      created_at: ISO(daysAgo(5)),
+    },
+  ]
+}
+
+// ── Recruitment — candidates ───────────────────────────────────────────────────
+export function demoRecruitmentCandidates() {
+  const seeds = [
+    { id: 'cand-001', first: 'Arjun',     last: 'Mehta',         company: 'Flipkart',      title: 'Software Engineer',              exp: 5, source: 'referral' },
+    { id: 'cand-002', first: 'Prerna',    last: 'Agarwal',       company: 'Swiggy',        title: 'HR Manager',                     exp: 3, source: 'linkedin' },
+    { id: 'cand-003', first: 'Rohan',     last: 'Bose',          company: 'Infosys',       title: 'Senior Software Engineer',       exp: 7, source: 'naukri' },
+    { id: 'cand-004', first: 'Aditi',     last: 'Chatterjee',    company: 'Wipro',         title: 'Software Engineer',              exp: 4, source: 'portal' },
+    { id: 'cand-005', first: 'Saurabh',   last: 'Tiwari',        company: 'Amazon',        title: 'Senior SDE',                     exp: 6, source: 'linkedin' },
+    { id: 'cand-006', first: 'Divya',     last: 'Nambiar',       company: 'Freshdesk',     title: 'Business Development Executive', exp: 2, source: 'referral' },
+    { id: 'cand-007', first: 'Kunal',     last: 'Sharma',        company: 'Microsoft',     title: 'Principal Engineer',             exp: 8, source: 'direct' },
+    { id: 'cand-008', first: 'Pooja',     last: 'Kapoor',        company: 'TCS',           title: 'Software Engineer',              exp: 5, source: 'naukri' },
+    { id: 'cand-009', first: 'Ravi',      last: 'Krishnamurthy', company: 'IBM',           title: 'Sales Executive',                exp: 3, source: 'agency' },
+    { id: 'cand-010', first: 'Shreya',    last: 'Jain',          company: 'Oracle',        title: 'Software Engineer',              exp: 4, source: 'linkedin' },
+    { id: 'cand-011', first: 'Vivek',     last: 'Pandey',        company: 'HCL',           title: 'Business Development Manager',   exp: 6, source: 'portal' },
+    { id: 'cand-012', first: 'Anita',     last: 'Desai',         company: 'Razorpay',      title: 'HR Executive',                   exp: 2, source: 'referral' },
+    { id: 'cand-013', first: 'Manish',    last: 'Oberoi',        company: 'Paytm',         title: 'Business Development Manager',   exp: 5, source: 'naukri' },
+    { id: 'cand-014', first: 'Simran',    last: 'Kaur',          company: 'Mindtree',      title: 'Sales Manager',                  exp: 3, source: 'direct' },
+    { id: 'cand-015', first: 'Abhishek',  last: 'Saxena',        company: 'Accenture',     title: 'Senior Engineer',                exp: 7, source: 'linkedin' },
+    { id: 'cand-016', first: 'Kavitha',   last: 'Nair',          company: 'Zoho',          title: 'Software Engineer',              exp: 4, source: 'referral' },
+    { id: 'cand-017', first: 'Ritesh',    last: 'Yadav',         company: 'Tech Mahindra', title: 'Senior Engineer',                exp: 5, source: 'naukri' },
+    { id: 'cand-018', first: 'Neha',      last: 'Singhania',     company: 'Capgemini',     title: 'Sales Manager',                  exp: 6, source: 'agency' },
+  ]
+  return seeds.map((c, i) => ({
+    id: c.id,
+    first_name: c.first,
+    last_name: c.last,
+    email: `${c.first.toLowerCase()}.${c.last.toLowerCase()}@gmail.com`,
+    phone: `+91 9${String(700000000 + i * 17391).slice(0, 9)}`,
+    current_company: c.company,
+    current_title: c.title,
+    total_experience: c.exp,
+    source: c.source,
+    linkedin_url: `https://linkedin.com/in/${c.first.toLowerCase()}-${c.last.toLowerCase()}`,
+    resume_url: null as string | null,
+    notes: null as string | null,
+    created_at: ISO(daysAgo(60 - i * 3)),
+  }))
+}
+
+// ── Recruitment — applications (Kanban + candidate-detail) ─────────────────────
+export function demoRecruitmentApplications() {
+  const stages = Object.fromEntries(demoRecruitmentPipelineStages().map(s => [s.id, s]))
+  const reqs   = Object.fromEntries(demoRecruitmentRequisitions().map(r => [r.id, r]))
+  const cands  = Object.fromEntries(demoRecruitmentCandidates().map(c => [c.id, c]))
+
+  const rows: {
+    candId: string; reqId: string; appId: string; stageId: string;
+    status: string; score: number | null; ago: number
+  }[] = [
+    { appId: 'app-001', candId: 'cand-001', reqId: 'req-001', stageId: 'stage-interview', status: 'interviewing', score: 7.8, ago: 40 },
+    { appId: 'app-002', candId: 'cand-002', reqId: 'req-003', stageId: 'stage-screening', status: 'screening',    score: null, ago: 22 },
+    { appId: 'app-003', candId: 'cand-003', reqId: 'req-001', stageId: 'stage-offer',     status: 'offer',        score: 8.5, ago: 55 },
+    { appId: 'app-004', candId: 'cand-004', reqId: 'req-006', stageId: 'stage-applied',   status: 'applied',      score: null, ago: 15 },
+    { appId: 'app-005', candId: 'cand-005', reqId: 'req-001', stageId: 'stage-hired',     status: 'hired',        score: 9.2, ago: 65 },
+    { appId: 'app-006', candId: 'cand-006', reqId: 'req-007', stageId: 'stage-screening', status: 'screening',    score: null, ago: 18 },
+    { appId: 'app-007', candId: 'cand-007', reqId: 'req-001', stageId: 'stage-offer',     status: 'offer',        score: 8.8, ago: 50 },
+    { appId: 'app-008', candId: 'cand-008', reqId: 'req-006', stageId: 'stage-applied',   status: 'applied',      score: null, ago: 12 },
+    { appId: 'app-009', candId: 'cand-009', reqId: 'req-002', stageId: 'stage-interview', status: 'interviewing', score: 6.9, ago: 30 },
+    { appId: 'app-010', candId: 'cand-010', reqId: 'req-006', stageId: 'stage-screening', status: 'screening',    score: null, ago: 20 },
+    { appId: 'app-011', candId: 'cand-011', reqId: 'req-007', stageId: 'stage-applied',   status: 'applied',      score: null, ago: 10 },
+    { appId: 'app-012', candId: 'cand-012', reqId: 'req-003', stageId: 'stage-interview', status: 'interviewing', score: 7.4, ago: 28 },
+    { appId: 'app-013', candId: 'cand-013', reqId: 'req-007', stageId: 'stage-hired',     status: 'hired',        score: 8.1, ago: 45 },
+    { appId: 'app-014', candId: 'cand-014', reqId: 'req-002', stageId: 'stage-screening', status: 'screening',    score: null, ago: 25 },
+    { appId: 'app-015', candId: 'cand-015', reqId: 'req-006', stageId: 'stage-interview', status: 'interviewing', score: 8.0, ago: 35 },
+    { appId: 'app-016', candId: 'cand-016', reqId: 'req-006', stageId: 'stage-applied',   status: 'applied',      score: null, ago: 8 },
+    { appId: 'app-017', candId: 'cand-017', reqId: 'req-001', stageId: 'stage-applied',   status: 'applied',      score: null, ago: 7 },
+    { appId: 'app-018', candId: 'cand-018', reqId: 'req-002', stageId: 'stage-offer',     status: 'offer',        score: 7.6, ago: 38 },
+  ]
+
+  return rows.map(r => {
+    const c = cands[r.candId]
+    return {
+      id: r.appId,
+      requisition_id: r.reqId,
+      status: r.status,
+      stage_id: r.stageId,
+      overall_score: r.score,
+      created_at: ISO(daysAgo(r.ago)),
+      candidates: {
+        id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email,
+        current_company: c.current_company, current_title: c.current_title,
+        source: c.source, total_experience: c.total_experience,
+      },
+      job_requisitions: reqs[r.reqId] ? { id: r.reqId, title: reqs[r.reqId].title } : null,
+      recruitment_pipeline_stages: stages[r.stageId] ?? null,
+    }
+  })
+}
+
+// ── Recruitment — interview rounds ────────────────────────────────────────────
+export function demoRecruitmentInterviews() {
+  const tomorrow   = new Date(NOW); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(10, 0, 0, 0)
+  const dayAfter   = new Date(NOW); dayAfter.setDate(dayAfter.getDate() + 2); dayAfter.setHours(14, 0, 0, 0)
+
+  const p1 = [
+    { interviewer_id: 'emp-0002', profiles: { id: 'emp-0002', full_name: 'Rahul Verma' } },
+    { interviewer_id: 'emp-0003', profiles: { id: 'emp-0003', full_name: 'Ananya Iyer' } },
+  ]
+  const p2 = [
+    { interviewer_id: 'emp-0001', profiles: { id: 'emp-0001', full_name: 'Priya Sharma' } },
+    { interviewer_id: 'emp-0011', profiles: { id: 'emp-0011', full_name: 'Divya Pillai' } },
+  ]
+  const p3 = [{ interviewer_id: 'emp-0007', profiles: { id: 'emp-0007', full_name: 'Kavya Menon' } }]
+
+  function appStub(appId: string, status: string, cId: string, cFirst: string, cLast: string, cEmail: string, cCompany: string, reqId: string, reqTitle: string) {
+    return { id: appId, status, candidates: { id: cId, first_name: cFirst, last_name: cLast, email: cEmail, current_company: cCompany }, job_requisitions: { id: reqId, title: reqTitle } }
+  }
+
+  return [
+    {
+      id: 'ivr-001', application_id: 'app-001', round_number: 1,
+      title: 'Technical Screen', interview_type: 'video',
+      scheduled_at: ISO(daysAgo(30)), duration_mins: 60,
+      meet_link: 'https://meet.google.com/demo-saar-001', status: 'completed',
+      notes: 'Strong DSA skills; good system design thinking. Clear communicator. Recommend round 2.',
+      created_at: ISO(daysAgo(35)),
+      applications: appStub('app-001', 'interviewing', 'cand-001', 'Arjun', 'Mehta', 'arjun.mehta@gmail.com', 'Flipkart', 'req-001', 'Senior Software Engineer'),
+      interview_panel: p1,
+    },
+    {
+      id: 'ivr-002', application_id: 'app-001', round_number: 2,
+      title: 'System Design', interview_type: 'video',
+      scheduled_at: tomorrow.toISOString(), duration_mins: 90,
+      meet_link: 'https://meet.google.com/demo-saar-002', status: 'scheduled',
+      notes: null, created_at: ISO(daysAgo(10)),
+      applications: appStub('app-001', 'interviewing', 'cand-001', 'Arjun', 'Mehta', 'arjun.mehta@gmail.com', 'Flipkart', 'req-001', 'Senior Software Engineer'),
+      interview_panel: p1,
+    },
+    {
+      id: 'ivr-003', application_id: 'app-009', round_number: 1,
+      title: 'Sales Aptitude & Role-play', interview_type: 'video',
+      scheduled_at: ISO(daysAgo(20)), duration_mins: 45, meet_link: null, status: 'completed',
+      notes: 'Decent pitch; needs improvement in objection handling. Borderline — second round recommended.',
+      created_at: ISO(daysAgo(25)),
+      applications: appStub('app-009', 'interviewing', 'cand-009', 'Ravi', 'Krishnamurthy', 'ravi.k@gmail.com', 'IBM', 'req-002', 'Sales Manager'),
+      interview_panel: p3,
+    },
+    {
+      id: 'ivr-004', application_id: 'app-012', round_number: 1,
+      title: 'HR Competency Interview', interview_type: 'video',
+      scheduled_at: ISO(daysAgo(18)), duration_mins: 60,
+      meet_link: 'https://meet.google.com/demo-saar-004', status: 'completed',
+      notes: 'Strong domain knowledge; excellent stakeholder management examples. Good culture alignment.',
+      created_at: ISO(daysAgo(22)),
+      applications: appStub('app-012', 'interviewing', 'cand-012', 'Anita', 'Desai', 'anita.desai@gmail.com', 'Razorpay', 'req-003', 'HR Business Partner'),
+      interview_panel: p2,
+    },
+    {
+      id: 'ivr-005', application_id: 'app-015', round_number: 1,
+      title: 'Technical Screen', interview_type: 'video',
+      scheduled_at: ISO(daysAgo(22)), duration_mins: 60,
+      meet_link: 'https://meet.google.com/demo-saar-005', status: 'completed',
+      notes: 'Excellent React/TypeScript skills. Solved all problems cleanly. Strong candidate.',
+      created_at: ISO(daysAgo(28)),
+      applications: appStub('app-015', 'interviewing', 'cand-015', 'Abhishek', 'Saxena', 'abhishek.s@gmail.com', 'Accenture', 'req-006', 'Software Engineer'),
+      interview_panel: p1,
+    },
+    {
+      id: 'ivr-006', application_id: 'app-015', round_number: 2,
+      title: 'Live Coding Challenge', interview_type: 'in_person',
+      scheduled_at: dayAfter.toISOString(), duration_mins: 120, meet_link: null, status: 'scheduled',
+      notes: null, created_at: ISO(daysAgo(5)),
+      applications: appStub('app-015', 'interviewing', 'cand-015', 'Abhishek', 'Saxena', 'abhishek.s@gmail.com', 'Accenture', 'req-006', 'Software Engineer'),
+      interview_panel: p1,
+    },
+  ]
+}
+
+// ── Recruitment — interviewers (GET /recruitment/interviewers) ─────────────────
+export function demoRecruitmentInterviewers() {
+  return demoEmployeeList.slice(0, 8).map(e => ({
+    id: e.id,
+    full_name: `${e.first_name} ${e.last_name}`,
+    role: e.user_account?.role ?? 'employee',
+  }))
+}
+
+// ── Recruitment — analytics (GET /recruitment/analytics) ─────────────────────
+export function demoRecruitmentAnalytics() {
+  return {
+    funnel: { applied: 142, screening: 68, interviewing: 31, offer: 12, hired: 8, rejected: 54, withdrawn: 9 },
+    avg_time_to_hire: 24, avg_time_to_offer: 18,
+    requisitions: { draft: 3, open: 11, on_hold: 2, filled: 7, cancelled: 1 },
+    interviews:   { scheduled: 9, completed: 47, cancelled: 4, no_show: 3 },
+    pass_rate: 62,
+    source_breakdown: [
+      { source: 'referral', count: 38 },
+      { source: 'linkedin', count: 34 },
+      { source: 'naukri',   count: 29 },
+      { source: 'portal',   count: 21 },
+      { source: 'direct',   count: 14 },
+      { source: 'agency',   count: 6 },
+    ],
+    recent_30d_applications: 37, total_applications: 142, total_requisitions: 24,
+  }
+}
+
+// ── Interviewer calibration (GET /recruitment/analytics/interviewers) ─────────
+export function demoInterviewerAnalytics() {
+  const interviewers = demoEmployeeList.slice(0, 5).map((e, i) => ({
+    interviewer_id: e.id,
+    name: `${e.first_name} ${e.last_name}`,
+    scored_count:    [18, 14, 11, 9, 6][i],
+    avg_overall:     [3.8, 4.1, 3.4, 3.9, 3.6][i],
+    leniency:        [0.2, 0.7, -0.6, 0.1, -0.3][i],
+    consistency:     [0.82, 0.74, 0.69, 0.88, 0.71][i],
+    positive_rate:   [0.55, 0.71, 0.36, 0.6, 0.5][i],
+    recommendations: { strong_yes: [3, 5, 1, 4, 2][i], yes: [7, 5, 3, 4, 2][i], no: [6, 3, 5, 1, 2][i], strong_no: [2, 1, 2, 0, 0][i] },
+    hire_accuracy:   [0.78, 0.66, 0.7, 0.81, 0.6][i],
+    reject_accuracy: [0.72, 0.6, 0.75, 0.69, 0.58][i],
+    decisions_with_outcome: [12, 9, 8, 7, 4][i],
+  }))
+  const criteria = [
+    { criterion: 'technical_skills', avg_hired: 4.2, avg_rejected: 2.6, lift: 1.6, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'problem_solving',  avg_hired: 4.0, avg_rejected: 2.8, lift: 1.2, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'communication',    avg_hired: 3.8, avg_rejected: 3.1, lift: 0.7, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'culture_fit',      avg_hired: 4.1, avg_rejected: 3.3, lift: 0.8, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'leadership',       avg_hired: 3.6, avg_rejected: 3.0, lift: 0.6, sample_hired: 5, sample_rejected: 14 },
+  ]
+  return { cohort_avg_overall: 3.7, total_scores: 58, interviewers, criteria, agreement: { multi_scorer_rounds: 14, avg_score_spread: 0.62, unanimous_rate: 0.57 } }
+}
+
+// ── Hired pipeline / preboarding tracking ─────────────────────────────────────
+export function demoHiredPipeline() {
+  const mk = (
+    id: string, first: string, last: string, email: string, title: string,
+    reqTitle: string, dept: string, offer: number, joinDaysAhead: number,
+    pjStatus: string | null, invitationId: string | null, submitted: boolean,
+  ) => ({
+    id, status: 'hired', offer_amount: offer,
+    expected_joining: DAY(daysAgo(-joinDaysAhead)),
+    preboarding_initiated_at: invitationId ? ISO(daysAgo(7)) : null,
+    pre_joinee_invitation_id: invitationId,
+    created_at: ISO(daysAgo(20)), updated_at: ISO(daysAgo(3)),
+    candidates: { id: `cand-${id}`, first_name: first, last_name: last, email, phone: '+91 98xxxxxx12', current_title: title },
+    job_requisitions: { id: `req-${id}`, title: reqTitle, departments: { name: dept } },
+    pre_joinee: pjStatus ? { id: `pj-${id}`, status: pjStatus, joining_date: DAY(daysAgo(-joinDaysAhead)), submitted_at: submitted ? ISO(daysAgo(2)) : null } : null,
+  })
+  return [
+    mk('h1', 'Nandini', 'Gupta',   'nandini.gupta@example.in',   'DevOps Engineer',   'Senior Software Engineer', 'Engineering', 2100000, 21, 'submitted', 'inv-h1', true),
+    mk('h2', 'Arjun',   'Rampal',  'arjun.rampal@example.in',    'UX/UI Designer',    'Senior Software Engineer', 'Engineering', 1850000, 30, 'pending',   'inv-h2', false),
+    mk('h3', 'Farhan',  'Qureshi', 'farhan.qureshi@example.in',  'Finance Analyst',   'Finance Analyst',          'Finance',     1150000, 14, 'approved',  'inv-h3', true),
+    mk('h4', 'Ishita',  'Roy',     'ishita.roy@example.in',      'Sales Executive',   'Sales Manager',            'Sales',       900000,  45, null,        null,     false),
+  ]
+}

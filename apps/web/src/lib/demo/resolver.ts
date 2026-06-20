@@ -534,7 +534,69 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path.startsWith('/datasets/')) return { data: {} }
 
   // ── Recruitment ────────────────────────────────────────────────────────────
-  if (path === '/recruitment/hired') return { data: [], total: 0 }
+  if (path === '/recruitment/analytics') return fx.demoRecruitmentAnalytics()
+  if (path === '/recruitment/analytics/interviewers') return { data: fx.demoInterviewerAnalytics() }
+  if (path === '/recruitment/stats') {
+    return { requisitions: fx.demoRecruitmentAnalytics().requisitions }
+  }
+  if (path === '/recruitment/pipeline/stages') return { data: fx.demoRecruitmentPipelineStages() }
+  if (path === '/recruitment/requisitions') {
+    let reqs = fx.demoRecruitmentRequisitions()
+    if (q.status && q.status !== 'all')   reqs = reqs.filter(r => r.status === q.status)
+    if (q.department_id)                  reqs = reqs.filter(r => r.department_id === q.department_id)
+    if (q.search) { const s = q.search.toLowerCase(); reqs = reqs.filter(r => r.title.toLowerCase().includes(s)) }
+    return { data: reqs, total: reqs.length }
+  }
+  mm = path.match(/^\/recruitment\/requisitions\/([^/]+)$/)
+  if (mm) {
+    const reqId = mm[1]
+    const all = fx.demoRecruitmentRequisitions()
+    return { data: all.find(r => r.id === reqId) ?? all[0] }
+  }
+  if (path === '/recruitment/candidates') {
+    let cands = fx.demoRecruitmentCandidates()
+    if (q.search) { const s = q.search.toLowerCase(); cands = cands.filter(c => `${c.first_name} ${c.last_name}`.toLowerCase().includes(s) || c.email.toLowerCase().includes(s)) }
+    if (q.source && q.source !== 'all') cands = cands.filter(c => c.source === q.source)
+    const offset = Number(q.offset) || 0
+    const limit  = Number(q.limit)  || 50
+    return { data: cands.slice(offset, offset + limit), total: cands.length }
+  }
+  mm = path.match(/^\/recruitment\/candidates\/([^/]+)$/)
+  if (mm) {
+    const candId = mm[1]
+    const all = fx.demoRecruitmentCandidates()
+    return { data: all.find(c => c.id === candId) ?? all[0] }
+  }
+  if (path === '/recruitment/applications') {
+    let apps = fx.demoRecruitmentApplications()
+    if (q.requisition_id) apps = apps.filter(a => a.requisition_id === q.requisition_id)
+    if (q.candidate_id)   apps = apps.filter(a => a.candidates.id === q.candidate_id)
+    if (q.status)         apps = apps.filter(a => a.status === q.status)
+    const limit = Number(q.limit) || 200
+    return { data: apps.slice(0, limit), total: apps.length }
+  }
+  mm = path.match(/^\/recruitment\/applications\/([^/]+)$/)
+  if (mm) {
+    const appId = mm[1]
+    const all = fx.demoRecruitmentApplications()
+    return { data: all.find(a => a.id === appId) ?? all[0] }
+  }
+  if (path === '/recruitment/interviews') {
+    let ivrs = fx.demoRecruitmentInterviews()
+    if (q.status)          ivrs = ivrs.filter(i => i.status === q.status)
+    if (q.candidate_id)    ivrs = ivrs.filter(i => i.applications?.candidates.id === q.candidate_id)
+    if (q.requisition_id)  ivrs = ivrs.filter(i => i.applications?.job_requisitions?.id === q.requisition_id)
+    return { data: ivrs }
+  }
+  if (path === '/recruitment/interviewers') return { data: fx.demoRecruitmentInterviewers() }
+  if (path === '/recruitment/hired') {
+    const all = fx.demoHiredPipeline()
+    const filter = q.preboarding_status || 'all'
+    const rows = filter === 'pending'   ? all.filter(a => !a.pre_joinee_invitation_id)
+               : filter === 'initiated' ? all.filter(a => a.pre_joinee_invitation_id)
+               : all
+    return { data: rows, total: rows.length }
+  }
   if (path.startsWith('/recruitment/')) return { data: [] }
 
   // ── Metrics (prometheus-style text) ────────────────────────────────────────
