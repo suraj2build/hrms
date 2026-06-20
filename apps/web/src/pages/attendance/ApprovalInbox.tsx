@@ -19,7 +19,7 @@ import {
   Inbox, CheckCircle2, XCircle, Loader2,
   CalendarDays, Clock, Filter, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, TrendingUp, ArrowUpDown, ArrowUp, ArrowDown,
-  GitBranch,
+  GitBranch, CalendarClock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -31,6 +31,7 @@ import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
 import { ForensicsDrawer } from '@/components/operational/ForensicsDrawer'
+import { LeaveContextDrawer, type LeaveContextTarget } from '@/components/operational/LeaveContextDrawer'
 import {
   IntelligenceLoadingSkeleton,
   IntelligenceEmptyState,
@@ -228,11 +229,11 @@ function RejectionForm({
 function LeaveRequestsTable({
   items,
   onRefresh,
-  onForensics,
+  onLeaveContext,
 }: {
-  items:       LeaveRequestItem[]
-  onRefresh:   () => void
-  onForensics: (t: ForensicsTarget) => void
+  items:          LeaveRequestItem[]
+  onRefresh:      () => void
+  onLeaveContext: (t: LeaveContextTarget) => void
 }) {
   const queryClient = useQueryClient()
   const [actionRowId,   setActionRowId]   = useState<string | null>(null)
@@ -419,20 +420,21 @@ function LeaveRequestsTable({
                           <XCircle className="h-3.5 w-3.5" />
                           Reject
                         </Button>
-                        {/* Q2 — forensics trigger in actions column */}
+                        {/* Leave-context trigger — balance, team overlap & history */}
                         {row.employees?.id && (
                           <Button
                             size="sm"
                             variant="ghost"
                             className="h-7 w-7 p-0 text-muted-foreground hover:text-info"
-                            title="View attendance timeline"
-                            onClick={() => onForensics({
+                            title="View leave context — balance, team overlap & history"
+                            onClick={() => onLeaveContext({
                               employeeId:   row.employees!.id,
-                              date:         row.from_date,
+                              from:         row.from_date,
+                              to:           row.to_date,
                               employeeName: employeeName(row.employees),
                             })}
                           >
-                            <GitBranch className="h-3.5 w-3.5" />
+                            <CalendarClock className="h-3.5 w-3.5" />
                           </Button>
                         )}
                       </div>
@@ -762,8 +764,10 @@ export function ApprovalInbox() {
   const [regPage,    setRegPage]    = useState(1)
   // Q3 — sort-by-age: cycles none → asc (oldest first) → desc (newest first)
   const [sortOrder,       setSortOrder]       = useState<SortOrder>('none')
-  // Q2 — forensics drawer target; null = closed
+  // Q2 — forensics drawer target; null = closed (regularisation tab only)
   const [forensicsTarget, setForensicsTarget] = useState<ForensicsTarget | null>(null)
+  // Leave-context drawer target; null = closed (leave tab)
+  const [leaveContextTarget, setLeaveContextTarget] = useState<LeaveContextTarget | null>(null)
 
   // Reset pages when switching tabs
   function switchTab(tab: FilterTab) {
@@ -956,7 +960,7 @@ export function ApprovalInbox() {
             </div>
           }
         >
-          <LeaveRequestsTable items={displayLeave} onRefresh={refetch} onForensics={t => setForensicsTarget(t)} />
+          <LeaveRequestsTable items={displayLeave} onRefresh={refetch} onLeaveContext={t => setLeaveContextTarget(t)} />
 
           <PaginationBar
             page={leavePage}
@@ -1008,10 +1012,16 @@ export function ApprovalInbox() {
         </div>
       )}
 
-      {/* Q2 — forensics drawer (shared across leave + regularisation tables) */}
+      {/* Forensics drawer — regularisation tab (past-date punch trace) */}
       <ForensicsDrawer
         target={forensicsTarget}
         onClose={() => setForensicsTarget(null)}
+      />
+
+      {/* Leave-context drawer — leave tab (balance, team overlap & history) */}
+      <LeaveContextDrawer
+        target={leaveContextTarget}
+        onClose={() => setLeaveContextTarget(null)}
       />
     </PageContainer>
   )
