@@ -1343,3 +1343,166 @@ export function demoInterviewerAnalytics() {
     agreement: { multi_scorer_rounds: 14, avg_score_spread: 0.62, unanimous_rate: 0.57 },
   }
 }
+
+// ── Executive snapshots (GET /executive/ceo|chro|workforce|financial|trends) ─
+const EXEC_MONTHS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06']
+
+export function demoExecCeo() {
+  return {
+    data: {
+      employee_count: 22, joiners_30d: 3, exits_30d: 1,
+      net_headcount_change: 2, attendance_rate: 94.6, absence_rate: 5.4,
+      payroll_cost_current: 4820000, payroll_net_current: 3960000, avg_cost_per_employee: 219000,
+      open_exceptions: 4, open_incidents: 1, pending_revisions: 2, total_attention_items: 7,
+      narrative: 'Workforce steady at 22 active employees — 3 joiners and 1 exit in the last 30 days. Attendance is healthy at 94.6% and payroll is on track at ₹48.2L gross this month, with 4 open exceptions to clear.',
+    },
+  }
+}
+
+export function demoExecChro() {
+  return {
+    data: {
+      gender_distribution: { Male: 13, Female: 9 },
+      employment_type_distribution: { permanent: 19, contract: 2, intern: 1 },
+      leave_utilization_pct: 58, trust_high_risk: 2,
+      narrative: 'Leave utilisation sits at 58% of entitlement with diversity at 41% women. Two employees are flagged high-risk by trust scoring; 82% of the workforce is identity-verified.',
+      trust_verified: 18, trust_total: 22, trust_verification_pct: 82,
+      pending_revisions: 2, approved_revisions: 5,
+      recruitment_active: true,
+      hiring_funnel: { applied: 142, screening: 68, interviewing: 31, offer: 12, hired: 8 },
+      offers_extended: 12, offers_accepted: 8, offer_acceptance_rate: 67,
+      avg_time_to_offer: 18, avg_time_to_hire: 24, open_requisitions: 11,
+    },
+  }
+}
+
+export function demoExecWorkforce() {
+  return {
+    data: {
+      employee_count: 22,
+      monthly_trends: EXEC_MONTHS.map((month, i) => ({ month, joiners: [2, 1, 3, 1, 2, 3][i], exits: [1, 0, 1, 1, 0, 1][i], net: [1, 1, 2, 0, 2, 2][i] })),
+      dept_distribution: [
+        { dept: 'Engineering', count: 8, pct: 36 },
+        { dept: 'Sales',       count: 4, pct: 18 },
+        { dept: 'Finance',     count: 3, pct: 14 },
+        { dept: 'HR',          count: 3, pct: 14 },
+        { dept: 'Operations',  count: 2, pct: 9 },
+        { dept: 'Marketing',   count: 2, pct: 9 },
+      ],
+      employment_type_distribution: [
+        { type: 'Permanent', count: 19, pct: 86 },
+        { type: 'Contract',  count: 2,  pct: 9 },
+        { type: 'Intern',    count: 1,  pct: 5 },
+      ],
+      gender_distribution: { Male: 13, Female: 9 },
+      total_joiners_period: 12, total_exits_period: 4,
+    },
+  }
+}
+
+export function demoExecFinancial() {
+  return {
+    data: {
+      payroll_current_gross: 4820000, payroll_current_net: 3960000, payroll_mom_change: 3.2,
+      payroll_cost_trend: EXEC_MONTHS.map((month, i) => ({ month, total_gross: 4400000 + i * 90000, employee_count: 18 + i, avg_cost_per_head: Math.round((4400000 + i * 90000) / (18 + i)) })),
+      dept_cost_breakdown: [
+        { dept: 'Engineering', headcount: 8, total_gross: 2280000, total_net: 1870000, ot_cost: 48000 },
+        { dept: 'Sales',       headcount: 4, total_gross: 940000,  total_net: 760000,  ot_cost: 22000 },
+        { dept: 'Finance',     headcount: 3, total_gross: 620000,  total_net: 510000,  ot_cost: 8000 },
+        { dept: 'HR',          headcount: 3, total_gross: 540000,  total_net: 450000,  ot_cost: 4000 },
+        { dept: 'Operations',  headcount: 2, total_gross: 240000,  total_net: 200000,  ot_cost: 12000 },
+        { dept: 'Marketing',   headcount: 2, total_gross: 200000,  total_net: 170000,  ot_cost: 3000 },
+      ],
+      component_mix: { month: '2026-06', fixed_pay: 3620000, variable_pay: 480000, statutory_cost: 420000, ot_cost: 97000, employee_deductions: 860000, gross_total: 4820000, has_data: true },
+    },
+  }
+}
+
+export function demoExecTrends() {
+  return {
+    data: {
+      months: EXEC_MONTHS.map((month, i) => ({
+        month, attendance_rate: [93.1, 94.0, 92.8, 95.2, 94.1, 94.6][i],
+        leave_days_approved: [14, 18, 22, 12, 16, 19][i],
+        payroll_gross: 4400000 + i * 90000, payroll_headcount: 18 + i,
+        joiners: [2, 1, 3, 1, 2, 3][i], exits: [1, 0, 1, 1, 0, 1][i], net_headcount: 18 + i + [1, 1, 2, 0, 2, 2][i],
+      })),
+    },
+  }
+}
+
+// ── Attendance confidence summary (GET /attendance/confidence/summary) ──────
+export function demoAttendanceConfidenceSummary() {
+  return {
+    avg_score: 82.4,
+    employees_at_risk: 3,
+    level_distribution: [
+      { level: 'high',     count: 14 },
+      { level: 'medium',   count: 5 },
+      { level: 'low',      count: 2 },
+      { level: 'critical', count: 1 },
+    ],
+  }
+}
+
+// ── Attendance risk summary (GET /attendance/risk/summary) ──────────────────
+export function demoAttendanceRiskSummary() {
+  return {
+    avg_risk_score: 28.5,
+    high_risk_count: 3,
+    employees_by_level: [
+      { level: 'critical', count: 1 },
+      { level: 'high',     count: 2 },
+      { level: 'medium',   count: 5 },
+      { level: 'low',      count: 14 },
+    ],
+  }
+}
+
+// ── Privacy / DPDP health (GET /governance/privacy/health) ──────────────────
+export function demoPrivacyHealth() {
+  return {
+    erasure_requests:      { open: 2, breached_sla: 0, completed: 11, total: 13 },
+    flagged_pii_access_30d: 0,
+    control_health:        { total: 24, implemented: 18, verified: 14, in_progress: 4, not_started: 2, waived: 0 },
+  }
+}
+
+// ── Security posture (GET /security/health) ─────────────────────────────────
+export function demoSecurityHealth() {
+  return {
+    alerts_30d:      { total: 17, open: 3, critical_open: 0, high_open: 1, resolved: 14, avg_mtta_sec: 1860, avg_mttr_sec: 18420 },
+    events_7d:       { total: 342, by_severity: { critical: 0, high: 4, medium: 23, low: 315 } },
+    detection_rules: { total: 28, enabled: 25 },
+  }
+}
+
+// ── Payroll accounting summary (GET /payroll/accounting/summary) ────────────
+export function demoPayrollAccountingSummary() {
+  return {
+    total_payroll_liability: 4820000,
+    pending_payout_amount:   0,
+    failed_payout_count:     0,
+    payout_completion_pct:   100,
+    imbalanced_ledger_count: 0,
+    total_ledger_count:      6,
+    posted_ledger_count:     6,
+    recent_ledgers:          [],
+  }
+}
+
+// ── Payroll run snapshot (GET /payroll/runs/:id/snapshot) ───────────────────
+export function demoPayrollRunSnapshot(runId: string) {
+  return {
+    id: `snap-${runId}`,
+    run_id: runId,
+    month: '2026-06',
+    snapshot_version: 3,
+    integrity_hash: 'a7f3c9e21b84d6f05c1e9a2b7d4f8e60c3a591b2d8e4f7a0c6b9d2e5f1a3c8b7',
+    replayable: true,
+    formula_engine_version: 4,
+    validation_engine_version: 2,
+    created_at: new Date(daysAgo(8)).toISOString(),
+    employee_count: 22,
+  }
+}

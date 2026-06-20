@@ -90,6 +90,10 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     return { data: rows, stale_count: rows.filter(r => r.is_stale).length, healthy: true }
   }
   if (path === '/attendance/exceptions/summary') return { data: fx.demoExceptionsSummary() }
+  if (path === '/attendance/confidence/summary') return { data: fx.demoAttendanceConfidenceSummary() }
+  if (path === '/attendance/confidence/low')     return { data: [] }
+  if (path === '/attendance/risk/summary')       return { data: fx.demoAttendanceRiskSummary() }
+  if (path === '/attendance/risk')               return { data: [] }
   if (path === '/attendance/reconciliation/open') {
     const issues = fx.demoReconciliationOpen()
     return { data: issues, total: issues.length }
@@ -300,6 +304,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   // /payroll/runs/:id/variance
   mm = path.match(/^\/payroll\/runs\/([^/]+)\/variance$/)
   if (mm) return fx.demoVarianceReport(mm[1])
+  // /payroll/runs/:id/snapshot
+  mm = path.match(/^\/payroll\/runs\/([^/]+)\/snapshot$/)
+  if (mm) return { data: fx.demoPayrollRunSnapshot(mm[1]) }
+  // /payroll/accounting/summary
+  if (path === '/payroll/accounting/summary') return { data: fx.demoPayrollAccountingSummary() }
   // /payroll/runs/:id (detail)
   mm = path.match(/^\/payroll\/runs\/([^/]+)$/)
   if (mm) return { data: fx.demoPayrollRunDetail(mm[1]) }
@@ -599,9 +608,18 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/datasets/statutory') return fx.demoStatutoryData()
   if (path.startsWith('/datasets/')) return { data: {} }
 
+  // ── Governance (DPDP) / Security posture ────────────────────────────────────
+  if (path === '/governance/privacy/health') return fx.demoPrivacyHealth()
+  if (path === '/security/health')           return fx.demoSecurityHealth()
+
   // ── Compliance / statutory ──────────────────────────────────────────────────
   if (path === '/payroll/compliance/stats') return fx.demoComplianceStats()
   if (path === '/executive/compliance') return fx.demoExecutiveCompliance()
+  if (path === '/executive/ceo')       return fx.demoExecCeo()
+  if (path === '/executive/chro')      return fx.demoExecChro()
+  if (path === '/executive/workforce') return fx.demoExecWorkforce()
+  if (path === '/executive/financial') return fx.demoExecFinancial()
+  if (path === '/executive/trends')    return fx.demoExecTrends()
   if (path === '/compliance/calendar') return fx.demoComplianceCalendar()
   if (path === '/compliance/calendar/upcoming') return { data: fx.demoComplianceCalendar().data }
   if (path.startsWith('/compliance/')) return { data: [] }
