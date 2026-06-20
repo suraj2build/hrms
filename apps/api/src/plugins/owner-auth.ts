@@ -1,15 +1,15 @@
 /**
  * Owner Auth Plugin
  *
- * Validates Supabase Bearer JWT then checks the platform_admins table.
- * Owner routes use fastify.authenticateOwner instead of fastify.authenticate.
+ * Validates Supabase Bearer JWT locally (no network call), then checks
+ * platform_admins with a 5-minute in-memory cache per user.
  *
- * Decorates request:
- *   request.platformAdminId   — UUID from platform_admins.id
- *   request.platformAdminRole — 'owner' | 'admin'
+ * Before: every request = auth.getUser() + platform_admins SELECT + UPDATE (3 Supabase hits)
+ * After:  every request = local JWT verify + cache lookup (0-1 Supabase hits)
  */
 import fp from 'fastify-plugin'
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
+import { createHmac } from 'node:crypto'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -17,14 +17,50 @@ declare module 'fastify' {
     authenticateOwnerOnly: (request: FastifyRequest, reply: FastifyReply) => Promise<void>
   }
   interface FastifyRequest {
-    platformAdminId:   string
-    platformAdminRole: string
+    platformAdminId:     string
+    platformAdminRole:   string
     platformAdminUserId: string
   }
 }
 
+interface AdminCacheEntry {
+  adminId:   string
+  role:      string
+  userId:    string
+  expiresAt: number
+}
+
+// In-memory cache: userId → admin record (5-min TTL)
+const adminCache = new Map<string, AdminCacheEntry>()
+const CACHE_TTL  = 5 * 60 * 1000
+
+function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+
+    const [headerB64, payloadB64, sigB64] = parts
+    const signingInput = `${headerB64}.${payloadB64}`
+
+    // Supabase signs with HS256
+    const expected = createHmac('sha256', secret)
+      .update(signingInput)
+      .digest('base64url')
+
+    if (expected !== sigB64) return null
+
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString())
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+
+    return { sub: payload.sub }
+  } catch {
+    return null
+  }
+}
+
 const ownerAuthPlugin: FastifyPluginAsync = async (fastify) => {
-  // ── authenticateOwner — accepts both 'owner' and 'admin' roles ───────────────
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET ?? process.env.JWT_SECRET ?? ''
+
   fastify.decorate('authenticateOwner', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const authHeader = request.headers.authorization
@@ -33,45 +69,65 @@ const ownerAuthPlugin: FastifyPluginAsync = async (fastify) => {
       }
       const token = authHeader.slice(7)
 
-      const { data: { user }, error } = await fastify.supabase.auth.getUser(token)
-      if (error || !user) {
-        return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Invalid token' })
+      // Verify JWT locally first (fast path); fall back to the Supabase Auth
+      // server when local HS256 verification fails (asymmetric signing keys or a
+      // rotated/unset secret), so valid tokens are not wrongly rejected.
+      let userId: string
+      const payload = verifySupabaseJwt(token, jwtSecret)
+      if (payload) {
+        userId = payload.sub
+      } else {
+        const { data: { user }, error } = await fastify.supabase.auth.getUser(token)
+        if (error || !user) {
+          return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Invalid or expired token' })
+        }
+        userId = user.id
       }
 
-      // Check platform_admins — NOT profiles
+      // Check in-memory cache first
+      const cached = adminCache.get(userId)
+      if (cached && cached.expiresAt > Date.now()) {
+        request.platformAdminId     = cached.adminId
+        request.platformAdminRole   = cached.role
+        request.platformAdminUserId = cached.userId
+        return
+      }
+
+      // Cache miss — one DB lookup
       const { data: admin, error: adminErr } = await fastify.supabase
         .from('platform_admins')
         .select('id, role, is_active')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .single()
 
       if (adminErr || !admin) {
+        adminCache.delete(userId)
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'Not a platform admin' })
       }
       if (!admin.is_active) {
+        adminCache.delete(userId)
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'Platform admin account is inactive' })
       }
 
+      // Populate cache
+      adminCache.set(userId, {
+        adminId:   admin.id,
+        role:      admin.role,
+        userId,
+        expiresAt: Date.now() + CACHE_TTL,
+      })
+
       request.platformAdminId     = admin.id
       request.platformAdminRole   = admin.role
-      request.platformAdminUserId = user.id
-
-      // Update last_login_at (fire and forget)
-      void Promise.resolve(
-        fastify.supabase
-          .from('platform_admins')
-          .update({ last_login_at: new Date().toISOString() })
-          .eq('id', admin.id)
-      ).catch(() => {})
+      request.platformAdminUserId = userId
     } catch {
       return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Invalid or expired token' })
     }
   })
 
-  // ── authenticateOwnerOnly — accepts only 'owner' role ────────────────────────
   fastify.decorate('authenticateOwnerOnly', async (request: FastifyRequest, reply: FastifyReply) => {
     await fastify.authenticateOwner(request, reply)
-    if (reply.sent) return  // already replied with error
+    if (reply.sent) return
 
     if (request.platformAdminRole !== 'owner') {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Owner-only action' })

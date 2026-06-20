@@ -112,8 +112,8 @@ function ReviewDialog({
         <div className="space-y-3 pt-2">
           {claim && (
             <div className="text-sm text-muted-foreground space-y-1">
-              <p>Employee: <span className="text-foreground font-medium">{claim.employee_name ?? claim.employee_id}</span></p>
-              <p>Category: <span className="text-foreground">{claim.category_name ?? claim.category_id}</span></p>
+              <p>Employee: <span className="text-foreground font-medium">{claim.employee_name ?? '—'}</span></p>
+              <p>Category: <span className="text-foreground">{claim.category_name ?? '—'}</span></p>
               <p>Claimed: <span className="text-foreground">{fmt(claim.claimed_amount)}</span></p>
             </div>
           )}
@@ -391,11 +391,11 @@ export function Reimbursements() {
                       <tr key={claim.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="py-3 px-4">
                           <div className="font-medium text-foreground">
-                            {claim.employee_name ?? claim.employee_id}
+                            {claim.employee_name ?? '—'}
                           </div>
                         </td>
                         <td className="py-3 px-4 text-foreground">
-                          {claim.category_name ?? claim.category_id}
+                          {claim.category_name ?? '—'}
                         </td>
                         <td className="py-3 px-4 text-muted-foreground">{claim.claim_month}</td>
                         <td className="py-3 px-4 text-right text-foreground">{fmt(claim.claimed_amount)}</td>

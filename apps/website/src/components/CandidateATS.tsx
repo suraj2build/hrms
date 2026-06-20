@@ -321,9 +321,9 @@ export default function CandidateATS({ candidates, onUpdateCandidate, onAddCandi
                 <div className="space-y-3">
                   <h5 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider block font-sans">Interview & Screening Notes</h5>
                   <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl relative">
-                    <quote className="text-xs italic text-slate-600 leading-relaxed block pl-2 border-l-2 border-indigo-500">
+                    <blockquote className="text-xs italic text-slate-600 leading-relaxed block pl-2 border-l-2 border-[#2E6FE6]">
                       "{selectedCandidate.notes || 'No evaluations logged yet. Standard review required.'}"
-                    </quote>
+                    </blockquote>
                   </div>
                 </div>
 

@@ -188,58 +188,6 @@ function buildDates(offset: number): string[] {
   return list
 }
 
-// ── SVG Donut chart ───────────────────────────────────────────────────────────
-
-function DonutChart({
-  segments, total, size = 88,
-}: {
-  segments: Array<{ value: number; color: string }>
-  total:    number
-  size?:    number
-}) {
-  const cx = size / 2, cy = size / 2
-  const outerR = size * 0.43, innerR = size * 0.28
-
-  if (total === 0) return (
-    <svg width={size} height={size}>
-      <circle cx={cx} cy={cy} r={outerR} fill="var(--muted)" />
-      <circle cx={cx} cy={cy} r={innerR} fill="var(--card)" />
-      <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.2} fontWeight={700} fill="var(--muted-foreground)" fontFamily={T.mono}>0</text>
-      <text x={cx} y={cy + size * 0.15} textAnchor="middle" fontSize={size * 0.1} fill="var(--muted-foreground)">Total</text>
-    </svg>
-  )
-
-  const paths: JSX.Element[] = []
-  let angle = -Math.PI / 2
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
-    if (seg.value <= 0) continue
-    const sweep = (seg.value / total) * 2 * Math.PI
-    const [x1, y1]   = [cx + outerR * Math.cos(angle),          cy + outerR * Math.sin(angle)]
-    const [x2, y2]   = [cx + outerR * Math.cos(angle + sweep),  cy + outerR * Math.sin(angle + sweep)]
-    const [ix1, iy1] = [cx + innerR * Math.cos(angle),          cy + innerR * Math.sin(angle)]
-    const [ix2, iy2] = [cx + innerR * Math.cos(angle + sweep),  cy + innerR * Math.sin(angle + sweep)]
-    const lg = sweep > Math.PI ? 1 : 0
-    paths.push(
-      <path key={i}
-        d={`M${x1} ${y1}A${outerR} ${outerR} 0 ${lg} 1 ${x2} ${y2}L${ix2} ${iy2}A${innerR} ${innerR} 0 ${lg} 0 ${ix1} ${iy1}Z`}
-        fill={seg.color}
-      />
-    )
-    angle += sweep
-  }
-
-  return (
-    <svg width={size} height={size}>
-      {paths}
-      <circle cx={cx} cy={cy} r={innerR} fill="var(--card)" />
-      <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.21} fontWeight={700} fill={T.text} fontFamily={T.mono}>{total}</text>
-      <text x={cx} y={cy + size * 0.155} textAnchor="middle" fontSize={size * 0.1} fill={T.muted}>Total</text>
-    </svg>
-  )
-}
-
 // ── CoreIdentity ──────────────────────────────────────────────────────────────
 
 function CoreIdentity({ emp, teamSize, pendingCount }: {
@@ -360,23 +308,18 @@ function CoreIdentity({ emp, teamSize, pendingCount }: {
 
 // ── KPI Strip ─────────────────────────────────────────────────────────────────
 
-function KPIStrip({ summary, pendingLeave, pendingReg }: {
-  summary:      TodaySummary
-  pendingLeave: number
-  pendingReg:   number
-}) {
+// Today's Attendance strip — attendance breakdown only. Team Size + Pending
+// Approvals deliberately omitted; those live in the identity header (CoreIdentity)
+// and the Approvals queue, so they are not repeated here.
+function KPIStrip({ summary }: { summary: TodaySummary }) {
   const total   = summary.total
   const present = summary.present
-  const pctPres = total > 0 ? ((present / total) * 100).toFixed(1) : '0.0'
+  const pct = (n: number) => (total > 0 ? `${((n / total) * 100).toFixed(0)}% of team` : '—')
 
   const tiles = [
     {
-      icon: Users,       label: 'Team Size',        value: total,
-      sub: 'Active members', color: '#1d4ed8', bg: 'var(--tint-blue-bg)',
-    },
-    {
       icon: UserCheck,   label: 'Present Today',    value: present,
-      sub: `${pctPres}% of team`, color: 'var(--tint-green-fg)', bg: 'var(--tint-green-bg)',
+      sub: pct(present), color: 'var(--tint-green-fg)', bg: 'var(--tint-green-bg)',
     },
     {
       icon: Calendar,    label: 'On Leave',          value: summary.leave,
@@ -384,19 +327,18 @@ function KPIStrip({ summary, pendingLeave, pendingReg }: {
     },
     {
       icon: AlertCircle, label: 'Absent',            value: summary.absent,
-      sub: summary.not_marked > 0 ? `${summary.not_marked} not marked` : 'Today',
-      color: 'var(--tint-red-fg)', bg: 'var(--tint-red-bg)',
+      sub: pct(summary.absent), color: 'var(--tint-red-fg)', bg: 'var(--tint-red-bg)',
     },
     {
-      icon: ClipboardList, label: 'Pending Approvals', value: pendingLeave + pendingReg,
-      sub: `${pendingLeave} leave · ${pendingReg} reg`,
-      color: pendingLeave + pendingReg > 0 ? '#f59e0b' : T.muted,
-      bg: pendingLeave + pendingReg > 0 ? 'var(--tint-amber-bg)' : 'var(--tint-neutral-bg)',
+      icon: Clock,       label: 'Not Marked',        value: summary.not_marked,
+      sub: summary.not_marked > 0 ? 'Awaiting punch' : 'All marked',
+      color: summary.not_marked > 0 ? '#f59e0b' : T.muted,
+      bg: summary.not_marked > 0 ? 'var(--tint-amber-bg)' : 'var(--tint-neutral-bg)',
     },
   ]
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ gap: 10 }}>
+    <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 10 }}>
       {tiles.map(t => {
         const Icon = t.icon
         return (
@@ -883,70 +825,6 @@ function TeamHeatmap({
   )
 }
 
-// ── TeamAttendanceTodayCard (donut) ───────────────────────────────────────────
-
-function TeamAttendanceTodayCard({ summary, navigate }: {
-  summary:  TodaySummary
-  navigate: ReturnType<typeof useNavigate>
-}) {
-  const segments = [
-    { value: summary.present - summary.late, color: '#10b981' },
-    { value: summary.late,                   color: '#f59e0b' },
-    { value: summary.leave,                  color: '#3b82f6' },
-    { value: summary.absent,                 color: '#f43f5e' },
-    { value: summary.not_marked,             color: 'var(--tint-faint)' },
-  ]
-
-  const rows = [
-    { label: 'Present',     n: summary.present,    color: '#10b981' },
-    { label: 'On Leave',    n: summary.leave,       color: '#3b82f6' },
-    { label: 'Absent',      n: summary.absent,      color: '#f43f5e' },
-    { label: 'Weekly Off',  n: 0,                   color: 'var(--tint-faint)' },
-    { label: 'Holiday',     n: 0,                   color: '#a78bfa' },
-  ]
-
-  return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius, boxShadow: T.shadow }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 18px', borderBottom: `1px solid ${T.borderL}` }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: T.sub }}>
-          Team Attendance · Today
-        </span>
-      </div>
-      <div style={{ padding: '14px 18px' }}>
-        {/* Donut + legend row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ flexShrink: 0 }}>
-            <DonutChart segments={segments} total={summary.total} size={88} />
-          </div>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {rows.map(r => {
-              const pct = summary.total > 0 ? ((r.n / summary.total) * 100).toFixed(1) : '0.0'
-              return (
-                <div key={r.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 11.5, color: T.sub }}>{r.label}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: T.mono }}>{r.n}</span>
-                    <span style={{ fontSize: 10.5, color: T.muted, minWidth: 36, textAlign: 'right' }}>{pct}%</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-        <button
-          onClick={() => navigate('/manager/team/attendance')}
-          style={{ marginTop: 12, fontSize: 11.5, color: '#1d4ed8', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-        >
-          View detailed report <ChevronRight style={{ width: 10, height: 10 }} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── Who's Out Card ────────────────────────────────────────────────────────────
 
 function WhosOutCard({ teamMembers, navigate }: {
@@ -1267,8 +1145,8 @@ export function ManagerDashboardPage() {
         {/* Lifecycle intelligence rails — probation / joiners / trust / expiry / separation (P6.2) */}
         <ManagerLifecycleRails />
 
-        {/* KPI strip */}
-        <KPIStrip summary={summary} pendingLeave={leaveRequests.length} pendingReg={regularisations.length} />
+        {/* Today's attendance strip */}
+        <KPIStrip summary={summary} />
 
         {/* Two-column body */}
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_310px]" style={{ gap: 14, alignItems: 'start' }}>
@@ -1298,7 +1176,6 @@ export function ManagerDashboardPage() {
 
           {/* Right rail */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <TeamAttendanceTodayCard summary={summary} navigate={navigate} />
             <WhosOutCard teamMembers={teamMembers} navigate={navigate} />
             <QuickActionsCard navigate={navigate} />
             <PendingRegularisationCard regularisations={regularisations} navigate={navigate} />

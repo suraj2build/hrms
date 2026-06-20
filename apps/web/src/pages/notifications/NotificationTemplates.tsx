@@ -498,8 +498,8 @@ export function NotificationTemplates() {
                 <tbody>
                   {filteredLogs.map(log => (
                     <tr key={log.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                      <td className="py-2 px-3 text-foreground">{log.template_name ?? log.template_id}</td>
-                      <td className="py-2 px-3 text-muted-foreground">{log.recipient_name ?? log.recipient_id}</td>
+                      <td className="py-2 px-3 text-foreground">{log.template_name ?? '—'}</td>
+                      <td className="py-2 px-3 text-muted-foreground">{log.recipient_name ?? '—'}</td>
                       <td className="py-2 px-3">
                         <span className="flex items-center gap-1 text-muted-foreground">
                           {channelIcon(log.channel_type)}

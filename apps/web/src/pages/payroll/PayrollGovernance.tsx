@@ -292,8 +292,8 @@ function MakerCheckerTab() {
               <tr key={log.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                 <td className="px-4 py-3 font-medium text-foreground capitalize">{log.entity_type.replace(/_/g, ' ')}</td>
                 <td className="px-4 py-3 text-foreground capitalize">{log.action.replace(/_/g, ' ')}</td>
-                <td className="px-4 py-3 text-foreground">{log.maker_name ?? log.maker_id}</td>
-                <td className="px-4 py-3 text-muted-foreground">{log.checker_name ?? log.checker_id ?? '—'}</td>
+                <td className="px-4 py-3 text-foreground">{log.maker_name ?? '—'}</td>
+                <td className="px-4 py-3 text-muted-foreground">{log.checker_name ?? '—'}</td>
                 <td className="px-4 py-3"><StatusBadge status={log.status} /></td>
                 <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(log.created_at)}</td>
                 <td className="px-4 py-3">
@@ -580,7 +580,7 @@ function VarianceApprovalsTab() {
             <tbody>
               {variances.map(v => (
                 <tr key={v.id} className="border-b border-border hover:bg-muted/40 transition-colors">
-                  <td className="px-4 py-3 text-foreground">{v.employee_name ?? v.employee_id}</td>
+                  <td className="px-4 py-3 text-foreground">{v.employee_name ?? '—'}</td>
                   <td className="px-4 py-3 font-mono text-muted-foreground">{v.component_code}</td>
                   <td className="px-4 py-3 text-right text-foreground">{fmt(v.expected_amount)}</td>
                   <td className="px-4 py-3 text-right text-foreground">{fmt(v.actual_amount)}</td>

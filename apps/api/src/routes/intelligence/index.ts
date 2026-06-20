@@ -481,10 +481,15 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       try {
         const { data: leavRows, error: leaveErr } = await fastify.supabase
           .from('employee_leave_balance')
-          .select('leave_type_id, balance, year')
+          .select('leave_type_id, balance, year, leave_types(name)')
           .eq('employee_id', employeeId).eq('tenant_id', tenantId).limit(20)
         if (!leaveErr && leavRows && leavRows.length > 0) {
-          leavePayload = { balances: leavRows.map((r: any) => ({ leave_type: r.leave_type_id, balance: Number(r.balance ?? 0), used: 0 })) }
+          leavePayload = { balances: leavRows.map((r: any) => ({
+            // Resolve the human-readable leave type name; never expose the raw id.
+            leave_type: (Array.isArray(r.leave_types) ? r.leave_types[0]?.name : r.leave_types?.name) ?? 'Leave',
+            balance:    Number(r.balance ?? 0),
+            used:       0,
+          })) }
           sources.push('employee_leave_balance')
         }
       } catch (_) { /* skip */ }

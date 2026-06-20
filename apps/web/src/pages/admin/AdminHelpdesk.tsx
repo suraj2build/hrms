@@ -373,7 +373,7 @@ export function AdminHelpdesk() {
                     className="w-full text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
                   >
                     <option value="">Unassigned</option>
-                    {agents.map(a => <option key={a.id} value={a.id}>{a.full_name ?? a.id.slice(0, 8)}</option>)}
+                    {agents.map(a => <option key={a.id} value={a.id}>{a.full_name ?? 'Unassigned'}</option>)}
                   </select>
                 </div>
                 <div>

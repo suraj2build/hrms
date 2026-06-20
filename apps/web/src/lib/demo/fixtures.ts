@@ -883,6 +883,661 @@ export const demoRelationshipTypes = [
   { id: 'rt-mother', tenant_id: DEMO_TENANT_ID, name: 'Mother', code: 'MOTHER', is_active: true, created_at: ISO(daysAgo(800)) },
   { id: 'rt-child', tenant_id: DEMO_TENANT_ID, name: 'Child', code: 'CHILD', is_active: true, created_at: ISO(daysAgo(800)) },
 ]
+
+// ── Attendance ops / pipeline (flat shapes; pages read fields directly) ───────
+
+const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
+
+export function demoAttendanceOpsStats() {
+  const n = demoEmployeeList.length
+  return {
+    unresolved_anomalies: 0,
+    pending_corrections: 0,
+    staffing_pressure: 0,
+    overnight_issues: 0,
+    confidence_warnings: 0,
+    recompute_backlog: 0,
+    payroll_continuity_gaps: 0,
+    is_processing: false,
+    active_period_month: CURRENT_MONTH,
+    active_period_summary: {
+      active_month: CURRENT_MONTH,
+      is_historical: false,
+      present: n - 2,
+      late: 1,
+      absent: 1,
+      half_day: 0,
+      leave: 1,
+      payable_days: n * 22,
+      lop_days: 0,
+      missing_punch: 0,
+      total_employees: n,
+    },
+  }
+}
+
+export function demoPipelineStats() {
+  const today = new Date().toISOString().slice(0, 10)
+  return {
+    raw_log_count_30d: 0,
+    processing_runs_30d: 22,
+    last_batch_run_date: today,
+    last_batch_ran_at: ISO(daysAgo(0)),
+    batch_employees_last: demoEmployeeList.length,
+    batch_last_error: null,
+    punch_log_count_30d: demoEmployeeList.length * 22,
+    csv_employees_30d: demoEmployeeList.length,
+    daily_rows_from_csv: demoEmployeeList.length * 22,
+    csv_date_range: { from: `${CURRENT_MONTH}-01`, to: today },
+    upload_count_30d: 3,
+    last_upload_at: ISO(daysAgo(1)),
+    active_source: 'csv' as const,
+  }
+}
+
+export function demoProcessStatus() {
+  return { is_running: false, started_at: null, started_by: null, lock_ttl_seconds: null }
+}
+
+// Processing runs history (Operational Health).
+export function demoProcessRuns() {
+  return [0, 1, 2, 3, 4].map(i => ({
+    id: `run-att-${i}`,
+    status: 'completed',
+    completed_at: ISO(daysAgo(i)),
+    started_at: ISO(daysAgo(i)),
+    processed_count: SEEDS.length,
+    skipped_count: 0,
+    incomplete_count: 0,
+    error_message: null,
+    duration_ms: 4000 + i * 120,
+  }))
+}
+
+// Attendance AI intelligence — returned BOTH flat and wrapped (.data) so
+// OperationalHealth (flat) and WorkforceIntelligence (.data) both work.
+export function demoAttendanceIntelligence() {
+  const summary = {
+    at_risk_count: 1,
+    open_anomalies: 0,
+    avg_risk_score: 22,
+    computed_at: new Date().toISOString(),
+  }
+  const at_risk = [
+    {
+      employee_id: demoEmployeeList[5].id,
+      name: `${demoEmployeeList[5].first_name} ${demoEmployeeList[5].last_name}`,
+      employee_code: demoEmployeeList[5].employee_code,
+      risk_score: 42,
+      reasons: ['2 late arrivals in last 14 days'],
+      anomaly_count: 0,
+      flag_types: ['punctuality'] as string[],
+    },
+  ]
+  const last14 = Array.from({ length: 14 }, (_, k) => {
+    const d = DAY(daysAgo(13 - k))
+    return { date: d, open: 0, resolved: k % 5 === 0 ? 1 : 0, total: k % 5 === 0 ? 1 : 0 }
+  })
+  const trends = {
+    daily: last14,
+    anomaly_by_type: { late_arrival: 3, missing_punch: 1 } as Record<string, number>,
+    anomaly_by_severity: { low: 3, medium: 1 } as Record<string, number>,
+  }
+  const patterns = {
+    repeat_offenders: [] as typeof at_risk,
+    top_anomaly_types: [
+      { type: 'late_arrival', count: 3, pct: 75 },
+      { type: 'missing_punch', count: 1, pct: 25 },
+    ],
+  }
+  return { summary, at_risk, trends, patterns, data: { summary, at_risk, trends, patterns }, cached: true, computed_at: new Date().toISOString() }
+}
+
+export function demoUploadHealth() {
+  return {
+    status: 'healthy' as const,
+    summary: {
+      total_last_30d: 3,
+      completed: 3,
+      failed: 0,
+      orphaned: 0,
+      partial_failures: 0,
+      replay_uploads: 0,
+    },
+    recent_failures: [] as Array<{ id: string; file_name: string | null; created_at: string; error_message: string | null; result_summary: Record<string, unknown> | null }>,
+    stale_uploads: [] as Array<{ id: string; file_name: string | null; created_at: string }>,
+    last_successful_upload: ISO(daysAgo(1)),
+  }
+}
+
+export function demoUploadSessions() {
+  const mk = (i: number, name: string, total: number, ok: number, fail: number) => ({
+    id: `ups-${i}`,
+    status: fail > 0 ? 'completed_with_errors' : 'completed',
+    file_name: name,
+    file_size: 12000 + i * 800,
+    created_at: ISO(daysAgo(i * 7 + 1)),
+    result_summary: { total_rows: total, success_rows: ok, failed_rows: fail, is_replay: false },
+  })
+  return [
+    mk(0, 'attendance_jun_2026.csv', demoEmployeeList.length * 22, demoEmployeeList.length * 22, 0),
+    mk(1, 'attendance_may_2026.csv', demoEmployeeList.length * 21, demoEmployeeList.length * 21, 0),
+    mk(2, 'attendance_apr_2026.csv', demoEmployeeList.length * 22, demoEmployeeList.length * 22, 0),
+  ]
+}
+
+// ── Leave governance ─────────────────────────────────────────────────────────
+
+export function demoSessionAnalytics() {
+  return {
+    total_requests: 48,
+    half_day_count: 6,
+    cross_session_count: 2,
+    hourly_count: 3,
+    by_type: [
+      { leave_type_name: 'Casual Leave', full_day: 14, first_half: 2, second_half: 2, cross_session: 0 },
+      { leave_type_name: 'Sick Leave',   full_day: 11, first_half: 2, second_half: 1, cross_session: 1 },
+      { leave_type_name: 'Earned Leave', full_day: 12, first_half: 0, second_half: 0, cross_session: 1 },
+      { leave_type_name: 'Comp Off',     full_day: 3,  first_half: 1, second_half: 0, cross_session: 0 },
+    ],
+  }
+}
+
+// Paginated "My leave requests" — richer history with mixed statuses.
+export function demoMyLeaveRequestsPaged(page: number, limit: number, status?: string) {
+  const lt = (id: string, name: string, is_paid = true) => ({ id, name, is_paid })
+  const all = [
+    { id: 'lr-01', leave_type_id: 'lt-cl', from_date: DAY(daysAgo(-6)), to_date: DAY(daysAgo(-4)), computed_days: 3, half_day: false, status: 'PENDING',   reason: 'Sister’s wedding', rejection_reason: null, created_at: ISO(daysAgo(1)),  leave_types: lt('lt-cl', 'Casual Leave') },
+    { id: 'lr-02', leave_type_id: 'lt-sl', from_date: DAY(daysAgo(4)),  to_date: DAY(daysAgo(4)),  computed_days: 0.5, half_day: true,  status: 'APPROVED',  reason: 'Doctor appointment', rejection_reason: null, created_at: ISO(daysAgo(6)),  leave_types: lt('lt-sl', 'Sick Leave') },
+    { id: 'lr-03', leave_type_id: 'lt-el', from_date: DAY(daysAgo(28)), to_date: DAY(daysAgo(24)), computed_days: 5, half_day: false, status: 'APPROVED',  reason: 'Goa vacation', rejection_reason: null, created_at: ISO(daysAgo(35)), leave_types: lt('lt-el', 'Earned Leave') },
+    { id: 'lr-04', leave_type_id: 'lt-cl', from_date: DAY(daysAgo(40)), to_date: DAY(daysAgo(40)), computed_days: 1, half_day: false, status: 'APPROVED',  reason: 'Personal work', rejection_reason: null, created_at: ISO(daysAgo(44)), leave_types: lt('lt-cl', 'Casual Leave') },
+    { id: 'lr-05', leave_type_id: 'lt-sl', from_date: DAY(daysAgo(55)), to_date: DAY(daysAgo(53)), computed_days: 3, half_day: false, status: 'APPROVED',  reason: 'Viral fever', rejection_reason: null, created_at: ISO(daysAgo(58)), leave_types: lt('lt-sl', 'Sick Leave') },
+    { id: 'lr-06', leave_type_id: 'lt-cl', from_date: DAY(daysAgo(62)), to_date: DAY(daysAgo(61)), computed_days: 2, half_day: false, status: 'REJECTED',  reason: 'Out of town', rejection_reason: 'Team release week — please re-plan', created_at: ISO(daysAgo(66)), leave_types: lt('lt-cl', 'Casual Leave') },
+    { id: 'lr-07', leave_type_id: 'lt-el', from_date: DAY(daysAgo(80)), to_date: DAY(daysAgo(78)), computed_days: 3, half_day: false, status: 'CANCELLED', reason: 'Plans changed', rejection_reason: null, created_at: ISO(daysAgo(85)), leave_types: lt('lt-el', 'Earned Leave') },
+    { id: 'lr-08', leave_type_id: 'lt-el', from_date: DAY(daysAgo(95)), to_date: DAY(daysAgo(91)), computed_days: 5, half_day: false, status: 'APPROVED',  reason: 'Festival break', rejection_reason: null, created_at: ISO(daysAgo(100)), leave_types: lt('lt-el', 'Earned Leave') },
+  ]
+  const filtered = status ? all.filter(r => r.status === status) : all
+  const start = (Math.max(1, page) - 1) * limit
+  const slice = filtered.slice(start, start + limit)
+  return { data: slice, pagination: { page: Math.max(1, page), limit, total: filtered.length, has_more: start + limit < filtered.length } }
+}
+
+// Attendance change audit trail.
+export function demoAttendanceAudit() {
+  const pick = (i: number) => demoEmployeeList[i % demoEmployeeList.length]
+  const mk = (i: number, before: string | null, after: string, source: string, byIdx: number) => {
+    const e = pick(i)
+    const by = demoEmployeeList[byIdx]
+    return {
+      id: `aud-${i}`,
+      date: DAY(daysAgo(i)),
+      source,
+      before_status: before,
+      after_status: after,
+      created_at: ISO(daysAgo(i)),
+      employee_name: `${e.first_name} ${e.last_name}`,
+      employee_code: e.employee_code,
+      changed_by_name: `${by.first_name} ${by.last_name}`,
+    }
+  }
+  return [
+    mk(0, 'absent',  'present',  'regularisation', 0),
+    mk(1, null,      'present',  'biometric',      2),
+    mk(2, 'absent',  'leave',    'leave_approval', 0),
+    mk(3, 'present', 'half_day', 'correction',     10),
+    mk(4, null,      'present',  'csv_upload',     0),
+    mk(5, 'late',    'present',  'regularisation', 6),
+    mk(6, null,      'present',  'biometric',      2),
+    mk(7, 'absent',  'present',  'correction',     0),
+  ]
+}
+
+// Hired pipeline (preboarding tracking).
+export function demoHiredPipeline() {
+  const mk = (
+    id: string, first: string, last: string, email: string, title: string, reqTitle: string, dept: string,
+    offer: number, joinDaysAhead: number, pjStatus: string | null, invitationId: string | null, submitted: boolean,
+  ) => ({
+    id, status: 'hired', offer_amount: offer,
+    expected_joining: DAY(daysAgo(-joinDaysAhead)),
+    preboarding_initiated_at: invitationId ? ISO(daysAgo(7)) : null,
+    pre_joinee_invitation_id: invitationId,
+    created_at: ISO(daysAgo(20)), updated_at: ISO(daysAgo(3)),
+    candidates: { id: `cand-${id}`, first_name: first, last_name: last, email, phone: '+91 98xxxxxx12', current_title: title },
+    job_requisitions: { id: `req-${id}`, title: reqTitle, departments: { name: dept } },
+    pre_joinee: pjStatus ? { id: `pj-${id}`, status: pjStatus, joining_date: DAY(daysAgo(-joinDaysAhead)), submitted_at: submitted ? ISO(daysAgo(2)) : null } : null,
+  })
+  return [
+    mk('h1', 'Nandini', 'Gupta',  'nandini.gupta@example.in',  'DevOps Engineer',     'Senior Software Engineer', 'Engineering', 2100000, 21, 'submitted', 'inv-h1', true),
+    mk('h2', 'Arjun',   'Rampal', 'arjun.rampal@example.in',   'UX/UI Designer',      'Senior Software Engineer', 'Engineering', 1850000, 30, 'pending',   'inv-h2', false),
+    mk('h3', 'Farhan',  'Qureshi','farhan.qureshi@example.in', 'Finance Analyst',     'Finance Analyst',          'Finance',     1150000, 14, 'approved',  'inv-h3', true),
+    mk('h4', 'Ishita',  'Roy',    'ishita.roy@example.in',     'Sales Executive',     'Sales Manager',            'Sales',       900000,  45, null,        null,    false),
+  ]
+}
+
+// Event-based leave grants (festival/birthday etc.).
+export function demoEventGrants() {
+  const e1 = demoEmployeeList[2], e2 = demoEmployeeList[6], e3 = demoEmployeeList[11]
+  const mk = (id: string, e: typeof e1, days: number, status: string, dt: string) => ({
+    id, employee_id: e.id, leave_type_id: 'lt-cl', date_type_id: 'dt-fest',
+    event_year: new Date().getFullYear(), grant_date: DAY(daysAgo(30)), days_granted: days,
+    expiry_date: DAY(daysAgo(-90)), status,
+    employees: { first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code },
+    leave_types: { name: 'Casual Leave' },
+    important_date_types: { name: dt, code: dt.slice(0, 4).toUpperCase() },
+  })
+  return [
+    mk('eg-1', e1, 1, 'active', 'Festival'),
+    mk('eg-2', e2, 1, 'used',   'Birthday'),
+    mk('eg-3', e3, 1, 'active', 'Work Anniversary'),
+  ]
+}
+
+export function demoReconciliationRuns() {
+  return [
+    { id: 'rec-1', run_date: ISO(daysAgo(1)),  year: new Date().getFullYear(), trigger: 'scheduled', issues_found: 0, employees_checked: demoEmployeeList.length, severity: 'ok' as const, report_data: { issue_breakdown: { critical: 0, high: 0, medium: 0, low: 0 }, details: [] } },
+    { id: 'rec-2', run_date: ISO(daysAgo(8)),  year: new Date().getFullYear(), trigger: 'scheduled', issues_found: 1, employees_checked: demoEmployeeList.length, severity: 'low' as const, report_data: { issue_breakdown: { critical: 0, high: 0, medium: 0, low: 1 }, details: [{ employee_id: demoEmployeeList[5].id, employee_name: `${demoEmployeeList[5].first_name} ${demoEmployeeList[5].last_name}`, issue_type: 'balance_drift', description: 'Carry-forward rounding of 0.5 day', severity: 'low' }] } },
+    { id: 'rec-3', run_date: ISO(daysAgo(31)), year: new Date().getFullYear(), trigger: 'manual',    issues_found: 0, employees_checked: demoEmployeeList.length, severity: 'ok' as const, report_data: { issue_breakdown: { critical: 0, high: 0, medium: 0, low: 0 }, details: [] } },
+  ]
+}
+
+// Workforce Command observations.
+export function demoWorkforceCommandData() {
+  const n = demoEmployeeList.length
+  return {
+    summary: 'Workforce is stable. One probation review is due this week and one employee is serving notice.',
+    critical_count: 0,
+    high_count: 1,
+    observations: [
+      {
+        id: 'obs-1', category: 'onboarding', severity: 'medium' as const,
+        title: 'Probation review due', body: 'Arjun Nair completes probation in 6 days. Schedule the confirmation review and update status.',
+        source_records: [{ table: 'employees', count: 1, sample: 'SAAR006' }], generated_at: new Date().toISOString(),
+      },
+      {
+        id: 'obs-2', category: 'separation', severity: 'high' as const,
+        title: 'Notice period in progress', body: 'Imran Khan is on notice. Initiate asset recovery and knowledge transfer checklist.',
+        source_records: [{ table: 'separations', count: 1, sample: 'SAAR022' }], generated_at: new Date().toISOString(),
+      },
+      {
+        id: 'obs-3', category: 'attendance', severity: 'info' as const,
+        title: 'Attendance healthy', body: `${n - 2} of ${n} employees are present today with no open anomalies.`,
+        source_records: [{ table: 'attendance_daily', count: n }], generated_at: new Date().toISOString(),
+      },
+    ],
+    kpis: {
+      on_notice: 1, stalled_onboarding: 0, pending_separations: 1,
+      assets_at_risk: 0, probation_due: 1, active_headcount: n, joiners_this_month: 1,
+    } as Record<string, number | string | null>,
+    generated_at: new Date().toISOString(),
+  }
+}
+
+// Action Center suggestions.
+export function demoActionObservations() {
+  return [
+    { id: 'ac-1', event_type: 'new_hire',           title: 'New joiner this week', suggestion: 'Aditya Kulkarni joined Sales. Confirm asset allocation and induction schedule.', source_table: 'employees',  source_count: 1, generated_at: new Date().toISOString() },
+    { id: 'ac-2', event_type: 'on_notice',          title: 'Employee on notice',    suggestion: 'Imran Khan is serving notice. Plan backfill and start clearance.', source_table: 'separations', source_count: 1, generated_at: new Date().toISOString() },
+    { id: 'ac-3', event_type: 'asset_assigned',     title: 'Assets pending return', suggestion: 'Review assets assigned to employees in separation to avoid overlap.', source_table: 'assets', source_count: 2, generated_at: new Date().toISOString() },
+  ]
+}
+
+// ── Compliance / statutory ───────────────────────────────────────────────────
+
+export function demoComplianceStatsModule(covered: number) {
+  return {
+    employees_covered: covered,
+    employees_missing: 0,
+    filing_gaps: 0,
+    computation_errors: 0,
+    next_deadline: null as string | null,
+    days_to_deadline: null as number | null,
+    is_ready: true,
+  }
+}
+
+export function demoComplianceStats() {
+  const n = demoEmployeeList.length
+  return {
+    epf:  demoComplianceStatsModule(n),
+    esi:  demoComplianceStatsModule(0),
+    ptax: demoComplianceStatsModule(n),
+    tds:  demoComplianceStatsModule(n),
+    total_filing_gaps: 0,
+    total_coverage_gaps: 0,
+    total_computation_errors: 0,
+    critical_deadline_days: null as number | null,
+  }
+}
+
+export function demoStatutoryData() {
+  const n = demoEmployeeList.length
+  const epfRemit = Math.round(n * 3600)
+  const ptaxAmt  = n * 200
+  const tdsAmt   = Math.round(n * 4200)
+  return {
+    coverage: {
+      epf:  { enrolled: n, missing_uan: 0, has_registration: true },
+      esi:  { eligible: 0, has_registration: true },
+      ptax: { enrolled: n, states: ['Karnataka', 'Maharashtra'], missing_registrations: [] as string[] },
+      tds:  { employees_with_tds: n, missing_pan: 0 },
+      lwf:  { enrolled: n, states: ['Karnataka', 'Maharashtra'] },
+      payroll: { finalized: n, total: n, all_finalized: true },
+    },
+    totals: {
+      epf:  { total_remittance: epfRemit },
+      esi:  { total_remittance: 0 },
+      ptax: { amount: ptaxAmt },
+      tds:  { total_deducted: tdsAmt },
+      lwf:  { total_remittance: n * 20 },
+      grand_total: epfRemit + ptaxAmt + tdsAmt + n * 20,
+    },
+    readiness: { overall: true, issues: [] as string[] },
+  }
+}
+
+export function demoStatutoryExceptions() {
+  const n = demoEmployeeList.length
+  return {
+    summary: { total_employees: n, complete: n, incomplete: 0, completeness_pct: 100 },
+    by_field: [] as Array<{ field: string; label: string; missing: number }>,
+    employees: [] as Array<{ id: string; employee_code: string; name: string; department: string; missing: string[] }>,
+  }
+}
+
+export function demoExecutiveCompliance() {
+  return {
+    open_duplicates: 0,
+    compliance_risk_score: 18,
+    risk_status: 'low' as const,
+    posture_components: {
+      trust:         { score: 92, weight: 0.25 },
+      compliance:    { score: 96, weight: 0.25 },
+      governance:    { score: 90, weight: 0.15 },
+      security:      { score: 94, weight: 0.15 },
+      privacy:       { score: 95, weight: 0.10 },
+      certification: { score: 88, weight: 0.10 },
+    },
+    trust_distribution: { high: demoEmployeeList.length - 2, medium: 2, low: 0 },
+    trust_trend: ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06'].map((month, i) => ({
+      month, avg_score: 88 + i,
+    })),
+  }
+}
+
+export function demoComplianceCalendar() {
+  const mk = (id: string, label: string, type: string, jur: string, due: string, status: string, days: number) => ({
+    id, compliance_type: type, label,
+    jurisdiction: jur, period: CURRENT_MONTH, period_label: 'This month',
+    due_date: due, status, days_to_due: days, filed_at: null as string | null, reference: null as string | null,
+  })
+  const y = new Date().getFullYear()
+  const mo = String(new Date().getMonth() + 1).padStart(2, '0')
+  const data = [
+    mk('cal-epf', 'EPF ECR filing', 'EPF', 'Central', `${y}-${mo}-15`, 'upcoming', 9),
+    mk('cal-esi', 'ESI contribution', 'ESI', 'Central', `${y}-${mo}-15`, 'upcoming', 9),
+    mk('cal-pt',  'Professional Tax remittance', 'PT', 'Karnataka', `${y}-${mo}-20`, 'upcoming', 14),
+    mk('cal-tds', 'TDS deposit (Form 26Q)', 'TDS', 'Central', `${y}-${mo}-07`, 'due_soon', 2),
+  ]
+  return {
+    data,
+    counts: { upcoming: 3, due_soon: 1, overdue: 0, completed: 0 },
+  }
+}
+
+// ── Recruitment analytics (GET /recruitment/analytics) ──────────────────────
+export function demoRecruitmentAnalytics() {
+  return {
+    funnel: { applied: 142, screening: 68, interviewing: 31, offer: 12, hired: 8, rejected: 54, withdrawn: 9 },
+    avg_time_to_hire:  24,
+    avg_time_to_offer: 18,
+    requisitions: { draft: 3, open: 11, on_hold: 2, filled: 7, cancelled: 1 },
+    interviews:   { scheduled: 9, completed: 47, cancelled: 4, no_show: 3 },
+    pass_rate: 62,
+    source_breakdown: [
+      { source: 'referral', count: 38 },
+      { source: 'linkedin', count: 34 },
+      { source: 'naukri',   count: 29 },
+      { source: 'portal',   count: 21 },
+      { source: 'direct',   count: 14 },
+      { source: 'agency',   count: 6 },
+    ],
+    recent_30d_applications: 37,
+    total_applications: 142,
+    total_requisitions: 24,
+  }
+}
+
+// ── Interviewer calibration (GET /recruitment/analytics/interviewers) ───────
+export function demoInterviewerAnalytics() {
+  const interviewers = demoEmployeeList.slice(0, 5).map((e, i) => ({
+    interviewer_id: e.id,
+    name: `${e.first_name} ${e.last_name}`,
+    scored_count:    [18, 14, 11, 9, 6][i],
+    avg_overall:     [3.8, 4.1, 3.4, 3.9, 3.6][i],
+    leniency:        [0.2, 0.7, -0.6, 0.1, -0.3][i],
+    consistency:     [0.82, 0.74, 0.69, 0.88, 0.71][i],
+    positive_rate:   [0.55, 0.71, 0.36, 0.6, 0.5][i],
+    recommendations: {
+      strong_yes: [3, 5, 1, 4, 2][i],
+      yes:        [7, 5, 3, 4, 2][i],
+      no:         [6, 3, 5, 1, 2][i],
+      strong_no:  [2, 1, 2, 0, 0][i],
+    },
+    hire_accuracy:   [0.78, 0.66, 0.7, 0.81, 0.6][i],
+    reject_accuracy: [0.72, 0.6, 0.75, 0.69, 0.58][i],
+    decisions_with_outcome: [12, 9, 8, 7, 4][i],
+  }))
+  const criteria = [
+    { criterion: 'technical_skills', avg_hired: 4.2, avg_rejected: 2.6, lift: 1.6, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'problem_solving',  avg_hired: 4.0, avg_rejected: 2.8, lift: 1.2, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'communication',    avg_hired: 3.8, avg_rejected: 3.1, lift: 0.7, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'culture_fit',      avg_hired: 4.1, avg_rejected: 3.3, lift: 0.8, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'leadership',       avg_hired: 3.6, avg_rejected: 3.0, lift: 0.6, sample_hired: 5, sample_rejected: 14 },
+  ]
+  return {
+    cohort_avg_overall: 3.7,
+    total_scores: 58,
+    interviewers,
+    criteria,
+    agreement: { multi_scorer_rounds: 14, avg_score_spread: 0.62, unanimous_rate: 0.57 },
+  }
+}
+
+// ── Executive snapshots (GET /executive/ceo|chro|workforce|financial|trends) ─
+const EXEC_MONTHS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06']
+
+export function demoExecCeo() {
+  return {
+    data: {
+      employee_count: 22, joiners_30d: 3, exits_30d: 1,
+      net_headcount_change: 2, attendance_rate: 94.6, absence_rate: 5.4,
+      payroll_cost_current: 4820000, payroll_net_current: 3960000, avg_cost_per_employee: 219000,
+      open_exceptions: 4, open_incidents: 1, pending_revisions: 2, total_attention_items: 7,
+      narrative: 'Workforce steady at 22 active employees — 3 joiners and 1 exit in the last 30 days. Attendance is healthy at 94.6% and payroll is on track at ₹48.2L gross this month, with 4 open exceptions to clear.',
+    },
+  }
+}
+
+export function demoExecChro() {
+  return {
+    data: {
+      gender_distribution: { Male: 13, Female: 9 },
+      employment_type_distribution: { permanent: 19, contract: 2, intern: 1 },
+      leave_utilization_pct: 58, trust_high_risk: 2,
+      narrative: 'Leave utilisation sits at 58% of entitlement with diversity at 41% women. Two employees are flagged high-risk by trust scoring; 82% of the workforce is identity-verified.',
+      trust_verified: 18, trust_total: 22, trust_verification_pct: 82,
+      pending_revisions: 2, approved_revisions: 5,
+      recruitment_active: true,
+      hiring_funnel: { applied: 142, screening: 68, interviewing: 31, offer: 12, hired: 8 },
+      offers_extended: 12, offers_accepted: 8, offer_acceptance_rate: 67,
+      avg_time_to_offer: 18, avg_time_to_hire: 24, open_requisitions: 11,
+    },
+  }
+}
+
+export function demoExecWorkforce() {
+  return {
+    data: {
+      employee_count: 22,
+      monthly_trends: EXEC_MONTHS.map((month, i) => ({ month, joiners: [2, 1, 3, 1, 2, 3][i], exits: [1, 0, 1, 1, 0, 1][i], net: [1, 1, 2, 0, 2, 2][i] })),
+      dept_distribution: [
+        { dept: 'Engineering', count: 8, pct: 36 },
+        { dept: 'Sales',       count: 4, pct: 18 },
+        { dept: 'Finance',     count: 3, pct: 14 },
+        { dept: 'HR',          count: 3, pct: 14 },
+        { dept: 'Operations',  count: 2, pct: 9 },
+        { dept: 'Marketing',   count: 2, pct: 9 },
+      ],
+      employment_type_distribution: [
+        { type: 'Permanent', count: 19, pct: 86 },
+        { type: 'Contract',  count: 2,  pct: 9 },
+        { type: 'Intern',    count: 1,  pct: 5 },
+      ],
+      gender_distribution: { Male: 13, Female: 9 },
+      total_joiners_period: 12, total_exits_period: 4,
+    },
+  }
+}
+
+export function demoExecFinancial() {
+  return {
+    data: {
+      payroll_current_gross: 4820000, payroll_current_net: 3960000, payroll_mom_change: 3.2,
+      payroll_cost_trend: EXEC_MONTHS.map((month, i) => ({ month, total_gross: 4400000 + i * 90000, employee_count: 18 + i, avg_cost_per_head: Math.round((4400000 + i * 90000) / (18 + i)) })),
+      dept_cost_breakdown: [
+        { dept: 'Engineering', headcount: 8, total_gross: 2280000, total_net: 1870000, ot_cost: 48000 },
+        { dept: 'Sales',       headcount: 4, total_gross: 940000,  total_net: 760000,  ot_cost: 22000 },
+        { dept: 'Finance',     headcount: 3, total_gross: 620000,  total_net: 510000,  ot_cost: 8000 },
+        { dept: 'HR',          headcount: 3, total_gross: 540000,  total_net: 450000,  ot_cost: 4000 },
+        { dept: 'Operations',  headcount: 2, total_gross: 240000,  total_net: 200000,  ot_cost: 12000 },
+        { dept: 'Marketing',   headcount: 2, total_gross: 200000,  total_net: 170000,  ot_cost: 3000 },
+      ],
+      component_mix: { month: '2026-06', fixed_pay: 3620000, variable_pay: 480000, statutory_cost: 420000, ot_cost: 97000, employee_deductions: 860000, gross_total: 4820000, has_data: true },
+    },
+  }
+}
+
+export function demoExecTrends() {
+  return {
+    data: {
+      months: EXEC_MONTHS.map((month, i) => ({
+        month, attendance_rate: [93.1, 94.0, 92.8, 95.2, 94.1, 94.6][i],
+        leave_days_approved: [14, 18, 22, 12, 16, 19][i],
+        payroll_gross: 4400000 + i * 90000, payroll_headcount: 18 + i,
+        joiners: [2, 1, 3, 1, 2, 3][i], exits: [1, 0, 1, 1, 0, 1][i], net_headcount: 18 + i + [1, 1, 2, 0, 2, 2][i],
+      })),
+    },
+  }
+}
+
+// ── Attendance confidence summary (GET /attendance/confidence/summary) ──────
+export function demoAttendanceConfidenceSummary() {
+  return {
+    avg_score: 82.4,
+    employees_at_risk: 3,
+    level_distribution: [
+      { level: 'high',     count: 14 },
+      { level: 'medium',   count: 5 },
+      { level: 'low',      count: 2 },
+      { level: 'critical', count: 1 },
+    ],
+  }
+}
+
+// ── Attendance risk summary (GET /attendance/risk/summary) ──────────────────
+export function demoAttendanceRiskSummary() {
+  return {
+    avg_risk_score: 28.5,
+    high_risk_count: 3,
+    employees_by_level: [
+      { level: 'critical', count: 1 },
+      { level: 'high',     count: 2 },
+      { level: 'medium',   count: 5 },
+      { level: 'low',      count: 14 },
+    ],
+  }
+}
+
+// ── Privacy / DPDP health (GET /governance/privacy/health) ──────────────────
+export function demoPrivacyHealth() {
+  return {
+    erasure_requests:      { open: 2, breached_sla: 0, completed: 11, total: 13 },
+    flagged_pii_access_30d: 0,
+    control_health:        { total: 24, implemented: 18, verified: 14, in_progress: 4, not_started: 2, waived: 0 },
+  }
+}
+
+// ── Security posture (GET /security/health) ─────────────────────────────────
+export function demoSecurityHealth() {
+  return {
+    alerts_30d:      { total: 17, open: 3, critical_open: 0, high_open: 1, resolved: 14, avg_mtta_sec: 1860, avg_mttr_sec: 18420 },
+    events_7d:       { total: 342, by_severity: { critical: 0, high: 4, medium: 23, low: 315 } },
+    detection_rules: { total: 28, enabled: 25 },
+  }
+}
+
+// ── Payroll accounting summary (GET /payroll/accounting/summary) ────────────
+export function demoPayrollAccountingSummary() {
+  return {
+    total_payroll_liability: 4820000,
+    pending_payout_amount:   0,
+    failed_payout_count:     0,
+    payout_completion_pct:   100,
+    imbalanced_ledger_count: 0,
+    total_ledger_count:      6,
+    posted_ledger_count:     6,
+    recent_ledgers:          [],
+  }
+}
+
+// ── Payroll run snapshot (GET /payroll/runs/:id/snapshot) ───────────────────
+export function demoPayrollRunSnapshot(runId: string) {
+  return {
+    id: `snap-${runId}`,
+    run_id: runId,
+    month: '2026-06',
+    snapshot_version: 3,
+    integrity_hash: 'a7f3c9e21b84d6f05c1e9a2b7d4f8e60c3a591b2d8e4f7a0c6b9d2e5f1a3c8b7',
+    replayable: true,
+    formula_engine_version: 4,
+    validation_engine_version: 2,
+    created_at: new Date(daysAgo(8)).toISOString(),
+    employee_count: 22,
+  }
+}
+
+// ── Statutory state config (GET /payroll/statutory/{ptax,lwf}/states) ───────
+// Returned as BARE ARRAYS — EmployeeProfile iterates them with for…of.
+export function demoPtaxStates() {
+  return [
+    { state_code: 'MH', state_name: 'Maharashtra',    enabled: true },
+    { state_code: 'KA', state_name: 'Karnataka',      enabled: true },
+    { state_code: 'WB', state_name: 'West Bengal',    enabled: true },
+    { state_code: 'TN', state_name: 'Tamil Nadu',     enabled: true },
+    { state_code: 'TG', state_name: 'Telangana',      enabled: true },
+    { state_code: 'AP', state_name: 'Andhra Pradesh', enabled: true },
+    { state_code: 'GJ', state_name: 'Gujarat',        enabled: true },
+    { state_code: 'MP', state_name: 'Madhya Pradesh', enabled: true },
+    { state_code: 'KL', state_name: 'Kerala',         enabled: false },
+    { state_code: 'OR', state_name: 'Odisha',         enabled: false },
+  ]
+}
+export function demoLwfStates() {
+  return [
+    { state_code: 'MH', state_name: 'Maharashtra',    enabled: true },
+    { state_code: 'KA', state_name: 'Karnataka',      enabled: true },
+    { state_code: 'TN', state_name: 'Tamil Nadu',     enabled: true },
+    { state_code: 'GJ', state_name: 'Gujarat',        enabled: true },
+    { state_code: 'TG', state_name: 'Telangana',      enabled: true },
+    { state_code: 'AP', state_name: 'Andhra Pradesh', enabled: true },
+    { state_code: 'WB', state_name: 'West Bengal',    enabled: true },
+    { state_code: 'HR', state_name: 'Haryana',        enabled: false },
+    { state_code: 'MP', state_name: 'Madhya Pradesh', enabled: false },
+    { state_code: 'KL', state_name: 'Kerala',         enabled: false },
+  ]
+}
+
 // ── Recruitment — pipeline stages ─────────────────────────────────────────────
 export function demoRecruitmentPipelineStages() {
   return [
@@ -894,148 +1549,58 @@ export function demoRecruitmentPipelineStages() {
   ]
 }
 
-// ── Recruitment — job requisitions ─────────────────────────────────────────────
+// ── Recruitment — job requisitions ────────────────────────────────────────────
 export function demoRecruitmentRequisitions() {
   return [
-    {
-      id: 'req-001', title: 'Senior Software Engineer', department_id: 'dept-eng',
-      departments: { id: 'dept-eng', name: 'Engineering' },
-      location: 'Bengaluru', employment_type: 'full_time', openings: 2, status: 'open',
-      target_date: DAY(daysAgo(-30)), applicant_count: 7,
-      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
-      jd_text: 'We are looking for a Senior Software Engineer with 5+ years of experience in distributed systems and cloud-native architectures. Must have strong TypeScript/Node.js skills and ability to lead technical discussions.',
-      required_skills: ['TypeScript', 'Node.js', 'AWS', 'PostgreSQL', 'System Design'],
-      min_experience: 5, max_experience: 10, salary_min: 1800000, salary_max: 2800000,
-      created_at: ISO(daysAgo(60)),
-    },
-    {
-      id: 'req-002', title: 'Sales Manager', department_id: 'dept-sales',
-      departments: { id: 'dept-sales', name: 'Sales' },
-      location: 'Mumbai', employment_type: 'full_time', openings: 1, status: 'open',
-      target_date: DAY(daysAgo(-15)), applicant_count: 3,
-      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
-      jd_text: 'Seeking an experienced Sales Manager to lead our Mumbai team. 6+ years in B2B SaaS sales, strong hunter mentality, proven track record of ₹5Cr+ annual quota attainment.',
-      required_skills: ['B2B Sales', 'SaaS', 'CRM', 'Negotiation', 'Team Management'],
-      min_experience: 6, max_experience: 12, salary_min: 2200000, salary_max: 3200000,
-      created_at: ISO(daysAgo(45)),
-    },
-    {
-      id: 'req-003', title: 'HR Business Partner', department_id: 'dept-hr',
-      departments: { id: 'dept-hr', name: 'HR' },
-      location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'open',
-      target_date: DAY(daysAgo(-20)), applicant_count: 2,
-      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
-      jd_text: 'HRBP to support Engineering and Product teams. 4-7 years in HR, strong understanding of talent management, L&D, and employee relations in a tech startup context.',
-      required_skills: ['HRBP', 'Talent Management', 'L&D', 'Employee Relations', 'Performance Management'],
-      min_experience: 4, max_experience: 7, salary_min: 1400000, salary_max: 1900000,
-      created_at: ISO(daysAgo(35)),
-    },
-    {
-      id: 'req-004', title: 'Finance Analyst', department_id: 'dept-fin',
-      departments: { id: 'dept-fin', name: 'Finance' },
-      location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'filled',
-      target_date: DAY(daysAgo(30)), applicant_count: 5,
-      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
-      jd_text: 'Finance Analyst for FP&A and management reporting. CA/CMA preferred, 3-5 years in finance analysis in a mid-size tech company.',
-      required_skills: ['FP&A', 'Excel', 'Tally', 'MIS Reporting', 'GST'],
-      min_experience: 3, max_experience: 5, salary_min: 900000, salary_max: 1300000,
-      created_at: ISO(daysAgo(90)),
-    },
-    {
-      id: 'req-005', title: 'Operations Executive', department_id: 'dept-ops',
-      departments: { id: 'dept-ops', name: 'Operations' },
-      location: 'Delhi NCR', employment_type: 'full_time', openings: 1, status: 'on_hold',
-      target_date: DAY(daysAgo(-10)), applicant_count: 0,
-      raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' },
-      jd_text: 'Operations Executive to manage vendor relationships and supply chain for our Delhi NCR office.',
-      required_skills: ['Vendor Management', 'Supply Chain', 'MS Office', 'Process Improvement'],
-      min_experience: 2, max_experience: 5, salary_min: 600000, salary_max: 900000,
-      created_at: ISO(daysAgo(40)),
-    },
-    {
-      id: 'req-006', title: 'Software Engineer', department_id: 'dept-eng',
-      departments: { id: 'dept-eng', name: 'Engineering' },
-      location: 'Bengaluru / Remote', employment_type: 'full_time', openings: 3, status: 'open',
-      target_date: DAY(daysAgo(-25)), applicant_count: 4,
-      raised_by_profile: { id: 'emp-0002', full_name: 'Rahul Verma' },
-      jd_text: 'Software Engineers for our platform team. 2-5 years experience, proficiency in React, TypeScript, and REST API design. Strong problem-solving skills required.',
-      required_skills: ['React', 'TypeScript', 'REST APIs', 'Git', 'SQL'],
-      min_experience: 2, max_experience: 5, salary_min: 900000, salary_max: 1600000,
-      created_at: ISO(daysAgo(50)),
-    },
-    {
-      id: 'req-007', title: 'Business Development Executive', department_id: 'dept-sales',
-      departments: { id: 'dept-sales', name: 'Sales' },
-      location: 'Mumbai / Delhi', employment_type: 'full_time', openings: 2, status: 'open',
-      target_date: DAY(daysAgo(-20)), applicant_count: 3,
-      raised_by_profile: { id: 'emp-0007', full_name: 'Kavya Menon' },
-      jd_text: 'BDE to drive new business acquisition in SMB and mid-market segment. 1-3 years sales experience, strong communication and persistence. Freshers with sales aptitude considered.',
-      required_skills: ['Lead Generation', 'Cold Calling', 'CRM', 'B2B Sales', 'Presentation Skills'],
-      min_experience: 1, max_experience: 3, salary_min: 600000, salary_max: 900000,
-      created_at: ISO(daysAgo(30)),
-    },
-    {
-      id: 'req-008', title: 'Product Designer (UX)', department_id: 'dept-eng',
-      departments: { id: 'dept-eng', name: 'Engineering' },
-      location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'draft',
-      target_date: null, applicant_count: 0,
-      raised_by_profile: { id: 'emp-0002', full_name: 'Rahul Verma' },
-      jd_text: null, required_skills: null,
-      min_experience: 3, max_experience: 7, salary_min: null, salary_max: null,
-      created_at: ISO(daysAgo(5)),
-    },
+    { id: 'req-001', title: 'Senior Software Engineer', department_id: 'dept-eng', departments: { id: 'dept-eng', name: 'Engineering' }, location: 'Bengaluru', employment_type: 'full_time', openings: 2, status: 'open', target_date: DAY(daysAgo(-30)), applicant_count: 7, raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' }, jd_text: 'We are looking for a Senior Software Engineer with 5+ years of experience in distributed systems and cloud-native architectures. Must have strong TypeScript/Node.js skills.', required_skills: ['TypeScript', 'Node.js', 'AWS', 'PostgreSQL', 'System Design'], min_experience: 5, max_experience: 10, salary_min: 1800000, salary_max: 2800000, created_at: ISO(daysAgo(60)) },
+    { id: 'req-002', title: 'Sales Manager', department_id: 'dept-sales', departments: { id: 'dept-sales', name: 'Sales' }, location: 'Mumbai', employment_type: 'full_time', openings: 1, status: 'open', target_date: DAY(daysAgo(-15)), applicant_count: 3, raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' }, jd_text: 'Seeking an experienced Sales Manager to lead our Mumbai team. 6+ years in B2B SaaS sales, proven track record of ₹5Cr+ annual quota.', required_skills: ['B2B Sales', 'SaaS', 'CRM', 'Negotiation', 'Team Management'], min_experience: 6, max_experience: 12, salary_min: 2200000, salary_max: 3200000, created_at: ISO(daysAgo(45)) },
+    { id: 'req-003', title: 'HR Business Partner', department_id: 'dept-hr', departments: { id: 'dept-hr', name: 'HR' }, location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'open', target_date: DAY(daysAgo(-20)), applicant_count: 2, raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' }, jd_text: 'HRBP to support Engineering and Product teams. 4-7 years in HR, strong understanding of talent management, L&D, and employee relations in a tech startup context.', required_skills: ['HRBP', 'Talent Management', 'L&D', 'Employee Relations'], min_experience: 4, max_experience: 7, salary_min: 1400000, salary_max: 1900000, created_at: ISO(daysAgo(35)) },
+    { id: 'req-004', title: 'Finance Analyst', department_id: 'dept-fin', departments: { id: 'dept-fin', name: 'Finance' }, location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'filled', target_date: DAY(daysAgo(30)), applicant_count: 5, raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' }, jd_text: 'Finance Analyst for FP&A and management reporting. CA/CMA preferred, 3-5 years in finance analysis.', required_skills: ['FP&A', 'Excel', 'Tally', 'MIS Reporting', 'GST'], min_experience: 3, max_experience: 5, salary_min: 900000, salary_max: 1300000, created_at: ISO(daysAgo(90)) },
+    { id: 'req-005', title: 'Operations Executive', department_id: 'dept-ops', departments: { id: 'dept-ops', name: 'Operations' }, location: 'Delhi NCR', employment_type: 'full_time', openings: 1, status: 'on_hold', target_date: DAY(daysAgo(-10)), applicant_count: 0, raised_by_profile: { id: DEMO_USER_ID, full_name: 'Priya Sharma' }, jd_text: 'Operations Executive to manage vendor relationships and supply chain.', required_skills: ['Vendor Management', 'Supply Chain', 'MS Office'], min_experience: 2, max_experience: 5, salary_min: 600000, salary_max: 900000, created_at: ISO(daysAgo(40)) },
+    { id: 'req-006', title: 'Software Engineer', department_id: 'dept-eng', departments: { id: 'dept-eng', name: 'Engineering' }, location: 'Bengaluru / Remote', employment_type: 'full_time', openings: 3, status: 'open', target_date: DAY(daysAgo(-25)), applicant_count: 4, raised_by_profile: { id: 'emp-0002', full_name: 'Rahul Verma' }, jd_text: 'Software Engineers for our platform team. 2-5 years experience, proficiency in React, TypeScript, and REST API design.', required_skills: ['React', 'TypeScript', 'REST APIs', 'Git', 'SQL'], min_experience: 2, max_experience: 5, salary_min: 900000, salary_max: 1600000, created_at: ISO(daysAgo(50)) },
+    { id: 'req-007', title: 'Business Development Executive', department_id: 'dept-sales', departments: { id: 'dept-sales', name: 'Sales' }, location: 'Mumbai / Delhi', employment_type: 'full_time', openings: 2, status: 'open', target_date: DAY(daysAgo(-20)), applicant_count: 3, raised_by_profile: { id: 'emp-0007', full_name: 'Kavya Menon' }, jd_text: 'BDE to drive new business acquisition in SMB and mid-market segment. 1-3 years sales experience.', required_skills: ['Lead Generation', 'Cold Calling', 'CRM', 'B2B Sales'], min_experience: 1, max_experience: 3, salary_min: 600000, salary_max: 900000, created_at: ISO(daysAgo(30)) },
+    { id: 'req-008', title: 'Product Designer (UX)', department_id: 'dept-eng', departments: { id: 'dept-eng', name: 'Engineering' }, location: 'Bengaluru', employment_type: 'full_time', openings: 1, status: 'draft', target_date: null, applicant_count: 0, raised_by_profile: { id: 'emp-0002', full_name: 'Rahul Verma' }, jd_text: null, required_skills: null, min_experience: 3, max_experience: 7, salary_min: null, salary_max: null, created_at: ISO(daysAgo(5)) },
   ]
 }
 
 // ── Recruitment — candidates ───────────────────────────────────────────────────
 export function demoRecruitmentCandidates() {
   const seeds = [
-    { id: 'cand-001', first: 'Arjun',     last: 'Mehta',         company: 'Flipkart',      title: 'Software Engineer',              exp: 5, source: 'referral' },
-    { id: 'cand-002', first: 'Prerna',    last: 'Agarwal',       company: 'Swiggy',        title: 'HR Manager',                     exp: 3, source: 'linkedin' },
-    { id: 'cand-003', first: 'Rohan',     last: 'Bose',          company: 'Infosys',       title: 'Senior Software Engineer',       exp: 7, source: 'naukri' },
-    { id: 'cand-004', first: 'Aditi',     last: 'Chatterjee',    company: 'Wipro',         title: 'Software Engineer',              exp: 4, source: 'portal' },
-    { id: 'cand-005', first: 'Saurabh',   last: 'Tiwari',        company: 'Amazon',        title: 'Senior SDE',                     exp: 6, source: 'linkedin' },
-    { id: 'cand-006', first: 'Divya',     last: 'Nambiar',       company: 'Freshdesk',     title: 'Business Development Executive', exp: 2, source: 'referral' },
-    { id: 'cand-007', first: 'Kunal',     last: 'Sharma',        company: 'Microsoft',     title: 'Principal Engineer',             exp: 8, source: 'direct' },
-    { id: 'cand-008', first: 'Pooja',     last: 'Kapoor',        company: 'TCS',           title: 'Software Engineer',              exp: 5, source: 'naukri' },
-    { id: 'cand-009', first: 'Ravi',      last: 'Krishnamurthy', company: 'IBM',           title: 'Sales Executive',                exp: 3, source: 'agency' },
-    { id: 'cand-010', first: 'Shreya',    last: 'Jain',          company: 'Oracle',        title: 'Software Engineer',              exp: 4, source: 'linkedin' },
-    { id: 'cand-011', first: 'Vivek',     last: 'Pandey',        company: 'HCL',           title: 'Business Development Manager',   exp: 6, source: 'portal' },
-    { id: 'cand-012', first: 'Anita',     last: 'Desai',         company: 'Razorpay',      title: 'HR Executive',                   exp: 2, source: 'referral' },
-    { id: 'cand-013', first: 'Manish',    last: 'Oberoi',        company: 'Paytm',         title: 'Business Development Manager',   exp: 5, source: 'naukri' },
-    { id: 'cand-014', first: 'Simran',    last: 'Kaur',          company: 'Mindtree',      title: 'Sales Manager',                  exp: 3, source: 'direct' },
-    { id: 'cand-015', first: 'Abhishek',  last: 'Saxena',        company: 'Accenture',     title: 'Senior Engineer',                exp: 7, source: 'linkedin' },
-    { id: 'cand-016', first: 'Kavitha',   last: 'Nair',          company: 'Zoho',          title: 'Software Engineer',              exp: 4, source: 'referral' },
-    { id: 'cand-017', first: 'Ritesh',    last: 'Yadav',         company: 'Tech Mahindra', title: 'Senior Engineer',                exp: 5, source: 'naukri' },
-    { id: 'cand-018', first: 'Neha',      last: 'Singhania',     company: 'Capgemini',     title: 'Sales Manager',                  exp: 6, source: 'agency' },
+    { id: 'cand-001', first: 'Arjun',    last: 'Mehta',         company: 'Flipkart',      title: 'Software Engineer',              exp: 5, source: 'referral' },
+    { id: 'cand-002', first: 'Prerna',   last: 'Agarwal',       company: 'Swiggy',        title: 'HR Manager',                     exp: 3, source: 'linkedin' },
+    { id: 'cand-003', first: 'Rohan',    last: 'Bose',          company: 'Infosys',       title: 'Senior Software Engineer',       exp: 7, source: 'naukri' },
+    { id: 'cand-004', first: 'Aditi',    last: 'Chatterjee',    company: 'Wipro',         title: 'Software Engineer',              exp: 4, source: 'portal' },
+    { id: 'cand-005', first: 'Saurabh',  last: 'Tiwari',        company: 'Amazon',        title: 'Senior SDE',                     exp: 6, source: 'linkedin' },
+    { id: 'cand-006', first: 'Divya',    last: 'Nambiar',       company: 'Freshdesk',     title: 'Business Development Executive', exp: 2, source: 'referral' },
+    { id: 'cand-007', first: 'Kunal',    last: 'Sharma',        company: 'Microsoft',     title: 'Principal Engineer',             exp: 8, source: 'direct' },
+    { id: 'cand-008', first: 'Pooja',    last: 'Kapoor',        company: 'TCS',           title: 'Software Engineer',              exp: 5, source: 'naukri' },
+    { id: 'cand-009', first: 'Ravi',     last: 'Krishnamurthy', company: 'IBM',           title: 'Sales Executive',                exp: 3, source: 'agency' },
+    { id: 'cand-010', first: 'Shreya',   last: 'Jain',          company: 'Oracle',        title: 'Software Engineer',              exp: 4, source: 'linkedin' },
+    { id: 'cand-011', first: 'Vivek',    last: 'Pandey',        company: 'HCL',           title: 'Business Development Manager',   exp: 6, source: 'portal' },
+    { id: 'cand-012', first: 'Anita',    last: 'Desai',         company: 'Razorpay',      title: 'HR Executive',                   exp: 2, source: 'referral' },
+    { id: 'cand-013', first: 'Manish',   last: 'Oberoi',        company: 'Paytm',         title: 'Business Development Manager',   exp: 5, source: 'naukri' },
+    { id: 'cand-014', first: 'Simran',   last: 'Kaur',          company: 'Mindtree',      title: 'Sales Manager',                  exp: 3, source: 'direct' },
+    { id: 'cand-015', first: 'Abhishek', last: 'Saxena',        company: 'Accenture',     title: 'Senior Engineer',                exp: 7, source: 'linkedin' },
+    { id: 'cand-016', first: 'Kavitha',  last: 'Nair',          company: 'Zoho',          title: 'Software Engineer',              exp: 4, source: 'referral' },
+    { id: 'cand-017', first: 'Ritesh',   last: 'Yadav',         company: 'Tech Mahindra', title: 'Senior Engineer',                exp: 5, source: 'naukri' },
+    { id: 'cand-018', first: 'Neha',     last: 'Singhania',     company: 'Capgemini',     title: 'Sales Manager',                  exp: 6, source: 'agency' },
   ]
   return seeds.map((c, i) => ({
-    id: c.id,
-    first_name: c.first,
-    last_name: c.last,
+    id: c.id, first_name: c.first, last_name: c.last,
     email: `${c.first.toLowerCase()}.${c.last.toLowerCase()}@gmail.com`,
     phone: `+91 9${String(700000000 + i * 17391).slice(0, 9)}`,
-    current_company: c.company,
-    current_title: c.title,
-    total_experience: c.exp,
-    source: c.source,
+    current_company: c.company, current_title: c.title, total_experience: c.exp, source: c.source,
     linkedin_url: `https://linkedin.com/in/${c.first.toLowerCase()}-${c.last.toLowerCase()}`,
-    resume_url: null as string | null,
-    notes: null as string | null,
-    created_at: ISO(daysAgo(60 - i * 3)),
+    resume_url: null as string | null, notes: null as string | null, created_at: ISO(daysAgo(60 - i * 3)),
   }))
 }
 
-// ── Recruitment — applications (Kanban + candidate-detail) ─────────────────────
+// ── Recruitment — applications (Kanban + candidate detail) ────────────────────
 export function demoRecruitmentApplications() {
   const stages = Object.fromEntries(demoRecruitmentPipelineStages().map(s => [s.id, s]))
   const reqs   = Object.fromEntries(demoRecruitmentRequisitions().map(r => [r.id, r]))
   const cands  = Object.fromEntries(demoRecruitmentCandidates().map(c => [c.id, c]))
-
-  const rows: {
-    candId: string; reqId: string; appId: string; stageId: string;
-    status: string; score: number | null; ago: number
-  }[] = [
+  const rows: { appId: string; candId: string; reqId: string; stageId: string; status: string; score: number | null; ago: number }[] = [
     { appId: 'app-001', candId: 'cand-001', reqId: 'req-001', stageId: 'stage-interview', status: 'interviewing', score: 7.8, ago: 40 },
     { appId: 'app-002', candId: 'cand-002', reqId: 'req-003', stageId: 'stage-screening', status: 'screening',    score: null, ago: 22 },
     { appId: 'app-003', candId: 'cand-003', reqId: 'req-001', stageId: 'stage-offer',     status: 'offer',        score: 8.5, ago: 55 },
@@ -1055,21 +1620,12 @@ export function demoRecruitmentApplications() {
     { appId: 'app-017', candId: 'cand-017', reqId: 'req-001', stageId: 'stage-applied',   status: 'applied',      score: null, ago: 7 },
     { appId: 'app-018', candId: 'cand-018', reqId: 'req-002', stageId: 'stage-offer',     status: 'offer',        score: 7.6, ago: 38 },
   ]
-
   return rows.map(r => {
     const c = cands[r.candId]
     return {
-      id: r.appId,
-      requisition_id: r.reqId,
-      status: r.status,
-      stage_id: r.stageId,
-      overall_score: r.score,
+      id: r.appId, requisition_id: r.reqId, status: r.status, stage_id: r.stageId, overall_score: r.score,
       created_at: ISO(daysAgo(r.ago)),
-      candidates: {
-        id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email,
-        current_company: c.current_company, current_title: c.current_title,
-        source: c.source, total_experience: c.total_experience,
-      },
+      candidates: { id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email, current_company: c.current_company, current_title: c.current_title, source: c.source, total_experience: c.total_experience },
       job_requisitions: reqs[r.reqId] ? { id: r.reqId, title: reqs[r.reqId].title } : null,
       recruitment_pipeline_stages: stages[r.stageId] ?? null,
     }
@@ -1078,157 +1634,26 @@ export function demoRecruitmentApplications() {
 
 // ── Recruitment — interview rounds ────────────────────────────────────────────
 export function demoRecruitmentInterviews() {
-  const tomorrow   = new Date(NOW); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(10, 0, 0, 0)
-  const dayAfter   = new Date(NOW); dayAfter.setDate(dayAfter.getDate() + 2); dayAfter.setHours(14, 0, 0, 0)
-
-  const p1 = [
-    { interviewer_id: 'emp-0002', profiles: { id: 'emp-0002', full_name: 'Rahul Verma' } },
-    { interviewer_id: 'emp-0003', profiles: { id: 'emp-0003', full_name: 'Ananya Iyer' } },
-  ]
-  const p2 = [
-    { interviewer_id: 'emp-0001', profiles: { id: 'emp-0001', full_name: 'Priya Sharma' } },
-    { interviewer_id: 'emp-0011', profiles: { id: 'emp-0011', full_name: 'Divya Pillai' } },
-  ]
+  const tomorrow = new Date(NOW); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(10, 0, 0, 0)
+  const dayAfter = new Date(NOW); dayAfter.setDate(dayAfter.getDate() + 2); dayAfter.setHours(14, 0, 0, 0)
+  const p1 = [{ interviewer_id: 'emp-0002', profiles: { id: 'emp-0002', full_name: 'Rahul Verma' } }, { interviewer_id: 'emp-0003', profiles: { id: 'emp-0003', full_name: 'Ananya Iyer' } }]
+  const p2 = [{ interviewer_id: 'emp-0001', profiles: { id: 'emp-0001', full_name: 'Priya Sharma' } }, { interviewer_id: 'emp-0011', profiles: { id: 'emp-0011', full_name: 'Divya Pillai' } }]
   const p3 = [{ interviewer_id: 'emp-0007', profiles: { id: 'emp-0007', full_name: 'Kavya Menon' } }]
-
-  function appStub(appId: string, status: string, cId: string, cFirst: string, cLast: string, cEmail: string, cCompany: string, reqId: string, reqTitle: string) {
-    return { id: appId, status, candidates: { id: cId, first_name: cFirst, last_name: cLast, email: cEmail, current_company: cCompany }, job_requisitions: { id: reqId, title: reqTitle } }
-  }
-
+  const appStub = (appId: string, status: string, cId: string, cFirst: string, cLast: string, cEmail: string, cCompany: string, reqId: string, reqTitle: string) =>
+    ({ id: appId, status, candidates: { id: cId, first_name: cFirst, last_name: cLast, email: cEmail, current_company: cCompany }, job_requisitions: { id: reqId, title: reqTitle } })
   return [
-    {
-      id: 'ivr-001', application_id: 'app-001', round_number: 1,
-      title: 'Technical Screen', interview_type: 'video',
-      scheduled_at: ISO(daysAgo(30)), duration_mins: 60,
-      meet_link: 'https://meet.google.com/demo-saar-001', status: 'completed',
-      notes: 'Strong DSA skills; good system design thinking. Clear communicator. Recommend round 2.',
-      created_at: ISO(daysAgo(35)),
-      applications: appStub('app-001', 'interviewing', 'cand-001', 'Arjun', 'Mehta', 'arjun.mehta@gmail.com', 'Flipkart', 'req-001', 'Senior Software Engineer'),
-      interview_panel: p1,
-    },
-    {
-      id: 'ivr-002', application_id: 'app-001', round_number: 2,
-      title: 'System Design', interview_type: 'video',
-      scheduled_at: tomorrow.toISOString(), duration_mins: 90,
-      meet_link: 'https://meet.google.com/demo-saar-002', status: 'scheduled',
-      notes: null, created_at: ISO(daysAgo(10)),
-      applications: appStub('app-001', 'interviewing', 'cand-001', 'Arjun', 'Mehta', 'arjun.mehta@gmail.com', 'Flipkart', 'req-001', 'Senior Software Engineer'),
-      interview_panel: p1,
-    },
-    {
-      id: 'ivr-003', application_id: 'app-009', round_number: 1,
-      title: 'Sales Aptitude & Role-play', interview_type: 'video',
-      scheduled_at: ISO(daysAgo(20)), duration_mins: 45, meet_link: null, status: 'completed',
-      notes: 'Decent pitch; needs improvement in objection handling. Borderline — second round recommended.',
-      created_at: ISO(daysAgo(25)),
-      applications: appStub('app-009', 'interviewing', 'cand-009', 'Ravi', 'Krishnamurthy', 'ravi.k@gmail.com', 'IBM', 'req-002', 'Sales Manager'),
-      interview_panel: p3,
-    },
-    {
-      id: 'ivr-004', application_id: 'app-012', round_number: 1,
-      title: 'HR Competency Interview', interview_type: 'video',
-      scheduled_at: ISO(daysAgo(18)), duration_mins: 60,
-      meet_link: 'https://meet.google.com/demo-saar-004', status: 'completed',
-      notes: 'Strong domain knowledge; excellent stakeholder management examples. Good culture alignment.',
-      created_at: ISO(daysAgo(22)),
-      applications: appStub('app-012', 'interviewing', 'cand-012', 'Anita', 'Desai', 'anita.desai@gmail.com', 'Razorpay', 'req-003', 'HR Business Partner'),
-      interview_panel: p2,
-    },
-    {
-      id: 'ivr-005', application_id: 'app-015', round_number: 1,
-      title: 'Technical Screen', interview_type: 'video',
-      scheduled_at: ISO(daysAgo(22)), duration_mins: 60,
-      meet_link: 'https://meet.google.com/demo-saar-005', status: 'completed',
-      notes: 'Excellent React/TypeScript skills. Solved all problems cleanly. Strong candidate.',
-      created_at: ISO(daysAgo(28)),
-      applications: appStub('app-015', 'interviewing', 'cand-015', 'Abhishek', 'Saxena', 'abhishek.s@gmail.com', 'Accenture', 'req-006', 'Software Engineer'),
-      interview_panel: p1,
-    },
-    {
-      id: 'ivr-006', application_id: 'app-015', round_number: 2,
-      title: 'Live Coding Challenge', interview_type: 'in_person',
-      scheduled_at: dayAfter.toISOString(), duration_mins: 120, meet_link: null, status: 'scheduled',
-      notes: null, created_at: ISO(daysAgo(5)),
-      applications: appStub('app-015', 'interviewing', 'cand-015', 'Abhishek', 'Saxena', 'abhishek.s@gmail.com', 'Accenture', 'req-006', 'Software Engineer'),
-      interview_panel: p1,
-    },
+    { id: 'ivr-001', application_id: 'app-001', round_number: 1, title: 'Technical Screen', interview_type: 'video', scheduled_at: ISO(daysAgo(30)), duration_mins: 60, meet_link: 'https://meet.google.com/demo-001', status: 'completed', notes: 'Strong DSA skills; good system design thinking. Recommend round 2.', created_at: ISO(daysAgo(35)), applications: appStub('app-001', 'interviewing', 'cand-001', 'Arjun', 'Mehta', 'arjun.mehta@gmail.com', 'Flipkart', 'req-001', 'Senior Software Engineer'), interview_panel: p1 },
+    { id: 'ivr-002', application_id: 'app-001', round_number: 2, title: 'System Design', interview_type: 'video', scheduled_at: tomorrow.toISOString(), duration_mins: 90, meet_link: 'https://meet.google.com/demo-002', status: 'scheduled', notes: null, created_at: ISO(daysAgo(10)), applications: appStub('app-001', 'interviewing', 'cand-001', 'Arjun', 'Mehta', 'arjun.mehta@gmail.com', 'Flipkart', 'req-001', 'Senior Software Engineer'), interview_panel: p1 },
+    { id: 'ivr-003', application_id: 'app-009', round_number: 1, title: 'Sales Aptitude & Role-play', interview_type: 'video', scheduled_at: ISO(daysAgo(20)), duration_mins: 45, meet_link: null, status: 'completed', notes: 'Decent pitch; needs improvement in objection handling.', created_at: ISO(daysAgo(25)), applications: appStub('app-009', 'interviewing', 'cand-009', 'Ravi', 'Krishnamurthy', 'ravi.k@gmail.com', 'IBM', 'req-002', 'Sales Manager'), interview_panel: p3 },
+    { id: 'ivr-004', application_id: 'app-012', round_number: 1, title: 'HR Competency Interview', interview_type: 'video', scheduled_at: ISO(daysAgo(18)), duration_mins: 60, meet_link: 'https://meet.google.com/demo-004', status: 'completed', notes: 'Strong domain knowledge; excellent stakeholder management examples.', created_at: ISO(daysAgo(22)), applications: appStub('app-012', 'interviewing', 'cand-012', 'Anita', 'Desai', 'anita.desai@gmail.com', 'Razorpay', 'req-003', 'HR Business Partner'), interview_panel: p2 },
+    { id: 'ivr-005', application_id: 'app-015', round_number: 1, title: 'Technical Screen', interview_type: 'video', scheduled_at: ISO(daysAgo(22)), duration_mins: 60, meet_link: 'https://meet.google.com/demo-005', status: 'completed', notes: 'Excellent React/TypeScript skills. Strong candidate.', created_at: ISO(daysAgo(28)), applications: appStub('app-015', 'interviewing', 'cand-015', 'Abhishek', 'Saxena', 'abhishek.s@gmail.com', 'Accenture', 'req-006', 'Software Engineer'), interview_panel: p1 },
+    { id: 'ivr-006', application_id: 'app-015', round_number: 2, title: 'Live Coding Challenge', interview_type: 'in_person', scheduled_at: dayAfter.toISOString(), duration_mins: 120, meet_link: null, status: 'scheduled', notes: null, created_at: ISO(daysAgo(5)), applications: appStub('app-015', 'interviewing', 'cand-015', 'Abhishek', 'Saxena', 'abhishek.s@gmail.com', 'Accenture', 'req-006', 'Software Engineer'), interview_panel: p1 },
   ]
 }
 
-// ── Recruitment — interviewers (GET /recruitment/interviewers) ─────────────────
+// ── Recruitment — interviewers (GET /recruitment/interviewers) ────────────────
 export function demoRecruitmentInterviewers() {
   return demoEmployeeList.slice(0, 8).map(e => ({
-    id: e.id,
-    full_name: `${e.first_name} ${e.last_name}`,
-    role: e.user_account?.role ?? 'employee',
+    id: e.id, full_name: `${e.first_name} ${e.last_name}`, role: e.user_account?.role ?? 'employee',
   }))
-}
-
-// ── Recruitment — analytics (GET /recruitment/analytics) ─────────────────────
-export function demoRecruitmentAnalytics() {
-  return {
-    funnel: { applied: 142, screening: 68, interviewing: 31, offer: 12, hired: 8, rejected: 54, withdrawn: 9 },
-    avg_time_to_hire: 24, avg_time_to_offer: 18,
-    requisitions: { draft: 3, open: 11, on_hold: 2, filled: 7, cancelled: 1 },
-    interviews:   { scheduled: 9, completed: 47, cancelled: 4, no_show: 3 },
-    pass_rate: 62,
-    source_breakdown: [
-      { source: 'referral', count: 38 },
-      { source: 'linkedin', count: 34 },
-      { source: 'naukri',   count: 29 },
-      { source: 'portal',   count: 21 },
-      { source: 'direct',   count: 14 },
-      { source: 'agency',   count: 6 },
-    ],
-    recent_30d_applications: 37, total_applications: 142, total_requisitions: 24,
-  }
-}
-
-// ── Interviewer calibration (GET /recruitment/analytics/interviewers) ─────────
-export function demoInterviewerAnalytics() {
-  const interviewers = demoEmployeeList.slice(0, 5).map((e, i) => ({
-    interviewer_id: e.id,
-    name: `${e.first_name} ${e.last_name}`,
-    scored_count:    [18, 14, 11, 9, 6][i],
-    avg_overall:     [3.8, 4.1, 3.4, 3.9, 3.6][i],
-    leniency:        [0.2, 0.7, -0.6, 0.1, -0.3][i],
-    consistency:     [0.82, 0.74, 0.69, 0.88, 0.71][i],
-    positive_rate:   [0.55, 0.71, 0.36, 0.6, 0.5][i],
-    recommendations: { strong_yes: [3, 5, 1, 4, 2][i], yes: [7, 5, 3, 4, 2][i], no: [6, 3, 5, 1, 2][i], strong_no: [2, 1, 2, 0, 0][i] },
-    hire_accuracy:   [0.78, 0.66, 0.7, 0.81, 0.6][i],
-    reject_accuracy: [0.72, 0.6, 0.75, 0.69, 0.58][i],
-    decisions_with_outcome: [12, 9, 8, 7, 4][i],
-  }))
-  const criteria = [
-    { criterion: 'technical_skills', avg_hired: 4.2, avg_rejected: 2.6, lift: 1.6, sample_hired: 8, sample_rejected: 22 },
-    { criterion: 'problem_solving',  avg_hired: 4.0, avg_rejected: 2.8, lift: 1.2, sample_hired: 8, sample_rejected: 22 },
-    { criterion: 'communication',    avg_hired: 3.8, avg_rejected: 3.1, lift: 0.7, sample_hired: 8, sample_rejected: 22 },
-    { criterion: 'culture_fit',      avg_hired: 4.1, avg_rejected: 3.3, lift: 0.8, sample_hired: 8, sample_rejected: 22 },
-    { criterion: 'leadership',       avg_hired: 3.6, avg_rejected: 3.0, lift: 0.6, sample_hired: 5, sample_rejected: 14 },
-  ]
-  return { cohort_avg_overall: 3.7, total_scores: 58, interviewers, criteria, agreement: { multi_scorer_rounds: 14, avg_score_spread: 0.62, unanimous_rate: 0.57 } }
-}
-
-// ── Hired pipeline / preboarding tracking ─────────────────────────────────────
-export function demoHiredPipeline() {
-  const mk = (
-    id: string, first: string, last: string, email: string, title: string,
-    reqTitle: string, dept: string, offer: number, joinDaysAhead: number,
-    pjStatus: string | null, invitationId: string | null, submitted: boolean,
-  ) => ({
-    id, status: 'hired', offer_amount: offer,
-    expected_joining: DAY(daysAgo(-joinDaysAhead)),
-    preboarding_initiated_at: invitationId ? ISO(daysAgo(7)) : null,
-    pre_joinee_invitation_id: invitationId,
-    created_at: ISO(daysAgo(20)), updated_at: ISO(daysAgo(3)),
-    candidates: { id: `cand-${id}`, first_name: first, last_name: last, email, phone: '+91 98xxxxxx12', current_title: title },
-    job_requisitions: { id: `req-${id}`, title: reqTitle, departments: { name: dept } },
-    pre_joinee: pjStatus ? { id: `pj-${id}`, status: pjStatus, joining_date: DAY(daysAgo(-joinDaysAhead)), submitted_at: submitted ? ISO(daysAgo(2)) : null } : null,
-  })
-  return [
-    mk('h1', 'Nandini', 'Gupta',   'nandini.gupta@example.in',   'DevOps Engineer',   'Senior Software Engineer', 'Engineering', 2100000, 21, 'submitted', 'inv-h1', true),
-    mk('h2', 'Arjun',   'Rampal',  'arjun.rampal@example.in',    'UX/UI Designer',    'Senior Software Engineer', 'Engineering', 1850000, 30, 'pending',   'inv-h2', false),
-    mk('h3', 'Farhan',  'Qureshi', 'farhan.qureshi@example.in',  'Finance Analyst',   'Finance Analyst',          'Finance',     1150000, 14, 'approved',  'inv-h3', true),
-    mk('h4', 'Ishita',  'Roy',     'ishita.roy@example.in',      'Sales Executive',   'Sales Manager',            'Sales',       900000,  45, null,        null,     false),
-  ]
 }

@@ -33,6 +33,14 @@ const LIST_HINTS = [
   'documents', 'contracts', 'notifications', 'contributions', 'slips',
   'plans', 'schedule', 'claims', 'reimbursements', 'declarations',
   'advances', 'loans', 'approvals', 'clearances', 'updates',
+  'runs', 'failures', 'flags', 'conflicts', 'locks', 'rules', 'drafts',
+  'checklists', 'addresses', 'nominations', 'decisions', 'controls',
+  'evaluations', 'tickets', 'grants', 'freezes', 'cards', 'visas',
+  'banks', 'accounts', 'policies', 'pools', 'cycles', 'batches',
+  'exceptions', 'gaps', 'issues', 'warnings', 'offenders', 'flags',
+  'attachments', 'comments', 'notes', 'tasks', 'steps', 'stages',
+  'members', 'reportees', 'candidates', 'requisitions', 'interviews',
+  'offers', 'letters', 'families', 'identities', 'access-cards',
 ]
 
 function isListish(path: string): boolean {
@@ -82,6 +90,10 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     return { data: rows, stale_count: rows.filter(r => r.is_stale).length, healthy: true }
   }
   if (path === '/attendance/exceptions/summary') return { data: fx.demoExceptionsSummary() }
+  if (path === '/attendance/confidence/summary') return { data: fx.demoAttendanceConfidenceSummary() }
+  if (path === '/attendance/confidence/low')     return { data: [] }
+  if (path === '/attendance/risk/summary')       return { data: fx.demoAttendanceRiskSummary() }
+  if (path === '/attendance/risk')               return { data: [] }
   if (path === '/attendance/reconciliation/open') {
     const issues = fx.demoReconciliationOpen()
     return { data: issues, total: issues.length }
@@ -94,10 +106,32 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
 
   // ── Employees ──────────────────────────────────────────────────────────────
   if (path === '/employees') {
+    // Ledger/governance search reads r.data.data → return nested envelope.
+    if (q.search) {
+      const s = q.search.toLowerCase()
+      const matched = fx.demoEmployeeList.filter(e =>
+        `${e.first_name} ${e.last_name}`.toLowerCase().includes(s) ||
+        e.employee_code.toLowerCase().includes(s)
+      ).slice(0, Number(q.limit) || 10)
+      return { data: { data: matched, total: matched.length } }
+    }
     return { data: fx.demoEmployeeList, total: fx.demoEmployeeList.length }
   }
   if (path === '/employees/org-tree') {
     return { data: fx.demoEmployeeList }
+  }
+  // /employees/options — identity picker (RoleSwitcher → Employee Self Service)
+  if (path === '/employees/options') {
+    const s = (q.search || '').toLowerCase()
+    const opts = fx.demoEmployeeList
+      .filter(e =>
+        !s ||
+        `${e.first_name} ${e.last_name}`.toLowerCase().includes(s) ||
+        e.employee_code.toLowerCase().includes(s)
+      )
+      .slice(0, Number(q.limit) || 25)
+      .map(e => ({ id: e.id, first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code }))
+    return { data: opts }
   }
   // /employees/:id/full-profile
   let mm = path.match(/^\/employees\/([^/]+)\/full-profile$/)
@@ -158,8 +192,28 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   }
   if (path === '/attendance/corrections' || path === '/attendance/corrections/my') return { data: [], total: 0 }
   if (path === '/attendance/regularisation/pending') return { data: fx.demoRegularisationPending() }
-  if (path === '/attendance/regularisation/my') return { data: [] }
-  if (path === '/attendance/stats') return { data: fx.demoExceptionsSummary() }
+  if (path === '/attendance/regularisation/my') return { data: [], total: 0 }
+  // /attendance/stats — flat ops stats (page reads fields directly, NOT via .data)
+  if (path === '/attendance/stats') return fx.demoAttendanceOpsStats()
+  if (path === '/attendance/pipeline-stats') return fx.demoPipelineStats()
+  if (path === '/attendance/process/status') return fx.demoProcessStatus()
+  if (path === '/attendance/audit') {
+    const rows = fx.demoAttendanceAudit()
+    return { data: rows, total: rows.length }
+  }
+  if (path === '/attendance/process/runs') return { data: fx.demoProcessRuns() }
+  if (path === '/attendance/anomalies/summary') return { open_count: 0, resolved_today: 0 }
+  if (path === '/attendance/regularisation/summary') {
+    return { pending_count: 0, approved_today: 0, oldest_pending_days: null }
+  }
+  if (path === '/attendance/intelligence') return fx.demoAttendanceIntelligence()
+  if (path === '/attendance/intelligence/flags') return { data: [], total: 0 }
+  if (path.startsWith('/attendance/intelligence/')) return { data: [], total: 0 }
+  if (path === '/attendance/upload-health') return fx.demoUploadHealth()
+  if (path === '/attendance/upload-sessions') return { data: fx.demoUploadSessions() }
+  if (path === '/attendance/sample-csv') {
+    return 'employee_code,date,check_in,check_out\nSAAR001,2026-06-01,09:02,18:10\nSAAR002,2026-06-01,09:15,18:30\n'
+  }
   if (path === '/attendance/events') return { data: [] }
   if (path === '/attendance/comp-off') return { data: [] }
   if (path === '/attendance/muster/latest-month') {
@@ -201,8 +255,18 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/leave-requests') return { data: fx.demoMyLeaveRequests() }
   if (path.startsWith('/attendance/leave/balance')) return { data: fx.demoLeaveBalances() }
   if (path === '/attendance/leave/team-balances') return { data: [] }
-  if (path.startsWith('/attendance/leave/ledger/')) return { data: [] }
+  // ledger reads r.data.data → nested envelope
+  if (path.startsWith('/attendance/leave/ledger/')) return { data: { data: [] } }
   if (path === '/leave/optional-holidays') return { data: [] }
+  // /leave/my-requests — paginated; page reads .pagination.has_more
+  if (path === '/leave/my-requests') {
+    return fx.demoMyLeaveRequestsPaged(Number(q.page) || 1, Number(q.limit) || 20, q.status)
+  }
+  if (path === '/leave/governance/session-analytics') return fx.demoSessionAnalytics()
+  if (path === '/leave/event-grants') return { data: fx.demoEventGrants() }
+  if (path === '/leave/scheduler/reconciliation') return { data: fx.demoReconciliationRuns() }
+  if (path === '/leave/lifecycle/all-freezes') return { data: [] }
+  if (path === '/leave/lifecycle/held-credits-summary') return { data: [] }
   if (path.startsWith('/leave/lifecycle/')) return { data: null }
 
   // ── Payroll — runs ─────────────────────────────────────────────────────────
@@ -240,6 +304,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   // /payroll/runs/:id/variance
   mm = path.match(/^\/payroll\/runs\/([^/]+)\/variance$/)
   if (mm) return fx.demoVarianceReport(mm[1])
+  // /payroll/runs/:id/snapshot
+  mm = path.match(/^\/payroll\/runs\/([^/]+)\/snapshot$/)
+  if (mm) return { data: fx.demoPayrollRunSnapshot(mm[1]) }
+  // /payroll/accounting/summary
+  if (path === '/payroll/accounting/summary') return { data: fx.demoPayrollAccountingSummary() }
   // /payroll/runs/:id (detail)
   mm = path.match(/^\/payroll\/runs\/([^/]+)$/)
   if (mm) return { data: fx.demoPayrollRunDetail(mm[1]) }
@@ -260,6 +329,8 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   }
   if (path.startsWith('/payroll/ledger/')) return { data: [] }
   if (path.startsWith('/payroll/revisions')) return { data: [] }
+  if (path === '/payroll/statutory/ptax/states') return fx.demoPtaxStates()
+  if (path === '/payroll/statutory/lwf/states')  return fx.demoLwfStates()
   if (path.startsWith('/payroll/statutory')) return { data: [] }
   if (path.startsWith('/payroll/reimbursements')) return { data: [] }
   if (path.startsWith('/payroll/ess/my-advances')) return { data: [] }
@@ -351,7 +422,14 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     }
   }
   if (path === '/intelligence/org/attrition-signal') {
-    return { signal: 'normal', by_department: [], total: 0 }
+    return {
+      signal: 'normal',
+      by_department: [
+        { dept_name: 'Engineering', count: 1 },
+        { dept_name: 'Sales', count: 0 },
+      ],
+      total: 1,
+    }
   }
   if (path === '/intelligence/org/headcount-by-site') {
     return {
@@ -362,19 +440,7 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     }
   }
   if (path === '/intelligence/workforce-command') {
-    return {
-      data: {
-        summary: 'Workforce is stable. No critical issues detected.',
-        critical_count: 0, high_count: 0,
-        observations: [],
-        kpis: {
-          on_notice: 0, stalled_onboarding: 0, pending_separations: 0,
-          assets_at_risk: 0, probation_due: 1,
-          active_headcount: fx.demoEmployeeList.length, joiners_this_month: 1,
-        },
-        generated_at: new Date().toISOString(),
-      },
-    }
+    return { data: fx.demoWorkforceCommandData() }
   }
   if (path.startsWith('/intelligence/digest/')) {
     const period = path.split('/').pop() ?? 'daily'
@@ -392,7 +458,8 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     }
   }
   if (path === '/intelligence/action-center') {
-    return { observations: [], total: 0, generated_at: new Date().toISOString() }
+    const obs = fx.demoActionObservations()
+    return { observations: obs, total: obs.length, generated_at: new Date().toISOString() }
   }
   // /intelligence/employee/:id/360
   mm = path.match(/^\/intelligence\/employee\/([^/]+)\/360$/)
@@ -409,7 +476,15 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
         },
         compliance: { probation_due: false, separation_stage: null, assets_assigned: 0, assets: [] },
         compensation: emp ? { ctc_annual: fx.demoActiveComp(mm[1]).ctc_annual, effective_from: '2025-04-01' } : null,
-        leave: { balances: fx.demoLeaveBalances() },
+        leave: {
+          // Employee 360 reads lb.leave_type (the NAME) — map it explicitly so
+          // the widget never falls back to showing the raw id.
+          balances: fx.demoLeaveBalances().map(b => ({
+            leave_type: b.leave_types?.name ?? 'Leave',
+            balance: b.balance,
+            used: b.used,
+          })),
+        },
         attendance_signal: 'normal',
         onboarding: null,
         summary: 'Employee is performing well with no open compliance items.',
@@ -531,7 +606,26 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/datasets/payroll-cost/anchor') {
     return { month: new Date().toISOString().slice(0, 7) }
   }
+  if (path === '/datasets/statutory/exceptions') return fx.demoStatutoryExceptions()
+  if (path === '/datasets/statutory') return fx.demoStatutoryData()
   if (path.startsWith('/datasets/')) return { data: {} }
+
+  // ── Governance (DPDP) / Security posture ────────────────────────────────────
+  if (path === '/governance/privacy/health') return fx.demoPrivacyHealth()
+  if (path === '/security/health')           return fx.demoSecurityHealth()
+
+  // ── Compliance / statutory ──────────────────────────────────────────────────
+  if (path === '/payroll/compliance/stats') return fx.demoComplianceStats()
+  if (path === '/executive/compliance') return fx.demoExecutiveCompliance()
+  if (path === '/executive/ceo')       return fx.demoExecCeo()
+  if (path === '/executive/chro')      return fx.demoExecChro()
+  if (path === '/executive/workforce') return fx.demoExecWorkforce()
+  if (path === '/executive/financial') return fx.demoExecFinancial()
+  if (path === '/executive/trends')    return fx.demoExecTrends()
+  if (path === '/compliance/calendar') return fx.demoComplianceCalendar()
+  if (path === '/compliance/calendar/upcoming') return { data: fx.demoComplianceCalendar().data }
+  if (path.startsWith('/compliance/')) return { data: [] }
+  if (path.startsWith('/executive/')) return { data: {} }
 
   // ── Recruitment ────────────────────────────────────────────────────────────
   if (path === '/recruitment/analytics') return fx.demoRecruitmentAnalytics()
@@ -549,22 +643,19 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   }
   mm = path.match(/^\/recruitment\/requisitions\/([^/]+)$/)
   if (mm) {
-    const reqId = mm[1]
-    const all = fx.demoRecruitmentRequisitions()
+    const reqId = mm[1]; const all = fx.demoRecruitmentRequisitions()
     return { data: all.find(r => r.id === reqId) ?? all[0] }
   }
   if (path === '/recruitment/candidates') {
     let cands = fx.demoRecruitmentCandidates()
     if (q.search) { const s = q.search.toLowerCase(); cands = cands.filter(c => `${c.first_name} ${c.last_name}`.toLowerCase().includes(s) || c.email.toLowerCase().includes(s)) }
     if (q.source && q.source !== 'all') cands = cands.filter(c => c.source === q.source)
-    const offset = Number(q.offset) || 0
-    const limit  = Number(q.limit)  || 50
+    const offset = Number(q.offset) || 0; const limit = Number(q.limit) || 50
     return { data: cands.slice(offset, offset + limit), total: cands.length }
   }
   mm = path.match(/^\/recruitment\/candidates\/([^/]+)$/)
   if (mm) {
-    const candId = mm[1]
-    const all = fx.demoRecruitmentCandidates()
+    const candId = mm[1]; const all = fx.demoRecruitmentCandidates()
     return { data: all.find(c => c.id === candId) ?? all[0] }
   }
   if (path === '/recruitment/applications') {
@@ -572,13 +663,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     if (q.requisition_id) apps = apps.filter(a => a.requisition_id === q.requisition_id)
     if (q.candidate_id)   apps = apps.filter(a => a.candidates.id === q.candidate_id)
     if (q.status)         apps = apps.filter(a => a.status === q.status)
-    const limit = Number(q.limit) || 200
-    return { data: apps.slice(0, limit), total: apps.length }
+    return { data: apps.slice(0, Number(q.limit) || 200), total: apps.length }
   }
   mm = path.match(/^\/recruitment\/applications\/([^/]+)$/)
   if (mm) {
-    const appId = mm[1]
-    const all = fx.demoRecruitmentApplications()
+    const appId = mm[1]; const all = fx.demoRecruitmentApplications()
     return { data: all.find(a => a.id === appId) ?? all[0] }
   }
   if (path === '/recruitment/interviews') {

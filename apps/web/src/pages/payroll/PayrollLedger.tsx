@@ -281,7 +281,7 @@ export function PayrollLedger() {
                   <tr key={e.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(e.created_at)}</td>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">{e.employee_name ?? e.employee_id}</div>
+                      <div className="font-medium text-foreground">{e.employee_name ?? e.employee_code ?? '—'}</div>
                       {e.employee_code && <div className="text-xs text-muted-foreground">{e.employee_code}</div>}
                     </td>
                     <td className="px-4 py-3">

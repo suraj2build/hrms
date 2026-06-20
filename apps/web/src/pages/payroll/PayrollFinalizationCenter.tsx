@@ -751,7 +751,7 @@ export function PayrollFinalizationCenter() {
                               <span className="text-xs font-medium">
                                 {r.employees
                                   ? `${r.employees.first_name} ${r.employees.last_name}`
-                                  : r.employee_name ?? r.employee_id?.slice(0, 8) ?? '—'}
+                                  : r.employee_name ?? r.employee_code ?? '—'}
                               </span>
                               <span className="text-[10px] text-muted-foreground font-mono">
                                 {r.employees?.employee_code ?? r.employee_code ?? ''}

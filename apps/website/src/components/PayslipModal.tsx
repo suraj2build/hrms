@@ -20,20 +20,27 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
     window.print();
   };
 
-  // Convert numbers to words (simple lookup for payroll bounds)
+  // Convert a rupee amount to words using Indian lakh/crore grouping.
   const amountToWords = (amount: number) => {
-    let num = amount;
-    const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+    const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
     const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-
-    const inWords = (n: number): string => {
-      if (n < 20) return a[n];
-      if (n < 100) return b[Math.floor(n / 10)] + ' ' + a[n % 10];
-      if (n < 1000) return a[Math.floor(n / 100)] + 'Hundred ' + inWords(n % 100);
-      return a[Math.floor(n / 1000)] + 'Thousand ' + inWords(n % 1000);
+    const two = (n: number): string => (n < 20 ? a[n] : `${b[Math.floor(n / 10)]} ${a[n % 10]}`);
+    const three = (n: number): string => {
+      const h = Math.floor(n / 100), r = n % 100;
+      return `${h ? `${a[h]} Hundred ` : ''}${r ? two(r) : ''}`;
     };
 
-    return inWords(num) + "Rupees Only";
+    let num = Math.round(amount);
+    if (num <= 0) return 'Zero Rupees Only';
+    const parts: string[] = [];
+    const crore = Math.floor(num / 10000000); num %= 10000000;
+    const lakh = Math.floor(num / 100000); num %= 100000;
+    const thousand = Math.floor(num / 1000); num %= 1000;
+    if (crore) parts.push(`${two(crore)} Crore`);
+    if (lakh) parts.push(`${two(lakh)} Lakh`);
+    if (thousand) parts.push(`${two(thousand)} Thousand`);
+    if (num) parts.push(three(num));
+    return `${parts.join(' ').replace(/\s+/g, ' ').trim()} Rupees Only`;
   };
 
   return (
@@ -42,11 +49,11 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
         {/* Header toolbar */}
         <div className="flex justify-between items-center bg-slate-50 px-6 py-4 border-b border-slate-100 rounded-t-3xl">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-lg">
+            <div className="p-1.5 bg-blue-50 border border-blue-200 text-blue-600 rounded-lg">
               <FileText className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-xs font-bold text-slate-800">Salary Pay Slip Reciept</span>
+              <span className="text-xs font-bold text-slate-800">Salary Pay Slip Receipt</span>
               <span className="text-[10px] block font-mono text-slate-400">ID: {record.employeeId}-PS-05</span>
             </div>
           </div>
@@ -60,7 +67,7 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
             </button>
             <button
               onClick={handleDownloadSim}
-              className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold relative"
+              className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold relative"
             >
               {downloadSuccess ? (
                 <>
@@ -84,7 +91,7 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
         </div>
 
         {/* Slips Content */}
-        <div id="payslip-print-section" className="p-8 space-y-8 bg-white font-sans text-slate-800 selection:bg-indigo-100">
+        <div id="payslip-print-section" className="p-8 space-y-8 bg-white font-sans text-slate-800 selection:bg-blue-100">
           
           {/* Company branding */}
           <div className="flex justify-between items-start">
@@ -176,7 +183,7 @@ export default function PayslipModal({ record, employee, onClose }: PayslipModal
               </div>
               <div className="bg-slate-50/50 border-t border-slate-200 px-4 py-3.5 flex justify-between text-xs font-extrabold text-slate-800 rounded-b-2xl">
                 <span>Gross Earnings (A)</span>
-                <span className="font-mono text-indigo-700">₹{(record.grossSalary + 2500).toLocaleString('en-IN')}</span>
+                <span className="font-mono text-blue-700">₹{(record.grossSalary + 2500).toLocaleString('en-IN')}</span>
               </div>
             </div>
 

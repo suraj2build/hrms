@@ -237,7 +237,7 @@ function RecordsDialog({
                     <tr key={r.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                       <td className="py-3 px-4">
                         <div className="font-medium text-foreground">
-                          {r.employee_name ?? r.employee_id}
+                          {r.employee_name ?? r.employee_code ?? '—'}
                         </div>
                         {r.employee_code && (
                           <div className="text-xs text-muted-foreground">{r.employee_code}</div>

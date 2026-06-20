@@ -947,7 +947,7 @@ export default function LeaveGovernanceWorkspace() {
                           )}
                         </td>
                         <td className="py-2.5 pr-4 text-xs">
-                          {g.important_date_types?.name ?? g.date_type_id.slice(0, 8)}
+                          {g.important_date_types?.name ?? '—'}
                         </td>
                         <td className="py-2.5 pr-4 text-xs">
                           {g.leave_types?.name ?? '—'}

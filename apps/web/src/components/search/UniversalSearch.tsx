@@ -320,7 +320,7 @@ export function UniversalSearch({
             (e): SearchResult => ({
               id:       `emp-${e.id}`,
               group:    'employees',
-              label:    e.full_name ?? e.name ?? e.id,
+              label:    e.full_name ?? e.name ?? e.employee_code ?? '—',
               sublabel: [e.department, e.employee_code].filter(Boolean).join(' · '),
               route:    `/admin/employees/${e.id}`,
               icon:     <Users className="h-4 w-4" />,
@@ -338,7 +338,7 @@ export function UniversalSearch({
             (p): SearchResult => ({
               id:         `pay-${p.id}`,
               group:      'payroll',
-              label:      p.run_name ?? p.name ?? p.id,
+              label:      p.run_name ?? p.name ?? 'Payroll run',
               sublabel:   p.period,
               route:      `/admin/payroll/${p.id}`,
               icon:       <DollarSign className="h-4 w-4" />,
@@ -363,7 +363,7 @@ export function UniversalSearch({
                   (a): SearchResult => ({
                     id:         `anom-${a.id}`,
                     group:      'anomalies',
-                    label:      a.employee_name ?? a.id,
+                    label:      a.employee_name ?? 'Unknown employee',
                     sublabel:   [a.anomaly_type, a.date].filter(Boolean).join(' · '),
                     route:      `/admin/attendance/anomalies?id=${a.id}`,
                     icon:       <AlertTriangle className="h-4 w-4" />,

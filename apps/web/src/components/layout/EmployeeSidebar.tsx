@@ -13,7 +13,6 @@ import {
   CalendarOff,
   Scale,
   Receipt,
-  FileCheck,
   CreditCard,
   FileText,
   Mail,
@@ -31,7 +30,6 @@ import {
   ArrowUpRight,
   Calculator,
   ScrollText,
-  TrendingUp,
   Wallet,
   LogOut,
 } from 'lucide-react'
@@ -66,7 +64,8 @@ const BASE_GROUPS: NavGroup[] = [
     items: [
       { label: 'Dashboard',     icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
       { label: 'My Onboarding', icon: Rocket,          href: '/ess/onboarding'             }, // shown only during/after onboarding journey
-      { label: 'My Insights',   icon: BarChart3,       href: '/ess/operational-center'     },
+      // "My Insights" (operational center) removed from employee nav — the
+      // attendance-operations style command center is not relevant for ESS.
     ],
   },
   {
@@ -81,24 +80,16 @@ const BASE_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Payroll & Tax',
+    // Tax Planner / IT Statement / YTD / TDS Recovery / HRA / Previous Employer
+    // are consolidated into the single "Tax & Declarations" hub (/ess/salary).
+    label: 'Pay, Tax & Benefits',
     items: [
-      { label: 'Pay & Compensation', icon: Receipt,    href: '/ess/compensation'              },
-      { label: 'Tax Planner',        icon: Calculator, href: '/ess/salary/tax-planner'        },
-      { label: 'IT Statement',       icon: ScrollText, href: '/ess/salary/it-statement'       },
-      { label: 'YTD Statement',      icon: TrendingUp, href: '/ess/salary/ytd'                },
-      { label: 'TDS Recovery',       icon: Receipt,    href: '/ess/salary/tds-recovery'       },
-    ],
-  },
-  {
-    label: 'Declarations & Claims',
-    items: [
-      { label: 'HRA Declaration',   icon: FileCheck,  href: '/ess/salary/hra'                      },
-      { label: 'Previous Employer', icon: FileText,   href: '/ess/salary/previous-employer'        },
-      { label: 'Reimbursements',    icon: CreditCard, href: '/ess/reimbursements'                  },
-      { label: 'Loans & Advances',  icon: Wallet,     href: '/ess/loans'                           },
-      { label: 'Flexible Benefits', icon: Receipt,    href: '/ess/fbp'                             },
-      { label: 'Benefits',          icon: ShieldCheck, href: '/ess/benefits'                       },
+      { label: 'Pay & Compensation', icon: Receipt,     href: '/ess/compensation'   },
+      { label: 'Tax & Declarations', icon: Calculator,  href: '/ess/salary'         },
+      { label: 'Reimbursements',     icon: CreditCard,  href: '/ess/reimbursements' },
+      { label: 'Loans & Advances',   icon: Wallet,      href: '/ess/loans'          },
+      { label: 'Flexible Benefits',  icon: ScrollText,  href: '/ess/fbp'            },
+      { label: 'Benefits',           icon: ShieldCheck, href: '/ess/benefits'       },
     ],
   },
   {
@@ -119,8 +110,10 @@ const BASE_GROUPS: NavGroup[] = [
 // ── Manager quick-access items (rendered only for manager+ roles) ──────────────
 
 // Approvals now lives in Attendance & Leave group; My Team in Documents & Support.
-// Both remain filtered for non-managers via this set.
-const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team'])
+// "Who's Off" (team leave calendar) is a manager-facing view — a plain employee
+// should not see colleagues' absence patterns (relevance + DPDP privacy).
+// All three stay in the ESS nav structure but are filtered out for non-managers.
+const MANAGER_ONLY_HREFS = new Set(['/ess/approvals', '/ess/team', '/ess/whos-off'])
 
 const MANAGER_QUICK_ITEMS: NavItem[] = [
   { label: 'Manager Console', icon: LayoutDashboard, href: '/manager/dashboard', exact: true },
@@ -198,7 +191,7 @@ function usePendingCount(employeeId: string | null) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function EmployeeSidebar() {
-  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen, activeRole } = useUIStore()
   const { profile }  = useAuthStore()
   const employeeId   = profile?.employee_id ?? null
   const location     = useLocation()
@@ -208,8 +201,12 @@ export function EmployeeSidebar() {
   // Close the mobile drawer on navigation
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
 
-  // Manager-only nav items — hidden for pure employee role
-  const isManager = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
+  // Manager-only nav items — hidden for pure employee role.
+  // Also hidden when an admin/manager is *previewing* the Employee Self Service
+  // workspace (activeRole === 'employee'): the preview should reflect the true
+  // employee experience, not the previewer's elevated permissions.
+  const hasManagerRole = profile?.role === 'manager' || profile?.role === 'hr_admin' || profile?.role === 'super_admin'
+  const isManager = hasManagerRole && activeRole !== 'employee'
 
   // Filter manager-only items; inject live badge into Approvals
   const GROUPS = useMemo((): NavGroup[] =>
