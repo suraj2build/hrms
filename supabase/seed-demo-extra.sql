@@ -77,7 +77,7 @@ insert into reimbursement_claims (tenant_id, employee_id, category_id, expense_d
 -- ============================================================================
 insert into advance_salary_requests (tenant_id, employee_id, requested_amount, approved_amount, purpose, recovery_months, status, requested_date, approved_by, approved_at, disbursed_date, disbursed_amount) values
  ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000009', 50000,  50000,  'Medical emergency in the family.', 5, 'recovering', current_date - 60, 'd0000000-0000-0000-0000-0000000000a1', now() - interval '58 days', current_date - 55, 50000),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000005', 30000,  null,   'Home renovation.',                  3, 'pending',    current_date - 5,  null,                                    null,               null),
+ ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000005', 30000,  null,   'Home renovation.',                  3, 'pending',    current_date - 5,  null,                                    null,               null,               null),
  ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001', 100000, 100000, 'Down payment for a vehicle.',       10,'disbursed',  current_date - 12, 'd0000000-0000-0000-0000-0000000000a1', now() - interval '10 days', current_date - 8,  100000);
 
 -- ============================================================================
