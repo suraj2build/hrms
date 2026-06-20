@@ -31,18 +31,36 @@ begin;
 -- ============================================================================
 --  0. RESET — remove any previous demo data so this is safe to re-run
 -- ============================================================================
--- Recruitment / misc tables whose tenant_id has NO cascade FK must be cleared
--- explicitly; the rest cascade when the tenant row is deleted.
-delete from interview_scores      where tenant_id = 'd0000000-0000-0000-0000-000000000001';
-delete from interview_panel       where tenant_id = 'd0000000-0000-0000-0000-000000000001';
-delete from interview_rounds      where tenant_id = 'd0000000-0000-0000-0000-000000000001';
-delete from applications          where tenant_id = 'd0000000-0000-0000-0000-000000000001';
-delete from candidates            where tenant_id = 'd0000000-0000-0000-0000-000000000001';
-delete from job_requisitions      where tenant_id = 'd0000000-0000-0000-0000-000000000001';
-delete from recruitment_pipeline_stages where tenant_id = 'd0000000-0000-0000-0000-000000000001';
+-- Cascade behaviour varies by table (some master tables do NOT cascade from the
+-- tenant), so we delete EVERY seeded table explicitly in child→parent FK order.
+-- This makes the seed reliably idempotent regardless of FK ON DELETE rules.
+do $$
+declare t text; tid uuid := 'd0000000-0000-0000-0000-000000000001';
+begin
+  foreach t in array array[
+    -- transactional / recruitment (children first)
+    'interview_scores','interview_panel','interview_rounds','applications',
+    'candidates','job_requisitions',
+    'employee_asset_ledger','assets','helpdesk_tickets',
+    'payroll_slips','payroll_runs',
+    'attendance_punch_logs','attendance_daily','holiday_calendar',
+    'leave_requests','employee_leave_balance',
+    'employee_compensation_components','employee_compensations',
+    'employee_shifts','job_history',
+    'profiles','employees',
+    -- masters (parents last)
+    'recruitment_pipeline_stages',
+    'salary_structure_components','salary_structures','salary_components',
+    'leave_types','payroll_groups','shifts','cost_centers','work_locations',
+    'grades','designations','departments'
+  ] loop
+    if to_regclass(t) is not null then
+      execute format('delete from %I where tenant_id = $1', t) using tid;
+    end if;
+  end loop;
+end $$;
 
--- Deleting the tenant cascades to all tenant_id-FK tables (employees, payroll,
--- attendance, leave, helpdesk, assets, masters, profiles, …).
+-- Finally the tenant row itself.
 delete from tenants where id = 'd0000000-0000-0000-0000-000000000001';
 
 -- Demo auth user (separate from tenant cascade).
