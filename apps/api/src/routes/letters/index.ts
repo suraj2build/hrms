@@ -43,6 +43,21 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 
+// ── Embedded-employee normaliser ──────────────────────────────────────────────
+// employees has no `full_name` / `designation` columns (name is first+last,
+// designation is a designation_id FK). Endpoints embed first/last + a
+// designations(name) lookup and we synthesise `full_name` / `designation` here
+// so the API response shape the UI consumes stays stable.
+function normEmp(e: any): any {
+  if (!e) return e
+  const d = Array.isArray(e.designations) ? e.designations[0] : e.designations
+  return {
+    ...e,
+    full_name:   `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
+    designation: d?.name ?? null,
+  }
+}
+
 // ── Variable resolver ─────────────────────────────────────────────────────────
 
 /**
@@ -54,32 +69,29 @@ async function resolveEmployeeVars(
   tenantId: string,
   employeeId: string,
 ): Promise<Record<string, string>> {
-  // Fetch employee + related data in parallel
-  const [empRes, compRes, jobRes] = await Promise.all([
+  // Fetch employee + current compensation in parallel. The canonical personal /
+  // statutory fields (gender, PAN, UAN, ESI, dob, address) live on the employees
+  // table itself (004_employees.sql); designation/department are FK lookups
+  // embedded by name. Avoid columns/tables that do not exist or the whole
+  // PostgREST select fails and the letter renders with no data.
+  const [empRes, compRes] = await Promise.all([
     supabase
       .from('employees')
       .select(`
-        id, employee_code, full_name, first_name, last_name,
-        date_of_joining, date_of_birth, employment_type,
-        designation, department_id,
-        departments!department_id(name),
-        personal_info:employee_personal_info(gender, pan_number),
-        bank_statutory:employee_bank_statutory(pf_number, esi_number),
-        addresses:employee_addresses(address_line1, city, state, pincode)
+        id, employee_code, first_name, last_name,
+        joining_date, dob, employment_type, gender,
+        pan_number, uan_number, esi_number, address,
+        designations(name), departments(name)
       `)
       .eq('id', employeeId)
       .eq('tenant_id', tenantId)
       .single(),
     supabase
       .from('employee_compensations')
-      .select('gross_salary, net_salary, basic_salary, effective_from')
+      .select('ctc_annual, ctc_monthly, effective_from')
+      .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
-      .eq('is_current', true)
-      .maybeSingle(),
-    supabase
-      .from('employee_job_history')
-      .select('designation, department_id, effective_from')
-      .eq('employee_id', employeeId)
+      .eq('is_active', true)
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -87,54 +99,61 @@ async function resolveEmployeeVars(
 
   const emp  = empRes.data  as any
   const comp = compRes.data as any
-  const _job = jobRes.data  as any
 
   if (!emp) return {}
 
-  const doj     = emp.date_of_joining ? new Date(emp.date_of_joining) : null
+  const flat = (rel: any) => (Array.isArray(rel) ? rel[0] : rel)
+
+  const doj     = emp.joining_date ? new Date(emp.joining_date) : null
   const today   = new Date()
   const yearsOfService = doj
     ? Math.floor((today.getTime() - doj.getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null
 
-  const addr  = Array.isArray(emp.addresses)    ? emp.addresses[0]    : emp.addresses
-  const pInfo = Array.isArray(emp.personal_info) ? emp.personal_info[0] : emp.personal_info
-  const bank  = Array.isArray(emp.bank_statutory)? emp.bank_statutory[0]: emp.bank_statutory
-  const dept  = emp.departments as any
+  const addr  = emp.address ?? {}
+  const dept  = flat(emp.departments) as any
+  const desig = flat(emp.designations) as any
+
+  const monthlyCtc = comp?.ctc_monthly != null ? Number(comp.ctc_monthly) : null
+  const annualCtc  = comp?.ctc_annual  != null ? Number(comp.ctc_annual)  : null
 
   const fmt = (d: string | null | undefined) =>
     d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : ''
 
   return {
     // Employee basics
-    employee_name:       emp.full_name ?? `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim(),
+    employee_name:       `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim(),
     employee_code:       emp.employee_code ?? '',
     first_name:          emp.first_name ?? '',
     last_name:           emp.last_name  ?? '',
-    designation:         emp.designation ?? '',
+    designation:         desig?.name ?? '',
     department:          dept?.name ?? '',
     employment_type:     emp.employment_type ?? '',
-    date_of_joining:     fmt(emp.date_of_joining),
-    date_of_birth:       fmt(emp.date_of_birth),
+    date_of_joining:     fmt(emp.joining_date),
+    date_of_birth:       fmt(emp.dob),
     years_of_service:    yearsOfService !== null ? String(yearsOfService) : '',
-    gender:              pInfo?.gender ?? '',
-    pan_number:          pInfo?.pan_number ?? '',
-    pf_number:           bank?.pf_number ?? '',
-    esi_number:          bank?.esi_number ?? '',
+    gender:              emp.gender ?? '',
+    pan_number:          emp.pan_number ?? '',
+    pf_number:           emp.uan_number ?? '',
+    esi_number:          emp.esi_number ?? '',
 
-    // Address
-    address_line1:       addr?.address_line1 ?? '',
+    // Address (employees.address JSONB — tolerate either key style)
+    address_line1:       addr?.address_line1 ?? addr?.line1 ?? '',
     city:                addr?.city ?? '',
     state:               addr?.state ?? '',
-    pincode:             addr?.pincode ?? '',
+    pincode:             addr?.pincode ?? addr?.pin ?? '',
 
-    // Compensation
-    gross_salary:        comp?.gross_salary  ? `₹${Number(comp.gross_salary).toLocaleString('en-IN')}` : '',
-    net_salary:          comp?.net_salary    ? `₹${Number(comp.net_salary).toLocaleString('en-IN')}`   : '',
-    basic_salary:        comp?.basic_salary  ? `₹${Number(comp.basic_salary).toLocaleString('en-IN')}` : '',
-    gross_salary_raw:    comp?.gross_salary  ? String(comp.gross_salary)  : '',
-    net_salary_raw:      comp?.net_salary    ? String(comp.net_salary)    : '',
-    basic_salary_raw:    comp?.basic_salary  ? String(comp.basic_salary)  : '',
+    // Compensation (CTC-based; gross ≈ monthly CTC). Annual/monthly exposed too.
+    gross_salary:        monthlyCtc != null ? `₹${monthlyCtc.toLocaleString('en-IN')}` : '',
+    net_salary:          '',
+    basic_salary:        '',
+    gross_salary_raw:    monthlyCtc != null ? String(monthlyCtc) : '',
+    net_salary_raw:      '',
+    basic_salary_raw:    '',
+    annual_ctc:          annualCtc  != null ? `₹${annualCtc.toLocaleString('en-IN')}`  : '',
+    monthly_ctc:         monthlyCtc != null ? `₹${monthlyCtc.toLocaleString('en-IN')}` : '',
+    annual_ctc_raw:      annualCtc  != null ? String(annualCtc)  : '',
+    monthly_ctc_raw:     monthlyCtc != null ? String(monthlyCtc) : '',
 
     // Dates
     today:               fmt(today.toISOString()),
@@ -474,7 +493,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
         id, employee_id, subject, approval_status, current_level,
         issued_at, created_at, missing_vars,
         template:letter_templates(name, letter_type, category),
-        employee:employees(full_name, employee_code, designation)
+        employee:employees(first_name, last_name, employee_code, designations(name))
       `, { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
@@ -487,7 +506,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     const { data, count, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
-    return { data, total: count }
+    return { data: (data ?? []).map((r: any) => ({ ...r, employee: normEmp(r.employee) })), total: count }
   })
 
   // GET /letters/issued/:letterId
@@ -502,7 +521,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
           *,
           template:letter_templates(name,letter_type,category,requires_approval,approval_levels,variables,
             approval_chains:letter_approval_chains(level,approver_role,label)),
-          employee:employees(full_name,employee_code,designation,
+          employee:employees(first_name,last_name,employee_code,designations(name),
             departments!department_id(name))
         `)
         .eq('id', letterId)
@@ -510,13 +529,19 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
         .single(),
       supabase
         .from('letter_approval_log')
-        .select(`*, actor:employees(full_name, designation)`)
+        .select(`*, actor:employees(first_name, last_name, designations(name))`)
         .eq('letter_id', letterId)
         .order('acted_at', { ascending: true }),
     ])
 
     if (letterRes.error || !letterRes.data) return reply.status(404).send({ error: 'Letter not found' })
-    return { data: { ...letterRes.data, approval_log: logRes.data ?? [] } }
+    return {
+      data: {
+        ...letterRes.data,
+        employee:     normEmp((letterRes.data as any).employee),
+        approval_log: (logRes.data ?? []).map((l: any) => ({ ...l, actor: normEmp(l.actor) })),
+      },
+    }
   })
 
   // POST /letters/issued/:letterId/submit-for-approval
@@ -836,7 +861,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select(`
         id, reason, status, requested_at, processed_at, rejection_reason,
         template:letter_templates(name, letter_type),
-        employee:employees(full_name, employee_code, designation,
+        employee:employees(first_name, last_name, employee_code, designations(name),
           departments!department_id(name))
       `, { count: 'exact' })
       .eq('tenant_id', tenantId)
@@ -847,7 +872,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     const { data, count, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
-    return { data, total: count }
+    return { data: (data ?? []).map((r: any) => ({ ...r, employee: normEmp(r.employee) })), total: count }
   })
 
   // POST /letters/requests/:id/fulfill  — generate + issue letter for ESS request
