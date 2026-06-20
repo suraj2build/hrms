@@ -2303,7 +2303,7 @@ export function EmployeeProfile() {
                         <div key={row.id} className="flex items-center gap-3 py-2.5">
                           <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium">{row.important_date_types?.name ?? row.date_type_id}</p>
+                            <p className="text-sm font-medium">{row.important_date_types?.name ?? '—'}</p>
                             <p className="text-xs text-muted-foreground">{display}{!row.year_known && ' (year unknown)'}</p>
                             {row.notes && !row.notes.startsWith('Auto-seeded') && <p className="text-xs text-muted-foreground mt-0.5 italic">{row.notes}</p>}
                           </div>

@@ -411,7 +411,7 @@ export function LeaveAccrualAdmin() {
                     <div className="flex items-center gap-3">
                       <div>
                         <p className="text-sm font-medium text-foreground">
-                          {rule.leave_types?.name ?? rule.leave_type_id}
+                          {rule.leave_types?.name ?? '—'}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {FREQ_LABELS[rule.accrual_frequency]} · {rule.days_per_period} day/period

@@ -768,7 +768,7 @@ export function WorkforceOperationsCenter() {
                     >
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-medium text-foreground truncate">
-                          {t.employee_name ?? `Employee ${t.employee_code ?? t.entity_id.slice(0, 8)}`}
+                          {t.employee_name ?? (t.employee_code ? `Employee ${t.employee_code}` : '—')}
                         </p>
                         <p className="text-[10px] text-muted-foreground truncate">
                           {t.factors?.[0] ?? 'Trust risk flagged'}

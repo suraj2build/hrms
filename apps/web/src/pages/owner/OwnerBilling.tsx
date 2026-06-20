@@ -113,7 +113,7 @@ export function OwnerBilling() {
             {rows.map(r => (
               <tr key={r.id} className="hover:bg-muted">
                 <td className="px-4 py-2.5 font-mono text-[12px] text-foreground">{r.snapshot_month}</td>
-                <td className="px-4 py-2.5 text-[13px] text-foreground">{tenantNames[r.tenant_id] ?? r.tenant_id.slice(0, 8) + '…'}</td>
+                <td className="px-4 py-2.5 text-[13px] text-foreground">{tenantNames[r.tenant_id] ?? '—'}</td>
                 <td className="px-4 py-2.5 text-foreground">{r.employee_count}</td>
                 <td className="px-4 py-2.5 text-muted-foreground">{fmtCurrency(r.per_employee_rate)}</td>
                 <td className="px-4 py-2.5 font-semibold text-success">{fmtCurrency(r.amount_due)}</td>

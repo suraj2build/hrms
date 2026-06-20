@@ -234,7 +234,7 @@ function PayoutsDialog({
                   {payouts.map(p => (
                     <tr key={p.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                       <td className="py-3 px-4">
-                        <div className="font-medium text-foreground">{p.employee_name ?? p.employee_id}</div>
+                        <div className="font-medium text-foreground">{p.employee_name ?? p.employee_code ?? '—'}</div>
                         {p.employee_code && (
                           <div className="text-xs text-muted-foreground">{p.employee_code}</div>
                         )}
@@ -428,7 +428,7 @@ export function VariablePay() {
                     <tr key={b.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                       <td className="py-3 px-4 font-medium text-foreground">{b.batch_name}</td>
                       <td className="py-3 px-4 text-muted-foreground">{b.payout_month}</td>
-                      <td className="py-3 px-4 text-foreground">{b.template_name ?? b.template_id}</td>
+                      <td className="py-3 px-4 text-foreground">{b.template_name ?? '—'}</td>
                       <td className="py-3 px-4">
                         <Badge variant={BATCH_BADGE[b.status] ?? 'secondary'}>
                           {labelify(b.status)}
