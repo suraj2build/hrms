@@ -329,6 +329,8 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   }
   if (path.startsWith('/payroll/ledger/')) return { data: [] }
   if (path.startsWith('/payroll/revisions')) return { data: [] }
+  if (path === '/payroll/statutory/ptax/states') return fx.demoPtaxStates()
+  if (path === '/payroll/statutory/lwf/states')  return fx.demoLwfStates()
   if (path.startsWith('/payroll/statutory')) return { data: [] }
   if (path.startsWith('/payroll/reimbursements')) return { data: [] }
   if (path.startsWith('/payroll/ess/my-advances')) return { data: [] }

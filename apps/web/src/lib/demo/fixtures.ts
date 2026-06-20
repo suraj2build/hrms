@@ -1506,3 +1506,34 @@ export function demoPayrollRunSnapshot(runId: string) {
     employee_count: 22,
   }
 }
+
+// ── Statutory state config (GET /payroll/statutory/{ptax,lwf}/states) ───────
+// Returned as BARE ARRAYS — EmployeeProfile iterates them with for…of.
+export function demoPtaxStates() {
+  return [
+    { state_code: 'MH', state_name: 'Maharashtra',    enabled: true },
+    { state_code: 'KA', state_name: 'Karnataka',      enabled: true },
+    { state_code: 'WB', state_name: 'West Bengal',    enabled: true },
+    { state_code: 'TN', state_name: 'Tamil Nadu',     enabled: true },
+    { state_code: 'TG', state_name: 'Telangana',      enabled: true },
+    { state_code: 'AP', state_name: 'Andhra Pradesh', enabled: true },
+    { state_code: 'GJ', state_name: 'Gujarat',        enabled: true },
+    { state_code: 'MP', state_name: 'Madhya Pradesh', enabled: true },
+    { state_code: 'KL', state_name: 'Kerala',         enabled: false },
+    { state_code: 'OR', state_name: 'Odisha',         enabled: false },
+  ]
+}
+export function demoLwfStates() {
+  return [
+    { state_code: 'MH', state_name: 'Maharashtra',    enabled: true },
+    { state_code: 'KA', state_name: 'Karnataka',      enabled: true },
+    { state_code: 'TN', state_name: 'Tamil Nadu',     enabled: true },
+    { state_code: 'GJ', state_name: 'Gujarat',        enabled: true },
+    { state_code: 'TG', state_name: 'Telangana',      enabled: true },
+    { state_code: 'AP', state_name: 'Andhra Pradesh', enabled: true },
+    { state_code: 'WB', state_name: 'West Bengal',    enabled: true },
+    { state_code: 'HR', state_name: 'Haryana',        enabled: false },
+    { state_code: 'MP', state_name: 'Madhya Pradesh', enabled: false },
+    { state_code: 'KL', state_name: 'Kerala',         enabled: false },
+  ]
+}
