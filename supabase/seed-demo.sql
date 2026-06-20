@@ -254,31 +254,35 @@ join (values
 ) as x(emp, ctc) on x.emp = e.id
 where e.tenant_id = 'd0000000-0000-0000-0000-000000000001';
 
--- Component breakdown derived from each comp's ctc_annual
-insert into employee_compensation_components (tenant_id, compensation_id, salary_component_id, calculation_type, value, computed_monthly, sequence)
-select 'd0000000-0000-0000-0000-000000000001', ec.id, t.comp, t.ct, t.val,
-       case t.code
-         when 'BASIC'   then round(ec.ctc_annual/12.0 * 0.40)
-         when 'HRA'     then round(ec.ctc_annual/12.0 * 0.40 * 0.50)
-         when 'SPECIAL' then round(ec.ctc_annual/12.0 * 0.25)
-         when 'CONV'    then 1600
-         when 'PF_EE'   then 1800
-         when 'PT'      then 200
-         when 'TDS'     then round(ec.ctc_annual/12.0 * 0.08)
-         when 'PF_ER'   then 1800
-       end,
-       t.seq
+-- Component breakdown derived from each comp's ctc_annual.
+-- SPECIAL is the BALANCING earning so that earnings + employer PF == CTC/12
+-- exactly (Basic 40% + HRA 20% + Conveyance 1600 + employer PF 1800 + Special).
+-- computed_annual is stored = computed_monthly * 12 (the ESS Salary tab reads it).
+insert into employee_compensation_components (tenant_id, compensation_id, salary_component_id, calculation_type, value, computed_monthly, computed_annual, sequence)
+select 'd0000000-0000-0000-0000-000000000001', ec.id, t.comp, t.ct, t.val, cm.amt, cm.amt * 12, t.seq
 from employee_compensations ec
 join (values
  ('a9000000-0000-0000-0000-000000000001'::uuid,'BASIC','pct_of_ctc',40,1),
  ('a9000000-0000-0000-0000-000000000002'::uuid,'HRA','pct_of_basic',50,2),
- ('a9000000-0000-0000-0000-000000000003'::uuid,'SPECIAL','pct_of_ctc',25,3),
+ ('a9000000-0000-0000-0000-000000000003'::uuid,'SPECIAL','balance',0,3),
  ('a9000000-0000-0000-0000-000000000004'::uuid,'CONV','fixed',1600,4),
  ('a9000000-0000-0000-0000-000000000005'::uuid,'PF_EE','fixed',1800,5),
  ('a9000000-0000-0000-0000-000000000006'::uuid,'PT','fixed',200,6),
  ('a9000000-0000-0000-0000-000000000007'::uuid,'TDS','pct_of_ctc',8,7),
  ('a9000000-0000-0000-0000-000000000008'::uuid,'PF_ER','fixed',1800,8)
 ) as t(comp, code, ct, val, seq) on true
+cross join lateral (select (
+  case t.code
+    when 'BASIC'   then round(ec.ctc_annual/12.0 * 0.40)
+    when 'HRA'     then round(ec.ctc_annual/12.0 * 0.20)
+    when 'SPECIAL' then round(ec.ctc_annual/12.0) - round(ec.ctc_annual/12.0 * 0.40) - round(ec.ctc_annual/12.0 * 0.20) - 1600 - 1800
+    when 'CONV'    then 1600
+    when 'PF_EE'   then 1800
+    when 'PT'      then 200
+    when 'TDS'     then round(ec.ctc_annual/12.0 * 0.08)
+    when 'PF_ER'   then 1800
+  end) as amt
+) cm
 where ec.tenant_id = 'd0000000-0000-0000-0000-000000000001';
 
 -- ============================================================================
@@ -334,18 +338,47 @@ values
  ('f0000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001', to_char(current_date - interval '2 months','YYYY-MM'),'finalized',12,0,0,'d0000000-0000-0000-0000-0000000000a1', now() - interval '50 days'),
  ('f0000000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001', to_char(current_date - interval '1 month','YYYY-MM'),'finalized',12,0,0,'d0000000-0000-0000-0000-0000000000a1', now() - interval '20 days');
 
--- Slips (gross/net derived from each employee's monthly CTC)
-insert into payroll_slips (tenant_id, run_id, employee_id, month, total_working_days, payable_days, ctc_monthly, gross_pay, total_deductions, net_pay, status)
+-- Slips — gross / deductions / net AND the JSONB component_breakdown are derived
+-- from the SAME component math as the salary structure, so the ESS Compensation
+-- tab, the printable payslip and the YTD statement all reconcile:
+--   gross   = Basic + HRA + Special + Conveyance        (= CTC/12 - employer PF)
+--   deduct  = PF(EE) 1800 + PT 200 + TDS (8% of CTC/12)
+--   net     = gross - deduct
+insert into payroll_slips (
+  tenant_id, run_id, employee_id, month, total_working_days, payable_days,
+  ctc_monthly, gross_pay, total_deductions, net_pay, tds_deducted,
+  employer_contributions, component_breakdown, status)
 select 'd0000000-0000-0000-0000-000000000001', r.id, ec.employee_id, pr.month,
        22, 22,
-       round(ec.ctc_annual/12.0),
-       round(ec.ctc_annual/12.0 * 0.90),                         -- gross ≈ 90% of CTC/mo
-       round(ec.ctc_annual/12.0 * 0.18),                         -- deductions ≈ 18%
-       round(ec.ctc_annual/12.0 * 0.90) - round(ec.ctc_annual/12.0 * 0.18),
+       v.mctc,
+       v.gross,
+       v.deductions,
+       v.gross - v.deductions,
+       v.tds,
+       1800,
+       jsonb_build_array(
+         jsonb_build_object('name','Basic Salary',              'code','BASIC', 'type','earning',               'monthly_amount', v.basic),
+         jsonb_build_object('name','House Rent Allowance',      'code','HRA',   'type','earning',               'monthly_amount', v.hra),
+         jsonb_build_object('name','Special Allowance',         'code','SPECIAL','type','earning',              'monthly_amount', v.special),
+         jsonb_build_object('name','Conveyance Allowance',      'code','CONV',  'type','earning',               'monthly_amount', 1600),
+         jsonb_build_object('name','Provident Fund (Employee)', 'code','PF_EE', 'type','deduction',             'monthly_amount', 1800),
+         jsonb_build_object('name','Professional Tax',          'code','PT',    'type','deduction',             'monthly_amount', 200),
+         jsonb_build_object('name','TDS (Income Tax)',          'code','TDS',   'type','deduction',             'monthly_amount', v.tds),
+         jsonb_build_object('name','Provident Fund (Employer)', 'code','PF_ER', 'type','employer_contribution', 'monthly_amount', 1800, 'is_employer_contrib', true)
+       ),
        'finalized'
 from employee_compensations ec
 cross join (values ('f0000000-0000-0000-0000-000000000001'::uuid), ('f0000000-0000-0000-0000-000000000002'::uuid)) as r(id)
 join payroll_runs pr on pr.id = r.id
+cross join lateral (select
+  round(ec.ctc_annual/12.0)                                                                                  as mctc,
+  round(ec.ctc_annual/12.0 * 0.40)                                                                           as basic,
+  round(ec.ctc_annual/12.0 * 0.20)                                                                           as hra,
+  round(ec.ctc_annual/12.0 * 0.08)                                                                           as tds,
+  round(ec.ctc_annual/12.0) - round(ec.ctc_annual/12.0 * 0.40) - round(ec.ctc_annual/12.0 * 0.20) - 1600 - 1800 as special,
+  round(ec.ctc_annual/12.0) - 1800                                                                           as gross,
+  2000 + round(ec.ctc_annual/12.0 * 0.08)                                                                    as deductions
+) v
 where ec.tenant_id = 'd0000000-0000-0000-0000-000000000001' and ec.is_active = true;
 
 -- Roll the run totals up from the slips

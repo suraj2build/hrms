@@ -64,7 +64,8 @@ const BASE_GROUPS: NavGroup[] = [
     items: [
       { label: 'Dashboard',     icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
       { label: 'My Onboarding', icon: Rocket,          href: '/ess/onboarding'             }, // shown only during/after onboarding journey
-      { label: 'My Insights',   icon: BarChart3,       href: '/ess/operational-center'     },
+      // "My Insights" (operational center) removed from employee nav — the
+      // attendance-operations style command center is not relevant for ESS.
     ],
   },
   {

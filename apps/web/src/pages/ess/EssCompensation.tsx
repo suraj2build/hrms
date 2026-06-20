@@ -824,7 +824,7 @@ function SalaryGroup({ label, items }: { label: string; items: CompComponent[] }
             )}
           </td>
           <td className="px-5 py-2.5 text-right tabular-nums">{fmtCurrency(c.computed_monthly)}</td>
-          <td className="px-5 py-2.5 text-right tabular-nums text-muted-foreground">{fmtCurrency(c.computed_annual)}</td>
+          <td className="px-5 py-2.5 text-right tabular-nums text-muted-foreground">{fmtCurrency(c.computed_annual || c.computed_monthly * 12)}</td>
         </tr>
       ))}
     </>
