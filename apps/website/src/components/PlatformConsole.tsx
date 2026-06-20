@@ -219,7 +219,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
       setPayrollProcessingMsg('Evaluating Provident Funds and Tax Deducted at Source summaries...');
       
       setTimeout(() => {
-        setPayrollProcessingMsg('Broadcasting bank-transfer ledger API coordinates. Done!');
+        setPayrollProcessingMsg('Bank transfer files generated and queued for disbursement. Done!');
         
         setTimeout(() => {
           setIsProcessingPayroll(false);
@@ -384,7 +384,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-indigo-100">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-blue-100">
       
       {/* Platform Level Header panel */}
       <header className="bg-slate-900 text-white px-6 py-3 border-b border-slate-800 flex flex-col sm:flex-row gap-3 justify-between items-center z-10">
@@ -401,7 +401,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
           {/* Slogan */}
           <div className="flex items-center gap-2">
-            <span className="font-extrabold text-indigo-400 font-sans text-sm tracking-tight">COGNIXHR PLATFORM CONSOLE</span>
+            <span className="font-extrabold text-blue-400 font-sans text-sm tracking-tight">COGNIXHR PLATFORM CONSOLE</span>
             <span className="text-[9px] px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded-md font-mono font-bold">V1.5-SANDBOX</span>
           </div>
         </div>
@@ -433,7 +433,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
               }}
               className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                 roleMode === 'admin' 
-                  ? 'bg-indigo-600 text-white shadow-xs' 
+                  ? 'bg-blue-600 text-white shadow-xs' 
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -447,7 +447,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
               }}
               className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                 roleMode === 'employee' 
-                  ? 'bg-indigo-600 text-white shadow-xs' 
+                  ? 'bg-blue-600 text-white shadow-xs' 
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -469,9 +469,9 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
             <div className="px-6 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700">
                 {roleMode === 'admin' ? (
-                  <User className="w-5 h-5 text-indigo-600" />
+                  <User className="w-5 h-5 text-blue-600" />
                 ) : (
-                  <img src={loggedInEmployee.avatar} alt="Login profile avatar representation" className="w-10 h-10 rounded-full object-cover border border-indigo-200" referrerPolicy="no-referrer" />
+                  <img src={loggedInEmployee.avatar} alt="Login profile avatar representation" className="w-10 h-10 rounded-full object-cover border border-blue-200" referrerPolicy="no-referrer" />
                 )}
               </div>
               <div>
@@ -490,7 +490,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveAdminTab('dashboard')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeAdminTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeAdminTab === 'dashboard' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Home className="w-4 h-4" /> <span>H.R. Dashboard</span>
@@ -498,7 +498,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveAdminTab('directory')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeAdminTab === 'directory' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeAdminTab === 'directory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Users className="w-4 h-4" /> <span>Employee Directory</span>
@@ -506,7 +506,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveAdminTab('payroll')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeAdminTab === 'payroll' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeAdminTab === 'payroll' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <CreditCard className="w-4 h-4" /> <span>Financial & Payroll</span>
@@ -514,7 +514,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveAdminTab('leaves')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeAdminTab === 'leaves' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeAdminTab === 'leaves' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Clock className="w-4 h-4" /> <span>Leaves Approval</span>
@@ -522,7 +522,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveAdminTab('ats')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeAdminTab === 'ats' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeAdminTab === 'ats' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Briefcase className="w-4 h-4" /> <span>Recruitment ATS</span>
@@ -530,7 +530,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveAdminTab('expenses')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeAdminTab === 'expenses' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeAdminTab === 'expenses' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <DollarSign className="w-4 h-4" /> <span>Expense Audits</span>
@@ -542,7 +542,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveEmployeeTab('dashboard')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeEmployeeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeEmployeeTab === 'dashboard' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Home className="w-4 h-4" /> <span>My Hub Dashboard</span>
@@ -550,7 +550,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveEmployeeTab('leaves')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeEmployeeTab === 'leaves' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeEmployeeTab === 'leaves' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Clock className="w-4 h-4" /> <span>My Leaves Request</span>
@@ -558,7 +558,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveEmployeeTab('payslips')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeEmployeeTab === 'payslips' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeEmployeeTab === 'payslips' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <CreditCard className="w-4 h-4" /> <span>My Pay Slips</span>
@@ -566,7 +566,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                 <button
                   onClick={() => setActiveEmployeeTab('helpdesk')}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                    activeEmployeeTab === 'helpdesk' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'
+                    activeEmployeeTab === 'helpdesk' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <HelpCircle className="w-4 h-4" /> <span>Helpdesk & Queries</span>
@@ -577,7 +577,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
           </div>
 
           <div className="px-6 space-y-3.5 text-xs text-slate-400">
-            <div className="p-3 bg-indigo-50 text-indigo-700 rounded-xl font-medium border border-indigo-100">
+            <div className="p-3 bg-blue-50 text-blue-700 rounded-xl font-medium border border-blue-100">
               <span className="font-bold uppercase tracking-wider text-[9px] block mb-1">Interactive Sandbox</span>
               You have loaded CognixHR's fully interactive product showcase with pre-populated records. Feel free to run operations!
             </div>
@@ -600,10 +600,10 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
                       <div>
                         <h2 className="text-xl font-bold text-slate-900 tracking-tight text-left">People Analytics Hub</h2>
-                        <span className="text-xs text-slate-500 font-medium">Real-time indicators of corporate personnel, pipelines, and compliance bills.</span>
+                        <span className="text-xs text-slate-500 font-medium">Real-time view of your workforce, hiring pipeline, and compliance status.</span>
                       </div>
                       <div className="text-[11px] font-mono font-medium border border-slate-250 bg-white shadow-xs p-2.5 rounded-lg">
-                        Today: <span className="font-bold text-indigo-600">June 8, 2026</span>
+                        Today: <span className="font-bold text-blue-600">June 8, 2026</span>
                       </div>
                     </div>
 
@@ -627,7 +627,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                           </span>
                           <span className="text-[10px] text-slate-400">Needs Response</span>
                         </div>
-                        <span className="text-[9px] text-indigo-600 hover:underline cursor-pointer font-semibold block mt-1" onClick={() => setActiveAdminTab('leaves')}>
+                        <span className="text-[9px] text-blue-600 hover:underline cursor-pointer font-semibold block mt-1" onClick={() => setActiveAdminTab('leaves')}>
                           Review approval folder →
                         </span>
                       </div>
@@ -651,7 +651,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                           </span>
                           <span className="text-[10px] text-slate-400">Awaiting Audits</span>
                         </div>
-                        <span className="text-[9px] text-indigo-600 hover:underline cursor-pointer font-semibold block mt-1" onClick={() => setActiveAdminTab('expenses')}>
+                        <span className="text-[9px] text-blue-600 hover:underline cursor-pointer font-semibold block mt-1" onClick={() => setActiveAdminTab('expenses')}>
                           Open expense logs
                         </span>
                       </div>
@@ -669,7 +669,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                         <div className="flex justify-between items-center mb-4">
                           <h3 className="text-sm font-bold text-slate-900">Corporate Announcements</h3>
-                          <span className="text-[9px] font-bold text-indigo-600 uppercase font-mono tracking-wider">Broadcasting Active</span>
+                          <span className="text-[9px] font-bold text-blue-600 uppercase font-mono tracking-wider">Broadcasting Active</span>
                         </div>
                         <div className="space-y-4">
                           {announcements.map((ann) => (
@@ -725,7 +725,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
                       <div>
                         <h2 className="text-xl font-bold text-slate-900 tracking-tight text-left">Internal Employee Registry</h2>
-                        <span className="text-xs text-slate-500 font-medium">Verify employee roles, contact parameters, salaries, and current status structures.</span>
+                        <span className="text-xs text-slate-500 font-medium">View employee roles, contact details, salaries, and current employment status.</span>
                       </div>
                       <div className="flex gap-2.5 w-full sm:w-auto">
                         <div className="relative">
@@ -735,7 +735,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                             placeholder="Search name, code..."
                             value={dirSearch}
                             onChange={(e) => setDirSearch(e.target.value)}
-                            className="pl-9 pr-4 py-2 border border-slate-200 bg-white rounded-lg text-xs focus:outline-hidden focus:border-indigo-500 w-full sm:w-[180px]"
+                            className="pl-9 pr-4 py-2 border border-slate-200 bg-white rounded-lg text-xs focus:outline-hidden focus:border-blue-500 w-full sm:w-[180px]"
                           />
                         </div>
                         <select 
@@ -753,7 +753,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                         </select>
                         <button
                           onClick={() => setIsAddingEmployee(true)}
-                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-transform flex items-center gap-1.5"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition-transform flex items-center gap-1.5"
                         >
                           <Plus className="w-4 h-4" /> <span>Onboard Employee</span>
                         </button>
@@ -778,7 +778,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                             <tr 
                               key={emp.id}
                               onClick={() => setSelectedDirectoryEmployee(emp)}
-                              className="hover:bg-indigo-50/30 cursor-pointer transition-colors"
+                              className="hover:bg-blue-50/30 cursor-pointer transition-colors"
                             >
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
@@ -826,14 +826,14 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     
                     <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
                       <div>
-                        <h2 className="text-xl font-bold text-slate-900 tracking-tight text-left">SaaS Financial & Payroll Console</h2>
-                        <span className="text-xs text-slate-500 font-medium">Verify employee tax brackets, PF reserves, deducts, and transfer active pay slips.</span>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight text-left">Financial & Payroll Console</h2>
+                        <span className="text-xs text-slate-500 font-medium">Review tax slabs, PF contributions, and deductions, then release payslips.</span>
                       </div>
                       <div className="flex gap-2.5">
                         <button
                           onClick={processFullPayroll}
                           disabled={isProcessingPayroll}
-                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
                         >
                           <Check className="w-4 h-4" /> 
                           <span>{isProcessingPayroll ? 'Processing...' : 'Run & Approve May Payroll'}</span>
@@ -843,8 +843,8 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
                     {/* Payroll loading / info alert */}
                     {payrollProcessingMsg && (
-                      <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center gap-2.5 text-indigo-700 text-xs font-semibold animate-pulse">
-                        <div className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-ping" />
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2.5 text-blue-700 text-xs font-semibold animate-pulse">
+                        <div className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-ping" />
                         <span>{payrollProcessingMsg}</span>
                       </div>
                     )}
@@ -872,17 +872,17 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                 <td className="px-6 py-4 font-bold text-slate-900">
                                   {pay.employeeName}
                                   <span className="block text-[9px] font-semibold text-slate-400 font-mono mt-0.5">{pay.employeeId} ({pay.department})</span>
-                                  <span className="block text-[8px] text-indigo-600 font-bold font-sans mt-0.5">PAN: ALHPXXXXXA</span>
+                                  <span className="block text-[8px] text-blue-600 font-bold font-sans mt-0.5">PAN: ALHPXXXXXA</span>
                                 </td>
                                 <td className="px-6 py-4 font-mono font-bold">₹{pay.grossSalary.toLocaleString('en-IN')}</td>
                                 <td className="px-6 py-3.5 font-mono">₹{pay.basicSalary.toLocaleString('en-IN')} + ₹{pay.hra.toLocaleString('en-IN')}</td>
                                 <td className="px-6 py-4 font-mono text-red-650 font-medium">-₹{pay.pfDeduction.toLocaleString('en-IN')}</td>
                                 <td className="px-6 py-4 font-mono text-red-650 font-medium">-₹{pay.taxDeduction.toLocaleString('en-IN')}</td>
-                                <td className="px-6 py-4 font-mono font-bold text-indigo-750">₹{pay.netSalary.toLocaleString('en-IN')}</td>
+                                <td className="px-6 py-4 font-mono font-bold text-blue-750">₹{pay.netSalary.toLocaleString('en-IN')}</td>
                                 <td className="px-6 py-4">
                                   <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
                                     pay.paymentStatus === 'Paid' ? 'bg-green-50 text-green-700 border border-green-200' :
-                                    pay.paymentStatus === 'Processing' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 animate-pulse' : 'bg-red-50 text-red-700'
+                                    pay.paymentStatus === 'Processing' ? 'bg-blue-50 text-blue-700 border border-blue-200 animate-pulse' : 'bg-red-50 text-red-700'
                                   }`}>
                                     {pay.paymentStatus}
                                   </span>
@@ -893,7 +893,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                       setSelectedPayslipRecord(pay);
                                       setSelectedPayslipEmployee(empObj);
                                     }}
-                                    className="px-3 py-1.5 hover:bg-slate-100 text-indigo-600 hover:text-indigo-800 font-bold text-xs rounded-lg border border-slate-200"
+                                    className="px-3 py-1.5 hover:bg-slate-100 text-blue-600 hover:text-blue-800 font-bold text-xs rounded-lg border border-slate-200"
                                   >
                                     View Slip
                                   </button>
@@ -914,7 +914,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     
                     <div>
                       <h2 className="text-xl font-bold text-slate-900 tracking-tight text-left">Leaves Management & Approvals</h2>
-                      <span className="text-xs text-slate-500 font-medium">Review vacation details, casualty log limits, and medical reasons of personnel.</span>
+                      <span className="text-xs text-slate-500 font-medium">Review leave requests, remaining balances, and reasons before approving.</span>
                     </div>
 
                     <div className="grid grid-cols-1 gap-6">
@@ -922,7 +922,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
                         <div className="flex justify-between items-center pb-3 border-b border-slate-100">
                           <h3 className="text-sm font-bold text-slate-900">Pending Leave Proposals</h3>
-                          <span className="text-[10px] font-bold text-indigo-650 uppercase font-mono tracking-wider">Awaiting Audit</span>
+                          <span className="text-[10px] font-bold text-blue-650 uppercase font-mono tracking-wider">Awaiting Audit</span>
                         </div>
 
                         <div className="space-y-4">
@@ -933,7 +933,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                 <div className="text-left font-sans">
                                   <div className="flex items-center gap-2">
                                     <span className="font-extrabold text-slate-900 text-xs">{req.employeeName}</span>
-                                    <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-[9px] font-bold text-indigo-700 rounded-md">{req.leaveType}</span>
+                                    <span className="px-2 py-0.5 bg-blue-50 border border-blue-200 text-[9px] font-bold text-blue-700 rounded-md">{req.leaveType}</span>
                                   </div>
                                   <span className="text-[10px] text-slate-400 block mt-0.5">Applied: {req.appliedDate} | Duration: <span className="font-bold text-slate-600">{req.startDate} to {req.endDate} ({req.days} days)</span></span>
                                   <p className="text-xs italic text-slate-500 font-medium mt-1.5 font-sans leading-relaxed">"Reason: {req.reason}"</p>
@@ -1090,7 +1090,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                         <span className="text-xs text-slate-500 font-medium">Verify your daily active schedules, download payslips, file IT tickets, or appreciate coworkers.</span>
                       </div>
                       <div className="text-[11px] font-semibold border border-slate-200 bg-white shadow-xs px-3.5 py-2.5 rounded-xl">
-                        Designation: <span className="font-extrabold text-indigo-600">{loggedInEmployee.role} ({loggedInEmployee.department})</span>
+                        Designation: <span className="font-extrabold text-blue-600">{loggedInEmployee.role} ({loggedInEmployee.department})</span>
                       </div>
                     </div>
 
@@ -1109,11 +1109,11 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
                         {/* Balance Leave Card widget */}
                         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-                          <h4 className="text-xs font-bold text-slate-900 border-b border-indigo-50 pb-2 uppercase tracking-wider block">My Remaining Leave Balance</h4>
+                          <h4 className="text-xs font-bold text-slate-900 border-b border-blue-50 pb-2 uppercase tracking-wider block">My Remaining Leave Balance</h4>
                           <div className="grid grid-cols-3 gap-2.5 text-center">
-                            <div className="p-2 bg-indigo-50 border border-indigo-100 rounded-xl">
+                            <div className="p-2 bg-blue-50 border border-blue-100 rounded-xl">
                               <span className="text-[10px] text-slate-500 font-medium block">Casual</span>
-                              <span className="text-base font-extrabold text-indigo-700 block font-mono">4.5</span>
+                              <span className="text-base font-extrabold text-blue-700 block font-mono">4.5</span>
                             </div>
                             <div className="p-2 bg-purple-50 border border-purple-100 rounded-xl">
                               <span className="text-[10px] text-slate-500 font-medium block">Sick</span>
@@ -1144,8 +1144,8 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                 <label className="text-[9.5px] font-bold text-slate-500 uppercase tracking-wider block">Select Coworker</label>
                                 <select
                                   value={newShoutoutForm.receiverId}
-                                  onChange={(e) => setNewFormState => setNewShoutoutForm({ ...newShoutoutForm, receiverId: e.target.value })}
-                                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white focus:outline-hidden text-slate-705 font-medium"
+                                  onChange={(e) => setNewShoutoutForm({ ...newShoutoutForm, receiverId: e.target.value })}
+                                  className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white focus:outline-hidden text-slate-700 font-medium"
                                   required
                                 >
                                   <option value="">-- Choose coworker --</option>
@@ -1177,7 +1177,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                 value={newShoutoutForm.message}
                                 onChange={(e) => setNewShoutoutForm({ ...newShoutoutForm, message: e.target.value })}
                                 placeholder="Describe specifically what outstanding work they processed or how they supported the squad..."
-                                className="w-full border border-slate-200 rounded-lg p-3 text-xs focus:outline-hidden focus:border-indigo-500"
+                                className="w-full border border-slate-200 rounded-lg p-3 text-xs focus:outline-hidden focus:border-blue-500"
                                 required
                               />
                             </div>
@@ -1190,7 +1190,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                               )}
                               <button
                                 type="submit"
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm"
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-sm"
                               >
                                 <Send className="w-3.5 h-3.5" /> <span>Send Kudos shoutout</span>
                               </button>
@@ -1200,7 +1200,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
 
                         {/* Core announcements listing */}
                         <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                          <h3 className="text-sm font-bold text-slate-900 border-b border-indigo-50 pb-2 mb-4">Organizational Broadcasting Hub</h3>
+                          <h3 className="text-sm font-bold text-slate-900 border-b border-blue-50 pb-2 mb-4">Organizational Broadcasting Hub</h3>
                           <div className="space-y-4">
                             {announcements.map((ann) => (
                               <div key={ann.id} className="border-b border-slate-50 last:border-b-0 pb-3 last:pb-0">
@@ -1209,7 +1209,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                   <span>{ann.date}</span>
                                 </div>
                                 <h4 className="text-xs font-bold text-slate-800 flex items-center gap-2">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                                   {ann.title}
                                 </h4>
                                 <p className="text-xs text-slate-500 leading-relaxed max-w-full font-medium font-sans mt-1">
@@ -1235,7 +1235,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       
                       {/* Submitting Forms */}
                       <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm self-start">
-                        <h3 className="text-sm font-bold text-slate-900 border-b border-indigo-50 pb-2 mb-4">Request a New Leave</h3>
+                        <h3 className="text-sm font-bold text-slate-900 border-b border-blue-50 pb-2 mb-4">Request a New Leave</h3>
                         
                         <form onSubmit={handleCreateLeaveRequest} className="space-y-4 text-xs font-medium">
                           
@@ -1297,7 +1297,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                               value={newLeaveForm.reason}
                               onChange={(e) => setNewLeaveForm({ ...newLeaveForm, reason: e.target.value })}
                               placeholder="Provide deep details or contact fallback support backup during leave duration..."
-                              className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500 text-xs"
+                              className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-blue-500 text-xs"
                             />
                           </div>
 
@@ -1307,7 +1307,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                             )}
                             <button
                               type="submit"
-                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-colors"
+                              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-sm transition-colors"
                             >
                               Submit Leave request
                             </button>
@@ -1319,7 +1319,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       {/* Presence list */}
                       <div className="lg:col-span-2 space-y-6">
                         <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                          <h3 className="text-sm font-bold text-slate-900 border-b border-indigo-50 pb-2 mb-4">Leave Application Tracker (Status)</h3>
+                          <h3 className="text-sm font-bold text-slate-900 border-b border-blue-50 pb-2 mb-4">Leave Application Tracker (Status)</h3>
                           
                           <div className="space-y-4">
                             {leaveRequests.filter(l => l.employeeId === loggedInEmployee.id).map((req) => (
@@ -1386,7 +1386,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                 <td className="px-6 py-4 font-extrabold text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /> May 2026</td>
                                 <td className="px-6 py-4 font-mono font-bold">₹{pay.grossSalary.toLocaleString('en-IN')}</td>
                                 <td className="px-6 py-4 font-mono text-red-600">-₹{totalDeductions.toLocaleString('en-IN')}</td>
-                                <td className="px-6 py-4 font-mono font-black text-indigo-700">₹{totalNetDisbursed.toLocaleString('en-IN')}</td>
+                                <td className="px-6 py-4 font-mono font-black text-blue-700">₹{totalNetDisbursed.toLocaleString('en-IN')}</td>
                                 <td className="px-6 py-4 font-mono text-slate-400">TXN-0091-LAB-MAY</td>
                                 <td className="px-6 py-4 text-right">
                                   <button
@@ -1394,7 +1394,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                       setSelectedPayslipRecord(pay);
                                       setSelectedPayslipEmployee(loggedInEmployee);
                                     }}
-                                    className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 ml-auto border border-indigo-100"
+                                    className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 ml-auto border border-blue-100"
                                   >
                                     View Payslip
                                   </button>
@@ -1416,7 +1416,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       
                       <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm self-start">
-                        <h3 className="text-sm font-bold text-slate-900 border-b border-indigo-50 pb-2 mb-4">File a Support Query</h3>
+                        <h3 className="text-sm font-bold text-slate-900 border-b border-blue-50 pb-2 mb-4">File a Support Query</h3>
                         
                         <form onSubmit={handleCreateTicket} className="space-y-4 text-xs font-medium">
                           <div className="space-y-1.5">
@@ -1437,7 +1437,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                               <select
                                 value={newTicketForm.category}
                                 onChange={(e) => setNewTicketForm({ ...newTicketForm, category: e.target.value as any })}
-                                className="w-full border border-slate-200 bg-white p-2 text-xs rounded-lg focus:outline-hidden focus:border-indigo-500"
+                                className="w-full border border-slate-200 bg-white p-2 text-xs rounded-lg focus:outline-hidden focus:border-blue-500"
                               >
                                 <option value="IT Support">IT Support</option>
                                 <option value="Payroll">Payroll</option>
@@ -1450,7 +1450,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                               <select
                                 value={newTicketForm.priority}
                                 onChange={(e) => setNewTicketForm({ ...newTicketForm, priority: e.target.value as any })}
-                                className="w-full border border-slate-200 bg-white p-2 text-xs rounded-lg focus:outline-hidden focus:border-indigo-500"
+                                className="w-full border border-slate-200 bg-white p-2 text-xs rounded-lg focus:outline-hidden focus:border-blue-500"
                               >
                                 <option value="Low">Low</option>
                                 <option value="Medium">Medium</option>
@@ -1477,7 +1477,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                             )}
                             <button
                               type="submit"
-                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs font-sans transition-colors"
+                              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs font-sans transition-colors"
                             >
                               File Ticket
                             </button>
@@ -1488,7 +1488,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       {/* Ticket listing */}
                       <div className="lg:col-span-2 space-y-4">
                         <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                          <h3 className="text-sm font-bold text-slate-900 border-b border-indigo-50 pb-2 mb-4">My Resolution Tickets (Support Desk)</h3>
+                          <h3 className="text-sm font-bold text-slate-900 border-b border-blue-50 pb-2 mb-4">My Resolution Tickets (Support Desk)</h3>
                           <div className="space-y-4">
                             {tickets.filter(t => t.employeeName === loggedInEmployee.name).map((tkt) => (
                               <div key={tkt.id} className="bg-slate-50/70 border border-slate-200 p-4 rounded-xl text-xs space-y-2">
@@ -1496,7 +1496,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                                   <span className="font-bold text-slate-400 font-mono">TICKET REF: {tkt.id}</span>
                                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
                                     tkt.status === 'Resolved' ? 'bg-green-50 text-green-700 border border-green-200' :
-                                    tkt.status === 'In Progress' ? 'bg-indigo-50 text-indigo-700 border border-indigo-150 animate-pulse' : 'bg-slate-200 text-slate-650'
+                                    tkt.status === 'In Progress' ? 'bg-blue-50 text-blue-700 border border-blue-150 animate-pulse' : 'bg-slate-200 text-slate-650'
                                   }`}>
                                     {tkt.status}
                                   </span>
@@ -1550,7 +1550,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden text-left"
             >
-              <div className="flex justify-between items-center bg-slate-50 px-6 py-4 border-b border-indigo-50">
+              <div className="flex justify-between items-center bg-slate-50 px-6 py-4 border-b border-blue-50">
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-widest block">Executive Profile Dossier</span>
                 <button onClick={() => setSelectedDirectoryEmployee(null)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600">
                   <X className="w-5 h-5" />
@@ -1560,10 +1560,10 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
               <div className="p-6 space-y-6">
                 
                 <div className="flex items-center gap-4">
-                  <img src={selectedDirectoryEmployee.avatar} alt="Dossier employee visual" className="w-[70px] h-[70px] rounded-full object-cover border-2 border-indigo-600 shadow-md" referrerPolicy="no-referrer" />
+                  <img src={selectedDirectoryEmployee.avatar} alt="Dossier employee visual" className="w-[70px] h-[70px] rounded-full object-cover border-2 border-blue-600 shadow-md" referrerPolicy="no-referrer" />
                   <div className="text-left">
                     <h3 className="text-base font-extrabold text-slate-900 leading-snug">{selectedDirectoryEmployee.name}</h3>
-                    <span className="text-xs text-indigo-750 font-bold block">{selectedDirectoryEmployee.role}</span>
+                    <span className="text-xs text-blue-750 font-bold block">{selectedDirectoryEmployee.role}</span>
                     <span className="text-[10px] font-mono text-slate-400 block uppercase font-medium mt-1">ID Code: {selectedDirectoryEmployee.id}</span>
                   </div>
                 </div>
@@ -1604,7 +1604,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                         setSelectedPayslipEmployee(selectedDirectoryEmployee);
                       }
                     }}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs transition-colors text-center block"
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors text-center block"
                   >
                     View Active Monthly Payslip Receipt
                   </button>
@@ -1626,7 +1626,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden text-left"
             >
-              <div className="flex justify-between items-center bg-slate-50 px-6 py-4 border-b border-indigo-50">
+              <div className="flex justify-between items-center bg-slate-50 px-6 py-4 border-b border-blue-50">
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-widest block">Onboard New Team Member</span>
                 <button onClick={() => setIsAddingEmployee(false)} className="p-1 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600">
                   <X className="w-5 h-5" />
@@ -1644,7 +1644,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       placeholder="e.g. Rahul Sen"
                       value={employeeForm.name}
                       onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500"
+                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-blue-500"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -1655,7 +1655,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       placeholder="rahul.sen@cognixhr.co"
                       value={employeeForm.email}
                       onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500"
+                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-blue-500"
                     />
                   </div>
                 </div>
@@ -1669,7 +1669,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       placeholder="e.g. Senior Frontend Specialist"
                       value={employeeForm.role}
                       onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500"
+                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-blue-500"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -1680,7 +1680,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                       min="1000"
                       value={employeeForm.salary}
                       onChange={(e) => setEmployeeForm({ ...employeeForm, salary: Number(e.target.value) })}
-                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500 font-mono"
+                      className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-blue-500 font-mono"
                     />
                   </div>
                 </div>
@@ -1722,7 +1722,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                     placeholder="+91 91234 11223"
                     value={employeeForm.phone}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, phone: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-indigo-500 font-mono"
+                    className="w-full border border-slate-200 rounded-lg p-2.5 focus:outline-hidden focus:border-blue-500 font-mono"
                   />
                 </div>
 
@@ -1736,7 +1736,7 @@ export default function PlatformConsole({ initialPersona, onExit }: PlatformCons
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm"
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm"
                   >
                     Finish Registration
                   </button>

@@ -149,9 +149,10 @@ export default function AdminDashboardPreview() {
           ))}
         </div>
         <div className="px-3.5 py-2 bg-slate-50 border-t border-slate-100 flex gap-4 text-[9px]">
-          <span className="font-bold text-emerald-700">21 Present</span>
+          <span className="font-bold text-emerald-700">19 Present</span>
           <span className="font-bold text-amber-600">1 Late</span>
           <span className="font-bold text-slate-500">1 On Leave</span>
+          <span className="font-bold text-rose-600">1 Absent</span>
           <span className="font-bold text-slate-400 ml-auto">0 Anomalies · All clear</span>
         </div>
       </div>
