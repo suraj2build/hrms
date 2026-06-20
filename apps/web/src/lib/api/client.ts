@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/stores/authStore'
 import { DEMO_MODE, resolveDemo } from '@/lib/demo'
+import { supabase } from '@/lib/supabase/client'
 
 // ── Structured API error ───────────────────────────────────────────────────────
 //
@@ -32,6 +33,38 @@ export class ApiError extends Error {
     this.error      = error
     this.data       = data
   }
+}
+
+// ── Auth self-heal ──────────────────────────────────────────────────────────
+//
+// A 401 "Invalid token" means the stored JWT is no longer valid for a current
+// user — normally Supabase silently refreshes the token, but it can't recover
+// when the refresh token itself is dead (account rebuilt, password reset
+// elsewhere, JWT-secret rotation, or — on demo deployments — a re-seed that
+// rebuilds the demo auth user). Without help the app is stuck retrying with the
+// same dead token and every call 401s.
+//
+// Recover ONCE per tab: clear the stale session and reload, which lets the
+// normal bootstrap (or the demo auto-login) obtain a fresh token. A one-shot
+// sessionStorage guard prevents reload loops if recovery doesn't help; it is
+// cleared again on the next successful response so future expiries can recover.
+const AUTH_RECOVERY_KEY = 'cognix-auth-recovery'
+
+function maybeRecoverFromInvalidToken(status: number, message: string): void {
+  if (status !== 401 || typeof window === 'undefined') return
+  if (!/invalid (or expired )?token/i.test(message)) return
+  try {
+    if (sessionStorage.getItem(AUTH_RECOVERY_KEY)) return
+    sessionStorage.setItem(AUTH_RECOVERY_KEY, '1')
+  } catch { /* sessionStorage unavailable — proceed without the guard */ }
+  void supabase.auth.signOut().catch(() => {}).finally(() => {
+    try { useAuthStore.getState().clear() } catch { /* noop */ }
+    window.location.reload()
+  })
+}
+
+function clearAuthRecoveryGuard(): void {
+  try { sessionStorage.removeItem(AUTH_RECOVERY_KEY) } catch { /* noop */ }
 }
 
 /**
@@ -122,13 +155,16 @@ async function request<T>(
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as Record<string, unknown>
+    const message = (body.message as string | undefined) ?? `HTTP ${response.status}`
+    maybeRecoverFromInvalidToken(response.status, message)
     throw new ApiError(
       response.status,
       (body.error   as string | undefined) ?? `HTTP_${response.status}`,
-      (body.message as string | undefined) ?? `HTTP ${response.status}`,
+      message,
       body,
     )
   }
+  clearAuthRecoveryGuard()
 
   // 204 No Content (and any other empty response) — return undefined rather than
   // trying to JSON-parse an empty body, which throws "Unexpected end of JSON input".
@@ -162,13 +198,16 @@ async function requestRaw(endpoint: string): Promise<Response> {
   })
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as Record<string, unknown>
+    const message = (body.message as string | undefined) ?? `HTTP ${response.status}`
+    maybeRecoverFromInvalidToken(response.status, message)
     throw new ApiError(
       response.status,
       (body.error   as string | undefined) ?? `HTTP_${response.status}`,
-      (body.message as string | undefined) ?? `HTTP ${response.status}`,
+      message,
       body,
     )
   }
+  clearAuthRecoveryGuard()
   return response
 }
 
@@ -192,13 +231,16 @@ async function requestWithMeta<T>(
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as Record<string, unknown>
+    const message = (body.message as string | undefined) ?? `HTTP ${response.status}`
+    maybeRecoverFromInvalidToken(response.status, message)
     throw new ApiError(
       response.status,
       (body.error   as string | undefined) ?? `HTTP_${response.status}`,
-      (body.message as string | undefined) ?? `HTTP ${response.status}`,
+      message,
       body,
     )
   }
+  clearAuthRecoveryGuard()
 
   const data = (await response.json()) as T
   return { data, headers: response.headers }

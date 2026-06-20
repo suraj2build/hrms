@@ -69,13 +69,16 @@ end $$;
 -- Finally the tenant row itself.
 delete from tenants where id = 'd0000000-0000-0000-0000-000000000001';
 
--- Demo auth user (separate from tenant cascade).
-delete from auth.identities where user_id = 'd0000000-0000-0000-0000-0000000000a1';
-delete from auth.users      where id      = 'd0000000-0000-0000-0000-0000000000a1';
+-- NOTE: the demo auth user is intentionally NOT deleted here. Deleting and
+-- recreating it invalidates every active session's JWT (the API's getUser(token)
+-- then returns "Invalid token") and risks a malformed row. Instead it is UPSERTed
+-- below so it stays stable and valid across re-seeds.
 
 -- ============================================================================
 --  1. AUTH USER  (profiles.id must equal a real auth.users.id)
 -- ============================================================================
+-- Upsert so re-running keeps the SAME user id (existing sessions stay valid) and
+-- just refreshes the password / confirmation.
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
   email_confirmed_at, created_at, updated_at,
@@ -91,7 +94,13 @@ insert into auth.users (
   '{"provider":"email","providers":["email"]}',
   '{"full_name":"Demo Admin"}',
   '', '', '', ''
-);
+)
+on conflict (id) do update set
+  email              = excluded.email,
+  encrypted_password = excluded.encrypted_password,
+  email_confirmed_at = excluded.email_confirmed_at,
+  raw_user_meta_data = excluded.raw_user_meta_data,
+  updated_at         = now();
 
 insert into auth.identities (
   id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at
@@ -101,7 +110,8 @@ insert into auth.identities (
   'd0000000-0000-0000-0000-0000000000a1',
   '{"sub":"d0000000-0000-0000-0000-0000000000a1","email":"demo@cognixhr.app","email_verified":true}',
   'email', now(), now(), now()
-);
+)
+on conflict do nothing;
 
 -- ============================================================================
 --  2. TENANT + PROFILE
