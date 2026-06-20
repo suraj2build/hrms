@@ -1,47 +1,63 @@
 import React, { useState } from 'react';
 import { Briefcase, Users, Calendar, CheckCircle2, Clock, XCircle, ChevronRight, Search, Filter, Mail } from 'lucide-react';
 
-const REQUISITIONS = [
-  {
-    id: 'REQ-001',
-    title: 'Senior Software Engineer',
-    dept: 'Engineering',
-    location: 'Bengaluru',
-    openings: 2,
-    stage_counts: { applied: 4, screening: 2, interview: 3, offered: 1, hired: 1 },
-    status: 'Active',
-    created: '2026-05-10',
-  },
-  {
-    id: 'REQ-002',
-    title: 'Sales Manager — South India',
-    dept: 'Sales',
-    location: 'Mumbai',
-    openings: 1,
-    stage_counts: { applied: 6, screening: 3, interview: 2, offered: 1, hired: 0 },
-    status: 'Active',
-    created: '2026-05-18',
-  },
-  {
-    id: 'REQ-003',
-    title: 'Finance Analyst',
-    dept: 'Finance',
-    location: 'Bengaluru',
-    openings: 1,
-    stage_counts: { applied: 3, screening: 1, interview: 1, offered: 0, hired: 1 },
-    status: 'Hired',
-    created: '2026-04-22',
-  },
+interface Requisition {
+  id: string;
+  title: string;
+  dept: string;
+  location: string;
+  openings: number;
+  status: 'Active' | 'Hired';
+  created: string;
+}
+
+interface Candidate {
+  id: string;
+  name: string;
+  role: string;
+  stage: 'Applied' | 'Screening' | 'Interview' | 'Offered' | 'Hired' | 'Rejected';
+  score: number;
+  applied: string;
+  exp: string;
+  req: string;
+}
+
+const REQUISITIONS: Requisition[] = [
+  { id: 'REQ-001', title: 'Senior Software Engineer', dept: 'Engineering', location: 'Bengaluru', openings: 2, status: 'Active', created: '2026-05-10' },
+  { id: 'REQ-002', title: 'Sales Manager — South India', dept: 'Sales', location: 'Mumbai', openings: 1, status: 'Active', created: '2026-05-18' },
+  { id: 'REQ-003', title: 'Finance Analyst', dept: 'Finance', location: 'Bengaluru', openings: 1, status: 'Hired', created: '2026-04-22' },
 ];
 
-const CANDIDATES = [
-  { id: 'CAN-101', name: 'Deepak Chawla', role: 'Fullstack Node & React Dev', stage: 'Interview', score: 88, applied: '2026-06-05', exp: '4.5 yrs', req: 'REQ-001' },
-  { id: 'CAN-102', name: 'Sneha Sen', role: 'Product Marketing Specialist', stage: 'Screening', score: 74, applied: '2026-06-03', exp: '3 yrs', req: 'REQ-002' },
-  { id: 'CAN-103', name: 'Arjun Rampal', role: 'UX/UI Designer', stage: 'Offered', score: 94, applied: '2026-06-01', exp: '6 yrs', req: 'REQ-001' },
-  { id: 'CAN-104', name: 'Nandini Gupta', role: 'Kubernetes & DevOps Eng.', stage: 'Hired', score: 91, applied: '2026-05-28', exp: '5 yrs', req: 'REQ-001' },
-  { id: 'CAN-105', name: 'Ayesha Ahmed', role: 'Financial Analyst', stage: 'Applied', score: 82, applied: '2026-06-07', exp: '2 yrs', req: 'REQ-003' },
-  { id: 'CAN-106', name: 'Vikrant Patil', role: 'Sales Executive', stage: 'Rejected', score: 52, applied: '2026-05-15', exp: '10 yrs', req: 'REQ-002' },
+// Roles align with each requisition; per-stage funnel counts are computed
+// from this list at render time so the pipeline is always internally consistent.
+const CANDIDATES: Candidate[] = [
+  // REQ-001 — Senior Software Engineer
+  { id: 'CAN-101', name: 'Nandini Gupta',  role: 'Platform / DevOps Engineer',   stage: 'Hired',     score: 91, applied: '2026-05-20', exp: '5 yrs',   req: 'REQ-001' },
+  { id: 'CAN-102', name: 'Arjun Rampal',   role: 'Full-Stack Engineer (Node/React)', stage: 'Offered', score: 94, applied: '2026-05-24', exp: '6 yrs', req: 'REQ-001' },
+  { id: 'CAN-103', name: 'Deepak Chawla',  role: 'Senior Backend Engineer',       stage: 'Interview', score: 88, applied: '2026-05-28', exp: '4.5 yrs', req: 'REQ-001' },
+  { id: 'CAN-104', name: 'Rohit Saxena',   role: 'Backend Engineer (Go)',         stage: 'Screening', score: 79, applied: '2026-06-01', exp: '4 yrs',   req: 'REQ-001' },
+  { id: 'CAN-105', name: 'Tara Krishnan',  role: 'Frontend Engineer (React)',     stage: 'Applied',   score: 76, applied: '2026-06-05', exp: '3 yrs',   req: 'REQ-001' },
+  { id: 'CAN-106', name: 'Imran Sheikh',   role: 'Senior Software Engineer',      stage: 'Applied',   score: 72, applied: '2026-06-07', exp: '7 yrs',   req: 'REQ-001' },
+  // REQ-002 — Sales Manager, South India
+  { id: 'CAN-201', name: 'Sneha Sen',      role: 'Regional Sales Manager',        stage: 'Interview', score: 85, applied: '2026-05-26', exp: '8 yrs',   req: 'REQ-002' },
+  { id: 'CAN-202', name: 'Manoj Pillai',   role: 'Sales Manager',                 stage: 'Screening', score: 77, applied: '2026-05-30', exp: '6 yrs',   req: 'REQ-002' },
+  { id: 'CAN-203', name: 'Divya Nair',     role: 'Territory Sales Lead',          stage: 'Applied',   score: 80, applied: '2026-06-04', exp: '5 yrs',   req: 'REQ-002' },
+  { id: 'CAN-204', name: 'Vikrant Patil',  role: 'Area Sales Manager',            stage: 'Rejected',  score: 52, applied: '2026-05-15', exp: '10 yrs',  req: 'REQ-002' },
+  // REQ-003 — Finance Analyst
+  { id: 'CAN-301', name: 'Ayesha Ahmed',   role: 'Financial Analyst',             stage: 'Hired',     score: 88, applied: '2026-04-28', exp: '3 yrs',   req: 'REQ-003' },
+  { id: 'CAN-302', name: 'Karan Mehta',    role: 'Finance Analyst (FP&A)',        stage: 'Interview', score: 81, applied: '2026-05-02', exp: '4 yrs',   req: 'REQ-003' },
+  { id: 'CAN-303', name: 'Priyanka Joshi', role: 'Costing & Finance Analyst',     stage: 'Screening', score: 75, applied: '2026-05-06', exp: '2.5 yrs', req: 'REQ-003' },
 ];
+
+const FUNNEL_STAGES = ['Applied', 'Screening', 'Interview', 'Offered', 'Hired'] as const;
+
+function funnelCounts(reqId: string): Record<string, number> {
+  const counts: Record<string, number> = { Applied: 0, Screening: 0, Interview: 0, Offered: 0, Hired: 0 };
+  for (const c of CANDIDATES) {
+    if (c.req === reqId && c.stage in counts) counts[c.stage] += 1;
+  }
+  return counts;
+}
 
 const STAGE_CONFIG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
   Applied:   { label: 'Applied',   color: 'text-slate-600',   bg: 'bg-slate-100',   dot: 'bg-slate-400' },
@@ -63,7 +79,8 @@ export default function RecruitmentPipeline() {
   const req = REQUISITIONS.find(r => r.id === activeReq)!;
   const reqCandidates = CANDIDATES.filter(c => c.req === activeReq);
 
-  const totalPipeline = Object.values(req.stage_counts).reduce((a, b) => a + b, 0);
+  const stageCounts = funnelCounts(activeReq);
+  const totalPipeline = Object.values(stageCounts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="flex gap-0 h-[420px] text-left select-none" style={{ fontFamily: 'system-ui, sans-serif' }}>
@@ -101,6 +118,8 @@ export default function RecruitmentPipeline() {
                 <span className="text-[9px] text-slate-400">{r.dept}</span>
                 <span className="text-[8px] text-slate-300">·</span>
                 <span className="text-[9px] text-slate-400">{r.location}</span>
+                <span className="text-[8px] text-slate-300">·</span>
+                <span className="text-[9px] text-slate-400">{CANDIDATES.filter(c => c.req === r.id).length} candidates</span>
               </div>
               <div className="flex items-center justify-between mt-1.5">
                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
@@ -148,12 +167,11 @@ export default function RecruitmentPipeline() {
 
           {/* Stage funnel strip */}
           <div className="flex items-center gap-1.5 mt-3">
-            {(['applied', 'screening', 'interview', 'offered', 'hired'] as const).map((stage, i) => {
-              const count = req.stage_counts[stage];
-              const stageName = stage.charAt(0).toUpperCase() + stage.slice(1);
+            {FUNNEL_STAGES.map((stageName, i) => {
+              const count = stageCounts[stageName];
               const cfg = STAGE_CONFIG[stageName];
               return (
-                <React.Fragment key={stage}>
+                <React.Fragment key={stageName}>
                   <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.color}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
                     {stageName} <span className="font-mono ml-0.5">{count}</span>
