@@ -453,9 +453,9 @@ export function OrgChart() {
           {roots.map(root => (
             <div key={root.id} className="inline-block mr-12 align-top">
               <Tree
-                lineWidth="2px"
-                lineColor="hsl(var(--border))"
-                lineBorderRadius="8px"
+                lineWidth="1.5px"
+                lineColor="var(--muted-foreground)"
+                lineBorderRadius="10px"
                 label={
                   <NodeCard
                     node={root}
