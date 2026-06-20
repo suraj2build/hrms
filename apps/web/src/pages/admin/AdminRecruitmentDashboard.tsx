@@ -36,6 +36,10 @@ function pct(a: number, b: number) {
   return b === 0 ? '—' : `${Math.round((a / b) * 100)}%`
 }
 
+const EMPTY_FUNNEL     = { applied: 0, screening: 0, interviewing: 0, offer: 0, hired: 0, rejected: 0, withdrawn: 0 }
+const EMPTY_REQS       = { draft: 0, open: 0, on_hold: 0, filled: 0, cancelled: 0 }
+const EMPTY_INTERVIEWS = { scheduled: 0, completed: 0, cancelled: 0, no_show: 0 }
+
 const SOURCE_LABELS: Record<string, string> = {
   direct: 'Direct', referral: 'Referral', portal: 'Job Portal',
   agency: 'Agency', linkedin: 'LinkedIn', naukri: 'Naukri',
@@ -122,11 +126,28 @@ function SkeletonCard() {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function AdminRecruitmentDashboard() {
-  const { data: d, isLoading, isError } = useQuery<AnalyticsData>({
+  const { data: raw, isLoading, isError } = useQuery<AnalyticsData>({
     queryKey: ['recruitment', 'analytics'],
     queryFn:  () => api.get<AnalyticsData>('/recruitment/analytics'),
     staleTime: 60_000,
   })
+
+  // Normalize the payload so partial/missing data can never crash the render
+  // (the nested funnel/requisitions/interviews objects are always present).
+  const d: AnalyticsData | undefined = raw
+    ? {
+        funnel:       { ...EMPTY_FUNNEL, ...raw.funnel },
+        requisitions: { ...EMPTY_REQS, ...raw.requisitions },
+        interviews:   { ...EMPTY_INTERVIEWS, ...raw.interviews },
+        source_breakdown:        raw.source_breakdown ?? [],
+        avg_time_to_hire:        raw.avg_time_to_hire ?? null,
+        avg_time_to_offer:       raw.avg_time_to_offer ?? null,
+        pass_rate:               raw.pass_rate ?? null,
+        recent_30d_applications: raw.recent_30d_applications ?? 0,
+        total_applications:      raw.total_applications ?? 0,
+        total_requisitions:      raw.total_requisitions ?? 0,
+      }
+    : undefined
 
   if (isError) {
     return (

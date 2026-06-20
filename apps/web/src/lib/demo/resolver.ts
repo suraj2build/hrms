@@ -608,6 +608,8 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path.startsWith('/executive/')) return { data: {} }
 
   // ── Recruitment ────────────────────────────────────────────────────────────
+  if (path === '/recruitment/analytics') return fx.demoRecruitmentAnalytics()
+  if (path === '/recruitment/analytics/interviewers') return { data: fx.demoInterviewerAnalytics() }
   if (path === '/recruitment/hired') {
     const all = fx.demoHiredPipeline()
     const filter = q.preboarding_status || 'all'

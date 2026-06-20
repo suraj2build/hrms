@@ -1284,3 +1284,62 @@ export function demoComplianceCalendar() {
     counts: { upcoming: 3, due_soon: 1, overdue: 0, completed: 0 },
   }
 }
+
+// ── Recruitment analytics (GET /recruitment/analytics) ──────────────────────
+export function demoRecruitmentAnalytics() {
+  return {
+    funnel: { applied: 142, screening: 68, interviewing: 31, offer: 12, hired: 8, rejected: 54, withdrawn: 9 },
+    avg_time_to_hire:  24,
+    avg_time_to_offer: 18,
+    requisitions: { draft: 3, open: 11, on_hold: 2, filled: 7, cancelled: 1 },
+    interviews:   { scheduled: 9, completed: 47, cancelled: 4, no_show: 3 },
+    pass_rate: 62,
+    source_breakdown: [
+      { source: 'referral', count: 38 },
+      { source: 'linkedin', count: 34 },
+      { source: 'naukri',   count: 29 },
+      { source: 'portal',   count: 21 },
+      { source: 'direct',   count: 14 },
+      { source: 'agency',   count: 6 },
+    ],
+    recent_30d_applications: 37,
+    total_applications: 142,
+    total_requisitions: 24,
+  }
+}
+
+// ── Interviewer calibration (GET /recruitment/analytics/interviewers) ───────
+export function demoInterviewerAnalytics() {
+  const interviewers = demoEmployeeList.slice(0, 5).map((e, i) => ({
+    interviewer_id: e.id,
+    name: `${e.first_name} ${e.last_name}`,
+    scored_count:    [18, 14, 11, 9, 6][i],
+    avg_overall:     [3.8, 4.1, 3.4, 3.9, 3.6][i],
+    leniency:        [0.2, 0.7, -0.6, 0.1, -0.3][i],
+    consistency:     [0.82, 0.74, 0.69, 0.88, 0.71][i],
+    positive_rate:   [0.55, 0.71, 0.36, 0.6, 0.5][i],
+    recommendations: {
+      strong_yes: [3, 5, 1, 4, 2][i],
+      yes:        [7, 5, 3, 4, 2][i],
+      no:         [6, 3, 5, 1, 2][i],
+      strong_no:  [2, 1, 2, 0, 0][i],
+    },
+    hire_accuracy:   [0.78, 0.66, 0.7, 0.81, 0.6][i],
+    reject_accuracy: [0.72, 0.6, 0.75, 0.69, 0.58][i],
+    decisions_with_outcome: [12, 9, 8, 7, 4][i],
+  }))
+  const criteria = [
+    { criterion: 'technical_skills', avg_hired: 4.2, avg_rejected: 2.6, lift: 1.6, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'problem_solving',  avg_hired: 4.0, avg_rejected: 2.8, lift: 1.2, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'communication',    avg_hired: 3.8, avg_rejected: 3.1, lift: 0.7, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'culture_fit',      avg_hired: 4.1, avg_rejected: 3.3, lift: 0.8, sample_hired: 8, sample_rejected: 22 },
+    { criterion: 'leadership',       avg_hired: 3.6, avg_rejected: 3.0, lift: 0.6, sample_hired: 5, sample_rejected: 14 },
+  ]
+  return {
+    cohort_avg_overall: 3.7,
+    total_scores: 58,
+    interviewers,
+    criteria,
+    agreement: { multi_scorer_rounds: 14, avg_score_spread: 0.62, unanimous_rate: 0.57 },
+  }
+}
