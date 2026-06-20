@@ -86,11 +86,11 @@ insert into tenants (id, name, slug, plan, country, timezone, status, trial_ends
 values ('d0000000-0000-0000-0000-000000000001', 'Demo', 'demo', 'enterprise', 'IN',
         'Asia/Kolkata', 'active', now() + interval '365 days', now());
 
--- profile links the auth user → tenant; employee_id points at the CHRO employee
+-- profile links the auth user → tenant. employee_id is set AFTER employees are
+-- inserted (profiles.employee_id has an FK to employees → chicken-and-egg).
 insert into profiles (id, tenant_id, role, is_active, full_name, email, employee_id)
 values ('d0000000-0000-0000-0000-0000000000a1', 'd0000000-0000-0000-0000-000000000001',
-        'hr_admin', true, 'Demo Admin', 'demo@cognixhr.app',
-        'e0000000-0000-0000-0000-000000000001');
+        'hr_admin', true, 'Demo Admin', 'demo@cognixhr.app', null);
 
 -- ============================================================================
 --  3. MASTERS
@@ -203,6 +203,10 @@ insert into employees (id, tenant_id, employee_code, first_name, last_name, emai
  ('e0000000-0000-0000-0000-00000000000a','d0000000-0000-0000-0000-000000000001','SAAR010','Rohan','Mehta','rohan.mehta@demo.cognixhr.app','+91-9800000010','2023-01-09','active','a4000000-0000-0000-0000-000000000002','e0000000-0000-0000-0000-000000000004'),
  ('e0000000-0000-0000-0000-00000000000b','d0000000-0000-0000-0000-000000000001','SAAR011','Ananya','Iyer','ananya.iyer@demo.cognixhr.app','+91-9800000011','2022-05-30','active','a4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001'),
  ('e0000000-0000-0000-0000-00000000000c','d0000000-0000-0000-0000-000000000001','SAAR012','Karan','Patel','karan.patel@demo.cognixhr.app','+91-9800000012','2020-10-12','active','a4000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000001');
+
+-- Now that the employees exist, link the demo admin profile to the CHRO record.
+update profiles set employee_id = 'e0000000-0000-0000-0000-000000000001'
+where id = 'd0000000-0000-0000-0000-0000000000a1';
 
 -- Job history (dept/designation/grade/employment_type/manager live HERE)
 insert into job_history (tenant_id, employee_id, employment_type, effective_from, is_current, department_id, designation_id, grade_id, work_location_id, manager_id)
