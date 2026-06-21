@@ -1090,7 +1090,7 @@ export function AttendanceWorkspace() {
     queryKey:  ['att-workspace-stats'],
     queryFn:   () =>
       api.get<{
-        active_period_summary?: {
+        today_snapshot?: {
           present?: number
           absent?: number
           late?: number
@@ -1102,13 +1102,14 @@ export function AttendanceWorkspace() {
         overnight_issues?: number
         pending_corrections?: number
       }>('/attendance/stats').then((r) => ({
-        // Present/absent/late counts live inside active_period_summary
-        present:           r?.active_period_summary?.present          ?? 0,
-        absent:            r?.active_period_summary?.absent           ?? 0,
-        late:              r?.active_period_summary?.late             ?? 0,
-        wfh:               r?.active_period_summary?.wfh              ?? 0,
-        on_leave:          r?.active_period_summary?.on_leave         ?? 0,
-        total:             r?.active_period_summary?.total            ?? 0,
+        // Live headcount comes from today_snapshot (latest day, distinct
+        // employees) — NOT the month-wide active_period_summary sum.
+        present:           r?.today_snapshot?.present          ?? 0,
+        absent:            r?.today_snapshot?.absent           ?? 0,
+        late:              r?.today_snapshot?.late             ?? 0,
+        wfh:               r?.today_snapshot?.wfh              ?? 0,
+        on_leave:          r?.today_snapshot?.on_leave         ?? 0,
+        total:             r?.today_snapshot?.total            ?? 0,
         // Operational counts are top-level fields
         anomalies:         r?.unresolved_anomalies                    ?? 0,
         missing_punches:   r?.overnight_issues                        ?? 0,

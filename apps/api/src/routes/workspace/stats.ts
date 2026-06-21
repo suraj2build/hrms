@@ -19,7 +19,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { buildActivePeriodSummary } from '../../lib/attendance-read-model.js'
+import { buildActivePeriodSummary, buildLatestDaySnapshot } from '../../lib/attendance-read-model.js'
 
 export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -229,6 +229,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       recentRegResult,
       missingCompResult,
       activePeriodResult,
+      daySnapshotResult,
     ] = await Promise.all([
       // unresolved_anomalies
       fastify.supabase
@@ -297,9 +298,14 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // returns ActivePeriodSummary.  This is the ONLY attendance count source
       // for all dashboard widgets.  Zero inline reducers.
       buildActivePeriodSummary(fastify.supabase, tenantId),
+      // Live/"today" headcount snapshot (latest day with data) — drives the
+      // AttendanceWorkspace Live tab so "Present Today" is a real headcount,
+      // not a month-wide sum of present-days.
+      buildLatestDaySnapshot(fastify.supabase, tenantId),
     ])
 
     const activePeriod = 'error' in activePeriodResult ? null : activePeriodResult
+    const daySnapshot  = 'error' in daySnapshotResult ? null : daySnapshotResult
 
     return reply.send({
       // Operational metrics (action queue, processing health)
@@ -316,6 +322,8 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // from a past month (e.g., imported 2025 data viewed in 2026).
       active_period_summary:  activePeriod,
       active_period_month:    activePeriod?.active_month ?? null,
+      // Per-day live headcount for the Workspace Live tab / "Present Today" KPI.
+      today_snapshot:         daySnapshot,
     })
   })
 

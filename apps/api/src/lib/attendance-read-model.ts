@@ -459,6 +459,73 @@ export async function buildActivePeriodSummary(
   }
 }
 
+// ── Latest-day snapshot ───────────────────────────────────────────────────────
+
+export interface DaySnapshot {
+  snapshot_date: string
+  present:  number
+  late:     number
+  absent:   number
+  half_day: number
+  on_leave: number
+  wfh:      number
+  total:    number
+}
+
+/**
+ * Live/"today" headcount for the Attendance Workspace: counts DISTINCT employees
+ * by status on the most recent date that has attendance_daily rows (falls back to
+ * `refDate`/today when none). Unlike buildActivePeriodSummary — which sums
+ * present-DAYS across the whole active month — this returns a per-day headcount
+ * that can never exceed the active headcount.
+ */
+export async function buildLatestDaySnapshot(
+  supabase: SupabaseClient,
+  tenantId: string,
+  refDate?: string,
+): Promise<DaySnapshot | { error: string }> {
+  const { data: latestRow, error: latestErr } = await supabase
+    .from('attendance_daily')
+    .select('date')
+    .eq('tenant_id', tenantId)
+    .order('date', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (latestErr) return { error: latestErr.message }
+
+  const date = (latestRow as { date: string } | null)?.date
+    ?? refDate ?? new Date().toISOString().slice(0, 10)
+
+  const { data: rows, error } = await supabase
+    .from('attendance_daily')
+    .select('employee_id, status')
+    .eq('tenant_id', tenantId)
+    .eq('date', date)
+  if (error) return { error: error.message }
+
+  // Collapse to one status per employee (defensive against duplicate rows).
+  const byEmployee = new Map<string, string>()
+  for (const r of (rows ?? []) as Array<{ employee_id: string; status: string }>) {
+    if (!byEmployee.has(r.employee_id)) byEmployee.set(r.employee_id, r.status)
+  }
+
+  let present = 0, late = 0, absent = 0, half_day = 0, on_leave = 0
+  for (const status of byEmployee.values()) {
+    if      (status === 'present')  present++
+    else if (status === 'late')     late++
+    else if (status === 'absent')   absent++
+    else if (status === 'half_day') half_day++
+    else if (status === 'leave')    on_leave++
+  }
+
+  return {
+    snapshot_date: date,
+    present, late, absent, half_day, on_leave,
+    wfh:   0, // no dedicated WFH status in attendance_daily
+    total: present + late + absent + half_day + on_leave,
+  }
+}
+
 // ── Convenience: full month build ─────────────────────────────────────────────
 
 interface Employee {

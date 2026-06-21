@@ -913,6 +913,16 @@ export function demoAttendanceOpsStats() {
       missing_punch: 0,
       total_employees: n,
     },
+    today_snapshot: {
+      snapshot_date: new Date().toISOString().slice(0, 10),
+      present:  n - 2,
+      late:     1,
+      absent:   1,
+      half_day: 0,
+      on_leave: 1,
+      wfh:      0,
+      total:    n,
+    },
   }
 }
 
