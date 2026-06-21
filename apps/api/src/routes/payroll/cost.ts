@@ -14,7 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { eventBus }            from '../../lib/event-bus.js'
-import { otFromBreakdown }     from '../../lib/payroll-dept-snapshot.js'
+import { otFromBreakdown, buildDeptSnapshots } from '../../lib/payroll-dept-snapshot.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -405,5 +405,46 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
     }))
 
     return reply.send({ data: departments, month, prior_month: prior })
+  })
+
+  // ── POST /analytics/payroll/cost/backfill-snapshots ──────────────────────────
+  // One-off (idempotent) backfill of payroll_dept_snapshots for runs that were
+  // finalized before snapshot population existed. Walks the tenant's finalized
+  // runs oldest-first so prior-month variance fills correctly, rebuilding each
+  // month from its latest finalized run. Safe to re-run (replace-by-month).
+  fastify.post('/analytics/payroll/cost/backfill-snapshots', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
+    const { data: runs, error: runsErr } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, created_at')
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'finalized')
+      .order('month', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (runsErr) {
+      return reply.code(500).send({ error: 'BACKFILL_FAILED', message: runsErr.message })
+    }
+
+    // Latest finalized run per month (later created_at wins within a month).
+    const latestPerMonth = new Map<string, string>()
+    for (const r of (runs ?? []) as any[]) latestPerMonth.set(r.month, r.id)
+
+    const results: Array<{ month: string; rows: number; ok: boolean; error?: string }> = []
+    for (const [month, runId] of latestPerMonth) {
+      const res = await buildDeptSnapshots({ supabase: fastify.supabase, tenantId: req.tenantId, month, runId })
+      results.push({ month, rows: res.rows, ok: res.ok, ...(res.error ? { error: res.error } : {}) })
+    }
+
+    const failed = results.filter(r => !r.ok)
+    return reply.send({
+      data: {
+        months_processed: results.length,
+        rows_written:     results.reduce((a, r) => a + r.rows, 0),
+        failed:           failed.length,
+        results,
+      },
+    })
   })
 }
