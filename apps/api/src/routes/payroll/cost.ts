@@ -371,6 +371,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
       total_gross:      Number(d.total_gross),
       total_net:        Number(d.total_net),
       total_ot_cost:    Number(d.total_ot_cost),
+      ot_pct:           Number(d.total_gross) > 0 ? Math.round((Number(d.total_ot_cost) / Number(d.total_gross)) * 1000) / 10 : 0,
       avg_gross:        d.headcount > 0 ? Math.round(Number(d.total_gross) / d.headcount) : 0,
       prior_gross:      priorMap.get(d.department_id) ?? null,
       variance_pct:     d.variance_pct ? Number(d.variance_pct) : null,

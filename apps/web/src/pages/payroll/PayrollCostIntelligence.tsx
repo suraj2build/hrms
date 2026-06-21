@@ -53,7 +53,7 @@ interface DeptRow {
   headcount:       number
   total_gross:     number
   total_ot_cost:   number
-  ot_pct:          number
+  ot_pct?:         number   // derived client-side if the API omits it
   ot_heavy:        boolean
   prior_gross:     number | null
   variance_pct:    number | null
@@ -429,7 +429,7 @@ export function PayrollCostIntelligence() {
                       </span>
                     </td>
                     <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                      {dept.ot_pct.toFixed(1)}%
+                      {(dept.ot_pct ?? (dept.total_gross > 0 ? (dept.total_ot_cost / dept.total_gross) * 100 : 0)).toFixed(1)}%
                     </td>
                     <td className="px-3 py-2 tabular-nums">
                       {dept.variance_pct == null
