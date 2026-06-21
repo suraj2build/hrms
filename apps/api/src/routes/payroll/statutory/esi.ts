@@ -455,10 +455,17 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       if (result.status === 'continuation') continuationActiveCount++
 
       if (result.isEligible) {
-        // Slip is the source of truth: use the actual ESI lines from the finalized
-        // slip when present, so the ESI page == reconciliation == payslip (deposit).
+        // The finalized slip is the deposit — the filing must equal what was
+        // actually deducted, never invent it. If the employee HAS a slip, use its
+        // ESI lines (0 when the slip carries none — e.g. a continuation employee
+        // the payroll engine didn't deduct for); only fall back to the computed
+        // amount for employees with NO finalized slip (estimate path on a partial
+        // run). This stops the filing over-stating ESI the payslip never deducted.
+        const hasSlip      = slipGrossMap.has(emp.id)
         const slipEmp      = slipEsiEmployeeMap.get(emp.id)
         const slipEmployer = slipEsiEmployerMap.get(emp.id)
+        const empContribution  = hasSlip ? (slipEmp      ?? 0) : result.employeeContribution
+        const emprContribution = hasSlip ? (slipEmployer ?? 0) : result.employerContribution
         contributions.push({
           tenant_id:             req.tenantId,
           employee_id:           emp.id,
@@ -466,8 +473,8 @@ export default async function esiRoutes(fastify: FastifyInstance) {
           payroll_run_id:        payrollRunId,
           esi_wages:             result.esiWages,
           is_eligible:           result.isEligible,
-          employee_contribution: slipEmp      ?? result.employeeContribution,
-          employer_contribution: slipEmployer ?? result.employerContribution,
+          employee_contribution: empContribution,
+          employer_contribution: emprContribution,
           // total_contribution is GENERATED ALWAYS AS (employee_contribution + employer_contribution) STORED
           // in esi_contributions — cannot be inserted; the DB computes it automatically.
         })

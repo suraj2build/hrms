@@ -30,6 +30,15 @@ function round2(n: number): number {
 }
 
 /**
+ * ESIC statutory rounding: each contribution is rounded UP to the next higher
+ * rupee (ESI (General) Regulations, reg. 40). Applied per employee/employer
+ * contribution; the total is the sum of the two rounded amounts.
+ */
+function ceilRupee(n: number): number {
+  return Math.ceil(n - 1e-9)   // epsilon guards fp noise on an exact rupee
+}
+
+/**
  * Compute ESI contributions for a single employee.
  *
  * @param grossWages     - Gross wages for the payroll month
@@ -77,13 +86,13 @@ export function computeESI(
     }
   }
 
-  const employeeContribution = round2(grossWages * config.employeeContributionPct / 100)
-  traceSteps.push(`Employee contribution: ${grossWages} × ${config.employeeContributionPct}% = ${employeeContribution}`)
+  const employeeContribution = ceilRupee(grossWages * config.employeeContributionPct / 100)
+  traceSteps.push(`Employee contribution: ${grossWages} × ${config.employeeContributionPct}% = ${employeeContribution} (rounded up to next rupee)`)
 
-  const employerContribution = round2(grossWages * config.employerContributionPct / 100)
-  traceSteps.push(`Employer contribution: ${grossWages} × ${config.employerContributionPct}% = ${employerContribution}`)
+  const employerContribution = ceilRupee(grossWages * config.employerContributionPct / 100)
+  traceSteps.push(`Employer contribution: ${grossWages} × ${config.employerContributionPct}% = ${employerContribution} (rounded up to next rupee)`)
 
-  const totalContribution = round2(employeeContribution + employerContribution)
+  const totalContribution = employeeContribution + employerContribution
   traceSteps.push(`Total ESI contribution: ${employeeContribution} + ${employerContribution} = ${totalContribution}`)
 
   return {
