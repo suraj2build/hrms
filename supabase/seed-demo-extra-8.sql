@@ -2,7 +2,7 @@
 --  CognixHR — DEMO TENANT ENRICHMENT #8  (run AFTER seed-demo.sql)
 --  Populates tables the ANALYTICS / INTELLIGENCE admin screens read but that the
 --  core demo seed (and extras 1–7) leave empty:
---    · leave_applications        (the 2nd leave table read by analytics/who-is-in)
+--    · leave_requests            (extra approved/pending/rejected leaves for analytics)
 --    · sites (+ employee→site links + headcount-by-site attribution)
 --    · intelligence_digest       (Workforce Digest screen)
 --    · workforce_staffing_snapshots + workforce_optimization_hints
@@ -46,13 +46,19 @@ begin
     'statutory_registrations',
     'lwf_contributions',
     'workforce_optimization_hints','workforce_staffing_snapshots',
-    'intelligence_digest',
-    'leave_applications'
+    'intelligence_digest'
   ] loop
     if to_regclass(t) is not null then
       execute format('delete from %I where tenant_id = $1', t) using tid;
     end if;
   end loop;
+
+  -- leave_requests is shared with the core seed — only remove THIS file's rows
+  -- (c85-prefixed) so the core seed's leave_requests are left intact.
+  if to_regclass('leave_requests') is not null then
+    delete from leave_requests
+    where tenant_id = tid and id::text like 'c8500000-%';
+  end if;
 
   -- Un-attribute the employees this file links to demo sites (so re-running is
   -- clean and the core seed's null site_id is restorable). Only clears the demo
@@ -76,20 +82,22 @@ begin
 end $$;
 
 -- ============================================================================
---  1. LEAVE APPLICATIONS  (033)  — the 2nd leave table (lowercase status)
---     status ∈ ('pending','approved','rejected').  No day-count column on this
---     table (only from_date/to_date), so nothing computed to populate.
+--  1. LEAVE REQUESTS  (041, canonical)  — extra approved/pending/rejected leaves
+--     for richer leave analytics. status UPPERCASE; computed_days + requested_by
+--     are NOT NULL; APPROVED requires approved_by + approved_at (lr CHECK).
+--     c85-prefixed ids so the reset only clears this file's rows, not the core
+--     seed's leave_requests.
 -- ============================================================================
-insert into leave_applications (tenant_id, employee_id, leave_type_id, from_date, to_date, reason, status, approved_by, approved_at) values
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000003','a8000000-0000-0000-0000-000000000001', current_date - 40, current_date - 39, 'Personal errand.',              'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '42 days'),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000004','a8000000-0000-0000-0000-000000000002', current_date - 32, current_date - 31, 'Viral fever — bed rest advised.', 'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '33 days'),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000005','a8000000-0000-0000-0000-000000000003', current_date - 25, current_date - 21, 'Family vacation.',              'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '27 days'),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000006','a8000000-0000-0000-0000-000000000001', current_date - 18, current_date - 18, 'Half-day for bank work.',       'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '19 days'),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','a8000000-0000-0000-0000-000000000002', current_date - 12, current_date - 11, 'Sick leave.',                   'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '13 days'),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000009','a8000000-0000-0000-0000-000000000003', current_date - 7,  current_date - 5,  'Short personal trip.',          'approved', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '9 days'),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000c','a8000000-0000-0000-0000-000000000001', current_date + 4,  current_date + 4,  'Festival at home.',             'pending',  null,                                   null),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000007','a8000000-0000-0000-0000-000000000003', current_date + 9,  current_date + 13, 'Pre-planned annual leave.',     'pending',  null,                                   null),
- ('d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000a','a8000000-0000-0000-0000-000000000004', current_date - 3,  current_date - 3,  'Leave without pay — no balance.','rejected', 'd0000000-0000-0000-0000-0000000000a1', now() - interval '2 days');
+insert into leave_requests (id, tenant_id, employee_id, leave_type_id, from_date, to_date, computed_days, half_day, status, reason, rejection_reason, requested_by, approved_by, approved_at) values
+ ('c8500000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000003','a8000000-0000-0000-0000-000000000001', current_date - 40, current_date - 39, 2.0, false,'APPROVED','Personal errand.',               null,                          'd0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '42 days'),
+ ('c8500000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000004','a8000000-0000-0000-0000-000000000002', current_date - 32, current_date - 31, 2.0, false,'APPROVED','Viral fever — bed rest advised.',null,                          'd0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '33 days'),
+ ('c8500000-0000-0000-0000-000000000003','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000005','a8000000-0000-0000-0000-000000000003', current_date - 25, current_date - 21, 5.0, false,'APPROVED','Family vacation.',               null,                          'd0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '27 days'),
+ ('c8500000-0000-0000-0000-000000000004','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000006','a8000000-0000-0000-0000-000000000001', current_date - 18, current_date - 18, 0.5, true, 'APPROVED','Half-day for bank work.',        null,                          'd0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '19 days'),
+ ('c8500000-0000-0000-0000-000000000005','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000008','a8000000-0000-0000-0000-000000000002', current_date - 12, current_date - 11, 2.0, false,'APPROVED','Sick leave.',                    null,                          'd0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '13 days'),
+ ('c8500000-0000-0000-0000-000000000006','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000009','a8000000-0000-0000-0000-000000000003', current_date - 7,  current_date - 5,  3.0, false,'APPROVED','Short personal trip.',           null,                          'd0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '9 days'),
+ ('c8500000-0000-0000-0000-000000000007','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000c','a8000000-0000-0000-0000-000000000001', current_date + 4,  current_date + 4,  1.0, false,'PENDING', 'Festival at home.',              null,                          'd0000000-0000-0000-0000-0000000000a1', null,                                   null),
+ ('c8500000-0000-0000-0000-000000000008','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000007','a8000000-0000-0000-0000-000000000003', current_date + 9,  current_date + 13, 5.0, false,'PENDING', 'Pre-planned annual leave.',      null,                          'd0000000-0000-0000-0000-0000000000a1', null,                                   null),
+ ('c8500000-0000-0000-0000-000000000009','d0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-00000000000a','a8000000-0000-0000-0000-000000000004', current_date - 3,  current_date - 3,  1.0, false,'REJECTED','Leave without pay — no balance.','No leave balance available.','d0000000-0000-0000-0000-0000000000a1','d0000000-0000-0000-0000-0000000000a1', now() - interval '2 days');
 
 -- ============================================================================
 --  2. SITES  (057 + 248 dims + 166 state_code)  mirroring the demo work locations
@@ -246,7 +254,7 @@ insert into attendance_exceptions (tenant_id, employee_id, date, exception_type,
 commit;
 
 -- ============================================================================
---  DONE. leave_applications, sites (+ employee links), statutory_registrations,
+--  DONE. leave_requests, sites (+ employee links), statutory_registrations,
 --  intelligence_digest, workforce staffing snapshots + optimization hints,
 --  lwf_contributions, operational_incidents, the onboarding pre-joinee funnel
 --  and attendance_exceptions now have demo data for the analytics/intelligence

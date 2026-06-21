@@ -247,10 +247,10 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
         .eq('tenant_id', req.tenantId)
         .eq('is_active', true),
       fastify.supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('leave_type_id, from_date, to_date, status')
         .eq('tenant_id', req.tenantId)
-        .eq('status', 'approved')
+        .eq('status', 'APPROVED')
         .gte('from_date', `${year}-01-01`)
         .lte('to_date',   `${year}-12-31`),
       fastify.supabase

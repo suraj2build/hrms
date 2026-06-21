@@ -103,13 +103,13 @@ export default async function payrollInvestigateRoute(fastify: FastifyInstance) 
         .lte('date', to)
         .order('date'),
 
-      // 2. Approved leaves overlapping the month
+      // 2. Approved leaves overlapping the month — canonical leave_requests
       fastify.supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('id, from_date, to_date, reason, status, approved_at, leave_types(id, name, is_paid)')
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employeeId)
-        .eq('status', 'approved')
+        .eq('status', 'APPROVED')
         .lte('from_date', to)
         .gte('to_date', from)
         .order('from_date'),

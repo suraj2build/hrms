@@ -103,7 +103,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     // SLA compliance — check how long the leave_application sat pending
     try {
       const { data: app } = await supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('created_at, approved_at')
         .eq('id', leaveId)
         .maybeSingle()
@@ -152,7 +152,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     const { tenantId, leaveId } = event.payload
     try {
       const { data: app } = await supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('created_at, approved_at')
         .eq('id', leaveId)
         .maybeSingle()
@@ -238,7 +238,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
       await supabase.from('audit_logs').insert({
         tenant_id:  tenantId,
         action:     'sla_breach',
-        table_name: entityType === 'leave'      ? 'leave_applications'
+        table_name: entityType === 'leave'      ? 'leave_requests'
                   : entityType === 'correction' ? 'attendance_regularisation'
                   : 'approval_workflows',
         record_id:  entityId,

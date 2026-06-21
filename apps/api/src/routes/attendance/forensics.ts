@@ -134,10 +134,10 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
           .eq('date', date)
           .order('created_at', { ascending: true }),
 
-        // 6. Leave applications covering this date
+        // 6. Leave covering this date — canonical leave_requests (status UPPERCASE)
         fastify.supabase
-          .from('leave_applications')
-          .select('id, status, from_date, to_date, reason, created_at, approved_at, approved_by, leave_types(name, is_paid), profiles!leave_applications_approved_by_fkey(full_name)')
+          .from('leave_requests')
+          .select('id, status, from_date, to_date, reason, created_at, approved_at, approved_by, leave_types(name, is_paid), profiles!leave_requests_approved_by_fkey(full_name)')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .lte('from_date', date)
@@ -427,7 +427,7 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
           source_badge: 'Leave',
           meta:         { id: la.id, status: la.status, leave_type: la.leave_types?.name },
         })
-        if (la.status === 'approved' && la.approved_at) {
+        if (la.status?.toUpperCase() === 'APPROVED' && la.approved_at) {
           timeline.push({
             time:         la.approved_at,
             type:         'leave_approved',
@@ -439,7 +439,7 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
             meta:         { leave_id: la.id, approved_by: la.approved_by },
           })
         }
-        if (la.status === 'rejected') {
+        if (la.status?.toUpperCase() === 'REJECTED') {
           timeline.push({
             time:         la.approved_at ?? null,
             type:         'leave_rejected',

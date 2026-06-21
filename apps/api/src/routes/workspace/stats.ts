@@ -959,12 +959,12 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('status', 'failed')
         .gte('started_at', last7d),
 
-      // sla_breaches: leave applications pending > 3 days (no action taken)
+      // sla_breaches: leave requests pending > 3 days (no action taken)
       fastify.supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('status', 'pending')
+        .eq('status', 'PENDING')
         .lte('created_at', escalationCutoff),
 
       // sla_breaches: regularisation requests pending > 3 days
@@ -977,10 +977,10 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
 
       // pending_escalations: any pending leave this month (not necessarily stale)
       fastify.supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('status', 'pending'),
+        .eq('status', 'PENDING'),
 
       // pending_escalations: any pending regularisation
       fastify.supabase

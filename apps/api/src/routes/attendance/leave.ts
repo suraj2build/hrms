@@ -58,11 +58,11 @@ async function applySandwichLeave(
 
   const [{ data: leaveDays }, { data: holidays }] = await Promise.all([
     fastify.supabase
-      .from('leave_applications')
+      .from('leave_requests')
       .select('from_date, to_date')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
-      .eq('status', 'approved')
+      .eq('status', 'APPROVED')
       .gte('to_date',   windowFrom)
       .lte('from_date', windowTo),
     fastify.supabase
@@ -1353,23 +1353,27 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const dates = expandDateRange(from_date, to_date)
     const now   = new Date().toISOString()
 
-    // Create leave applications (auto-approved)
+    // Create auto-approved leave on the canonical leave_requests table.
+    // computed_days / requested_by are NOT NULL there; APPROVED requires
+    // approved_by + approved_at (lr_approved_fields CHECK).
     const appRows = employee_ids.map((emp_id) => ({
       tenant_id:     req.tenantId,
       employee_id:   emp_id,
       leave_type_id,
       from_date,
       to_date,
+      computed_days: dates.length,
       reason:        reason ?? null,
-      status:        'approved',
+      status:        'APPROVED',
+      requested_by:  req.userId,
       approved_by:   req.userId,
       approved_at:   now,
     }))
     const { data: insertedApps, error: appErr } = await fastify.supabase
-      .from('leave_applications').insert(appRows).select('id, employee_id')
+      .from('leave_requests').insert(appRows).select('id, employee_id')
     if (appErr) {
-      req.log.error({ err: appErr }, 'bulk-assign leave applications insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave applications' })
+      req.log.error({ err: appErr }, 'bulk-assign leave_requests insert failed')
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave requests' })
     }
     // employee → application id, for keying idempotent consumption ledger rows.
     const appIdByEmp = new Map<string, string>(
@@ -1452,7 +1456,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // Audit log — bulk leave assignment by HR admin on behalf of multiple employees
     await logBulkAction(fastify.supabase, {
       tenantId:    req.tenantId,
-      tableName:   'leave_applications',
+      tableName:   'leave_requests',
       action:      'INSERT',
       performedBy: req.userId,
       // onBehalfOf not set for bulk — multiple targets captured in summary.employee_ids

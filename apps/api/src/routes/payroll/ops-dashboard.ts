@@ -90,12 +90,12 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
         .eq('status', 'failed')
         .gte('started_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
 
-      // Pending leave applications older than 48h
+      // Pending leave older than 48h — canonical leave_requests
       fastify.supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('status', 'pending')
+        .eq('status', 'PENDING')
         .lte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()),
 
       // EPF contributions without a matching finalized payroll slip for same month

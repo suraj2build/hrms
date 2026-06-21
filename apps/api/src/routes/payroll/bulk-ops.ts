@@ -211,21 +211,21 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const now = new Date().toISOString()
 
     const { data: apps } = await fastify.supabase
-      .from('leave_applications')
+      .from('leave_requests')
       .select('id, employee_id, leave_type_id, from_date, to_date, status, leave_types(is_paid)')
       .eq('tenant_id', req.tenantId)
       .in('id', application_ids)
-      .eq('status', 'pending')
+      .eq('status', 'PENDING')
 
     const approvedIds: string[] = []
     const failedIds:   Array<{ id: string; reason: string }> = []
     const skipped = application_ids.filter(id => !(apps ?? []).find((a: any) => a.id === id))
 
     for (const app of (apps ?? []) as any[]) {
-      // Approve the application
+      // Approve the request (leave_requests CHECK requires approved_by + approved_at)
       const { error: updateErr } = await fastify.supabase
-        .from('leave_applications')
-        .update({ status: 'approved', approved_by: req.userId, approved_at: now })
+        .from('leave_requests')
+        .update({ status: 'APPROVED', approved_by: req.userId, approved_at: now })
         .eq('id', app.id)
 
       if (updateErr) {

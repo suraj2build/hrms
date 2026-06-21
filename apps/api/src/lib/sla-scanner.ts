@@ -93,10 +93,10 @@ async function scan(supabase: SupabaseClient): Promise<void> {
 
     // ── 1. Overdue leave requests ──────────────────────────────────────────────
     const { data: overLeave } = await supabase
-      .from('leave_applications')
+      .from('leave_requests')
       .select('id, employee_id, created_at, employees(first_name, last_name)')
       .eq('tenant_id', tenantId)
-      .eq('status', 'pending')
+      .eq('status', 'PENDING')
       .lt('created_at', cutoffLeave)
 
     for (const row of (overLeave ?? [])) {

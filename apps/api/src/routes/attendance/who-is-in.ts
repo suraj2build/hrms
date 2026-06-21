@@ -121,12 +121,12 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
         .eq('is_current', true)
         .in('employee_id', empIds),
 
-      // Approved leave applications covering today (for "Applied" badge)
+      // Approved leave covering today (for "Applied" badge) — canonical leave_requests
       fastify.supabase
-        .from('leave_applications')
+        .from('leave_requests')
         .select('employee_id, from_date, to_date')
         .eq('tenant_id', tenantId)
-        .eq('status', 'approved')
+        .eq('status', 'APPROVED')
         .lte('from_date', date)
         .gte('to_date',   date)
         .in('employee_id', empIds),

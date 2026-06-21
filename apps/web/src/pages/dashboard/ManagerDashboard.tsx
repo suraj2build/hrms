@@ -1076,12 +1076,12 @@ export function ManagerDashboardPage() {
   }
 
   const { mutate: approveLeave, variables: approvingLeaveId } = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/leave/${id}/approve`, {}),
+    mutationFn: (id: string) => api.post(`/leave-requests/${id}/approve`, {}),
     onSuccess: () => { invalidate(); toast.success('Leave approved') },
     onError:   (e: Error) => toast.error('Failed to approve leave', { description: e.message }),
   })
   const { mutate: rejectLeave } = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/leave/${id}/reject`, {}),
+    mutationFn: (id: string) => api.post(`/leave-requests/${id}/reject`, {}),
     onSuccess: () => { invalidate(); toast.success('Leave rejected') },
     onError:   (e: Error) => toast.error('Failed to reject leave', { description: e.message }),
   })
