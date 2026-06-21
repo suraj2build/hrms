@@ -13,6 +13,7 @@ Each file is a single idempotent transaction (safe to re-run; it clears its own 
 | 6 | `seed-demo-extra-5.sql`  | Leave accrual rules, accrual ledger, accrual runs, balance ledger |
 | 7 | `seed-demo-extra-6.sql`  | Shift roster + extra shifts, rosters, rotation groups/members, weekly-off & holiday groups |
 | 8 | `seed-demo-extra-7.sql`  | Notification templates + log, helpdesk comments, asset categories, OT policies, EPF/ESI/PT config |
+| 9 | `seed-demo-extra-8.sql`  | Analytics coverage: leave_applications, sites (+ headcount attribution), statutory registrations, intelligence digest, workforce staffing snapshots/hints, LWF contributions, operational incidents, onboarding/pre-join funnel, attendance exceptions |
 
 ## Notes
 - Order matters: files 2–8 reference rows created by `seed-demo.sql` (employees,
