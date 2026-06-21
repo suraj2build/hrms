@@ -1,24 +1,26 @@
 /**
- * WorkforceAnalytics — /admin/analytics/workforce
+ * WorkforceAnalytics — /admin/analytics/workforce (also embedded as the
+ * Executive "Headcount" tab).
  *
- * Operational attendance analytics dashboard.
+ * Operational attendance analytics dashboard, on the shared BI canvas.
  * Shows absenteeism trends, leave utilization, reliability scores,
- * late arrival patterns, and overtime distribution.
+ * late arrival patterns, and overtime distribution — with click-to-investigate
+ * drilldowns preserved throughout.
  *
  * Uses the existing:
  *  GET /attendance/payroll-summary?month=YYYY-MM   → aggregate summary
  *  GET /attendance/muster?month=YYYY-MM            → per-employee per-day grid
- *  GET /overtime/requests                          → OT data
  *  GET /attendance/anomalies                       → anomaly counts
+ *  GET /analytics/workforce/summary | /absenteeism → 4-week intelligence
  */
 
-import { useState, useMemo, useCallback }  from 'react'
-import { useQuery }                         from '@tanstack/react-query'
-import { useSearchParams }                  from 'react-router-dom'
+import { useState, useMemo, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  ResponsiveContainer, Legend,
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Users,
@@ -27,21 +29,18 @@ import {
   Activity, Zap, Clock, Search,
 } from 'lucide-react'
 
-import { PageContainer }  from '@/components/layout/PageContainer'
-import { PageHeader }     from '@/components/layout/PageHeader'
-import { SectionCard }    from '@/components/layout/SectionCard'
-import { Badge }          from '@/components/ui/badge'
-import { Button }         from '@/components/ui/button'
-import { api }            from '@/lib/api/client'
-import { useAuthStore }   from '@/stores/authStore'
-import {
-  getChartColor,
-  getAxisStyle,
-  getGridStyle,
-  getTooltipStyle,
-} from '@/components/ui/chart'
-import { cn }              from '@/lib/utils'
-import { ErrorBoundary }   from '@/components/error-boundary/ErrorBoundary'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader } from '@/components/layout/PageHeader'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/authStore'
+import { getChartColor } from '@/components/ui/chart'
+import { cn } from '@/lib/utils'
+import { ErrorBoundary } from '@/components/error-boundary/ErrorBoundary'
+import { KpiCard } from '@/components/exec/KpiCard'
+import { Viz, DonutBlock, ChartTip, NoData, MiniStat } from '@/components/exec/viz'
+import { GRID, AXIS } from '@/components/exec/exec-utils'
 import {
   InvestigationPanel,
   type DrillTarget,
@@ -51,25 +50,27 @@ import {
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface MusterDay {
-  date:        string
-  status:      string | null
-  work_hours:  number
+  date: string
+  status: string | null
+  work_hours: number
   late_minutes: number
 }
 
 interface MusterEmployee {
-  employee_id:   string
+  employee_id: string
   employee_code: string
-  name:          string
-  days:          MusterDay[]
+  name: string
+  days: MusterDay[]
 }
 
 interface PayrollSummary {
-  total_employees:   number
+  total_employees: number
   total_payable_days: number
-  total_lop_days:    number
-  avg_work_hours:    number
+  total_lop_days: number
+  avg_work_hours: number
 }
+
+type Tone = 'primary' | 'success' | 'warning' | 'destructive' | 'info'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -91,25 +92,25 @@ function monthLabel(m: string): string {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  present:    getChartColor('active'),
-  late:       getChartColor('probation'),
-  absent:     getChartColor('separated'),
-  half_day:   getChartColor('inactive'),
-  holiday:    getChartColor('chart1'),
+  present: getChartColor('active'),
+  late: getChartColor('probation'),
+  absent: getChartColor('separated'),
+  half_day: getChartColor('inactive'),
+  holiday: getChartColor('chart1'),
   weekly_off: getChartColor('chart2'),
-  leave:      getChartColor('chart3'),
+  leave: getChartColor('chart3'),
 }
 
 // ── Reliability Score ─────────────────────────────────────────────────────────
 
 interface ReliabilityEntry {
-  name:         string
-  code:         string
-  score:        number
-  present:      number
-  late:         number
-  absent:       number
-  total:        number
+  name: string
+  code: string
+  score: number
+  present: number
+  late: number
+  absent: number
+  total: number
 }
 
 function computeReliabilityScore(days: MusterDay[]): number {
@@ -118,39 +119,16 @@ function computeReliabilityScore(days: MusterDay[]): number {
   )
   if (!workDays.length) return 100
   const present = workDays.filter(d => d.status === 'present').length
-  const late    = workDays.filter(d => d.status === 'late').length
-  const half    = workDays.filter(d => d.status === 'half_day').length
+  const late = workDays.filter(d => d.status === 'late').length
+  const half = workDays.filter(d => d.status === 'half_day').length
   return Math.round(((present + late * 0.8 + half * 0.5) / workDays.length) * 100)
 }
-
-// ── StatCard ──────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, sub, trend, cls }: {
-  label: string; value: string | number; sub?: string
-  trend?: 'up' | 'down'; cls?: string
-}) {
-  return (
-    <div className="surface-premium lift-hover p-4">
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className={cn('text-2xl font-bold mt-0.5 tabular-nums', cls)}>{value}</p>
-      {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-      {trend && (
-        <div className={cn('flex items-center gap-1 text-[10px] mt-1', trend === 'up' ? 'text-success' : 'text-destructive')}>
-          {trend === 'up' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-          {trend === 'up' ? 'Improving' : 'Needs attention'}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
 
 // ── Default investigation date range (last 4 weeks) ───────────────────────────
 
 function defaultDrillRange(): { from: string; to: string } {
-  const to  = new Date().toISOString().slice(0, 10)
-  const d   = new Date(); d.setDate(d.getDate() - 28)
+  const to = new Date().toISOString().slice(0, 10)
+  const d = new Date(); d.setDate(d.getDate() - 28)
   return { from: d.toISOString().slice(0, 10), to }
 }
 
@@ -172,10 +150,10 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
 
   const investigation = useMemo((): DrillTarget | null => {
     const metric = searchParams.get('drill_metric') as DrillMetric | null
-    const from   = searchParams.get('drill_from')
-    const to     = searchParams.get('drill_to')
-    const week   = searchParams.get('drill_week') ?? undefined
-    const label  = searchParams.get('drill_label') ?? ''
+    const from = searchParams.get('drill_from')
+    const to = searchParams.get('drill_to')
+    const week = searchParams.get('drill_week') ?? undefined
+    const label = searchParams.get('drill_label') ?? ''
     if (!metric || !from || !to) return null
     return { metric, from, to, week, label }
   }, [searchParams])
@@ -184,11 +162,11 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
       next.set('drill_metric', target.metric)
-      next.set('drill_from',   target.from)
-      next.set('drill_to',     target.to)
-      next.set('drill_label',  target.label)
+      next.set('drill_from', target.from)
+      next.set('drill_to', target.to)
+      next.set('drill_label', target.label)
       if (target.week) next.set('drill_week', target.week)
-      else             next.delete('drill_week')
+      else next.delete('drill_week')
       return next
     }, { replace: true })
   }, [setSearchParams])
@@ -209,36 +187,36 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     month: string; employees: MusterEmployee[]
   }>({
     queryKey: ['muster', month],
-    queryFn:  () => api.get(`/attendance/muster?month=${month}`),
-    enabled:  isAdmin,
+    queryFn: () => api.get(`/attendance/muster?month=${month}`),
+    enabled: isAdmin,
     staleTime: 120_000,
   })
 
   const { data: payrollData, isLoading: summaryLoading } = useQuery<{ summary: PayrollSummary }>({
     queryKey: ['payroll-summary', month],
-    queryFn:  () => api.get(`/attendance/payroll-summary?month=${month}`),
-    enabled:  isAdmin,
+    queryFn: () => api.get(`/attendance/payroll-summary?month=${month}`),
+    enabled: isAdmin,
     staleTime: 120_000,
   })
 
   const { data: anomalyData } = useQuery<{ data: unknown[]; total?: number }>({
     queryKey: ['anomalies-count', month],
-    queryFn:  () => api.get(`/attendance/anomalies?month=${month}&resolved=false`),
-    enabled:  isAdmin,
+    queryFn: () => api.get(`/attendance/anomalies?month=${month}&resolved=false`),
+    enabled: isAdmin,
     staleTime: 120_000,
   })
 
   // ── New intelligence API — 4-week operational summary ─────────────────────
   const { data: intelligenceSummary } = useQuery<{
     range: { from: string; to: string }
-    attendance:  { total_records: number; absent_rate: number; absent_only_rate: number; late_rate: number; on_leave_rate: number }
-    overtime:    { employees_with_ot: number; total_ot_minutes: number }
+    attendance: { total_records: number; absent_rate: number; absent_only_rate: number; late_rate: number; on_leave_rate: number }
+    overtime: { employees_with_ot: number; total_ot_minutes: number }
     staffing_pressure: number
     unresolved_anomalies: number
   }>({
     queryKey: ['workforce-intelligence-summary'],
-    queryFn:  () => api.get('/analytics/workforce/summary'),
-    enabled:  isAdmin,
+    queryFn: () => api.get('/analytics/workforce/summary'),
+    enabled: isAdmin,
     staleTime: 300_000,
   })
 
@@ -249,12 +227,12 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     summary: { total_records: number; total_absent: number; overall_absent_rate: number }
   }>({
     queryKey: ['workforce-absenteeism'],
-    queryFn:  () => api.get('/analytics/workforce/absenteeism'),
-    enabled:  isAdmin,
+    queryFn: () => api.get('/analytics/workforce/absenteeism'),
+    enabled: isAdmin,
     staleTime: 300_000,
   })
 
-  const employees  = useMemo(() => musterData?.employees ?? [], [musterData])
+  const employees = useMemo(() => musterData?.employees ?? [], [musterData])
   const payrollSum = payrollData?.summary
   const anomalyCount = Array.isArray(anomalyData?.data) ? anomalyData!.data.length : 0
 
@@ -263,10 +241,9 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
   const analytics = useMemo(() => {
     if (!employees.length) return null
 
-    // Status distribution across all employees × days
     const statusCounts: Record<string, number> = {}
-    let   totalLateMinutes = 0
-    let   totalDaysWithData = 0
+    let totalLateMinutes = 0
+    let totalDaysWithData = 0
 
     for (const emp of employees) {
       for (const d of emp.days) {
@@ -278,28 +255,18 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     }
 
     const totalPresent = (statusCounts.present ?? 0) + (statusCounts.late ?? 0)
-    const totalAbsent  = statusCounts.absent  ?? 0
-    const totalLeave   = statusCounts.leave   ?? 0
+    const totalAbsent = statusCounts.absent ?? 0
+    const totalLeave = statusCounts.leave ?? 0
 
-    const attendanceRate = totalDaysWithData > 0
-      ? ((totalPresent / totalDaysWithData) * 100).toFixed(1)
-      : '—'
+    const attendanceRate = totalDaysWithData > 0 ? ((totalPresent / totalDaysWithData) * 100).toFixed(1) : '—'
+    const absentRate = totalDaysWithData > 0 ? ((totalAbsent / totalDaysWithData) * 100).toFixed(1) : '—'
+    const avgLateMin = totalPresent > 0 ? Math.round(totalLateMinutes / totalPresent) : 0
 
-    const absentRate = totalDaysWithData > 0
-      ? ((totalAbsent / totalDaysWithData) * 100).toFixed(1)
-      : '—'
-
-    const avgLateMin = totalPresent > 0
-      ? Math.round(totalLateMinutes / totalPresent)
-      : 0
-
-    // Status pie data
     const pieData = Object.entries(statusCounts)
       .filter(([, v]) => v > 0)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
 
-    // Daily attendance trend (count of present per day)
     const allDates = employees[0]?.days?.map(d => d.date) ?? []
     const dailyTrend = allDates.map(date => {
       const p = employees.filter(e => {
@@ -313,28 +280,23 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
       return { date: date.slice(5), present: p, absent: a }
     })
 
-    // Reliability scores
     const reliability: ReliabilityEntry[] = employees.map(emp => {
       const workDays = emp.days.filter(d =>
         d.status && !['holiday', 'weekly_off', 'weekend'].includes(d.status)
       )
       return {
-        name:    emp.name,
-        code:    emp.employee_code,
-        score:   computeReliabilityScore(emp.days),
+        name: emp.name,
+        code: emp.employee_code,
+        score: computeReliabilityScore(emp.days),
         present: workDays.filter(d => d.status === 'present').length,
-        late:    workDays.filter(d => d.status === 'late').length,
-        absent:  workDays.filter(d => d.status === 'absent').length,
-        total:   workDays.length,
+        late: workDays.filter(d => d.status === 'late').length,
+        absent: workDays.filter(d => d.status === 'absent').length,
+        total: workDays.length,
       }
     }).sort((a, b) => a.score - b.score)
 
-    // Leave utilization (employees with leave days)
     const leaveBar = employees
-      .map(e => ({
-        name: e.name.split(' ')[0],
-        days: e.days.filter(d => d.status === 'leave').length,
-      }))
+      .map(e => ({ name: e.name.split(' ')[0], days: e.days.filter(d => d.status === 'leave').length }))
       .filter(e => e.days > 0)
       .sort((a, b) => b.days - a.days)
       .slice(0, 15)
@@ -346,35 +308,33 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
     }
   }, [employees])
 
-  const axisStyle   = getAxisStyle()
-  const gridStyle   = getGridStyle()
-  const tooltipStyle = getTooltipStyle()
-
   const filteredReliability = analytics?.reliability.filter(e =>
     !search || e.name.toLowerCase().includes(search.toLowerCase()) || e.code.toLowerCase().includes(search.toLowerCase())
   ) ?? []
+
+  const donutData = useMemo(() => (analytics?.pieData ?? []).map(d => ({
+    name: d.name.replace(/_/g, ' '), value: d.value, color: STATUS_COLOR[d.name] ?? getChartColor('inactive'),
+  })), [analytics])
+  const donutTotal = donutData.reduce((s, d) => s + d.value, 0)
 
   if (!isAdmin) {
     return (
       <PageContainer>
         <PageHeader title="Workforce Analytics" subtitle="Attendance and leave intelligence" />
-        <SectionCard>
-          <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
+        <Viz title="Access Restricted">
+          <div className="flex flex-col items-center justify-center gap-4 py-20 text-muted-foreground">
             <ShieldAlert className="h-12 w-12 opacity-30" />
             <p className="font-medium text-foreground">Access Restricted</p>
           </div>
-        </SectionCard>
+        </Viz>
       </PageContainer>
     )
   }
 
   return (
-    <PageContainer className={embedded ? 'p-0' : undefined}>
+    <PageContainer className={cn('space-y-5', embedded && 'p-0')}>
       {!embedded && (
-        <PageHeader
-          title="Workforce Analytics"
-          subtitle={`Attendance intelligence dashboard — ${monthLabel(month)}`}
-        />
+        <PageHeader title="Workforce Analytics" subtitle={`Attendance intelligence dashboard — ${monthLabel(month)}`} />
       )}
 
       {/* Month navigation */}
@@ -382,409 +342,191 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
         <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setMonth(prevMonth(month))}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="text-sm font-medium min-w-[160px] text-center">{monthLabel(month)}</span>
+        <span className="min-w-[160px] text-center text-sm font-medium">{monthLabel(month)}</span>
         <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setMonth(nextMonth(month))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
-      {/* ── 4-Week Intelligence Snapshot (each card drills into the metric) ── */}
+      {/* 4-week intelligence snapshot — each card drills into the metric */}
       {intelligenceSummary && (() => {
         const range = defaultDrillRange()
-        const summaryCards = [
-          {
-            label:  'Absent Rate (4wk)',
-            value:  `${intelligenceSummary.attendance.absent_rate}%`,
-            icon:   TrendingDown,
-            cls:    intelligenceSummary.attendance.absent_rate > 10 ? 'text-destructive' : 'text-success',
-            sub:    `${intelligenceSummary.attendance.total_records} records`,
-            metric: 'absent' as DrillMetric,
-            drillLabel: `Absent Rate · last 4 weeks`,
-          },
-          {
-            label:  'Employees w/ OT',
-            value:  intelligenceSummary.overtime.employees_with_ot,
-            icon:   Clock,
-            cls:    'text-warning',
-            sub:    `${Math.round(intelligenceSummary.overtime.total_ot_minutes / 60)}h total OT`,
-            metric: 'ot' as DrillMetric,
-            drillLabel: `Overtime Dependency · last 4 weeks`,
-          },
-          {
-            label:  'Staffing Pressure',
-            value:  intelligenceSummary.staffing_pressure,
-            icon:   Zap,
-            cls:    intelligenceSummary.staffing_pressure > 20 ? 'text-destructive' : 'text-muted-foreground',
-            sub:    'worked on off/holiday',
-            metric: 'pressure' as DrillMetric,
-            drillLabel: `Staffing Pressure · last 4 weeks`,
-          },
-          {
-            label:  'Unresolved Anomalies',
-            value:  intelligenceSummary.unresolved_anomalies,
-            icon:   AlertTriangle,
-            cls:    intelligenceSummary.unresolved_anomalies > 0 ? 'text-warning' : 'text-success',
-            sub:    intelligenceSummary.unresolved_anomalies > 0 ? 'Needs review' : 'All clear',
-            metric: null,   // anomalies don't map to a drill metric
-            drillLabel: '',
-          },
+        const cards: Array<{ label: string; value: string | number; icon: typeof Clock; tone: Tone; sub: string; metric: DrillMetric | null; drillLabel: string }> = [
+          { label: 'Absent Rate · 4wk', value: `${intelligenceSummary.attendance.absent_rate}%`, icon: TrendingDown, tone: intelligenceSummary.attendance.absent_rate > 10 ? 'destructive' : 'success', sub: `${intelligenceSummary.attendance.total_records} records`, metric: 'absent', drillLabel: 'Absent Rate · last 4 weeks' },
+          { label: 'Employees w/ OT', value: intelligenceSummary.overtime.employees_with_ot, icon: Clock, tone: 'warning', sub: `${Math.round(intelligenceSummary.overtime.total_ot_minutes / 60)}h total OT`, metric: 'ot', drillLabel: 'Overtime Dependency · last 4 weeks' },
+          { label: 'Staffing Pressure', value: intelligenceSummary.staffing_pressure, icon: Zap, tone: intelligenceSummary.staffing_pressure > 20 ? 'destructive' : 'info', sub: 'worked on off/holiday', metric: 'pressure', drillLabel: 'Staffing Pressure · last 4 weeks' },
+          { label: 'Unresolved Anomalies', value: intelligenceSummary.unresolved_anomalies, icon: AlertTriangle, tone: intelligenceSummary.unresolved_anomalies > 0 ? 'warning' : 'success', sub: intelligenceSummary.unresolved_anomalies > 0 ? 'Needs review' : 'All clear', metric: null, drillLabel: '' },
         ]
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {summaryCards.map(({ label, value, icon: Icon, cls, sub, metric: m, drillLabel }) => (
-              <button
-                key={label}
-                onClick={m ? () => openInvestigation({ metric: m, ...range, label: drillLabel }) : undefined}
-                disabled={!m}
-                className={cn(
-                  'text-left transition-all',
-                  m && 'cursor-pointer group',
-                  !m && 'cursor-default',
-                )}
-              >
-                <div className={cn('surface-premium p-4 transition-all', m && 'group-hover:-translate-y-0.5 group-hover:ring-1 group-hover:ring-primary/30')}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                      <p className="text-[10px] text-muted-foreground">{label}</p>
-                    </div>
-                    {m && (
-                      <Search className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    )}
-                  </div>
-                  <p className={cn('text-2xl font-bold tabular-nums', cls)}>{value}</p>
-                  {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-                  {m && (
-                    <p className="text-[10px] text-primary mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      Click to investigate →
-                    </p>
-                  )}
-                </div>
-              </button>
+          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {cards.map(c => (
+              <KpiCard key={c.label} label={c.label} value={String(c.value)} icon={c.icon} tone={c.tone}
+                deltaLabel={c.metric ? 'Investigate →' : undefined} hint={c.sub}
+                onClick={c.metric ? () => openInvestigation({ metric: c.metric!, ...range, label: c.drillLabel }) : undefined} />
             ))}
-          </div>
+          </section>
         )
       })()}
 
-      {/* ── Backend Absenteeism Trend (weekly — click a data point to drill) ── */}
+      {/* Absenteeism trend (weekly — click a data point to drill) */}
       {absenteeismData && Array.isArray(absenteeismData.buckets) && absenteeismData.buckets.length > 0 && (
-        <SectionCard
-          title="Absenteeism Trend (Last 12 Weeks)"
-          icon={<Activity className="h-4 w-4 text-muted-foreground" />}
-          action={
-            <span className="text-[10px] text-muted-foreground">
-              Click a data point to investigate
-            </span>
-          }
-        >
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart
-              data={absenteeismData.buckets}
-              onClick={(payload) => {
-                if (!payload?.activePayload?.[0]) return
-                const week = (payload.activePayload?.[0]?.payload as { week: string } | undefined)?.week
-                const bucket = absenteeismData.buckets.find(b => b.week === week)
-                if (!bucket) return
-                // Compute approximate date bounds from week label
-                openInvestigation({
-                  metric: 'absent',
-                  from:   absenteeismData.range.from,
-                  to:     absenteeismData.range.to,
-                  week,
-                  label:  `Absent Rate · ${week}  (${bucket.absent_rate}%)`,
-                })
-              }}
-              style={{ cursor: 'pointer' }}
-            >
-              <CartesianGrid {...gridStyle} />
-              <XAxis
-                dataKey="week"
-                tick={{ ...axisStyle.tick, fontSize: 9 }}
-                axisLine={axisStyle.axisLine}
-                tickLine={axisStyle.tickLine}
-              />
-              <YAxis
-                tick={axisStyle.tick}
-                axisLine={axisStyle.axisLine}
-                tickLine={axisStyle.tickLine}
-                tickFormatter={(v: number) => `${v}%`}
-              />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                formatter={(v: number) => [`${v}%`]}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line
-                type="monotone"
-                dataKey="absent_rate"
-                stroke={STATUS_COLOR.absent}
-                strokeWidth={2}
-                dot={{ r: 3, fill: STATUS_COLOR.absent, strokeWidth: 0 }}
-                activeDot={{ r: 5, strokeWidth: 2 }}
-                name="Absent Rate %"
-              />
-              <Line
-                type="monotone"
-                dataKey="late_rate"
-                stroke={STATUS_COLOR.late}
-                strokeWidth={1.5}
-                dot={false}
-                strokeDasharray="4 2"
-                name="Late Rate %"
-                onClick={(data: unknown) => {
-                  const pt = (data as { payload?: { week: string; late_rate: number } })?.payload
-                  if (!pt) return
-                  openInvestigation({
-                    metric: 'late',
-                    from:   absenteeismData.range.from,
-                    to:     absenteeismData.range.to,
-                    week:   pt.week,
-                    label:  `Late Rate · ${pt.week}  (${pt.late_rate}%)`,
-                  })
+        <Viz icon={Activity} title="Absenteeism Trend" sub="Last 12 weeks · click a point to investigate">
+          <div className="h-[200px]">
+            <ResponsiveContainer>
+              <LineChart data={absenteeismData.buckets}
+                onClick={(payload) => {
+                  if (!payload?.activePayload?.[0]) return
+                  const week = (payload.activePayload?.[0]?.payload as { week: string } | undefined)?.week
+                  const bucket = absenteeismData.buckets.find(b => b.week === week)
+                  if (!bucket) return
+                  openInvestigation({ metric: 'absent', from: absenteeismData.range.from, to: absenteeismData.range.to, week, label: `Absent Rate · ${week}  (${bucket.absent_rate}%)` })
                 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-          <div className="flex items-center gap-4 mt-2 text-[10px] text-muted-foreground">
+                margin={{ top: 6, right: 8, left: -16, bottom: 0 }} style={{ cursor: 'pointer' }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+                <XAxis dataKey="week" tick={{ ...AXIS, fontSize: 9 }} tickLine={false} axisLine={false} />
+                <YAxis tick={AXIS} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${v}%`} />
+                <Tooltip content={<ChartTip fmt={(v: number) => `${v}%`} />} cursor={{ stroke: 'var(--muted)' }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="absent_rate" stroke={STATUS_COLOR.absent} strokeWidth={2} dot={{ r: 3, fill: STATUS_COLOR.absent, strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 2 }} name="Absent Rate %" />
+                <Line type="monotone" dataKey="late_rate" stroke={STATUS_COLOR.late} strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="Late Rate %" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 flex items-center gap-4 text-[10px] text-muted-foreground">
             <span>Overall absent rate: <strong className="text-foreground">{absenteeismData.summary.overall_absent_rate}%</strong></span>
             <span>Records analysed: <strong className="text-foreground">{(absenteeismData.summary.total_records ?? 0).toLocaleString()}</strong></span>
           </div>
-        </SectionCard>
+        </Viz>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Attendance Rate"
-          value={`${analytics?.attendanceRate ?? '—'}%`}
-          sub={`${analytics?.totalPresent ?? 0} present days`}
-          cls={parseFloat(analytics?.attendanceRate ?? '0') >= 90 ? 'text-success' : 'text-warning'}
-          trend={parseFloat(analytics?.attendanceRate ?? '0') >= 90 ? 'up' : 'down'}
-        />
-        <StatCard
-          label="Absenteeism Rate"
-          value={`${analytics?.absentRate ?? '—'}%`}
-          sub={`${analytics?.totalAbsent ?? 0} absent days`}
-          cls={parseFloat(analytics?.absentRate ?? '0') <= 5 ? 'text-success' : 'text-destructive'}
-        />
-        <StatCard
-          label="Leave Days Used"
-          value={analytics?.totalLeave ?? '—'}
-          sub="across all employees"
-          cls="text-info"
-        />
-        <StatCard
-          label="Avg Late (min)"
-          value={analytics?.avgLateMin ?? '—'}
-          sub="per late arrival"
-          cls={(analytics?.avgLateMin ?? 0) > 30 ? 'text-warning' : 'text-foreground'}
-        />
-      </div>
+      {/* KPI ribbon */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard label="Attendance Rate" value={`${analytics?.attendanceRate ?? '—'}%`} hint={`${analytics?.totalPresent ?? 0} present days`} icon={CheckCircle2} tone={parseFloat(analytics?.attendanceRate ?? '0') >= 90 ? 'success' : 'warning'} />
+        <KpiCard label="Absenteeism Rate" value={`${analytics?.absentRate ?? '—'}%`} hint={`${analytics?.totalAbsent ?? 0} absent days`} icon={TrendingDown} tone={parseFloat(analytics?.absentRate ?? '0') <= 5 ? 'success' : 'destructive'} />
+        <KpiCard label="Leave Days Used" value={String(analytics?.totalLeave ?? '—')} hint="across all employees" icon={Calendar} tone="info" />
+        <KpiCard label="Avg Late · min" value={String(analytics?.avgLateMin ?? '—')} hint="per late arrival" icon={Clock} tone={(analytics?.avgLateMin ?? 0) > 30 ? 'warning' : 'primary'} />
+      </section>
 
       {musterLoading || summaryLoading ? (
-        <SectionCard>
-          <div className="flex items-center justify-center py-20 gap-3 text-muted-foreground">
-            <Calendar className="h-8 w-8 opacity-30 animate-pulse" />
+        <Viz title="Attendance Analytics">
+          <div className="flex items-center justify-center gap-3 py-20 text-muted-foreground">
+            <Calendar className="h-8 w-8 animate-pulse opacity-30" />
             <p className="text-sm">Loading analytics…</p>
           </div>
-        </SectionCard>
+        </Viz>
       ) : !analytics ? (
-        <SectionCard>
-          <div className="flex flex-col items-center py-20 gap-3 text-muted-foreground">
-            <Calendar className="h-10 w-10 opacity-30" />
-            <p className="text-sm">No attendance data for this period.</p>
-          </div>
-        </SectionCard>
+        <NoData text="No attendance data for this period." />
       ) : (
         <>
           {/* Charts row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <Viz icon={TrendingUp} title="Daily Attendance Trend" sub="Present vs absent · click to investigate">
+              <div className="h-[220px]">
+                <ResponsiveContainer>
+                  <LineChart data={analytics.dailyTrend}
+                    onClick={(payload) => {
+                      if (!payload?.activePayload?.[0]) return
+                      const pt = payload.activePayload[0].payload as { date: string; present: number; absent: number }
+                      const fullDate = `${month}-${pt.date.slice(-2)}`
+                      const [y, mo] = month.split('-').map(Number)
+                      const from = `${month}-01`
+                      const to = new Date(y, mo, 0).toISOString().slice(0, 10)
+                      openInvestigation({ metric: 'absent', from, to, label: `Absent / Present · ${fullDate}  (${pt.absent} absent, ${pt.present} present)` })
+                    }}
+                    margin={{ top: 6, right: 8, left: -16, bottom: 0 }} style={{ cursor: 'pointer' }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+                    <XAxis dataKey="date" tick={AXIS} tickLine={false} axisLine={false} />
+                    <YAxis tick={AXIS} tickLine={false} axisLine={false} />
+                    <Tooltip content={<ChartTip />} cursor={{ stroke: 'var(--muted)' }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="present" stroke={STATUS_COLOR.present} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} name="Present" />
+                    <Line type="monotone" dataKey="absent" stroke={STATUS_COLOR.absent} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} name="Absent" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </Viz>
 
-            {/* Daily attendance trend */}
-            <SectionCard
-              title="Daily Attendance Trend"
-              icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
-              action={
-                <span className="text-[10px] text-muted-foreground">Click to investigate</span>
-              }
-            >
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart
-                  data={analytics.dailyTrend}
-                  onClick={(payload) => {
-                    if (!payload?.activePayload?.[0]) return
-                    const pt = payload.activePayload[0].payload as { date: string; present: number; absent: number }
-                    // date is MM-DD; reconstruct full date for this month
-                    const fullDate = `${month}-${pt.date.slice(-2)}`
-                    const metric: DrillMetric = pt.absent > pt.present ? 'absent' : 'absent'
-                    const [y, mo] = month.split('-').map(Number)
-                    const from = `${month}-01`
-                    const to   = new Date(y, mo, 0).toISOString().slice(0, 10)
-                    openInvestigation({
-                      metric,
-                      from, to,
-                      label: `Absent / Present · ${fullDate}  (${pt.absent} absent, ${pt.present} present)`,
-                    })
-                  }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <CartesianGrid {...gridStyle} />
-                  <XAxis dataKey="date" tick={axisStyle.tick} axisLine={axisStyle.axisLine} tickLine={axisStyle.tickLine} />
-                  <YAxis tick={axisStyle.tick} axisLine={axisStyle.axisLine} tickLine={axisStyle.tickLine} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="present" stroke={STATUS_COLOR.present} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} name="Present" />
-                  <Line type="monotone" dataKey="absent"  stroke={STATUS_COLOR.absent}  strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} name="Absent" />
-                </LineChart>
-              </ResponsiveContainer>
-            </SectionCard>
+            <Viz icon={CheckCircle2} title="Status Distribution" sub="Across all employee-days">
+              {donutData.length > 0 ? (
+                <DonutBlock data={donutData} centerValue={donutTotal.toLocaleString()} centerLabel="days" total={donutTotal} />
+              ) : <NoData text="No status data." />}
+            </Viz>
+          </section>
 
-            {/* Status distribution pie */}
-            <SectionCard
-              title="Status Distribution"
-              icon={<CheckCircle2 className="h-4 w-4 text-muted-foreground" />}
-            >
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={analytics.pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {analytics.pieData.map((entry) => (
-                      <Cell key={entry.name} fill={STATUS_COLOR[entry.name] ?? getChartColor('inactive')} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={tooltipStyle} />
-                </PieChart>
-              </ResponsiveContainer>
-            </SectionCard>
-          </div>
-
-          {/* Leave utilization bar */}
+          {/* Leave utilization */}
           {analytics.leaveBar.length > 0 && (
-            <SectionCard
-              title="Leave Utilization (Top Employees)"
-              icon={<Calendar className="h-4 w-4 text-muted-foreground" />}
-              action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1.5"
+            <Viz icon={Calendar} title="Leave Utilization" sub="Top employees · this month"
+              right={
+                <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs"
                   onClick={() => {
                     const [y, mo] = month.split('-').map(Number)
                     const from = `${month}-01`
-                    const to   = new Date(y, mo, 0).toISOString().slice(0, 10)
-                    openInvestigation({
-                      metric: 'leave',
-                      from, to,
-                      label: `Leave Utilization · ${monthLabel(month)}`,
-                    })
-                  }}
-                >
-                  <Search className="h-3 w-3" />
-                  Investigate All
+                    const to = new Date(y, mo, 0).toISOString().slice(0, 10)
+                    openInvestigation({ metric: 'leave', from, to, label: `Leave Utilization · ${monthLabel(month)}` })
+                  }}>
+                  <Search className="h-3 w-3" /> Investigate
                 </Button>
-              }
-            >
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart
-                  data={analytics.leaveBar}
-                  layout="vertical"
-                  onClick={() => {
-                    const [y, mo] = month.split('-').map(Number)
-                    const from = `${month}-01`
-                    const to   = new Date(y, mo, 0).toISOString().slice(0, 10)
-                    openInvestigation({
-                      metric: 'leave',
-                      from, to,
-                      label: `Leave Utilization · ${monthLabel(month)}`,
-                    })
-                  }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <CartesianGrid {...gridStyle} />
-                  <XAxis type="number" tick={axisStyle.tick} axisLine={axisStyle.axisLine} tickLine={axisStyle.tickLine} />
-                  <YAxis type="category" dataKey="name" tick={axisStyle.tick} axisLine={axisStyle.axisLine} tickLine={axisStyle.tickLine} width={70} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="days" fill={STATUS_COLOR.leave} name="Leave Days" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </SectionCard>
+              }>
+              <div className="h-[200px]">
+                <ResponsiveContainer>
+                  <BarChart data={analytics.leaveBar} layout="vertical"
+                    onClick={() => {
+                      const [y, mo] = month.split('-').map(Number)
+                      const from = `${month}-01`
+                      const to = new Date(y, mo, 0).toISOString().slice(0, 10)
+                      openInvestigation({ metric: 'leave', from, to, label: `Leave Utilization · ${monthLabel(month)}` })
+                    }}
+                    margin={{ top: 2, right: 16, left: 4, bottom: 2 }} style={{ cursor: 'pointer' }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+                    <XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} />
+                    <YAxis type="category" dataKey="name" tick={AXIS} tickLine={false} axisLine={false} width={72} />
+                    <Tooltip content={<ChartTip />} cursor={{ fill: 'var(--muted)', opacity: 0.4 }} />
+                    <Bar dataKey="days" fill={STATUS_COLOR.leave} name="Leave Days" radius={[0, 4, 4, 0]} maxBarSize={16} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Viz>
           )}
 
-          {/* Reliability Table */}
-          <SectionCard
-            title="Employee Reliability Scores"
-            icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            action={
+          {/* Reliability table */}
+          <Viz icon={Users} title="Employee Reliability Scores" sub="Lowest first"
+            right={
               <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Search employee…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="h-7 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none w-36"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1.5"
+                <input type="text" placeholder="Search employee…" value={search} onChange={e => setSearch(e.target.value)}
+                  className="h-7 w-36 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none" />
+                <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs"
                   onClick={() => {
                     const [y, mo] = month.split('-').map(Number)
                     const from = `${month}-01`
-                    const to   = new Date(y, mo, 0).toISOString().slice(0, 10)
-                    openInvestigation({
-                      metric: 'reliability',
-                      from, to,
-                      label:  `Reliability Scores · ${monthLabel(month)}`,
-                    })
-                  }}
-                >
-                  <Search className="h-3 w-3" />
-                  Investigate
+                    const to = new Date(y, mo, 0).toISOString().slice(0, 10)
+                    openInvestigation({ metric: 'reliability', from, to, label: `Reliability Scores · ${monthLabel(month)}` })
+                  }}>
+                  <Search className="h-3 w-3" /> Investigate
                 </Button>
               </div>
-            }
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border">
+            }>
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full min-w-[560px] text-xs">
+                <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <tr>
                     {['Employee', 'Score', 'Present', 'Late', 'Absent', 'Work Days'].map(h => (
-                      <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
+                      <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y">
                   {filteredReliability.map(e => (
-                    <tr key={e.code} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <tr key={e.code} className="transition-colors hover:bg-muted/30">
                       <td className="px-3 py-2">
                         <p className="font-medium text-foreground">{e.name}</p>
                         <p className="text-[10px] text-muted-foreground">{e.code}</p>
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden max-w-[60px]">
-                            <div
-                              className={cn(
-                                'h-full rounded-full',
-                                e.score >= 90 ? 'bg-success' : e.score >= 70 ? 'bg-warning' : 'bg-destructive',
-                              )}
-                              style={{ width: `${e.score}%` }}
-                            />
+                          <div className="h-1.5 max-w-[60px] flex-1 overflow-hidden rounded-full bg-muted">
+                            <div className={cn('h-full rounded-full', e.score >= 90 ? 'bg-success' : e.score >= 70 ? 'bg-warning' : 'bg-destructive')} style={{ width: `${e.score}%` }} />
                           </div>
-                          <Badge
-                            variant={e.score >= 90 ? 'success' : e.score >= 70 ? 'warning' : 'destructive'}
-                            className="rounded-full text-[10px]"
-                          >
-                            {e.score}%
-                          </Badge>
+                          <Badge variant={e.score >= 90 ? 'success' : e.score >= 70 ? 'warning' : 'destructive'} className="rounded-full text-[10px]">{e.score}%</Badge>
                         </div>
                       </td>
                       <td className="px-3 py-2 tabular-nums text-success">{e.present}</td>
@@ -796,11 +538,11 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
                 </tbody>
               </table>
             </div>
-          </SectionCard>
+          </Viz>
 
           {/* Anomaly alert */}
           {anomalyCount > 0 && (
-            <div className="flex items-center gap-3 p-4 rounded-lg bg-warning/10 border border-warning/20 text-warning">
+            <div className="flex items-center gap-3 rounded-lg border border-warning/20 bg-warning/10 p-4 text-warning">
               <AlertTriangle className="h-5 w-5 flex-shrink-0" />
               <div>
                 <p className="text-sm font-semibold">{anomalyCount} unresolved anomaly(ies) this month</p>
@@ -811,30 +553,20 @@ function WorkforceAnalyticsInner({ embedded = false }: { embedded?: boolean }) {
 
           {/* Payroll summary footer */}
           {payrollSum && (
-            <SectionCard>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: 'Total Employees', value: payrollSum.total_employees,   cls: 'text-foreground' },
-                  { label: 'Payable Days',    value: payrollSum.total_payable_days, cls: 'text-success' },
-                  { label: 'LOP Days',        value: payrollSum.total_lop_days,    cls: 'text-destructive' },
-                  { label: 'Avg Hours/Day',   value: payrollSum.avg_work_hours?.toFixed(1) ?? '—', cls: 'text-info' },
-                ].map(({ label, value, cls }) => (
-                  <div key={label} className="text-center">
-                    <p className="text-[10px] text-muted-foreground">{label}</p>
-                    <p className={cn('text-xl font-bold', cls)}>{value}</p>
-                  </div>
-                ))}
+            <Viz title="Payroll Summary" sub={monthLabel(month)}>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <MiniStat label="Total Employees" value={String(payrollSum.total_employees)} tone="primary" boxed />
+                <MiniStat label="Payable Days" value={String(payrollSum.total_payable_days)} tone="success" boxed />
+                <MiniStat label="LOP Days" value={String(payrollSum.total_lop_days)} tone="destructive" boxed />
+                <MiniStat label="Avg Hours/Day" value={payrollSum.avg_work_hours?.toFixed(1) ?? '—'} tone="muted" boxed />
               </div>
-            </SectionCard>
+            </Viz>
           )}
         </>
       )}
 
-      {/* ── Investigation Panel — slide-over for any drilldown ─────────── */}
-      <InvestigationPanel
-        target={investigation}
-        onClose={closeInvestigation}
-      />
+      {/* Investigation Panel — slide-over for any drilldown */}
+      <InvestigationPanel target={investigation} onClose={closeInvestigation} />
     </PageContainer>
   )
 }
