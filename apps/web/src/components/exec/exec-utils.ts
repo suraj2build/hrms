@@ -15,6 +15,17 @@ export const CAT = [C.blue, C.teal, C.violet, C.amber, C.cyan, C.rose, C.green, 
 export const GRID = 'var(--border)'
 export const AXIS = { fontSize: 10, fill: 'var(--muted-foreground)' } as const
 
+// ── Period slicer (windows trend series) ────────────────────────────────────────
+export type Period = '30D' | 'QTD' | 'YTD' | '12M'
+export const PERIODS: Period[] = ['30D', 'QTD', 'YTD', '12M']
+export function periodMonths(p: Period): number {
+  // 30D ≈ latest month (min 2 points for a chart); YTD = months elapsed this year.
+  return p === '30D' ? 2 : p === 'QTD' ? 3 : p === 'YTD' ? Math.max(2, new Date().getMonth() + 1) : 12
+}
+export function slicePeriod<T>(arr: T[], p: Period): T[] {
+  return arr.slice(-periodMonths(p))
+}
+
 export function genderColor(k: string): string {
   const x = k.toLowerCase()
   if (/female|^f$/.test(x)) return C.teal

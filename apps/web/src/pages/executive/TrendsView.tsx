@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { TrendingUp, Users, UserMinus, Wallet, Activity, CalendarCheck, ArrowUpDown } from 'lucide-react'
 import {
@@ -8,14 +8,15 @@ import {
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { ExecLayout } from '@/components/exec/ExecShell'
-import { Viz, ChartTip, NoData } from '@/components/exec/viz'
-import { C, GRID, AXIS, fmtMonth } from '@/components/exec/exec-utils'
+import { Viz, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
+import { C, GRID, AXIS, fmtMonth, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
 interface TrendsData {
   months: Array<{ month: string; attendance_rate: number; leave_days_approved: number; payroll_gross: number | null; payroll_headcount: number | null; joiners: number; exits: number; net_headcount: number }>
 }
 
 export default function TrendsView() {
+  const [period, setPeriod] = useState<Period>('12M')
   const { data: t } = useQuery<TrendsData>({ queryKey: ['exec-trends'], queryFn: () => api.get<{ data?: TrendsData } & TrendsData>('/executive/trends').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
   const months = useMemo(() => t?.months ?? [], [t])
 
@@ -34,20 +35,21 @@ export default function TrendsView() {
     return { cagr, attrition, runrate, netChange }
   }, [months])
 
-  const combined = months.map(m => ({
+  const combined = slicePeriod(months.map(m => ({
     month: fmtMonth(m.month),
     headcount: m.net_headcount ?? 0,
     payroll: m.payroll_gross != null ? +(m.payroll_gross / 1e7).toFixed(2) : null,
     attrition: m.net_headcount > 0 ? +(m.exits / m.net_headcount * 100).toFixed(2) : 0,
     attendance: +(m.attendance_rate ?? 0).toFixed(1),
-  }))
-  const flow = months.map(m => ({ month: fmtMonth(m.month), joiners: m.joiners ?? 0, exits: -(m.exits ?? 0), net: (m.joiners ?? 0) - (m.exits ?? 0) }))
+  })), period)
+  const flow = slicePeriod(months.map(m => ({ month: fmtMonth(m.month), joiners: m.joiners ?? 0, exits: -(m.exits ?? 0), net: (m.joiners ?? 0) - (m.exits ?? 0) })), period)
 
   const fmtPct = (n: number | null) => (n == null ? '—' : `${n.toFixed(1)}%`)
   const cr = (n: number | null) => (n == null ? '—' : n >= 1e7 ? `₹${(n / 1e7).toFixed(1)}Cr` : `₹${(n / 1e5).toFixed(1)}L`)
 
   return (
-    <ExecLayout title="Trends & Forecasting" subtitle="Long-run workforce, cost and attrition trends · live data">
+    <ExecLayout title="Trends & Forecasting" subtitle="Long-run workforce, cost and attrition trends · live data"
+      actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
       {/* KPI ribbon */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Headcount Growth" value={fmtPct(metrics.cagr)} icon={Users} tone="primary" deltaLabel="Annualised" />

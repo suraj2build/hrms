@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Users, Users2, TrendingUp, Building2, Layers, Activity } from 'lucide-react'
 import {
@@ -8,8 +8,8 @@ import {
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { ExecLayout } from '@/components/exec/ExecShell'
-import { Viz, DonutBlock, ChartTip, NoData } from '@/components/exec/viz'
-import { C, CAT, GRID, AXIS, genderColor, tc, fmtNum, fmtMonth } from '@/components/exec/exec-utils'
+import { Viz, DonutBlock, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
+import { C, CAT, GRID, AXIS, genderColor, tc, fmtNum, fmtMonth, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
 interface WorkforceData {
   employee_count: number
@@ -21,6 +21,7 @@ interface WorkforceData {
 }
 
 export default function WorkforceView() {
+  const [period, setPeriod] = useState<Period>('12M')
   const { data: wf } = useQuery<WorkforceData>({ queryKey: ['exec-workforce'], queryFn: () => api.get<{ data?: WorkforceData } & WorkforceData>('/executive/workforce').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const deptRanked = useMemo(() => [...(wf?.dept_distribution ?? [])]
@@ -34,11 +35,12 @@ export default function WorkforceView() {
   const genderTotal = genderData.reduce((s, d) => s + d.value, 0)
   const femalePct = genderTotal > 0 ? ((genderData.find(g => /female|^f$/i.test(g.name))?.value ?? 0) / genderTotal) * 100 : null
 
-  const flow = (wf?.monthly_trends ?? []).map(t => ({ month: fmtMonth(t.month), joiners: t.joiners, exits: -t.exits, net: t.net }))
+  const flow = slicePeriod((wf?.monthly_trends ?? []).map(t => ({ month: fmtMonth(t.month), joiners: t.joiners, exits: -t.exits, net: t.net })), period)
   const net = (wf?.total_joiners_period ?? 0) - (wf?.total_exits_period ?? 0)
 
   return (
-    <ExecLayout title="Workforce Analytics" subtitle="Composition, movement and structure of the manpower base · live data">
+    <ExecLayout title="Workforce Analytics" subtitle="Composition, movement and structure of the manpower base · live data"
+      actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
       {/* KPI ribbon */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Active Headcount" value={fmtNum(wf?.employee_count)} icon={Users} tone="primary" />

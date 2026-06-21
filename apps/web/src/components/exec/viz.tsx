@@ -5,6 +5,21 @@
  */
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { cn } from '@/lib/utils'
+import { PERIODS, type Period } from '@/components/exec/exec-utils'
+
+export function PeriodSlicer({ value, onChange }: { value: Period; onChange: (p: Period) => void }) {
+  return (
+    <div className="flex items-center rounded-lg border bg-muted/40 p-0.5">
+      {PERIODS.map((p) => (
+        <button key={p} onClick={() => onChange(p)}
+          className={cn('rounded-md px-3 py-1 text-xs font-medium transition-colors',
+            value === p ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+          {p}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function Viz({ title, sub, icon: Icon, right, className, children }: {
   title: string; sub?: string; icon?: React.ComponentType<{ className?: string }>

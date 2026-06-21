@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Wallet, IndianRupee, Users, Clock, Building2, TrendingUp, Gauge, CalendarClock, LogOut, Activity, Layers } from 'lucide-react'
 import {
@@ -8,8 +8,8 @@ import {
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
 import { ExecLayout, StatTile } from '@/components/exec/ExecShell'
-import { Viz, ChartTip, NoData } from '@/components/exec/viz'
-import { C, CAT, GRID, AXIS, cr, fmtMonth } from '@/components/exec/exec-utils'
+import { Viz, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
+import { C, CAT, GRID, AXIS, cr, fmtMonth, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
 type FlagTone = 'high' | 'medium' | 'normal'
 
@@ -36,6 +36,7 @@ const flagTone = (f?: FlagTone): 'warning' | 'destructive' | 'success' =>
   f === 'high' ? 'destructive' : f === 'medium' ? 'warning' : 'success'
 
 export default function FinancialView() {
+  const [period, setPeriod] = useState<Period>('12M')
   const { data: fin } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get<{ data?: FinancialData } & FinancialData>('/executive/financial').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const trend = fin?.payroll_cost_trend ?? []
@@ -45,7 +46,7 @@ export default function FinancialView() {
   const leaveLiability = fin?.leave_liability ?? 0
   const ffExposure = fin?.ff_exposure ?? 0
 
-  const trendData = trend.map(t => ({ month: fmtMonth(t.month), gross: +(t.total_gross / 1e7).toFixed(2), head: t.employee_count }))
+  const trendData = slicePeriod(trend.map(t => ({ month: fmtMonth(t.month), gross: +(t.total_gross / 1e7).toFixed(2), head: t.employee_count })), period)
   const deptRows = useMemo(() => [...(fin?.dept_cost_breakdown ?? [])].sort((a, b) => b.total_gross - a.total_gross), [fin])
   const deptCost = deptRows.slice(0, 8).map(d => ({ dept: d.dept, value: +(d.total_gross / 1e5).toFixed(2), gross: d.total_gross }))
   const otByDept = deptRows.filter(d => (d.ot_cost ?? 0) > 0).slice(0, 8).map((d, i) => ({ dept: d.dept, value: +(d.ot_cost / 1e5).toFixed(1), ot: d.ot_cost, color: CAT[i % CAT.length] }))
@@ -61,10 +62,11 @@ export default function FinancialView() {
       ].filter(s => s.value > 0)
     : []
   const mixTotal = mixSegments.reduce((s, m) => s + m.value, 0)
-  const otTrend = (fin?.ot_trend ?? []).filter(t => t.ot_cost > 0).map(t => ({ month: fmtMonth(t.month), ot: +(t.ot_cost / 1e5).toFixed(1) }))
+  const otTrend = slicePeriod((fin?.ot_trend ?? []).filter(t => t.ot_cost > 0).map(t => ({ month: fmtMonth(t.month), ot: +(t.ot_cost / 1e5).toFixed(1) })), period)
 
   return (
-    <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and exposure · live data">
+    <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and exposure · live data"
+      actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
       {/* KPI ribbon — payroll */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Gross Payroll · MTD" value={cr(fin?.payroll_current_gross ?? 0)} delta={fin?.payroll_mom_change} deltaLabel="MoM" icon={Wallet} tone="primary" />
