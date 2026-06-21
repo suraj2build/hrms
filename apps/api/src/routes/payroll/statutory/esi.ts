@@ -471,6 +471,22 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Remove stale rows for employees no longer in this month's eligible set
+    // (e.g. crossed the ESI ceiling / became exempt since the last compute).
+    // Without this, a re-finalize upserts only the still-eligible rows and leaves
+    // the dropped employee's old contribution behind → the challan over-remits.
+    {
+      const keepIds = contributions.map((c: any) => c.employee_id)
+      let delQ = fastify.supabase
+        .from('esi_contributions')
+        .delete()
+        .eq('tenant_id', req.tenantId)
+        .eq('contribution_month', month)
+      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
+      const { error: delErr } = await delQ
+      if (delErr) return reply.code(500).send({ error: 'STALE_CLEANUP_FAILED', message: delErr.message })
+    }
+
     if (contributions.length > 0) {
       const { error: upsertErr } = await fastify.supabase
         .from('esi_contributions')

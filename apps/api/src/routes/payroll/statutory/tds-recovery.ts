@@ -22,6 +22,18 @@ import { z } from 'zod'
  * Example: fyFromLabel('2025-26') →
  *   ['2025-04','2025-05',...,'2025-12','2026-01','2026-02','2026-03']
  */
+/**
+ * Current Indian financial year label ("YYYY-YY"). The FY starts in April, so
+ * Jan–Mar belong to the FY that started the PREVIOUS calendar year — using the
+ * raw calendar year (as this route did) mislabels Jan–Mar and returns empty
+ * recovery schedules for a quarter of the year.
+ */
+function currentFinancialYear(): string {
+  const now = new Date()
+  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+  return `${fyYear}-${String(fyYear + 1).slice(2)}`
+}
+
 function fyMonths(financialYear: string): string[] {
   // financialYear is "YYYY-YY", e.g. "2025-26"
   const startYear = parseInt(financialYear.slice(0, 4), 10)
@@ -127,6 +139,9 @@ async function buildRecoveryFromSlips(
       .eq('employee_id', employeeId)
       .gte('month', fromPeriod)
       .lte('month', toPeriod)
+      // Only finalized slips represent actually-deducted TDS — without this, a
+      // draft/in-progress slip leaks into the employee-facing recovery view.
+      .eq('status', 'finalized')
       .order('month', { ascending: true }),
     fastify.supabase
       .from('tds_monthly_projections')
@@ -213,7 +228,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
     const { data, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
 
-    const fy = parsed.data.financial_year ?? `${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(2)}`
+    const fy = parsed.data.financial_year ?? currentFinancialYear()
     if (!data || data.length === 0) {
       const fallback = await buildRecoveryFromSlips(fastify, req.tenantId, employeeId, fy)
       if (fallback) return reply.send(fallback)
@@ -251,7 +266,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
       const { data, error } = await q
       if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
 
-      const fy = parsed.data.financial_year ?? `${new Date().getFullYear()}-${String(new Date().getFullYear() + 1).slice(2)}`
+      const fy = parsed.data.financial_year ?? currentFinancialYear()
       if (!data || data.length === 0) {
         const fallback = await buildRecoveryFromSlips(fastify, req.tenantId, employeeId, fy)
         if (fallback) return reply.send(fallback)
@@ -314,8 +329,11 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
         .eq('employee_id', employee_id)
         .gte('month', fyStart)
         .lte('month', fyEnd)
-        // Only include processed slips for accurate TDS figures
-        .in('status', ['processed', 'finalized', 'paid'])
+        // Only finalized slips represent actually-deducted TDS. ('processed'/'paid'
+        // are not valid payroll_slips statuses — see migration 140 — so the old
+        // set already collapsed to 'finalized'; stated explicitly here to match
+        // the IT statement, which uses the same single source of truth.)
+        .eq('status', 'finalized')
 
       if (slipErr) {
         req.log.error({ err: slipErr }, 'tds-recovery: failed to fetch payroll_slips')
@@ -357,20 +375,23 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
 
       // ── Step 8: Upsert into tds_monthly_recovery ──────────────────────────────
       // Unique constraint: (tenant_id, employee_id, financial_year, payroll_period)
+      // Column names MUST match tds_monthly_recovery (migration 174). The previous
+      // payload used tax_deducted_prior / monthly_recovery_amount and three columns
+      // that don't exist on this table (tax_declaration_id, computed_by,
+      // computed_at) — PostgREST rejected the whole upsert, so recovery rows were
+      // never persisted and the read surfaced already-deducted = 0 / inflated
+      // remaining tax.
       const upsertPayload = {
         tenant_id:                 req.tenantId,
         employee_id,
         financial_year,
         payroll_period,
-        tax_declaration_id:        declaration?.id ?? null,
         projected_annual_tax:      projectedAnnualTax,
-        tax_deducted_prior:        taxAlreadyDeducted,
+        tax_already_deducted:      taxAlreadyDeducted,
         external_tds:              externalTds,
         remaining_tax:             remainingTax,
         payroll_cycles_remaining:  payrollCyclesRemaining,
-        monthly_recovery_amount:   monthlyRecovery,
-        computed_by:               req.userId,
-        computed_at:               now,
+        monthly_recovery:          monthlyRecovery,
         updated_at:                now,
       }
 

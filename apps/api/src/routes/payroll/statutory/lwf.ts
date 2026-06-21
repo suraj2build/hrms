@@ -359,6 +359,21 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Remove stale rows for employees no longer in this month's deductible set
+    // (e.g. became exempt / state disabled / no longer configured since the last
+    // compute), so a re-finalize cannot leave a phantom LWF liability on the filing.
+    {
+      const keepIds = contributions.map((c: any) => c.employee_id)
+      let delQ = fastify.supabase
+        .from('lwf_contributions')
+        .delete()
+        .eq('tenant_id', req.tenantId)
+        .eq('contribution_month', month)
+      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
+      const { error: delErr } = await delQ
+      if (delErr) return reply.code(500).send({ error: 'STALE_CLEANUP_FAILED', message: delErr.message })
+    }
+
     if (contributions.length > 0) {
       const { error: upsertErr } = await fastify.supabase
         .from('lwf_contributions')

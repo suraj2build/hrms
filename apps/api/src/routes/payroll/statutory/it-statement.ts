@@ -33,11 +33,19 @@ function currentFinancialYear(): string {
 
 function remainingMonthsInFY(financialYear: string): number {
   const fyStart = parseInt(financialYear.split('-')[0], 10)
-  const now = new Date()
-  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const fromPeriod = `${fyStart}-04`
+  const toPeriod   = `${fyStart + 1}-03`
   const fyMonths: string[] = []
   for (let m = 4; m <= 12; m++) fyMonths.push(`${fyStart}-${String(m).padStart(2, '0')}`)
   for (let m = 1; m <= 3;  m++) fyMonths.push(`${fyStart + 1}-${String(m).padStart(2, '0')}`)
+  const now = new Date()
+  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  // The "current month" must be interpreted relative to the REQUESTED FY, not
+  // raw today. For a future FY all months remain; for a past/closed FY spread the
+  // balance across the whole FY rather than dumping it into a single month (the
+  // old `|| 1` collapsed every closed-FY recovery into one absurd month).
+  if (currentMonthStr < fromPeriod) return fyMonths.length
+  if (currentMonthStr > toPeriod)   return fyMonths.length
   return fyMonths.filter(m => m >= currentMonthStr).length || 1
 }
 
