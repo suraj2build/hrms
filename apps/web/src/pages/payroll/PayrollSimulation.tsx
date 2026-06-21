@@ -27,6 +27,7 @@ import { SectionCard }      from '@/components/layout/SectionCard'
 import { Button }           from '@/components/ui/button'
 import { Badge }            from '@/components/ui/badge'
 import { Input }            from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   getAxisStyle, getGridStyle, getTooltipStyle, getChartColor,
 } from '@/components/ui/chart'
@@ -48,7 +49,7 @@ interface ScenarioForm {
   // headcount_change
   delta?:         string
   // revision
-  employee_ids?:  string  // newline-separated UUIDs
+  employee_ids?:  string[]
   new_ctc_annual?: string
   // lop_rate_change
   working_days?:  string
@@ -122,7 +123,7 @@ function defaultForm(type: ScenarioType): ScenarioForm {
     working_days:  '26',
     lop_days_delta: '1',
     monthly_delta:  '2000',
-    employee_ids:  '',
+    employee_ids:  [],
     department_id: '',
   }
 }
@@ -139,7 +140,7 @@ function buildPayload(forms: ScenarioForm[]) {
           department_id: f.department_id || undefined }
       case 'revision':
         return { ...base,
-          employee_ids: (f.employee_ids ?? '').split('\n').map(s => s.trim()).filter(Boolean),
+          employee_ids: f.employee_ids ?? [],
           new_ctc_annual: parseFloat(f.new_ctc_annual ?? '0') }
       case 'lop_rate_change':
         return { ...base, working_days: parseInt(f.working_days ?? '26'),
@@ -221,12 +222,13 @@ function ScenarioCard({
         {form.type === 'revision' && (
           <>
             <div className="col-span-2">
-              <label className={labelCls}>Employee UUIDs (one per line)</label>
-              <textarea
-                className="flex w-full rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus:ring-1 ring-primary/50 resize-y min-h-[52px]"
-                placeholder={'UUID-1\nUUID-2'}
-                value={form.employee_ids}
-                onChange={e => field('employee_ids', e.target.value)}
+              <label className={labelCls}>Employees</label>
+              <EmployeeSelector
+                multiple
+                value={form.employee_ids ?? []}
+                onChange={v => onChange({ ...form, employee_ids: Array.isArray(v) ? v : (v ? [v] : []) })}
+                placeholder="Select employees…"
+                className="w-full"
               />
             </div>
             <div>

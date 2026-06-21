@@ -23,6 +23,7 @@ import { Button }         from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
@@ -318,12 +319,12 @@ function CreateIncidentDialog({ open, onClose }: CreateIncidentDialogProps) {
           {/* optional fields */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Employee ID (opt)</label>
-              <input
+              <label className="text-xs font-medium text-muted-foreground">Employee (opt)</label>
+              <EmployeeSelector
                 value={form.employee_id}
-                onChange={set('employee_id')}
-                placeholder="UUID"
-                className="flex w-full h-8 rounded-md border border-input bg-background px-3 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                onChange={v => setForm(f => ({ ...f, employee_id: typeof v === 'string' ? v : (v[0] ?? '') }))}
+                placeholder="Select employee…"
+                className="w-full"
               />
             </div>
             <div className="space-y-1">
@@ -413,12 +414,12 @@ function EscalateDialog({
         </DialogHeader>
         <div className="space-y-3 pt-1">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Escalate To (Employee ID)</label>
-            <input
+            <label className="text-xs font-medium text-muted-foreground">Escalate To</label>
+            <EmployeeSelector
               value={escalateTo}
-              onChange={e => setEscalateTo(e.target.value)}
-              placeholder="UUID"
-              className="flex w-full h-8 rounded-md border border-input bg-background px-3 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+              onChange={v => setEscalateTo(typeof v === 'string' ? v : (v[0] ?? ''))}
+              placeholder="Select employee…"
+              className="w-full"
             />
           </div>
           <div className="space-y-1">

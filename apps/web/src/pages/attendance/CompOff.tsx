@@ -23,6 +23,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
@@ -380,12 +381,12 @@ export function CompOff() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Employee UUID <span className="text-muted-foreground">(optional — omit to process all employees)</span></label>
-                <Input
+                <label className="text-xs font-medium text-foreground">Employee <span className="text-muted-foreground">(optional — omit to process all employees)</span></label>
+                <EmployeeSelector
                   value={genEmpId}
-                  onChange={e => setGenEmpId(e.target.value)}
-                  placeholder="Leave blank for all active employees"
-                  className="h-8 text-xs"
+                  onChange={v => setGenEmpId(typeof v === 'string' ? v : (v[0] ?? ''))}
+                  placeholder="All active employees"
+                  className="w-full"
                 />
               </div>
 

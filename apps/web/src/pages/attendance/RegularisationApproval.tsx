@@ -38,6 +38,7 @@ import { Badge }            from '@/components/ui/badge'
 import { Button }           from '@/components/ui/button'
 import { Input }            from '@/components/ui/input'
 import { DateInput }        from '@/components/ui/date-input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   Dialog,
   DialogContent,
@@ -253,7 +254,7 @@ export function RegularisationApproval() {
 
   // ── Bulk leave state ───────────────────────────────────────────────────────
   const [bulkLeaveTypeId, setBulkLeaveTypeId] = useState('')
-  const [bulkEmpIds,      setBulkEmpIds]      = useState('')
+  const [bulkEmpIds,      setBulkEmpIds]      = useState<string[]>([])
   const [bulkFrom,        setBulkFrom]        = useState('')
   const [bulkTo,          setBulkTo]          = useState('')
   const [bulkMsg,         setBulkMsg]         = useState('')
@@ -435,7 +436,7 @@ export function RegularisationApproval() {
         description: `${r.days_count} day${r.days_count !== 1 ? 's' : ''} of leave applied.`,
       })
       setBulkMsg('')
-      setBulkEmpIds('')
+      setBulkEmpIds([])
       setBulkFrom('')
       setBulkTo('')
     },
@@ -447,7 +448,7 @@ export function RegularisationApproval() {
   })
 
   function handleBulkLeave() {
-    const ids = bulkEmpIds.split('\n').map(s => s.trim()).filter(Boolean)
+    const ids = bulkEmpIds
     if (!ids.length || !bulkLeaveTypeId || !bulkFrom || !bulkTo) {
       setBulkMsg('All fields are required')
       return
@@ -1056,13 +1057,14 @@ export function RegularisationApproval() {
             {/* Left: employee IDs textarea */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">
-                Employee IDs (one UUID per line)
+                Employees
               </label>
-              <textarea
+              <EmployeeSelector
+                multiple
                 value={bulkEmpIds}
-                onChange={e => setBulkEmpIds(e.target.value)}
-                className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 ring-primary/50 resize-y"
-                placeholder={"UUID-1\nUUID-2\nUUID-3"}
+                onChange={v => setBulkEmpIds(Array.isArray(v) ? v : (v ? [v] : []))}
+                placeholder="Select employees…"
+                className="w-full"
               />
             </div>
 

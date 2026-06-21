@@ -26,6 +26,7 @@ import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
 import { SubTabs }        from '@/components/ui/SubTabs'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { toast }          from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -500,12 +501,12 @@ function NewDelegationDialog({ open, onClose }: { open: boolean; onClose: () => 
         <div className="space-y-3 pt-1">
           {/* Delegate ID */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Delegate (Employee UUID) *</label>
-            <input
+            <label className="text-xs font-medium text-muted-foreground">Delegate *</label>
+            <EmployeeSelector
               value={delegateId}
-              onChange={e => setDelegateId(e.target.value)}
-              placeholder="UUID"
-              className="flex w-full h-8 rounded-md border border-input bg-background px-3 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+              onChange={v => setDelegateId(typeof v === 'string' ? v : (v[0] ?? ''))}
+              placeholder="Select employee…"
+              className="w-full"
             />
           </div>
 
@@ -766,12 +767,12 @@ function GrantOverrideDialog({ open, onClose }: { open: boolean; onClose: () => 
 
           {/* Granted to */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Granted To (Employee UUID) *</label>
-            <input
+            <label className="text-xs font-medium text-muted-foreground">Granted To *</label>
+            <EmployeeSelector
               value={grantedTo}
-              onChange={e => setGrantedTo(e.target.value)}
-              placeholder="UUID"
-              className="flex w-full h-8 rounded-md border border-input bg-background px-3 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+              onChange={v => setGrantedTo(typeof v === 'string' ? v : (v[0] ?? ''))}
+              placeholder="Select employee…"
+              className="w-full"
             />
           </div>
 

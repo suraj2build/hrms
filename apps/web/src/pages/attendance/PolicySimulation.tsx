@@ -27,6 +27,7 @@ import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
 import { DateInput }      from '@/components/ui/date-input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
@@ -256,7 +257,7 @@ export function PolicySimulation() {
   const [scenarios,    setScenarios]    = useState<ScenarioEntry[]>([defaultScenario('grace_change')])
   const [dateFrom,     setDateFrom]     = useState(defaultDateFrom)
   const [dateTo,       setDateTo]       = useState(defaultDateTo)
-  const [employeeIds,  setEmployeeIds]  = useState('')
+  const [employeeIds,  setEmployeeIds]  = useState<string[]>([])
   const [simError,     setSimError]     = useState('')
   const [result,       setResult]       = useState<SimulationResult | null>(null)
 
@@ -292,9 +293,6 @@ export function PolicySimulation() {
   function runSimulation() {
     setSimError('')
     const ids = employeeIds
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean)
 
     simulateMut.mutate({
       scenarios:    scenarios.map(buildScenarioPayload),
@@ -407,13 +405,14 @@ export function PolicySimulation() {
           </div>
           <div className="space-y-1 sm:col-span-2 lg:col-span-1">
             <label className="text-xs font-medium text-muted-foreground">
-              Employee IDs (optional, one UUID per line)
+              Employees (optional, leave blank = all)
             </label>
-            <textarea
-              className="flex w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 ring-primary/50 resize-y min-h-[60px]"
-              placeholder={'UUID-1\nUUID-2\n(leave blank = all employees)'}
+            <EmployeeSelector
+              multiple
               value={employeeIds}
-              onChange={e => setEmployeeIds(e.target.value)}
+              onChange={v => setEmployeeIds(Array.isArray(v) ? v : (v ? [v] : []))}
+              placeholder="All employees"
+              className="w-full"
             />
           </div>
         </div>
