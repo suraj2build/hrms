@@ -103,7 +103,7 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
     const employeeIds = [...new Set(rows.map(r => r.employee_id))]
     const { data: dailyRows, error: dErr } = await fastify.supabase
       .from('attendance_daily')
-      .select('employee_id, date, status, work_hours')
+      .select('employee_id, date, status, work_hours, confidence_level')
       .eq('tenant_id', req.tenantId)
       .in('employee_id', employeeIds)
       .gte('date', fromDate)
@@ -114,14 +114,21 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
     }
 
     // Build lookup: `${employee_id}:${date}` → daily row
-    const dailyMap = new Map<string, { status: string | null; work_hours: number }>()
-    for (const d of (dailyRows ?? []) as Array<{ employee_id: string; date: string; status: string; work_hours: number }>) {
+    const dailyMap = new Map<string, { status: string | null; work_hours: number; confidence_level: string }>()
+    for (const d of (dailyRows ?? []) as Array<{ employee_id: string; date: string; status: string; work_hours: number; confidence_level: string | null }>) {
       const key = `${d.employee_id}:${d.date}`
       dailyMap.set(key, {
-        status:     normalizeAttendanceStatus(d.status),
-        work_hours: Number(d.work_hours ?? 0),
+        status:           normalizeAttendanceStatus(d.status),
+        work_hours:       Number(d.work_hours ?? 0),
+        confidence_level: d.confidence_level ?? 'high',
       })
     }
+
+    // A daily row is only trustworthy enough to CONTRADICT (auto-resolve) an
+    // anomaly when its own confidence is high/medium. A low/critical-confidence
+    // row may itself be stale/inferred, so resolving against it would mask a real
+    // gap. Such anomalies are kept for human review instead.
+    const TRUSTED_CONF = new Set(['high', 'medium'])
 
     // ── Step 3: Classify each anomaly ─────────────────────────────────────────
     const toResolve: string[] = []
@@ -139,23 +146,28 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
       const key    = `${anomaly.employee_id}:${anomaly.date}`
       const daily  = dailyMap.get(key)
       const status = daily?.status ?? null
+      const trusted = daily ? TRUSTED_CONF.has(daily.confidence_level) : false
 
       let action:  'auto_resolve' | 'keep' = 'keep'
       let reason = 'no attendance_daily row found'
 
       if (anomaly.type === 'no_punch') {
-        if (status && ATTENDED_STATUSES.has(status)) {
+        if (status && ATTENDED_STATUSES.has(status) && trusted) {
           action = 'auto_resolve'
-          reason = `attendance_daily.status = '${status}' — attendance was recorded (CSV or engine)`
+          reason = `attendance_daily.status = '${status}' (confidence ${daily?.confidence_level}) — attendance was recorded (CSV or engine)`
+        } else if (status && ATTENDED_STATUSES.has(status)) {
+          reason = `attendance_daily.status = '${status}' but confidence is '${daily?.confidence_level}' — kept for review`
         } else if (status) {
           reason = `attendance_daily.status = '${status}' — not an attended status`
         }
       } else if (anomaly.type === 'missing_out') {
         // Auto-resolve missing_out when attendance is present AND work_hours > 0
         // (session was completed retroactively via CSV or correction)
-        if (status && ATTENDED_STATUSES.has(status) && (daily?.work_hours ?? 0) > 0) {
+        if (status && ATTENDED_STATUSES.has(status) && (daily?.work_hours ?? 0) > 0 && trusted) {
           action = 'auto_resolve'
-          reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} — punch session completed`
+          reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} (confidence ${daily?.confidence_level}) — punch session completed`
+        } else if (status && ATTENDED_STATUSES.has(status) && (daily?.work_hours ?? 0) > 0) {
+          reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} but confidence is '${daily?.confidence_level}' — kept for review`
         } else if (status) {
           reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} — session may still be open`
         }
