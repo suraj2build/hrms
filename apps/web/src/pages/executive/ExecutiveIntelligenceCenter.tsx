@@ -221,7 +221,7 @@ export default function ExecutiveIntelligenceCenter() {
         {/* KPI grid */}
         <section>
           <SectionHeader title="Critical Manpower KPIs" subtitle="Live snapshot from operational data" icon={Gauge} />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
           </div>
         </section>
@@ -417,7 +417,7 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* Department analysis — real headcount + cost */}
-        <section className="rounded-2xl border bg-card p-5 shadow-[var(--shadow-card)]">
+        <section className="rounded-2xl border bg-card p-4 shadow-[var(--shadow-card)]">
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2"><Users className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Department Manpower Analysis</h3><Badge variant="secondary" className="ml-1">{deptRows.length} depts</Badge></div>
@@ -474,7 +474,7 @@ function Panel({ title, subtitle, icon: Icon, iconClass, badge, action, classNam
   badge?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode
 }) {
   return (
-    <div className={cn('rounded-2xl border bg-card p-5 shadow-[var(--shadow-card)]', className)}>
+    <div className={cn('rounded-2xl border bg-card p-4 shadow-[var(--shadow-card)]', className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
@@ -493,9 +493,9 @@ function Panel({ title, subtitle, icon: Icon, iconClass, badge, action, classNam
 
 function EmptyBody({ text }: { text: string }) {
   return (
-    <div className="mt-4 flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center">
-      <Info className="h-6 w-6 text-muted-foreground/40" />
-      <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">{text}</p>
+    <div className="mt-3 flex min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border bg-muted/20 p-4 text-center">
+      <Info className="h-4 w-4 text-muted-foreground/40" />
+      <p className="max-w-sm text-[11px] text-muted-foreground leading-relaxed">{text}</p>
     </div>
   )
 }
