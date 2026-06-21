@@ -11,7 +11,7 @@
  */
 
 import { useState }                          from 'react'
-import { useQuery }                          from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -34,6 +34,7 @@ import {
 import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
 import { cn }               from '@/lib/utils'
+import { toast }            from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,26 @@ export function PayrollCostIntelligence() {
     queryFn:  () => api.get(`/analytics/payroll/cost/departments?month=${month}`),
     enabled:  isAdmin,
     staleTime: 120_000,
+  })
+
+  // ── Backfill ───────────────────────────────────────────────────────────────
+  // Rebuild payroll_dept_snapshots from every finalized run, for tenants whose
+  // runs were finalized before snapshot population existed. Idempotent.
+  const qc = useQueryClient()
+  const backfillM = useMutation({
+    mutationFn: () => api.post<{ data: { months_processed: number; rows_written: number; failed: number } }>(
+      '/analytics/payroll/cost/backfill-snapshots',
+    ),
+    onSuccess: (res) => {
+      const d = res.data
+      toast.success('Department snapshots rebuilt', {
+        description: `${d.months_processed} month(s) processed, ${d.rows_written} row(s) written${d.failed ? ` — ${d.failed} failed` : ''}.`,
+      })
+      for (const k of ['payroll-cost', 'payroll-cost-trends', 'payroll-cost-insights', 'payroll-cost-departments']) {
+        qc.invalidateQueries({ queryKey: [k] })
+      }
+    },
+    onError: (e: Error) => toast.error('Backfill failed', { description: e.message }),
   })
 
   // ── Access guard ─────────────────────────────────────────────────────────
@@ -347,10 +368,20 @@ export function PayrollCostIntelligence() {
         title={`Department Details — ${month}`}
         icon={<Users className="h-4 w-4 text-muted-foreground" />}
         action={
-          <Button size="icon" variant="ghost" className="h-7 w-7"
-            onClick={() => deptsQ.refetch()} title="Refresh">
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" className="h-7"
+              onClick={() => backfillM.mutate()} disabled={backfillM.isPending}
+              title="Rebuild department cost snapshots from all finalized payroll runs">
+              {backfillM.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="h-3.5 w-3.5" />}
+              <span className="ml-1.5">Backfill snapshots</span>
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7"
+              onClick={() => deptsQ.refetch()} title="Refresh">
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         }
       >
         {deptsQ.isLoading && (
