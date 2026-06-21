@@ -14,7 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { eventBus }            from '../../lib/event-bus.js'
-import { otFromBreakdown, buildDeptSnapshots } from '../../lib/payroll-dept-snapshot.js'
+import { aggregateDeptCost, buildDeptSnapshots, SLIP_DEPT_SELECT } from '../../lib/payroll-dept-snapshot.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -112,42 +112,16 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
     // (authoritative per-employee output); payroll_run_employees is never written.
     const { data: slips } = await fastify.supabase
       .from('payroll_slips')
-      .select(`
-        employee_id, gross_pay, net_pay, lop_amount, component_breakdown,
-        employees!inner(
-          id, first_name, last_name,
-          job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name))
-        )
-      `)
+      .select(SLIP_DEPT_SELECT)
       .eq('run_id', run.id)
       .eq('tenant_id', req.tenantId)
 
-    // Aggregate by department
-    const deptMap = new Map<string, {
-      department_id: string; department_name: string
-      headcount: number; total_gross: number; total_net: number
-      total_ot_cost: number; total_lop: number
-    }>()
-
-    for (const slip of (slips ?? []) as any[]) {
-      const jh = slip.employees?.job_history?.find((j: any) => j.is_current)
-      const deptId   = jh?.department_id ?? 'unassigned'
-      const deptName = jh?.departments?.name ?? 'Unassigned'
-      const entry = deptMap.get(deptId) ?? {
-        department_id: deptId, department_name: deptName,
-        headcount: 0, total_gross: 0, total_net: 0, total_ot_cost: 0, total_lop: 0,
-      }
-      entry.headcount++
-      entry.total_gross   += Number(slip.gross_pay ?? 0)
-      entry.total_net     += Number(slip.net_pay ?? 0)
-      entry.total_ot_cost += otFromBreakdown(slip.component_breakdown)
-      entry.total_lop     += Number(slip.lop_amount ?? 0)
-      deptMap.set(deptId, entry)
-    }
-
-    const departments = Array.from(deptMap.values())
-      .map(d => ({ ...d, avg_gross: d.headcount > 0 ? Math.round(d.total_gross / d.headcount) : 0 }))
-      .sort((a, b) => b.total_gross - a.total_gross)
+    // Single source of truth: the SAME aggregation the finalize-time snapshot
+    // uses (lib/payroll-dept-snapshot.aggregateDeptCost), so the live number and
+    // the persisted snapshot can never disagree. Preserve the legacy API shape by
+    // surfacing the no-dept bucket as 'unassigned' rather than null.
+    const departments = aggregateDeptCost((slips ?? []) as any[])
+      .map(d => ({ ...d, department_id: d.department_id ?? 'unassigned' }))
 
     const totals = departments.reduce(
       (acc, d) => ({
