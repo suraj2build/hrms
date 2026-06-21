@@ -258,9 +258,10 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     const monthDate = `${month}-01`
 
     // Guard: statutory contributions must be computed from a FINALIZED payroll run.
+    let payrollRunId: string | null = null
     {
       const { data: runRow } = await fastify.supabase
-        .from('payroll_runs').select('status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
+        .from('payroll_runs').select('id, status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
       const st = (runRow as any)?.status
       if (st !== 'finalized' && st !== 'partial_failed' && st !== 'frozen') {
         return reply.code(409).send({
@@ -268,6 +269,7 @@ export default async function esiRoutes(fastify: FastifyInstance) {
           message: `Finalize the ${month} payroll run before computing ESI contributions (current: ${st ?? 'no run'}).`,
         })
       }
+      payrollRunId = (runRow as any)?.id ?? null
     }
 
     // ── ESI config (effective-date-guarded, most recent row) ─────────────────
@@ -461,6 +463,7 @@ export default async function esiRoutes(fastify: FastifyInstance) {
           tenant_id:             req.tenantId,
           employee_id:           emp.id,
           contribution_month:    month,
+          payroll_run_id:        payrollRunId,
           esi_wages:             result.esiWages,
           is_eligible:           result.isEligible,
           employee_contribution: slipEmp      ?? result.employeeContribution,

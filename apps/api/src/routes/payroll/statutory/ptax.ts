@@ -383,9 +383,10 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const monthDate = `${month}-01`
 
     // Guard: statutory contributions must be computed from a FINALIZED payroll run.
+    let payrollRunId: string | null = null
     {
       const { data: runRow } = await fastify.supabase
-        .from('payroll_runs').select('status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
+        .from('payroll_runs').select('id, status').eq('tenant_id', req.tenantId).eq('month', month).maybeSingle()
       const st = (runRow as any)?.status
       if (st !== 'finalized' && st !== 'partial_failed' && st !== 'frozen') {
         return reply.code(409).send({
@@ -393,6 +394,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           message: `Finalize the ${month} payroll run before computing Professional Tax (current: ${st ?? 'no run'}).`,
         })
       }
+      payrollRunId = (runRow as any)?.id ?? null
     }
 
     // Calendar month for frequency checks (1–12)
@@ -514,6 +516,19 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .eq('financial_year', financial_year)
       .eq('is_active', true)
 
+    // States the tenant has explicitly DISABLED in ptax_state_settings. PT must
+    // not be deducted/filed for these even if slabs exist (LWF already gates on
+    // its settings; PT didn't). Only an explicit enabled=false disables — states
+    // with no settings row keep the slab-driven default, so this never silently
+    // stops PT for tenants who never configured ptax_state_settings.
+    const { data: ptStateSettings } = await fastify.supabase
+      .from('ptax_state_settings')
+      .select('state_code, enabled')
+      .eq('tenant_id', req.tenantId)
+    const disabledStates = new Set<string>(
+      ((ptStateSettings ?? []) as any[]).filter(s => s.enabled === false).map(s => s.state_code),
+    )
+
     const slabsByState = new Map<string, PTaxSlab[]>()
     for (const slab of (allSlabs ?? []) as any[]) {
       const existing = slabsByState.get(slab.state_code) ?? []
@@ -530,6 +545,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const contributions: any[] = []
     let skippedExempt = 0
     let skippedNoState = 0
+    let skippedStateDisabled = 0
     let wagesFromSlip = 0
     let wagesFallback = 0
     let computedZero = 0           // slab found but PT resolved to 0 (no income match / freq / ₹0 slab)
@@ -555,6 +571,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         })
       }
       if (!stateCode) { skippedNoState++; continue }
+      if (disabledStates.has(stateCode)) { skippedStateDisabled++; continue }
 
       const slabs = slabsByState.get(stateCode) ?? []
       if (slabs.length === 0) { skippedNoSlabs++; noSlabStates.add(stateCode); continue }  // no slabs for state/FY
@@ -577,6 +594,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         tenant_id:          req.tenantId,
         employee_id:        emp.id,
         contribution_month: month,
+        payroll_run_id:     payrollRunId,
         state_code:         stateCode,
         financial_year,
         gross_salary:       grossSalary,
@@ -613,6 +631,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       computed_nonzero:  contributions.length - computedZero,
       skipped_exempt:    skippedExempt,
       skipped_no_state:  skippedNoState,
+      skipped_state_disabled: skippedStateDisabled,
       skipped_no_slabs:  skippedNoSlabs,
       no_slab_states:    [...noSlabStates],
       total_active:      empList.length,
