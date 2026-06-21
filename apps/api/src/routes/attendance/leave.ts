@@ -208,6 +208,20 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       })
     }
 
+    // Roster-aware working-days for display (the engine is the only valid source —
+    // the ESS page must never recompute duration from raw dates). Non-fatal:
+    // approval recomputes authoritatively before any balance is deducted.
+    let workingDaysVal: number | null = null
+    try {
+      const wd = await computeWorkingLeaveDays(
+        fastify.supabase, req.tenantId, profile.employee_id, from_date, to_date,
+        { halfDay: session !== 'full_day' },
+      )
+      workingDaysVal = wd.computed_days
+    } catch (e) {
+      req.log.warn({ err: e }, 'leave apply: working-days precompute failed (non-fatal — display only)')
+    }
+
     const { data, error } = await fastify.supabase
       .from('leave_applications')
       .insert({
@@ -218,6 +232,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         to_date,
         reason:        parsed.data.reason ?? null,
         session,
+        working_days:  workingDaysVal,
       })
       .select('id, from_date, to_date, status, created_at')
       .single()
@@ -243,7 +258,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('leave_applications')
-      .select('id, from_date, to_date, reason, status, approved_at, created_at, leave_types(name, is_paid)')
+      .select('id, from_date, to_date, reason, status, approved_at, created_at, working_days, leave_types(name, is_paid)')
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', profile.employee_id)
       .order('from_date', { ascending: false })
@@ -396,9 +411,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const { error: updateError } = await fastify.supabase
       .from('leave_applications')
       .update({
-        status:      'approved',
-        approved_by: req.userId,
-        approved_at: new Date().toISOString(),
+        status:       'approved',
+        approved_by:  req.userId,
+        approved_at:  new Date().toISOString(),
+        working_days: workingDays.computed_days,   // authoritative roster-aware duration
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)

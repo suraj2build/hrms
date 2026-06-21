@@ -59,13 +59,16 @@ interface BalanceRow {
 }
 
 interface LeaveApp {
-  id:           string
-  from_date:    string
-  to_date:      string
-  status:       string
-  reason?:      string
-  leave_types?: { name: string }
-  created_at:   string
+  id:            string
+  from_date:     string
+  to_date:       string
+  status:        string
+  reason?:       string
+  leave_types?:  { name: string }
+  created_at:    string
+  // Authoritative roster-aware duration from the server (half-day/holiday/week-off
+  // aware). Null only for legacy rows created before it was stored.
+  working_days?: number | null
 }
 
 interface LedgerRow {
@@ -235,6 +238,15 @@ function daysBetween(from: string, to: string) {
   const a = new Date(`${from}T12:00:00Z`)
   const b = new Date(`${to}T12:00:00Z`)
   return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1
+}
+
+/**
+ * Authoritative leave duration for display: the server's roster-aware
+ * working_days (half-day/holiday/week-off aware), falling back to the raw
+ * calendar span only for legacy rows that predate the stored value.
+ */
+function leaveDays(a: { working_days?: number | null; from_date: string; to_date: string }): number {
+  return a.working_days != null ? Number(a.working_days) : daysBetween(a.from_date, a.to_date)
 }
 
 function buildYears(): number[] {
@@ -518,12 +530,12 @@ export function EssLeaveBalance() {
   )
 
   const totalApprovedDays = useMemo(
-    () => allLeaves.filter(a => a.status === 'approved').reduce((s, a) => s + daysBetween(a.from_date, a.to_date), 0),
+    () => allLeaves.filter(a => a.status === 'approved').reduce((s, a) => s + leaveDays(a), 0),
     [allLeaves],
   )
 
   const totalPendingDays = useMemo(
-    () => allLeaves.filter(a => a.status === 'pending').reduce((s, a) => s + daysBetween(a.from_date, a.to_date), 0),
+    () => allLeaves.filter(a => a.status === 'pending').reduce((s, a) => s + leaveDays(a), 0),
     [allLeaves],
   )
 
@@ -1195,7 +1207,7 @@ export function EssLeaveBalance() {
                                 {r.leave_types?.name ?? 'Leave'}
                               </span>
                               <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                {daysBetween(r.from_date, r.to_date)} day{daysBetween(r.from_date, r.to_date) !== 1 ? 's' : ''}
+                                {leaveDays(r)} day{leaveDays(r) !== 1 ? 's' : ''}
                               </span>
                             </div>
                             <div className="text-[11px] text-muted-foreground font-medium mt-0.5">

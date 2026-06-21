@@ -25,6 +25,7 @@ import {
 import {
   approveLeaveRequest,
   rejectLeaveRequest,
+  reverseApprovedLeaveRequest,
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
 
@@ -309,6 +310,44 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       actor_id:    req.userId,
       actor_type:  'user',
       payload:     { approved_by: req.userId },
+      correlation_id: req.correlationId ?? undefined,
+    })
+    return reply.send({ data: result.value })
+  })
+
+  // ── POST /leave-requests/:id/cancel-approved ───────────────────────────────
+  // Reverse an already-APPROVED request: restores the deducted balance (credit-
+  // back ledger row) and reprocesses attendance for the dates. Same approver
+  // authorisation as approve (direct manager or HR admin).
+  fastify.post('/leave-requests/:id/cancel-approved', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const result = await reverseApprovedLeaveRequest(fastify.supabase, {
+      tenantId:  req.tenantId,
+      requestId: id,
+      ctx: {
+        approverId:   req.userId,
+        approverRole: req.userRole,
+        tenantId:     req.tenantId,
+      },
+    })
+
+    if (!result.ok) {
+      return reply.code(errorToHttp(result.error.type)).send({
+        error:   result.error.type,
+        message: result.error.message,
+      })
+    }
+
+    fastify.eventPublisher.publish({
+      event_type:  EventType.LEAVE_CANCELLED,
+      module:      MODULE.LEAVE,
+      entity_type: 'leave_request',
+      entity_id:   id,
+      org_id:      req.tenantId,
+      actor_id:    req.userId,
+      actor_type:  'user',
+      payload:     { reversed_by: req.userId },
       correlation_id: req.correlationId ?? undefined,
     })
     return reply.send({ data: result.value })

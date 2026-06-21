@@ -292,6 +292,110 @@ export async function approveLeaveRequest(
 }
 
 /**
+ * Reverse an APPROVED leave request (cancel-after-approval).
+ *
+ * Restores the deducted balance and writes a credit-back ledger row, then clears
+ * the leave-approval attendance rows so the engine reprocesses those dates. The
+ * balance/ledger/status change is atomic (RPC reverse_leave_request_atomic);
+ * attendance cleanup + recompute are post-transaction and non-fatal, mirroring
+ * approveLeaveRequest.
+ */
+export async function reverseApprovedLeaveRequest(
+  supabase: SupabaseClient,
+  opts:     LeaveApprovalOpts,
+): Promise<ApprovalResult<{ id: string; status: string }>> {
+  const { tenantId, requestId, ctx } = opts
+
+  // ── 1. Fetch ────────────────────────────────────────────────────────────────
+  const fetchResult = await getLeaveRequest(supabase, tenantId, requestId)
+  if (!fetchResult.ok) {
+    return { ok: false, error: { type: 'NOT_FOUND', message: fetchResult.error.message } }
+  }
+  const req = fetchResult.value
+
+  // ── 2. Status pre-check — only an APPROVED request can be reversed ────────────
+  if (req.status !== 'APPROVED') {
+    return {
+      ok:    false,
+      error: { type: 'CONFLICT', message: `Only an APPROVED request can be reversed (current: ${req.status})` },
+    }
+  }
+
+  // ── 3. Authorise (same approver chain as approve) ────────────────────────────
+  const authResult = await validateApprover(supabase, ctx, req.employee_id)
+  if (!authResult.ok) return authResult
+
+  const lt   = req.leave_types as { id: string; name: string; is_paid: boolean } | null
+  const year = new Date(req.from_date).getFullYear()
+
+  // ── 4. Atomic reversal (status + credit-back + ledger) ───────────────────────
+  const { data: rpcData, error: rpcErr } = await supabase.rpc('reverse_leave_request_atomic', {
+    p_tenant_id:     tenantId,
+    p_request_id:    requestId,
+    p_actor_id:      ctx.approverId,
+    p_is_paid:       lt?.is_paid ?? false,
+    p_employee_id:   req.employee_id,
+    p_leave_type_id: req.leave_type_id,
+    p_days:          req.computed_days,
+    p_year:          year,
+  })
+  if (rpcErr) return { ok: false, error: parseRpcError(rpcErr) }
+  const reversed = rpcData as { id: string; status: string }
+
+  // ── 5. Reverse attendance (non-fatal) ────────────────────────────────────────
+  // Delete the leave-approval rows then recompute so the engine reprocesses those
+  // dates from punch data instead of leaving them stuck on status=LEAVE.
+  try {
+    await supabase
+      .from('attendance_daily')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', req.employee_id)
+      .eq('computed_source', 'leave_approval')
+      .gte('date', req.from_date)
+      .lte('date', req.to_date)
+    await recomputeRange(supabase, {
+      tenant_id:   tenantId,
+      employee_id: req.employee_id,
+      from_date:   req.from_date,
+      to_date:     req.to_date,
+      changed_by:  ctx.approverId,
+    })
+  } catch (engineErr: unknown) {
+    const errMsg = engineErr instanceof Error ? engineErr.message : String(engineErr)
+    process.stderr.write(JSON.stringify({
+      level: 'error', time: new Date().toISOString(), service: 'approval-service',
+      fn: 'reverseApprovedLeaveRequest',
+      msg: 'attendance recompute failed after leave reversal — reversal is committed but attendance_daily may be stale',
+      tenant_id: tenantId, employee_id: req.employee_id, leave_request_id: requestId, err: errMsg,
+    }) + '\n')
+  }
+
+  // ── 6. Audit (non-fatal) ─────────────────────────────────────────────────────
+  await logAction(supabase, {
+    tenantId,
+    tableName:   'leave_requests',
+    recordId:    requestId,
+    action:      'UPDATE',
+    performedBy: ctx.approverId,
+    oldData:     { status: 'APPROVED' },
+    newData:     { status: 'CANCELLED' },
+  })
+
+  // ── 7. Event emission (fire-and-forget) ──────────────────────────────────────
+  eventService.emit('leave.cancelled', {
+    tenant_id:   tenantId,
+    employee_id: req.employee_id,
+    request_id:  requestId,
+    from_date:   req.from_date,
+    to_date:     req.to_date,
+    leave_type:  lt?.name,
+  })
+
+  return { ok: true, value: reversed }
+}
+
+/**
  * Reject a PENDING leave request.
  *
  * Steps:
