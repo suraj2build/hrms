@@ -636,7 +636,15 @@ export async function buildPayrollFinancialLedger(
     .select('id')
     .single()
 
-  if (lErr || !ledger) return { error: `Failed to create ledger: ${lErr?.message}` }
+  if (lErr || !ledger) {
+    // The (tenant_id, run_id, ledger_type) partial unique index backstops a
+    // concurrent/duplicate build: the loser gets 23505 — report it as an
+    // existing ledger rather than a generic failure.
+    if ((lErr as any)?.code === '23505') {
+      return { error: 'Ledger already exists for this run', code: 'LEDGER_EXISTS' }
+    }
+    return { error: `Failed to create ledger: ${lErr?.message}` }
+  }
   const ledgerId = (ledger as any).id as string
 
   // 7. Generate all journal entries

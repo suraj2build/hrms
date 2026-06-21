@@ -1919,12 +1919,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       req.log.warn({ err: advLoanErr }, 'payroll finalize: advance/loan schedule marking failed (non-fatal)')
     }
 
-    // Step 2: Mark the run as finalized (only after slips are confirmed finalized)
+    // Step 2: Mark the run as finalized (only after slips are confirmed finalized).
+    // The status filter makes this an ATOMIC seal: only a draft/partial_failed run
+    // can be flipped, so a concurrent or duplicated finalize request cannot
+    // re-stamp an already-finalized run (and re-run its side-effects).
     const { error: runFinalizeErr } = await fastify.supabase
       .from('payroll_runs')
       .update({ status: 'finalized', finalized_by: req.userId, finalized_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', ['draft', 'partial_failed'])
 
     if (runFinalizeErr) {
       // Slips are finalized; run status is not.  Retrying finalization is safe:
