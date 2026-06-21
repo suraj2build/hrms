@@ -5,7 +5,7 @@
  * + chart helpers that every exec page uses.
  */
 import { NavLink } from 'react-router-dom'
-import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, BarChart2, Brain, Info } from 'lucide-react'
+import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, BarChart2, Brain } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const TABS = [
@@ -62,37 +62,6 @@ export function ExecLayout({ title, subtitle, actions, children }: {
         <ExecNav />
       </div>
       {children}
-    </div>
-  )
-}
-
-export function Panel({ title, subtitle, icon: Icon, iconClass, badge, action, className, children }: {
-  title: string; subtitle?: string; icon: React.ComponentType<{ className?: string }>; iconClass?: string
-  badge?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode
-}) {
-  return (
-    <div className={cn('rounded-2xl border bg-card p-4 shadow-[var(--shadow-card)]', className)}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
-            <Icon className={cn('h-4 w-4', iconClass)} />
-            <h3 className="text-sm font-semibold">{title}</h3>
-            {badge}
-          </div>
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
-        </div>
-        {action}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-export function EmptyBody({ text }: { text: string }) {
-  return (
-    <div className="mt-3 flex min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border bg-muted/20 p-4 text-center">
-      <Info className="h-4 w-4 text-muted-foreground/40" />
-      <p className="max-w-sm text-[11px] text-muted-foreground leading-relaxed">{text}</p>
     </div>
   )
 }

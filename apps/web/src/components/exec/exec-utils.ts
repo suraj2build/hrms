@@ -3,9 +3,6 @@
  * Split out from ExecShell so that file only exports components (react-refresh).
  */
 
-export const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
-export const TIP = { background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 } as const
-
 // ── BI canvas palette (shared by every Executive tab) ───────────────────────────
 export const C = {
   blue: '#2E6FE6', teal: '#15B8A6', violet: '#7C5CFC', amber: '#E0A53B',
