@@ -1,14 +1,15 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Wallet, IndianRupee, Users, Clock, PieChart as PieIcon, Building2, TrendingUp, Gauge, CalendarClock, LogOut, Activity } from 'lucide-react'
+import { Wallet, IndianRupee, Users, Clock, Building2, TrendingUp, Gauge, CalendarClock, LogOut, Activity, Layers } from 'lucide-react'
 import {
-  Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line,
-  ResponsiveContainer, Tooltip, XAxis, YAxis, Legend,
+  Bar, BarChart, CartesianGrid, Cell, ComposedChart, LabelList, Line,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, Panel, EmptyBody, StatTile } from '@/components/exec/ExecShell'
-import { TIP, PALETTE, cr, fmtMonth } from '@/components/exec/exec-utils'
+import { ExecLayout, StatTile } from '@/components/exec/ExecShell'
+import { Viz, ChartTip, NoData } from '@/components/exec/viz'
+import { C, CAT, GRID, AXIS, cr, fmtMonth } from '@/components/exec/exec-utils'
 
 type FlagTone = 'high' | 'medium' | 'normal'
 
@@ -38,138 +39,176 @@ export default function FinancialView() {
   const { data: fin } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get<{ data?: FinancialData } & FinancialData>('/executive/financial').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const trend = fin?.payroll_cost_trend ?? []
-  const grossSpark = trend.map(t => +(t.total_gross / 1e7).toFixed(2))
-  const cphSpark   = trend.map(t => +(t.avg_cost_per_head / 1000).toFixed(1))
-
   const latestCph = trend.length ? trend[trend.length - 1].avg_cost_per_head : 0
-  // Canonical full-month OT (CST.ot_cost) from the API; fall back to the top-N dept sum.
   const totalOt = fin?.ot_cost_total ?? (fin?.dept_cost_breakdown ?? []).reduce((s, d) => s + (d.ot_cost ?? 0), 0)
   const otDepPct = fin?.ot_dependency_pct ?? 0
   const leaveLiability = fin?.leave_liability ?? 0
   const ffExposure = fin?.ff_exposure ?? 0
 
   const trendData = trend.map(t => ({ month: fmtMonth(t.month), gross: +(t.total_gross / 1e7).toFixed(2), head: t.employee_count }))
-  const deptRows = useMemo(
-    () => [...(fin?.dept_cost_breakdown ?? [])].sort((a, b) => b.total_gross - a.total_gross),
-    [fin],
-  )
-  const otByDept = deptRows.filter(d => (d.ot_cost ?? 0) > 0).map((d, i) => ({ dept: d.dept, ot: +(d.ot_cost / 1e5).toFixed(1), color: PALETTE[i % PALETTE.length] }))
-  const revByType = Object.entries(fin?.revisions_by_type ?? {}).map(([type, n], i) => ({ type, n, color: PALETTE[i % PALETTE.length] }))
+  const deptRows = useMemo(() => [...(fin?.dept_cost_breakdown ?? [])].sort((a, b) => b.total_gross - a.total_gross), [fin])
+  const deptCost = deptRows.slice(0, 8).map(d => ({ dept: d.dept, value: +(d.total_gross / 1e5).toFixed(2), gross: d.total_gross }))
+  const otByDept = deptRows.filter(d => (d.ot_cost ?? 0) > 0).slice(0, 8).map((d, i) => ({ dept: d.dept, value: +(d.ot_cost / 1e5).toFixed(1), ot: d.ot_cost, color: CAT[i % CAT.length] }))
+  const revByType = Object.entries(fin?.revisions_by_type ?? {}).map(([type, n], i) => ({ type, n, color: CAT[i % CAT.length] }))
 
-  // P5.4 — component-level payroll mix (fixed / variable / statutory / OT)
   const mix = fin?.component_mix
   const mixSegments = mix && mix.has_data
     ? [
-        { label: 'Fixed Pay',      value: mix.fixed_pay,      color: PALETTE[0] },
-        { label: 'Variable Pay',   value: mix.variable_pay,   color: PALETTE[1] },
-        { label: 'Statutory Cost', value: mix.statutory_cost, color: PALETTE[2] },
-        { label: 'Overtime',       value: mix.ot_cost,        color: PALETTE[3] },
+        { label: 'Fixed Pay', value: mix.fixed_pay, color: C.blue },
+        { label: 'Variable Pay', value: mix.variable_pay, color: C.teal },
+        { label: 'Statutory', value: mix.statutory_cost, color: C.violet },
+        { label: 'Overtime', value: mix.ot_cost, color: C.amber },
       ].filter(s => s.value > 0)
     : []
   const mixTotal = mixSegments.reduce((s, m) => s + m.value, 0)
-
-  // P5.6 — overtime cost trend (month-by-month, ₹ Lakh)
   const otTrend = (fin?.ot_trend ?? []).filter(t => t.ot_cost > 0).map(t => ({ month: fmtMonth(t.month), ot: +(t.ot_cost / 1e5).toFixed(1) }))
 
   return (
-    <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and compensation revisions · live data">
-      {/* KPIs */}
+    <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and exposure · live data">
+      {/* KPI ribbon — payroll */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Gross Payroll (MTD)" value={cr(fin?.payroll_current_gross ?? 0)} delta={fin?.payroll_mom_change} deltaLabel="MoM" icon={Wallet} tone="primary" spark={grossSpark} />
-        <KpiCard label="Net Payout" value={cr(fin?.payroll_current_net ?? 0)} icon={IndianRupee} tone="success" spark={grossSpark} hint={fin ? `${((fin.payroll_current_net / Math.max(1, fin.payroll_current_gross)) * 100).toFixed(0)}% of gross` : undefined} />
-        <KpiCard label="Cost / Head" value={latestCph ? cr(latestCph) : '—'} icon={Users} tone="info" spark={cphSpark} hint="Per month" />
-        <KpiCard label="Overtime Cost" value={totalOt ? cr(totalOt) : '—'} icon={Clock} tone="warning" hint={fin?.payroll_current_month ? `Month ${fmtMonth(fin.payroll_current_month)}` : 'Current period'} />
+        <KpiCard label="Gross Payroll · MTD" value={cr(fin?.payroll_current_gross ?? 0)} delta={fin?.payroll_mom_change} deltaLabel="MoM" icon={Wallet} tone="primary" />
+        <KpiCard label="Net Payout" value={cr(fin?.payroll_current_net ?? 0)} icon={IndianRupee} tone="success" hint={fin ? `${((fin.payroll_current_net / Math.max(1, fin.payroll_current_gross)) * 100).toFixed(0)}% of gross` : undefined} />
+        <KpiCard label="Cost / Head" value={latestCph ? cr(latestCph) : '—'} icon={Users} tone="info" deltaLabel="Per month" />
+        <KpiCard label="Overtime Cost" value={totalOt ? cr(totalOt) : '—'} icon={Clock} tone="warning" deltaLabel={fin?.payroll_current_month ? fmtMonth(fin.payroll_current_month) : 'Current'} />
       </section>
 
-      {/* R3 — Financial Exposure: OT dependency, payroll variance, leave liability, F&F */}
+      {/* KPI ribbon — exposure */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard
-          label="OT Dependency"
-          value={`${otDepPct.toFixed(1)}%`}
-          icon={Gauge}
-          tone={flagTone(fin?.ot_dependency_flag)}
-          hint={fin?.ot_dependency_flag === 'high' ? 'High — OT >25% of gross' : fin?.ot_dependency_flag === 'medium' ? 'Elevated — OT >15%' : 'Healthy'}
-        />
-        <KpiCard
-          label="Payroll Variance"
-          value={`${fin?.payroll_mom_change != null ? (fin.payroll_mom_change > 0 ? '+' : '') + fin.payroll_mom_change.toFixed(1) : '0.0'}%`}
-          icon={Activity}
-          tone={flagTone(fin?.variance_flag)}
-          hint={fin?.variance_flag === 'high' ? 'High swing MoM' : fin?.variance_flag === 'medium' ? 'Notable swing MoM' : 'Stable MoM'}
-        />
-        <KpiCard
-          label="Leave Liability"
-          value={leaveLiability ? cr(leaveLiability) : '—'}
-          icon={CalendarClock}
-          tone="info"
-          hint={fin?.leave_liability_days ? `${fin.leave_liability_days.toLocaleString('en-IN')} encashable days` : 'Encashable balance'}
-        />
-        <KpiCard
-          label="F&F Exposure"
-          value={ffExposure ? cr(ffExposure) : '—'}
-          icon={LogOut}
-          tone={ffExposure > 0 ? 'warning' : 'success'}
-          hint={fin?.ff_active_separations ? `${fin.ff_active_separations} pending settlement${fin.ff_active_separations !== 1 ? 's' : ''}` : 'No pending settlements'}
-        />
+        <KpiCard label="OT Dependency" value={`${otDepPct.toFixed(1)}%`} icon={Gauge} tone={flagTone(fin?.ot_dependency_flag)}
+          hint={fin?.ot_dependency_flag === 'high' ? 'OT >25% gross' : fin?.ot_dependency_flag === 'medium' ? 'OT >15%' : 'Healthy'} />
+        <KpiCard label="Payroll Variance" value={`${fin?.payroll_mom_change != null ? (fin.payroll_mom_change > 0 ? '+' : '') + fin.payroll_mom_change.toFixed(1) : '0.0'}%`} icon={Activity} tone={flagTone(fin?.variance_flag)}
+          hint={fin?.variance_flag === 'high' ? 'High swing' : fin?.variance_flag === 'medium' ? 'Notable swing' : 'Stable'} />
+        <KpiCard label="Leave Liability" value={leaveLiability ? cr(leaveLiability) : '—'} icon={CalendarClock} tone="info"
+          hint={fin?.leave_liability_days ? `${fin.leave_liability_days.toLocaleString('en-IN')} days` : 'Encashable'} />
+        <KpiCard label="F&F Exposure" value={ffExposure ? cr(ffExposure) : '—'} icon={LogOut} tone={ffExposure > 0 ? 'warning' : 'success'}
+          hint={fin?.ff_active_separations ? `${fin.ff_active_separations} pending` : 'None pending'} />
       </section>
 
-      {/* Payroll trend (real) + payroll mix (empty) */}
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <Panel className="xl:col-span-2" icon={TrendingUp} iconClass="text-primary" title="Payroll Cost Trend" subtitle="Gross payroll (₹ Cr) bars · headcount line">
+      {/* Visual grid */}
+      <section className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+        <Viz className="lg:col-span-8" icon={TrendingUp} title="Payroll Cost Trend" sub="Gross payroll ₹Cr (bars) · headcount (line)">
           {trendData.length > 0 ? (
-            <div className="mt-4 h-60">
+            <div className="h-[240px]">
               <ResponsiveContainer>
-                <ComposedChart data={trendData}>
-                  <defs><linearGradient id="grossA" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} /></linearGradient></defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <Tooltip contentStyle={TIP} />
-                  <Bar yAxisId="left" dataKey="gross" name="Gross ₹Cr" fill="var(--chart-1)" radius={[4, 4, 0, 0]} barSize={18} />
-                  <Line yAxisId="right" type="monotone" dataKey="head" name="Headcount" stroke="var(--chart-3)" strokeWidth={2.5} dot={{ r: 3 }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                <ComposedChart data={trendData} margin={{ top: 6, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+                  <XAxis dataKey="month" tick={AXIS} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="l" tick={AXIS} tickLine={false} axisLine={false} unit="Cr" />
+                  <YAxis yAxisId="r" orientation="right" tick={AXIS} tickLine={false} axisLine={false} />
+                  <Tooltip content={<ChartTip fmt={(v: number, p: { dataKey?: string }) => (p.dataKey === 'gross' ? `₹${v}Cr` : v)} />} cursor={{ fill: 'var(--muted)', opacity: 0.4 }} />
+                  <Bar yAxisId="l" dataKey="gross" name="Gross ₹Cr" fill={C.blue} radius={[3, 3, 0, 0]} maxBarSize={28} />
+                  <Line yAxisId="r" type="monotone" dataKey="head" name="Headcount" stroke={C.amber} strokeWidth={2.5} dot={{ r: 2.5 }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-          ) : <EmptyBody text="Payroll cost trend will appear once payroll has run for a few months." />}
-        </Panel>
+          ) : <NoData text="Payroll cost trend appears once payroll has run for a few months." />}
+        </Viz>
 
-        <Panel icon={PieIcon} iconClass="text-success" title="Payroll Cost Mix" subtitle={mix ? `${fmtMonth(mix.month)} · monthly` : 'By component'}
-          badge={undefined}>
+        <Viz className="lg:col-span-4" icon={Layers} title="Cost Mix" sub={mix ? `${fmtMonth(mix.month)} · by component` : 'By component'}>
           {mixSegments.length > 0 ? (
-            <div className="mt-4 space-y-4">
-              {/* Stacked composition bar */}
+            <div className="space-y-3">
               <div className="flex h-3 overflow-hidden rounded-full">
-                {mixSegments.map(s => (
-                  <div key={s.label} style={{ width: `${(s.value / mixTotal) * 100}%`, background: s.color }} title={s.label} />
-                ))}
+                {mixSegments.map(s => <div key={s.label} style={{ width: `${(s.value / mixTotal) * 100}%`, background: s.color }} title={s.label} />)}
               </div>
-              <div className="space-y-2.5">
-                {mixSegments.map(s => (
-                  <div key={s.label}>
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.label}
-                      </span>
-                      <span className="font-medium tabular-nums">{cr(s.value)} · {((s.value / mixTotal) * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full" style={{ width: `${(s.value / mixTotal) * 100}%`, background: s.color }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-muted-foreground">Employer-side cost. Employee deductions ({cr(mix?.employee_deductions ?? 0)}) excluded.</p>
+              {mixSegments.map(s => (
+                <div key={s.label} className="flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.label}</span>
+                  <span className="font-medium tabular-nums">{cr(s.value)} · {((s.value / mixTotal) * 100).toFixed(0)}%</span>
+                </div>
+              ))}
+              <p className="text-[10px] text-muted-foreground">Employer-side cost. Employee deductions ({cr(mix?.employee_deductions ?? 0)}) excluded.</p>
             </div>
-          ) : <EmptyBody text="Component-level payroll mix will appear once a payroll run is finalized for the current month." />}
-        </Panel>
+          ) : <NoData text="Component mix appears once a payroll run is finalised." />}
+        </Viz>
+
+        <Viz className="lg:col-span-8" icon={Building2} title="Payroll Cost by Department" sub="Gross monthly cost · ranked"
+          right={<span className="text-[10px] font-medium text-muted-foreground">{cr(fin?.payroll_current_gross ?? 0)} total</span>}>
+          {deptCost.length > 0 ? (
+            <div className="h-[240px]">
+              <ResponsiveContainer>
+                <BarChart data={deptCost} layout="vertical" margin={{ top: 2, right: 56, left: 4, bottom: 2 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+                  <XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} unit="L" />
+                  <YAxis type="category" dataKey="dept" width={104} tick={{ ...AXIS }} tickLine={false} axisLine={false}
+                    tickFormatter={(v: string) => (v.length > 15 ? `${v.slice(0, 15)}…` : v)} />
+                  <Tooltip content={<ChartTip fmt={(_v: number, p: { payload?: { gross?: number } }) => cr(p.payload?.gross ?? 0)} />} cursor={{ fill: 'var(--muted)', opacity: 0.4 }} />
+                  <Bar dataKey="value" name="Gross cost" fill={C.teal} radius={[0, 4, 4, 0]} maxBarSize={20}>
+                    <LabelList dataKey="gross" position="right" formatter={(v: number) => cr(v)} className="fill-foreground" style={{ fontSize: 10, fontWeight: 600 }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <NoData text="No department cost data." />}
+        </Viz>
+
+        <Viz className="lg:col-span-4" icon={IndianRupee} title="Compensation Revisions" sub="Approved salary revisions">
+          {(fin?.total_revision_delta != null || revByType.length > 0) ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <StatTile label="Total Delta" value={cr(fin?.total_revision_delta ?? 0)} tone="primary" />
+                <StatTile label="Avg" value={fin?.avg_revision_pct != null ? `${fin.avg_revision_pct.toFixed(1)}%` : '—'} tone="success" />
+                <StatTile label="Approved" value={(fin?.approved_revisions_count ?? 0).toLocaleString()} tone="muted" />
+              </div>
+              {revByType.length > 0 && (
+                <div className="space-y-2">
+                  {revByType.map(r => {
+                    const max = Math.max(...revByType.map(x => x.n))
+                    return (
+                      <div key={r.type}>
+                        <div className="mb-1 flex justify-between text-[11px]"><span className="capitalize">{r.type.replace(/_/g, ' ')}</span><span className="font-medium tabular-nums">{r.n}</span></div>
+                        <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${(r.n / max) * 100}%`, background: r.color }} /></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ) : <NoData text="No approved compensation revisions in the current window." />}
+        </Viz>
+
+        <Viz className="lg:col-span-6" icon={Clock} title="Overtime by Department" sub="OT cost ₹Lakh · current period">
+          {otByDept.length > 0 ? (
+            <div className="h-[220px]">
+              <ResponsiveContainer>
+                <BarChart data={otByDept} layout="vertical" margin={{ top: 2, right: 40, left: 4, bottom: 2 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+                  <XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} unit="L" />
+                  <YAxis type="category" dataKey="dept" width={96} tick={{ ...AXIS }} tickLine={false} axisLine={false}
+                    tickFormatter={(v: string) => (v.length > 14 ? `${v.slice(0, 14)}…` : v)} />
+                  <Tooltip content={<ChartTip fmt={(_v: number, p: { payload?: { ot?: number } }) => cr(p.payload?.ot ?? 0)} />} cursor={{ fill: 'var(--muted)', opacity: 0.4 }} />
+                  <Bar dataKey="value" name="OT ₹L" radius={[0, 4, 4, 0]} maxBarSize={18}>
+                    {otByDept.map(d => <Cell key={d.dept} fill={d.color} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <NoData text="No overtime cost recorded for the current period." />}
+        </Viz>
+
+        <Viz className="lg:col-span-6" icon={Clock} title="Overtime Cost Trend" sub="Monthly OT cost ₹Lakh">
+          {otTrend.length > 0 ? (
+            <div className="h-[220px]">
+              <ResponsiveContainer>
+                <BarChart data={otTrend} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+                  <XAxis dataKey="month" tick={AXIS} tickLine={false} axisLine={false} />
+                  <YAxis tick={AXIS} tickLine={false} axisLine={false} unit="L" />
+                  <Tooltip content={<ChartTip fmt={(v: number) => `₹${v}L`} />} cursor={{ fill: 'var(--muted)', opacity: 0.4 }} />
+                  <Bar dataKey="ot" name="OT ₹L" fill={C.amber} radius={[3, 3, 0, 0]} maxBarSize={26} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <NoData text="Overtime trend appears once payroll has run with overtime for a few months." />}
+        </Viz>
       </section>
 
-      {/* Cost by department (real headcount + gross + ot) */}
-      <Panel icon={Building2} iconClass="text-primary" title="Cost by Department" subtitle="Headcount, gross & overtime are live · budget / variance not configured">
-        <div className="mt-3 overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[680px] text-sm">
+      {/* Department cost table */}
+      <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
+        <div className="flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Cost by Department</h3></div>
+        <p className="text-xs text-muted-foreground">Headcount, gross &amp; overtime are live · budget / variance not configured</p>
+        <div className="mt-3 overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[600px] text-sm">
             <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Department</th>
@@ -177,7 +216,6 @@ export default function FinancialView() {
                 <th className="px-3 py-2 text-right font-medium">Gross</th>
                 <th className="px-3 py-2 text-right font-medium">Net</th>
                 <th className="px-3 py-2 text-right font-medium">OT Cost</th>
-                <th className="px-3 py-2 text-right font-medium">Budget</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -188,77 +226,13 @@ export default function FinancialView() {
                   <td className="px-3 py-2.5 text-right tabular-nums">{cr(d.total_gross)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{cr(d.total_net)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{d.ot_cost ? cr(d.ot_cost) : '—'}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">—</td>
                 </tr>
               ))}
-              {deptRows.length === 0 && <tr><td colSpan={6} className="px-3 py-10 text-center text-xs text-muted-foreground">No department cost data.</td></tr>}
+              {deptRows.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-xs text-muted-foreground">No department cost data.</td></tr>}
             </tbody>
           </table>
         </div>
-      </Panel>
-
-      {/* Comp revision impact (real) + Overtime by dept (real) */}
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-        <Panel icon={IndianRupee} iconClass="text-info" title="Compensation Revision Impact" subtitle="Approved salary revisions">
-          {(fin?.total_revision_delta != null || revByType.length > 0) ? (
-            <>
-              <div className="mt-3 grid grid-cols-3 gap-3">
-                <StatTile label="Total Delta" value={cr(fin?.total_revision_delta ?? 0)} tone="primary" />
-                <StatTile label="Avg Revision" value={fin?.avg_revision_pct != null ? `${fin.avg_revision_pct.toFixed(1)}%` : '—'} tone="success" />
-                <StatTile label="Approved" value={(fin?.approved_revisions_count ?? 0).toLocaleString()} tone="muted" />
-              </div>
-              {revByType.length > 0 && (
-                <div className="mt-4 space-y-2.5">
-                  {revByType.map(r => {
-                    const max = Math.max(...revByType.map(x => x.n))
-                    return (
-                      <div key={r.type}>
-                        <div className="mb-1 flex justify-between text-xs"><span className="capitalize">{r.type.replace(/_/g, ' ')}</span><span className="font-medium tabular-nums">{r.n}</span></div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${(r.n / max) * 100}%`, background: r.color }} /></div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          ) : <EmptyBody text="No approved compensation revisions in the current window." />}
-        </Panel>
-
-        <Panel icon={Clock} iconClass="text-warning" title="Overtime by Department" subtitle="Overtime cost (₹ Lakh) · current period">
-          {otByDept.length > 0 ? (
-            <div className="mt-3 h-56">
-              <ResponsiveContainer>
-                <BarChart data={otByDept} layout="vertical" margin={{ left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <YAxis type="category" dataKey="dept" width={90} tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                  <Tooltip contentStyle={TIP} />
-                  <Bar dataKey="ot" name="OT ₹L" radius={[0, 4, 4, 0]}>
-                    {otByDept.map(d => <Cell key={d.dept} fill={d.color} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : <EmptyBody text="No overtime cost recorded for the current period." />}
-        </Panel>
       </section>
-
-      {/* Overtime cost trend (real · month-by-month) — P5.6 */}
-      <Panel icon={Clock} iconClass="text-warning" title="Overtime Cost Trend" subtitle="Monthly overtime cost (₹ Lakh) across the window">
-        {otTrend.length > 0 ? (
-          <div className="mt-3 h-56">
-            <ResponsiveContainer>
-              <BarChart data={otTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                <YAxis tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} />
-                <Tooltip contentStyle={TIP} />
-                <Bar dataKey="ot" name="OT ₹L" fill="var(--chart-4)" radius={[4, 4, 0, 0]} barSize={22} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        ) : <EmptyBody text="Overtime trend will appear once payroll has run with overtime for a few months." />}
-      </Panel>
     </ExecLayout>
   )
 }
