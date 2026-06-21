@@ -47,6 +47,7 @@
 import type { SupabaseClient }    from '@supabase/supabase-js'
 import { recomputeRange }         from '../../lib/attendance-engine.js'
 import { logAction }              from '../../lib/audit-service.js'
+import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,28 @@ export async function processAttendanceCorrection(
   }
 
   const currentRetryCount = row.retry_count
+
+  // ── Period protection (defence-in-depth) ───────────────────────────────────
+  // The route guards this too, but the month can be locked/finalized for payroll
+  // in the window between approval and this async apply. Refuse to write punches
+  // or recompute into a sealed month — mark the correction failed so it surfaces
+  // and isn't left stuck in 'processing'.
+  if (await isMonthLocked(supabase, tenantId, monthOf(date))) {
+    log.warn(
+      { event: LOG_EVENTS.FAILED, correction_id: correctionId, tenant_id: tenantId, date },
+      'correction-processor: period locked — refusing to apply correction to a sealed month',
+    )
+    await supabase
+      .from('attendance_corrections')
+      .update({
+        status:         'failed',
+        failure_reason: `PERIOD_LOCKED: ${monthOf(date)} is locked for payroll`,
+        retry_count:    currentRetryCount + 1,
+      })
+      .eq('id', correctionId)
+      .eq('tenant_id', tenantId)
+    return
+  }
 
   // ── Upsert corrected punch rows ────────────────────────────────────────────
   if (punchRows.length > 0) {

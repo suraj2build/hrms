@@ -209,6 +209,43 @@ export function getLocalDate(utcIso: string, timezone: string): string {
   }
 }
 
+/**
+ * UTC ISO bounds of a tenant-LOCAL calendar day.
+ *
+ * Loading raw punches for a local day with a naive `${date}T00:00:00.000Z` /
+ * `…T23:59:59.999Z` window is wrong for any non-UTC tenant — it is offset by the
+ * tenant's UTC offset, so punches near local midnight fall in the wrong day.
+ * This returns the UTC instants of local-midnight..local-end-of-day so the query
+ * captures exactly the punches belonging to `date` in `timezone`.
+ *
+ * @param date     YYYY-MM-DD (tenant-local)
+ * @param timezone IANA timezone identifier
+ */
+export function localDayBoundsUtc(date: string, timezone: string): { startUtc: string; endUtc: string } {
+  try {
+    // Offset (minutes that local wall-clock leads UTC) at this date, derived by
+    // asking the tz what wall time it shows for the date's UTC-midnight instant.
+    const guess = new Date(`${date}T00:00:00.000Z`)
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(guess)
+    const m: Record<string, string> = {}
+    for (const p of parts) m[p.type] = p.value
+    const hour = m.hour === '24' ? '00' : m.hour   // Intl can emit '24' at midnight
+    const asLocalUtc = Date.UTC(+m.year, +m.month - 1, +m.day, +hour, +m.minute, +m.second)
+    const offsetMin = (asLocalUtc - guess.getTime()) / 60_000
+    const startMs = guess.getTime() - offsetMin * 60_000   // local midnight in UTC
+    return {
+      startUtc: new Date(startMs).toISOString(),
+      endUtc:   new Date(startMs + 24 * 60 * 60_000 - 1).toISOString(),
+    }
+  } catch {
+    return { startUtc: `${date}T00:00:00.000Z`, endUtc: `${date}T23:59:59.999Z` }
+  }
+}
+
 // ── Async resolvers ───────────────────────────────────────────────────────────
 
 /**

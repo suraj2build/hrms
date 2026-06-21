@@ -25,7 +25,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { recomputeRange } from '../../lib/attendance-engine.js'
+import { recomputeRange, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 
 const HR_ADMIN_ROLES = ['super_admin', 'hr_admin']
@@ -90,12 +90,24 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
       employeeId = profile.employee_id
     }
 
+    // The engine keys attendance by the tenant-LOCAL calendar date. punched_at is
+    // a UTC instant, so derive the local date via the tenant timezone — otherwise
+    // a punch near local midnight (e.g. 04:00 IST = 22:30Z prior day) is filed to
+    // the wrong day, recomputes the wrong day, and can mis-target the lock check.
+    const { data: tzRow } = await fastify.supabase
+      .from('tenants')
+      .select('timezone')
+      .eq('id', req.tenantId)
+      .maybeSingle()
+    const tenantTz: string = (tzRow as { timezone?: string } | null)?.timezone ?? 'UTC'
+    const punchedDate = utcToLocalDate(new Date(punchedAt), tenantTz)
+
     // Period protection (F4) — a punch (especially a backdated manual one) must
     // not land in a month that is locked/finalized for payroll, since it triggers
     // a recompute that would rewrite sealed attendance. Block it cleanly here;
     // the engine's recomputeRange is invoked directly below, bypassing the
     // route-level period guards, so this is the only gate on this path.
-    const punchMonth = monthOf(new Date(punchedAt).toISOString().slice(0, 10))
+    const punchMonth = monthOf(punchedDate)
     if (await isMonthLocked(fastify.supabase, req.tenantId, punchMonth)) {
       return reply.code(409).send({
         error:   'PERIOD_LOCKED',
@@ -148,10 +160,7 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
       punchRow = existing
     }
 
-    // Fire-and-forget recompute for the punched date
-    // We derive the "logical date" from punched_at (UTC date).
-    const punchedDate = new Date(punchedAt).toISOString().slice(0, 10)
-
+    // Fire-and-forget recompute for the punched date (tenant-local, computed above).
     setImmediate(async () => {
       try {
         await recomputeRange(fastify.supabase, {

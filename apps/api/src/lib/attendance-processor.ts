@@ -31,6 +31,7 @@ import {
   getLocalDayOfWeek,
   getLocalTimeMinutes,
   getLocalDate,
+  localDayBoundsUtc,
   type EmployeeOrgContext,
 } from './org-context.js'
 import { resolveShiftBatch, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
@@ -483,8 +484,16 @@ export async function processAttendanceForDate(
   const log = logger?.child({ module: 'attendance-processor', tenant_id: tenantId, date })
   const runStartedAt = Date.now()   // Step 3: wall-clock timer for duration_ms
 
-  const dayStart = `${date}T00:00:00.000Z`
-  const dayEnd   = `${date}T23:59:59.999Z`
+  // Load raw punches by the tenant-LOCAL day, not a naive UTC day — otherwise the
+  // window is offset by the tenant's UTC offset and punches near local midnight
+  // are processed into the wrong date (wrong status / hours / OT).
+  const { data: tzRow } = await supabase
+    .from('tenants')
+    .select('timezone')
+    .eq('id', tenantId)
+    .maybeSingle()
+  const tenantTz: string = (tzRow as { timezone?: string } | null)?.timezone ?? 'Asia/Kolkata'
+  const { startUtc: dayStart, endUtc: dayEnd } = localDayBoundsUtc(date, tenantTz)
 
   // ── 0. Holiday check — runs before everything else ────────────────────────
   // If this date is in holiday_calendar, every employee who punched in will

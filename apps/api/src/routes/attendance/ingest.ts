@@ -58,9 +58,12 @@ export default async function ingestRoute(fastify: FastifyInstance) {
       direction:     log.direction,
     }))
 
+    // Upsert (not insert) so a re-POSTed device batch — network retry or device
+    // replay — does not duplicate raw punches and inflate computed hours/OT.
+    // Dedupe key matches uidx_raw_logs_dedup (migration 284).
     const { error: insertError } = await fastify.supabase
       .from('attendance_raw_logs')
-      .insert(rows)
+      .upsert(rows, { onConflict: 'tenant_id,employee_code,timestamp,direction', ignoreDuplicates: true })
 
     if (insertError) {
       req.log.error(

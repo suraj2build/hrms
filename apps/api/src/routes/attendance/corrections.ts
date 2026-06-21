@@ -33,6 +33,7 @@ import {
 import { logAction }                    from '../../lib/audit-service.js'
 import { eventBus }                     from '../../lib/event-bus.js'
 import { orchestrateWorkforceEvent }    from '../../lib/workforce-orchestrator.js'
+import { isMonthLocked, monthOf }       from '../../lib/period-lock.js'
 
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
 const HR_ROLES    = ['super_admin', 'hr_admin']
@@ -518,6 +519,17 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       return reply.code(409).send({ error: 'CONFLICT', message: `Correction is already ${c.status}` })
     }
 
+    // Period protection — approving a correction inserts punches and recomputes
+    // attendance_daily for c.date, bypassing the route-level period guards. If the
+    // month is locked/finalized for payroll, that would silently rewrite sealed
+    // attendance. Block it here (and again in the async worker as defence-in-depth).
+    if (await isMonthLocked(fastify.supabase, req.tenantId, monthOf(c.date))) {
+      return reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${monthOf(c.date)} is locked for payroll — corrections cannot be applied to it.`,
+      })
+    }
+
     const authResult = await authoriseApprover(req.userId, req.userRole, req.tenantId, c.employee_id)
     if (!authResult.ok) {
       return reply.code(authResult.code).send({ error: authResult.error, message: authResult.message })
@@ -526,9 +538,11 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     // ── Atomically advance to 'processing' ───────────────────────────────
     // approved_by / approved_at are set here and MUST NOT be overwritten by
     // any subsequent failure or retry — they represent the immutable approval
-    // record regardless of how many recompute attempts follow.
+    // record regardless of how many recompute attempts follow. The status='pending'
+    // guard makes this a compare-and-swap so two concurrent approvals can't both
+    // dispatch the worker.
     const now = new Date().toISOString()
-    const { error: updateErr } = await fastify.supabase
+    const { data: claimed, error: updateErr } = await fastify.supabase
       .from('attendance_corrections')
       .update({
         status:                'processing',
@@ -538,9 +552,18 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
 
     if (updateErr) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to approve correction' })
+    }
+    if (!claimed) {
+      return reply.code(409).send({
+        error:   'CONFLICT',
+        message: 'This correction was already picked up by another approval.',
+      })
     }
 
     auditLog(req.tenantId, id, 'UPDATE', req.userId, {
@@ -648,6 +671,15 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       return reply.code(409).send({
         error:   'CONFLICT',
         message: `Only failed corrections can be retried. Current status: ${c.status}`,
+      })
+    }
+
+    // Period protection — a retry re-applies the correction (punches + recompute)
+    // for c.date. Refuse if the month has since been locked/finalized for payroll.
+    if (await isMonthLocked(fastify.supabase, req.tenantId, monthOf(c.date))) {
+      return reply.code(409).send({
+        error:   'PERIOD_LOCKED',
+        message: `Attendance period ${monthOf(c.date)} is locked for payroll — corrections cannot be applied to it.`,
       })
     }
 
