@@ -48,6 +48,9 @@ export interface ESIApplicability {
   isApplicable: boolean
   isExempt:     boolean
   exemptReason: string | null
+  // True when the employee is inside an ESI contribution-period continuation for
+  // this month — forces ESI to be deducted even above the wage ceiling.
+  continuationActive: boolean
 }
 
 export interface PTaxApplicability {
@@ -125,6 +128,7 @@ export async function resolveEmployeeStatutoryParams(
     epfOverrideResult,
     esiOverrideResult,
     ptaxOverrideResult,
+    esiContinuationResult,
   ] = await Promise.all([
     // Employee + site + state_code
     supabase
@@ -182,6 +186,21 @@ export async function resolveEmployeeStatutoryParams(
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
+
+    // ESI contribution-period continuation — latest timeline row wins. When
+    // continuation_until covers this month, ESI must keep being DEDUCTED on the
+    // payslip even though wages crossed the ₹21,000 ceiling mid-period (ESIC
+    // contribution-period rule). The filing already honoured this; the payslip
+    // didn't, so the deduction was lost. This forces the slip to deduct too.
+    supabase
+      .from('esi_eligibility_timeline')
+      .select('continuation_until')
+      .eq('employee_id', employeeId)
+      .eq('tenant_id', tenantId)
+      .not('continuation_until', 'is', null)
+      .order('effective_from', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   const emp      = empResult.data as any
@@ -236,10 +255,17 @@ export async function resolveEmployeeStatutoryParams(
 
   // ── ESI applicability ─────────────────────────────────────────────────────────
   const esiExempt  = esiOverrideResult.data as any
+  // Continuation is active when continuation_until (last day of the contribution
+  // period, e.g. Sep 30 / Mar 31) is on/after the last calendar day of this month.
+  const [cyY, cyM] = month.split('-').map(Number)
+  const monthEnd   = new Date(cyY, cyM, 0).toISOString().slice(0, 10)
+  const continuationUntil = (esiContinuationResult.data as any)?.continuation_until ?? null
+  const continuationActive = !!(continuationUntil && continuationUntil >= monthEnd)
   const esiApplicability: ESIApplicability = {
     isApplicable: !esiExempt,
     isExempt:     !!esiExempt,
     exemptReason: esiExempt?.exemption_reason ?? null,
+    continuationActive,
   }
 
   // ── PTax: slabs + registration ─────────────────────────────────────────────

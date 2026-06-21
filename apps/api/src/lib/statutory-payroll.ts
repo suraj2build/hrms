@@ -132,8 +132,12 @@ export function applyStatutoryToSlip(
     : null
 
   // ── ESI ───────────────────────────────────────────────────────────────────
+  // forceApplicable keeps deducting through a contribution-period continuation
+  // even when wages crossed the ₹21,000 ceiling mid-period (ESIC rule). Without
+  // it the payslip silently dropped ESI for continuation employees while the
+  // filing still reported it — a deposit-vs-filing divergence.
   const esi = params.esiApplicability.isApplicable
-    ? computeESI(grossWages, params.esiConfig)
+    ? computeESI(grossWages, params.esiConfig, params.esiApplicability.continuationActive)
     : null
 
   // ── PTax ──────────────────────────────────────────────────────────────────
