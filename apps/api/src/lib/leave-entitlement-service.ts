@@ -656,8 +656,23 @@ async function writeLedgerEntry(
   accrualDate: string,  // YYYY-MM-DD; stored in `accrued_on` (was incorrectly `run_date`)
   expiresOn:   string | null,
   note?:       string,
-): Promise<void> {
+): Promise<{ skipped: boolean }> {
   try {
+    // Pre-check the composite idempotency key so callers can gate the
+    // (non-idempotent) balance-cache credit on whether this row already existed —
+    // re-running an accrual must not double-credit the cache.
+    const { data: existing } = await supabase
+      .from('leave_accrual_ledger')
+      .select('id')
+      .eq('tenant_id',     tenantId)
+      .eq('employee_id',   employeeId)
+      .eq('leave_type_id', leaveTypeId)
+      .eq('year',          year)
+      .eq('accrual_type',  accrualType)
+      .eq('accrued_on',    accrualDate)
+      .maybeSingle()
+    if (existing) return { skipped: true }
+
     await supabase.from('leave_accrual_ledger').upsert(
       {
         tenant_id:     tenantId,
@@ -676,8 +691,10 @@ async function writeLedgerEntry(
         ignoreDuplicates: true,
       },
     )
+    return { skipped: false }
   } catch {
     // swallow — ledger write is supplemental; balance update is primary
+    return { skipped: false }
   }
 }
 
@@ -869,15 +886,18 @@ export async function runEngineMonthlyAccrual(
       if (accrualAmount <= 0) { result.skipped++; continue }
 
       try {
-        await creditEmployeeDays(
-          supabase, tenantId, assignment.employee_id, leaveTypeId,
-          accrualAmount, year, rule.max_accrual_balance,
-        )
-
-        await writeLedgerEntry(
+        // Ledger-first, then gate the non-idempotent cache credit on insertion so
+        // re-running the engine accrual for the same period can't double-credit.
+        const { skipped: alreadyCredited } = await writeLedgerEntry(
           supabase, tenantId, assignment.employee_id, leaveTypeId,
           rule.accrual_type, accrualAmount, year, runDate, null,
           `Engine ${rule.accrual_type} accrual — policy ${assignment.policy_id}`,
+        )
+        if (alreadyCredited) { result.skipped++; continue }
+
+        await creditEmployeeDays(
+          supabase, tenantId, assignment.employee_id, leaveTypeId,
+          accrualAmount, year, rule.max_accrual_balance,
         )
 
         result.employees_processed++

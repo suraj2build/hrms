@@ -179,8 +179,8 @@ async function writeLedgerEntry(
   expiresOn:    string | null,
   notes?:       string,
   ctx?:         LedgerWriteContext,
-): Promise<void> {
-  await writeAccrualEntry(supabase, {
+): Promise<{ skipped: boolean }> {
+  return writeAccrualEntry(supabase, {
     tenantId,
     employeeId,
     leaveTypeId,
@@ -365,18 +365,21 @@ export async function monthlyAccrualJob(
             // Deterministic cycle key — idempotency guard for replay
             const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, cycleLabel, 'monthly')
 
-            // Credit balance (respects max_accrual_balance cap)
-            await creditEmployeeDays(
-              supabase, tenantId, emp.id, policy.leave_type_id,
-              monthlyDays, year, policy.max_accrual_balance ?? undefined,
-            )
-
-            // Write ledger entry — accrual_type 'monthly'; include expiry + replay ctx
-            await writeLedgerEntry(
+            // Ledger is the authority — write it first. Only credit the (non-
+            // idempotent) balance cache when the ledger row was actually inserted,
+            // so a re-run of the same cycle never double-credits the cache.
+            const { skipped: alreadyCredited } = await writeLedgerEntry(
               supabase, tenantId, emp.id, policy.leave_type_id, year,
               'monthly', monthlyDays, accrualDate, expiresOn,
               `Monthly accrual ${cycleLabel}`,
               { lineageId, cycleKey },
+            )
+            if (alreadyCredited) { skipped++; continue }
+
+            // Credit balance (respects max_accrual_balance cap)
+            await creditEmployeeDays(
+              supabase, tenantId, emp.id, policy.leave_type_id,
+              monthlyDays, year, policy.max_accrual_balance ?? undefined,
             )
 
             employees_processed++
@@ -409,19 +412,21 @@ export async function monthlyAccrualJob(
             const elig = checkEligibility(emp.joining_date, policy, asOfDate)
             if (!elig.eligible) { skipped++; continue }
 
-            await creditEmployeeDays(
-              supabase, tenantId, emp.id, policy.leave_type_id,
-              quarterlyDays, year, policy.max_accrual_balance ?? undefined,
-            )
-
             // Deterministic cycle key — idempotency guard for replay
             const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, quarterLabel, 'quarterly')
 
-            await writeLedgerEntry(
+            // Ledger-first, then gate the non-idempotent cache credit on insertion.
+            const { skipped: alreadyCredited } = await writeLedgerEntry(
               supabase, tenantId, emp.id, policy.leave_type_id, year,
               'quarterly', quarterlyDays, accrualDate, expiresOn,
               `Quarterly accrual ${quarterLabel}`,
               { lineageId, cycleKey },
+            )
+            if (alreadyCredited) { skipped++; continue }
+
+            await creditEmployeeDays(
+              supabase, tenantId, emp.id, policy.leave_type_id,
+              quarterlyDays, year, policy.max_accrual_balance ?? undefined,
             )
 
             employees_processed++
@@ -819,17 +824,19 @@ export async function carryForwardJob(
 
           if (carryDays <= 0) { skipped++; continue }
 
+          // Ledger-first, then gate the non-idempotent cache credit on insertion
+          // so a re-run of carry-forward doesn't double-credit toYear's balance.
+          const { skipped: alreadyCarried } = await writeLedgerEntry(
+            supabase, tenantId, emp.id, policy.leave_type_id, toYear,
+            'carry_forward', carryDays, cfDate, null,
+            `Carry-forward from ${fromYear}: ${carryDays} day(s)`,
+          )
+          if (alreadyCarried) { skipped++; continue }
+
           // Credit toYear balance
           await creditEmployeeDays(
             supabase, tenantId, emp.id, policy.leave_type_id,
             carryDays, toYear, policy.max_accrual_balance ?? undefined,
-          )
-
-          // Ledger entry for the carry-forward
-          await writeLedgerEntry(
-            supabase, tenantId, emp.id, policy.leave_type_id, toYear,
-            'carry_forward', carryDays, cfDate, null,
-            `Carry-forward from ${fromYear}: ${carryDays} day(s)`,
           )
 
           employees_processed++
@@ -1293,18 +1300,33 @@ export async function runLifecycleMonthlyAccrual(
       }
 
       try {
-        await creditEmployeeDays(
-          supabase, tenantId, assignment.employee_id, rule.leave_type_id,
-          lifecycle.days_to_credit, year, rule.max_accrual_balance,
-        )
-
-        // Write lifecycle-enriched ledger entry
         const accrualTypeValue = lifecycle.accrual_earning_basis === 'advance'
           ? 'advance_accrual'
           : lifecycle.accrual_earning_basis === 'prorated'
             ? 'prorated_accrual'
             : rule.accrual_type  // 'monthly' or 'quarterly'
 
+        // Ledger is the authority — pre-check its composite idempotency key and
+        // only credit the (non-idempotent) balance cache when no row exists yet,
+        // so a re-run of the lifecycle accrual can't double-credit the cache.
+        const { data: existingLedger } = await supabase
+          .from('leave_accrual_ledger')
+          .select('id')
+          .eq('tenant_id',     tenantId)
+          .eq('employee_id',   assignment.employee_id)
+          .eq('leave_type_id', rule.leave_type_id)
+          .eq('year',          year)
+          .eq('accrual_type',  accrualTypeValue)
+          .eq('accrued_on',    effectiveAsOf)
+          .maybeSingle()
+        if (existingLedger) { result.skipped++; continue }
+
+        await creditEmployeeDays(
+          supabase, tenantId, assignment.employee_id, rule.leave_type_id,
+          lifecycle.days_to_credit, year, rule.max_accrual_balance,
+        )
+
+        // Write lifecycle-enriched ledger entry
         await supabase.from('leave_accrual_ledger').upsert(
           {
             tenant_id:                 tenantId,

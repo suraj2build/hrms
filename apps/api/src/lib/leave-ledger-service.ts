@@ -483,6 +483,22 @@ export async function writeAccrualEntry(
 
     return { skipped: false }
   } else {
+    // Pre-check the composite idempotency key so the caller can tell whether the
+    // row already existed — an ignoreDuplicates upsert can't report that, and the
+    // accrual jobs rely on it to keep the (non-idempotent) balance cache in step.
+    const { data: existing } = await supabase
+      .from('leave_accrual_ledger')
+      .select('id')
+      .eq('tenant_id',     opts.tenantId)
+      .eq('employee_id',   opts.employeeId)
+      .eq('leave_type_id', opts.leaveTypeId)
+      .eq('year',          opts.year)
+      .eq('accrual_type',  opts.accrualType)
+      .eq('accrued_on',    opts.accruedOn)
+      .maybeSingle()
+
+    if (existing) return { skipped: true }
+
     const { error } = await supabase
       .from('leave_accrual_ledger')
       .upsert(payload, {

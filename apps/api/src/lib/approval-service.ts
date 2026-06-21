@@ -62,6 +62,11 @@ function parseRpcError(rpcError: { message?: string }): ApprovalError {
   if (msg.includes('CONFLICT:')) {
     return { type: 'CONFLICT', message: msg.replace(/^.*CONFLICT:\s*/, '') }
   }
+  if (msg.includes('INSUFFICIENT_BALANCE:')) {
+    // The RPC raises this when the strict deduct matches no row (balance < days
+    // or no balance row). The live balance isn't carried on the exception.
+    return { type: 'INSUFFICIENT_BALANCE', message: msg.replace(/^.*INSUFFICIENT_BALANCE:\s*/, ''), currentBalance: 0 }
+  }
   return { type: 'DB_ERROR', message: 'Transaction failed' }
 }
 
