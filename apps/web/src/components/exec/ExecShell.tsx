@@ -45,8 +45,8 @@ export function ExecLayout({ title, subtitle, actions, children }: {
   title: string; subtitle: string; actions?: React.ReactNode; children: React.ReactNode
 }) {
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6">
-      <div className="space-y-4">
+    <div className="mx-auto max-w-[1600px] space-y-5">
+      <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[image:var(--gradient-primary)] text-primary-foreground shadow-sm">
@@ -71,7 +71,7 @@ export function Panel({ title, subtitle, icon: Icon, iconClass, badge, action, c
   badge?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode
 }) {
   return (
-    <div className={cn('rounded-2xl border bg-card p-5 shadow-[var(--shadow-card)]', className)}>
+    <div className={cn('rounded-2xl border bg-card p-4 shadow-[var(--shadow-card)]', className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
@@ -90,9 +90,9 @@ export function Panel({ title, subtitle, icon: Icon, iconClass, badge, action, c
 
 export function EmptyBody({ text }: { text: string }) {
   return (
-    <div className="mt-4 flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center">
-      <Info className="h-6 w-6 text-muted-foreground/40" />
-      <p className="max-w-sm text-xs text-muted-foreground leading-relaxed">{text}</p>
+    <div className="mt-3 flex min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border bg-muted/20 p-4 text-center">
+      <Info className="h-4 w-4 text-muted-foreground/40" />
+      <p className="max-w-sm text-[11px] text-muted-foreground leading-relaxed">{text}</p>
     </div>
   )
 }

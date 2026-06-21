@@ -51,7 +51,7 @@ export default function ChroView() {
   return (
     <ExecLayout title="People & Culture (CHRO)" subtitle="Engagement, diversity, development and succession · live where available">
       {/* KPIs — most are gaps; leave / trust / diversity are real */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Leave Utilisation" value={chro ? `${chro.leave_utilization_pct.toFixed(0)}%` : '—'} icon={CalendarCheck} tone="primary" hint="Of entitlement" />
         <KpiCard label="Diversity (F)" value={femalePct == null ? '—' : `${femalePct.toFixed(1)}%`} icon={Sparkles} tone="info" hint="Org-wide" />
         <KpiCard label="Trust High-Risk" value={(chro?.trust_high_risk ?? 0).toLocaleString()} icon={ShieldCheck} tone="warning" hint={chro?.trust_verification_pct != null ? `${chro.trust_verification_pct.toFixed(0)}% verified` : undefined} />
@@ -59,7 +59,7 @@ export default function ChroView() {
       </section>
 
       {/* Talent Acquisition (R10) — hiring velocity & offer acceptance */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Offer Acceptance"
           value={recruitmentLive ? `${(chro?.offer_acceptance_rate ?? 0).toFixed(0)}%` : '—'}
@@ -91,7 +91,7 @@ export default function ChroView() {
       </section>
 
       {/* Diversity (real pie) + Engagement trend (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel icon={Users2} iconClass="text-primary" title="Gender Diversity" subtitle="Org-wide distribution">
           {gender.length > 0 ? (
             <>
@@ -123,7 +123,7 @@ export default function ChroView() {
       </section>
 
       {/* Performance distribution (empty) + L&D (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={Users2} iconClass="text-info" title="Performance Distribution" subtitle="Rating bands across the org">
           <EmptyBody text="Performance rating distribution needs the performance-review module, which isn't enabled yet." />
         </Panel>
@@ -133,7 +133,7 @@ export default function ChroView() {
       </section>
 
       {/* Hiring funnel (real where available) + AI insight (real narrative) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel className="xl:col-span-2" icon={Filter} iconClass="text-primary" title="Hiring Funnel" subtitle="Conversion across stages · rolling 6 months">
           {recruitmentLive && funnelMax > 0 ? (
             <div className="mt-3 space-y-2.5">

@@ -51,7 +51,7 @@ export default function TrendsView() {
   return (
     <ExecLayout title="Trends & Forecasting" subtitle="Long-run workforce, cost and attrition trends · live data">
       {/* KPIs */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Headcount Growth" value={fmtPct(metrics.cagr)} icon={Users} tone="primary" spark={hcSpark} hint="Annualised" />
         <KpiCard label="Attrition (TTM)" value={fmtPct(metrics.attrition)} icon={UserMinus} tone="destructive" spark={attrSpark} hint="Trailing 12m" />
         <KpiCard label="Payroll Run-rate" value={cr(metrics.runrate)} icon={Wallet} tone="info" spark={payrollSpark} hint="Annualised" />
@@ -61,7 +61,7 @@ export default function TrendsView() {
       {/* Combined long-run trend (real) */}
       <Panel icon={TrendingUp} iconClass="text-primary" title="Workforce, Payroll & Attrition Trend" subtitle="Headcount & payroll (₹ Cr) bars · attrition % line · last 12 months">
         {combined.length > 0 ? (
-          <div className="mt-4 h-80">
+          <div className="mt-4 h-64">
             <ResponsiveContainer>
               <ComposedChart data={combined}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -80,10 +80,10 @@ export default function TrendsView() {
       </Panel>
 
       {/* Attendance trend (real) + Attrition forecast (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={LineIcon} iconClass="text-success" title="Attendance Trend" subtitle="Monthly attendance rate (%)">
           {combined.length > 0 ? (
-            <div className="mt-3 h-64">
+            <div className="mt-3 h-56">
               <ResponsiveContainer>
                 <ComposedChart data={combined}>
                   <defs><linearGradient id="attTrend" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} /></linearGradient></defs>
@@ -104,7 +104,7 @@ export default function TrendsView() {
       </section>
 
       {/* Seasonality (empty) + Cohort retention (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={CalendarRange} iconClass="text-warning" title="Seasonality" subtitle="Month-of-year patterns">
           <EmptyBody text="Seasonality decomposition needs at least two full years of history; we currently surface a 12-month window." />
         </Panel>

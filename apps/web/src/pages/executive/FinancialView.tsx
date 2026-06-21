@@ -74,7 +74,7 @@ export default function FinancialView() {
   return (
     <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and compensation revisions · live data">
       {/* KPIs */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Gross Payroll (MTD)" value={cr(fin?.payroll_current_gross ?? 0)} delta={fin?.payroll_mom_change} deltaLabel="MoM" icon={Wallet} tone="primary" spark={grossSpark} />
         <KpiCard label="Net Payout" value={cr(fin?.payroll_current_net ?? 0)} icon={IndianRupee} tone="success" spark={grossSpark} hint={fin ? `${((fin.payroll_current_net / Math.max(1, fin.payroll_current_gross)) * 100).toFixed(0)}% of gross` : undefined} />
         <KpiCard label="Cost / Head" value={latestCph ? cr(latestCph) : '—'} icon={Users} tone="info" spark={cphSpark} hint="Per month" />
@@ -82,7 +82,7 @@ export default function FinancialView() {
       </section>
 
       {/* R3 — Financial Exposure: OT dependency, payroll variance, leave liability, F&F */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="OT Dependency"
           value={`${otDepPct.toFixed(1)}%`}
@@ -114,10 +114,10 @@ export default function FinancialView() {
       </section>
 
       {/* Payroll trend (real) + payroll mix (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel className="xl:col-span-2" icon={TrendingUp} iconClass="text-primary" title="Payroll Cost Trend" subtitle="Gross payroll (₹ Cr) bars · headcount line">
           {trendData.length > 0 ? (
-            <div className="mt-4 h-72">
+            <div className="mt-4 h-60">
               <ResponsiveContainer>
                 <ComposedChart data={trendData}>
                   <defs><linearGradient id="grossA" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} /></linearGradient></defs>
@@ -198,7 +198,7 @@ export default function FinancialView() {
       </Panel>
 
       {/* Comp revision impact (real) + Overtime by dept (real) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={IndianRupee} iconClass="text-info" title="Compensation Revision Impact" subtitle="Approved salary revisions">
           {(fin?.total_revision_delta != null || revByType.length > 0) ? (
             <>
@@ -226,7 +226,7 @@ export default function FinancialView() {
 
         <Panel icon={Clock} iconClass="text-warning" title="Overtime by Department" subtitle="Overtime cost (₹ Lakh) · current period">
           {otByDept.length > 0 ? (
-            <div className="mt-3 h-64">
+            <div className="mt-3 h-56">
               <ResponsiveContainer>
                 <BarChart data={otByDept} layout="vertical" margin={{ left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
@@ -246,7 +246,7 @@ export default function FinancialView() {
       {/* Overtime cost trend (real · month-by-month) — P5.6 */}
       <Panel icon={Clock} iconClass="text-warning" title="Overtime Cost Trend" subtitle="Monthly overtime cost (₹ Lakh) across the window">
         {otTrend.length > 0 ? (
-          <div className="mt-3 h-64">
+          <div className="mt-3 h-56">
             <ResponsiveContainer>
               <BarChart data={otTrend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />

@@ -52,26 +52,49 @@ export function KpiCard({
     <button
       onClick={onClick}
       className={cn(
-        'surface-premium lift-hover group w-full overflow-hidden p-5 text-left',
+        'surface-premium lift-hover group relative w-full overflow-hidden p-3.5 text-left',
         'focus:outline-none focus:ring-2 focus:ring-primary/30',
       )}
     >
-      <div className={cn('pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br opacity-70 blur-2xl', toneRing[tone])} />
-      <div className="relative flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
-          <div className="text-2xl font-semibold tracking-tight text-foreground tabular-nums">{value}</div>
-        </div>
+      <div className={cn('pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br opacity-60 blur-xl', toneRing[tone])} />
+
+      {/* label + icon */}
+      <div className="relative flex items-center justify-between gap-2">
+        <span className="truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</span>
         {Icon && (
-          <div className="gloss-sheen flex h-9 w-9 items-center justify-center rounded-xl ring-1 ring-black/5 shadow-sm"
+          <div className="gloss-sheen flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1 ring-black/5 shadow-sm"
                style={{ background: toneChip[tone] }}>
-            <Icon className="h-4 w-4 text-white" />
+            <Icon className="h-3.5 w-3.5 text-white" />
           </div>
         )}
       </div>
 
+      {/* value + delta */}
+      <div className="relative mt-1 flex items-end justify-between gap-2">
+        <span className="text-[1.6rem] font-semibold leading-none tracking-tight text-foreground tabular-nums">{value}</span>
+        {typeof delta === 'number' && (
+          <span className={cn(
+            'inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums',
+            positive && 'bg-success/10 text-success',
+            negative && 'bg-destructive/10 text-destructive',
+            !positive && !negative && 'bg-muted text-muted-foreground',
+          )}>
+            {positive ? <ArrowUpRight className="h-3 w-3" /> : negative ? <ArrowDownRight className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
+            {Math.abs(delta).toFixed(1)}%
+          </span>
+        )}
+      </div>
+
+      {/* footer: period + hint */}
+      {(deltaLabel || hint) && (
+        <div className="relative mt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <span className="truncate">{deltaLabel ?? ''}</span>
+          <span className="truncate text-right">{hint ?? ''}</span>
+        </div>
+      )}
+
       {data.length > 0 && (
-        <div className="relative -mx-1 mt-3 h-10">
+        <div className="relative -mx-1 mt-2 h-7">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 2, right: 2, bottom: 0, left: 2 }}>
               <defs>
@@ -85,22 +108,6 @@ export function KpiCard({
           </ResponsiveContainer>
         </div>
       )}
-
-      <div className="relative mt-3 flex items-center justify-between text-xs">
-        {typeof delta === 'number' ? (
-          <span className={cn(
-            'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium tabular-nums',
-            positive && 'bg-success/10 text-success',
-            negative && 'bg-destructive/10 text-destructive',
-            !positive && !negative && 'bg-muted text-muted-foreground',
-          )}>
-            {positive ? <ArrowUpRight className="h-3 w-3" /> : negative ? <ArrowDownRight className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
-            {Math.abs(delta).toFixed(1)}%
-            {deltaLabel && <span className="font-normal text-muted-foreground">· {deltaLabel}</span>}
-          </span>
-        ) : <span />}
-        {hint && <span className="text-muted-foreground">{hint}</span>}
-      </div>
     </button>
   )
 }

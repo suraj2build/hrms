@@ -30,7 +30,7 @@ export default function WorkforceView() {
   return (
     <ExecLayout title="Workforce Analytics" subtitle="Composition, demographics and structure of the manpower base · live data">
       {/* KPIs */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Active Headcount" value={fmtNum(wf?.employee_count)} icon={Users} tone="primary" spark={hcSpark} />
         <KpiCard label="Joiners (period)" value={fmtNum(wf?.total_joiners_period)} icon={Users2} tone="success" spark={joinersSpark} />
         <KpiCard label="Exits (period)" value={fmtNum(wf?.total_exits_period)} icon={TrendingUp} tone="destructive" spark={exitsSpark} hint={wf ? `Net ${wf.total_joiners_period - wf.total_exits_period >= 0 ? '+' : ''}${wf.total_joiners_period - wf.total_exits_period}` : undefined} />
@@ -71,7 +71,7 @@ export default function WorkforceView() {
       </Panel>
 
       {/* Location (empty) + Mix (real) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel className="xl:col-span-2" icon={MapPin} iconClass="text-primary" title="Headcount by Location" subtitle="Geographic distribution">
           <EmptyBody text="Headcount by location isn't aggregated yet — work-location is captured per employee but not rolled up for the executive view." />
         </Panel>
@@ -90,7 +90,7 @@ export default function WorkforceView() {
       </section>
 
       {/* Age + Tenure (both empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={Cake} iconClass="text-info" title="Age Distribution" subtitle="By age band">
           <EmptyBody text="Age-band distribution isn't available yet (date-of-birth isn't aggregated for analytics)." />
         </Panel>
@@ -100,10 +100,10 @@ export default function WorkforceView() {
       </section>
 
       {/* Monthly net trend (real) + Span (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={TrendingUp} iconClass="text-primary" title="Joiners vs Exits" subtitle="Last 12 months">
           {(wf?.monthly_trends?.length ?? 0) > 0 ? (
-            <div className="mt-3 h-64">
+            <div className="mt-3 h-56">
               <ResponsiveContainer>
                 <BarChart data={wf!.monthly_trends.map(t => ({ ...t, m: t.month.slice(5) }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />

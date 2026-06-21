@@ -194,7 +194,7 @@ export default function ExecutiveIntelligenceCenter() {
     >
         {/* Hero strip */}
         <section className="relative overflow-hidden rounded-2xl border bg-[image:var(--gradient-primary)] p-6 text-primary-foreground shadow-[var(--shadow-elegant)]">
-          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute -right-20 -top-20 h-56 w-64 rounded-full bg-white/10 blur-3xl" />
           <div className="absolute right-10 bottom-0 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
           <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl">
@@ -221,17 +221,17 @@ export default function ExecutiveIntelligenceCenter() {
         {/* KPI grid */}
         <section>
           <SectionHeader title="Critical Manpower KPIs" subtitle="Live snapshot from operational data" icon={Gauge} />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
           </div>
         </section>
 
         {/* Headcount trend + Workforce mix */}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Panel className="xl:col-span-2" icon={Users} iconClass="text-primary" title="Headcount Trend"
             subtitle="Active employees per month · plan/budget targets not configured">
             {headcountTrend.length > 0 ? (
-              <div className="mt-4 h-72">
+              <div className="mt-4 h-60">
                 <ResponsiveContainer>
                   <ComposedChart data={headcountTrend}>
                     <defs><linearGradient id="hcArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} /></linearGradient></defs>
@@ -273,7 +273,7 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* Predictive attrition (empty) + Attendance */}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Panel className="xl:col-span-2" icon={Sparkles} iconClass="text-info" title="Predictive Attrition · Next 6 Months"
             badge={<Badge variant="secondary" className="bg-info/10 text-info border-info/20">AI</Badge>}
             subtitle="Forecast model not enabled yet">
@@ -283,7 +283,7 @@ export default function ExecutiveIntelligenceCenter() {
           <Panel icon={CalendarCheck} iconClass="text-primary" title="Attendance Trend" subtitle="Monthly attendance rate (%)">
             {attendanceTrend.length > 0 ? (
               <>
-                <div className="mt-3 h-56">
+                <div className="mt-3 h-48">
                   <ResponsiveContainer>
                     <AreaChart data={attendanceTrend}>
                       <defs><linearGradient id="attA" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-3)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--chart-3)" stopOpacity={0} /></linearGradient></defs>
@@ -307,11 +307,11 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* Combined trend + Payroll mix (empty) */}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Panel className="xl:col-span-2" icon={IndianRupee} iconClass="text-primary" title="Manpower, Attrition & Payroll Cost Trend"
             badge={<Badge variant="secondary">12 months</Badge>} subtitle="Headcount & payroll (₹ Cr) bars · attrition % line">
             {combinedTrend.length > 0 ? (
-              <div className="mt-4 h-72">
+              <div className="mt-4 h-60">
                 <ResponsiveContainer>
                   <ComposedChart data={combinedTrend}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -363,7 +363,7 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* Position ageing / tenure / reasons — all empty */}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Panel icon={Clock} iconClass="text-warning" title="Open Position Ageing" subtitle="Days since requisition opened">
             <EmptyBody text="Requisition ageing isn't surfaced here yet. Open requisitions and the hiring funnel live in the CHRO view → Talent Acquisition." />
           </Panel>
@@ -377,7 +377,7 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* Hiring funnel (empty) + Diversity (empty) */}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Panel icon={UserPlus} iconClass="text-info" title="Hiring Funnel" subtitle="Conversion across stages">
             <EmptyBody text="The hiring funnel and offer-acceptance rate are published in the CHRO view → Talent Acquisition (canonical surface)." />
           </Panel>
@@ -389,7 +389,7 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* AI insights + Exceptions */}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Panel icon={Lightbulb} iconClass="text-warning" title="AI Manpower Insights" badge={<Badge variant="secondary" className="ml-auto">Auto-generated</Badge>}>
             <div className="mt-3 space-y-3">
               {insights.length > 0 ? insights.map((ins) => (

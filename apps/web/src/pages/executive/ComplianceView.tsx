@@ -79,7 +79,7 @@ export default function ComplianceView() {
   return (
     <ExecLayout title="Compliance & Risk" subtitle="Statutory risk, incidents and governance posture · live data">
       {/* KPIs */}
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Risk Posture Index" value={c?.posture_index != null ? `${postureIdx}` : '—'} icon={ShieldAlert} tone={postureBand === 'high' || postureBand === 'critical' ? 'destructive' : postureBand === 'medium' ? 'warning' : 'success'} hint={`${postureBand} · 6-domain composite`} />
         <KpiCard label="Compliance Score" value={c ? `${score}` : '—'} icon={Gauge} tone={status === 'high' ? 'destructive' : status === 'medium' ? 'warning' : 'success'} hint={`Risk: ${status}`} />
         <KpiCard label="Open Breaches" value={(c?.sla_breached_30d ?? 0).toLocaleString()} icon={FileWarning} tone="destructive" hint={c ? `${(c.sla_breach_rate * 100).toFixed(0)}% breach rate` : undefined} />
@@ -87,7 +87,7 @@ export default function ComplianceView() {
       </section>
 
       {/* R2 — Risk Posture Index: canonical 6-domain composite */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel icon={ShieldAlert} iconClass={postureTone.text} title="Risk Posture Index" subtitle="Weighted composite of six risk domains (0–100, higher = more risk)">
           {c?.posture_index != null ? (
             <>
@@ -128,7 +128,7 @@ export default function ComplianceView() {
       </section>
 
       {/* Risk posture (real radial) + Statutory matrix (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel icon={ShieldCheck} iconClass={tone.text} title="Risk Posture" subtitle="Composite compliance score (0–100)">
           {c ? (
             <>
@@ -162,7 +162,7 @@ export default function ComplianceView() {
                 <StatTile label="Due This Week" value={dueSoon.length.toLocaleString()} tone="warning" />
                 <StatTile label="Due This Month" value={(deadlines.length - overdue.length).toLocaleString()} tone="muted" />
               </div>
-              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 {deadlines.slice(0, 12).map(d => (
                   <div key={d.id} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-1.5">
                     <div className="min-w-0">
@@ -181,7 +181,7 @@ export default function ComplianceView() {
       </section>
 
       {/* P3.5 — Workforce Lifecycle Exposure (single source: lifecycle-expiry) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Panel icon={Gauge} iconClass={lc && lc.expiry_risk_index >= 50 ? 'text-destructive' : lc && lc.expiry_risk_index >= 20 ? 'text-warning' : 'text-success'} title="Expiry Risk Index" subtitle="Composite lifecycle exposure (0–100)">
           {lc ? (
             <>
@@ -219,7 +219,7 @@ export default function ComplianceView() {
       </section>
 
       {/* Incidents by severity (real) + Governance log (empty) */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={AlertTriangle} iconClass="text-warning" title="Governance Events by Severity" subtitle="Last 30 days">
           {sevEntries.length > 0 ? (
             <div className="mt-3 space-y-2.5">
@@ -247,7 +247,7 @@ export default function ComplianceView() {
       </section>
 
       {/* O5.9 — Trust Intelligence Panel */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <Panel icon={ShieldCheck} iconClass="text-primary" title="Trust Distribution" subtitle="Employees by trust risk severity">
           {c && Object.keys(c.trust_distribution ?? {}).length > 0 ? (
             <div className="mt-3 space-y-2.5">
