@@ -3,8 +3,8 @@
  *
  * GET /manager/team/payroll-cost?month=YYYY-MM
  *   Per-employee payroll figures for the caller's direct reports for a given
- *   payroll month. Reads payroll_run_employees (any run status — draft is
- *   shown with a flag). Managers see only their own team; HR admins may
+ *   payroll month. Reads payroll_slips (the authoritative per-employee payroll
+ *   output). Managers see only their own team; HR admins may
  *   pass ?manager_employee_id to inspect a specific team, or see all employees
  *   when omitted.
  *
@@ -21,6 +21,25 @@ const monthRe = /^\d{4}-\d{2}$/
 function currentMonth(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function prevMonth(m: string): string {
+  const [y, mo] = m.split('-').map(Number)
+  const d = new Date(y, mo - 2, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Best-effort overtime cost from a payroll slip's component_breakdown JSONB. */
+function otFromBreakdown(cb: unknown): number {
+  if (!Array.isArray(cb)) return 0
+  let ot = 0
+  for (const c of cb as any[]) {
+    const key = `${c?.code ?? ''} ${c?.name ?? ''} ${c?.type ?? ''}`.toLowerCase()
+    if (/over\s*time|overtime|(^|[^a-z])ot([^a-z]|$)/.test(key)) {
+      ot += Number(c?.amount ?? c?.value ?? 0) || 0
+    }
+  }
+  return ot
 }
 
 export default async function managerTeamPayrollCostRoute(fastify: FastifyInstance) {
@@ -70,30 +89,59 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
       return reply.send({ data: [], month, run_status: null, total: null, note: 'No payroll run for this month' })
     }
 
+    // Per-employee figures come from payroll_slips — the authoritative per-employee
+    // payroll output. (payroll_run_employees is read-only legacy: nothing writes it.)
+    // OT cost is derived from the slip's component_breakdown; volatility is computed
+    // against the prior month's net pay.
     const { data: rows, error } = await fastify.supabase
-      .from('payroll_run_employees')
+      .from('payroll_slips')
       .select(`
-        employee_id, gross_pay, net_pay, ot_cost, lop_deduction, volatility_index,
+        employee_id, gross_pay, net_pay, lop_amount, component_breakdown,
         employees!inner( id, first_name, last_name, employee_code, designations(name) )
       `)
       .eq('tenant_id', req.tenantId)
-      .eq('payroll_run_id', run.id)
+      .eq('run_id', run.id)
       .in('employee_id', employeeIds)
       .order('gross_pay', { ascending: false })
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
-    const data = (rows ?? []).map((r: any) => ({
-      employee_id:      r.employee_id,
-      name:             r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
-      employee_code:    r.employees?.employee_code ?? null,
-      designation:      (Array.isArray(r.employees?.designations) ? r.employees.designations[0]?.name : r.employees?.designations?.name) ?? null,
-      gross_pay:        Number(r.gross_pay  ?? 0),
-      net_pay:          Number(r.net_pay    ?? 0),
-      ot_cost:          Number(r.ot_cost    ?? 0),
-      lop_deduction:    Number(r.lop_deduction ?? 0),
-      volatility_index: r.volatility_index != null ? Number(r.volatility_index) : null,
-    }))
+    // Prior-month net pay per employee → volatility = |net − prior| / prior × 100
+    const priorNet = new Map<string, number>()
+    const { data: priorRun } = await fastify.supabase
+      .from('payroll_runs')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('month', prevMonth(month))
+      .maybeSingle()
+    if (priorRun) {
+      const { data: priorSlips } = await fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, net_pay')
+        .eq('tenant_id', req.tenantId)
+        .eq('run_id', (priorRun as any).id)
+        .in('employee_id', employeeIds)
+      for (const s of (priorSlips ?? []) as any[]) priorNet.set(s.employee_id, Number(s.net_pay ?? 0))
+    }
+
+    const data = (rows ?? []).map((r: any) => {
+      const net   = Number(r.net_pay ?? 0)
+      const prior = priorNet.get(r.employee_id)
+      const volatility_index = prior && prior > 0
+        ? Math.round((Math.abs(net - prior) / prior) * 10000) / 100
+        : null
+      return {
+        employee_id:      r.employee_id,
+        name:             r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
+        employee_code:    r.employees?.employee_code ?? null,
+        designation:      (Array.isArray(r.employees?.designations) ? r.employees.designations[0]?.name : r.employees?.designations?.name) ?? null,
+        gross_pay:        Number(r.gross_pay ?? 0),
+        net_pay:          net,
+        ot_cost:          otFromBreakdown(r.component_breakdown),
+        lop_deduction:    Number(r.lop_amount ?? 0),
+        volatility_index,
+      }
+    })
 
     const total = data.reduce(
       (acc: { gross_pay: number; net_pay: number; ot_cost: number; lop_deduction: number }, r) => ({

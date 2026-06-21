@@ -17,6 +17,19 @@ import { eventBus }            from '../../lib/event-bus.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
+/** Best-effort overtime cost from a payroll slip's component_breakdown JSONB. */
+function otFromBreakdown(cb: unknown): number {
+  if (!Array.isArray(cb)) return 0
+  let ot = 0
+  for (const c of cb as any[]) {
+    const key = `${c?.code ?? ''} ${c?.name ?? ''} ${c?.type ?? ''}`.toLowerCase()
+    if (/over\s*time|overtime|(^|[^a-z])ot([^a-z]|$)/.test(key)) {
+      ot += Number(c?.amount ?? c?.value ?? 0) || 0
+    }
+  }
+  return ot
+}
+
 function currentMonth(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -86,7 +99,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
       })
     }
 
-    // Live path: aggregate from payroll_run_employees for the month's run
+    // Live path: aggregate from payroll_slips for the month's run
     const { data: run } = await fastify.supabase
       .from('payroll_runs')
       .select('id, status, total_gross, total_net, employee_count')
@@ -107,17 +120,18 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
       })
     }
 
-    // Fetch per-employee slips with job_history for dept
+    // Fetch per-employee slips with job_history for dept. Source is payroll_slips
+    // (authoritative per-employee output); payroll_run_employees is never written.
     const { data: slips } = await fastify.supabase
-      .from('payroll_run_employees')
+      .from('payroll_slips')
       .select(`
-        employee_id, gross_pay, net_pay, ot_cost, lop_deduction,
+        employee_id, gross_pay, net_pay, lop_amount, component_breakdown,
         employees!inner(
           id, first_name, last_name,
           job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name))
         )
       `)
-      .eq('payroll_run_id', run.id)
+      .eq('run_id', run.id)
       .eq('tenant_id', req.tenantId)
 
     // Aggregate by department
@@ -138,8 +152,8 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
       entry.headcount++
       entry.total_gross   += Number(slip.gross_pay ?? 0)
       entry.total_net     += Number(slip.net_pay ?? 0)
-      entry.total_ot_cost += Number(slip.ot_cost ?? 0)
-      entry.total_lop     += Number(slip.lop_deduction ?? 0)
+      entry.total_ot_cost += otFromBreakdown(slip.component_breakdown)
+      entry.total_lop     += Number(slip.lop_amount ?? 0)
       deptMap.set(deptId, entry)
     }
 
