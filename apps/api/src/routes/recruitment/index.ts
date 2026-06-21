@@ -69,6 +69,19 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       },
     ],
   }
+  // Managers may RAISE requisitions (they land in 'draft' / pending HR approval);
+  // HR admins still own the approve/hold/cancel workflow.
+  const MANAGER_CREATE_ROLES = [...HR_ADMIN_ROLES, 'manager']
+  const managerOrHrAuth = {
+    preHandler: [
+      fastify.authenticate,
+      async (req: any, reply: any) => {
+        if (!MANAGER_CREATE_ROLES.includes(req.userRole)) {
+          return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR admin access required' })
+        }
+      },
+    ],
+  }
 
   // ── Pipeline Stages ───────────────────────────────────────────────────────
 
@@ -248,7 +261,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ data: { ...(data as any), applicant_count: appCount ?? 0 } })
   })
 
-  fastify.post('/requisitions', hrAdminAuth, async (req: any, reply) => {
+  fastify.post('/requisitions', managerOrHrAuth, async (req: any, reply) => {
     const schema = z.object({
       title:           z.string().min(1),
       department_id:   z.string().uuid().optional().nullable(),

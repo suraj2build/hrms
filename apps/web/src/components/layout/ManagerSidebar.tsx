@@ -42,6 +42,7 @@ import {
   Radio,
   Calculator,
   Wallet,
+  Briefcase,
   IndianRupee,
   UserCog,
   Package,
@@ -150,6 +151,7 @@ const BASE_SECTIONS: NavSection[] = [
         label: 'Team Management',
         items: [
           { label: 'Team Lifecycle', icon: UserCog,      href: '/manager/team/lifecycle'      },
+          { label: 'Requisitions',   icon: Briefcase,    href: '/manager/requisitions'        },
           { label: 'Leave Balances', icon: Scale,        href: '/manager/team/leave-balances' },
           { label: 'Team Assets',    icon: Package,      href: '/manager/team/assets'         },
           { label: 'Team Helpdesk',  icon: LifeBuoy,     href: '/manager/team/helpdesk'       },
