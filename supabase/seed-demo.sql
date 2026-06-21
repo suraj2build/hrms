@@ -48,6 +48,8 @@ begin
     'interview_scores','interview_panel','interview_rounds','applications',
     'candidates','job_requisitions',
     'employee_asset_ledger','assets','helpdesk_tickets',
+    -- letters / documents reference employees (issued_by / employee_id) — clear first
+    'letter_approval_log','generated_letters','documents',
     'payroll_slips','payroll_runs',
     'attendance_punch_logs','attendance_daily','holiday_calendar',
     'leave_requests','employee_leave_balance',

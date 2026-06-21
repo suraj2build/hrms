@@ -780,7 +780,21 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
 
     const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [], total: count ?? 0 })
+
+    // Flatten the embedded employee/category relations into the flat field names
+    // the admin table renders (employee_name, category_name, claim_month).
+    const rows = (data ?? []).map((c: any) => {
+      const emp = Array.isArray(c.employees) ? c.employees[0] : c.employees
+      const cat = Array.isArray(c.reimbursement_categories) ? c.reimbursement_categories[0] : c.reimbursement_categories
+      const name = emp ? `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim() : ''
+      return {
+        ...c,
+        employee_name: name || emp?.employee_code || null,
+        category_name: cat?.name ?? null,
+        claim_month:   (c.expense_date ?? c.claim_date ?? c.created_at ?? '').slice(0, 7) || null,
+      }
+    })
+    return reply.send({ data: rows, total: count ?? 0 })
   })
 
   /**

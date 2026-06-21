@@ -35,6 +35,7 @@ import { SectionCard }     from '@/components/layout/SectionCard'
 import { Badge }           from '@/components/ui/badge'
 import { Button }          from '@/components/ui/button'
 import { Input }           from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { DateInput }       from '@/components/ui/date-input'
 import { StatusChangePill } from '@/components/operational/AttendanceDiff'
 import { api }             from '@/lib/api/client'
@@ -798,13 +799,11 @@ export function AttendanceTimeline() {
       <SectionCard title="Lookup" icon={<Search className="h-4 w-4 text-muted-foreground" />}>
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px] space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Employee UUID</label>
-            <Input
+            <label className="text-xs font-medium text-muted-foreground">Employee</label>
+            <EmployeeSelector
               value={empInput}
-              onChange={e => setEmpInput(e.target.value)}
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              className="h-8 text-xs font-mono"
-              onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              onChange={v => setEmpInput(typeof v === 'string' ? v : (v[0] ?? ''))}
+              placeholder="Search employee by name or code…"
             />
           </div>
           <div className="space-y-1">

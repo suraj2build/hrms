@@ -20,6 +20,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
@@ -212,11 +213,11 @@ export function PayrollLedger() {
       <SectionCard className="mb-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Employee ID (UUID)</label>
-            <Input
-              placeholder="e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            <label className="text-xs font-medium text-muted-foreground">Employee</label>
+            <EmployeeSelector
+              placeholder="Search employee by name or code…"
               value={employeeId}
-              onChange={e => setEmployeeId(e.target.value)}
+              onChange={v => setEmployeeId(typeof v === 'string' ? v : (v[0] ?? ''))}
             />
           </div>
           <div className="w-40 space-y-1">

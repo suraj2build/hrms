@@ -25,7 +25,7 @@ import { api } from '@/lib/api/client'
 import { cn }  from '@/lib/utils'
 
 type Bucket = 'overdue' | 'due_7' | 'due_30' | 'due_90'
-type Category = 'document' | 'identity' | 'passport' | 'visa' | 'contract' | 'probation'
+type Category = 'document' | 'identity' | 'passport' | 'visa' | 'contract' | 'probation' | 'certification'
 
 interface RiskItem {
   id: string
@@ -72,8 +72,11 @@ const CATEGORY_META: Record<Category, { label: string; icon: LucideIcon }> = {
   visa:      { label: 'Visa',      icon: Plane },
   contract:  { label: 'Contracts', icon: FileSignature },
   probation: { label: 'Probation', icon: UserCheck },
+  certification: { label: 'Certifications', icon: FileText },
 }
-const CATEGORY_ORDER: Category[] = ['document', 'identity', 'passport', 'visa', 'contract', 'probation']
+// Fallback so an unknown/new category from the API can never crash the table.
+const CATEGORY_FALLBACK = { label: 'Other', icon: FileText }
+const CATEGORY_ORDER: Category[] = ['document', 'identity', 'passport', 'visa', 'contract', 'probation', 'certification']
 
 export function ExpiryManagement() {
   const { data: res, isLoading, isError } = useQuery<ExpiryResp>({
@@ -202,7 +205,7 @@ export function ExpiryManagement() {
                   </thead>
                   <tbody>
                     {rows.map(i => {
-                      const CM = CATEGORY_META[i.category]
+                      const CM = CATEGORY_META[i.category] ?? CATEGORY_FALLBACK
                       return (
                         <tr key={i.id} className="border-b border-border/50">
                           <td className="py-2 px-3">
