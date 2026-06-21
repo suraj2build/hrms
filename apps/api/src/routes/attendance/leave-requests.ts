@@ -212,8 +212,11 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
       if (employeeId)            countQ = countQ.eq('employee_id', employeeId) as any
       if (parsed.data.status)    countQ = countQ.eq('status', parsed.data.status) as any
-      if ((parsed.data as any).from_date) countQ = countQ.gte('start_date', (parsed.data as any).from_date) as any
-      if ((parsed.data as any).to_date)   countQ = countQ.lte('end_date',   (parsed.data as any).to_date)   as any
+      // Mirror listLeaveRequests' date filter exactly — the columns are
+      // from_date/to_date (migration 280); start_date/end_date don't exist, so the
+      // old filter silently failed and skewed payroll-readiness counts.
+      if ((parsed.data as any).from_date) countQ = countQ.gte('from_date', (parsed.data as any).from_date) as any
+      if ((parsed.data as any).to_date)   countQ = countQ.lte('to_date',   (parsed.data as any).to_date)   as any
       const { count } = await countQ
       return reply.send({ total: count ?? 0 })
     }

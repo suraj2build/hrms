@@ -23,6 +23,7 @@ import {
   type DayContext,
   type LeaveSessionSpan,
 } from './leave-duration-engine.js'
+import { resolveEmployeeOrgContext, getWeeklyOffDays, getLocalDayOfWeek } from './org-context.js'
 import { eventService }    from './event-service.js'
 import {
   captureRuleSnapshot,
@@ -420,12 +421,24 @@ export async function createLeaveRequest(
       .map(h => [h.date, h.name] as [string, string]),
   )
 
+  // ── Resolve the employee's ACTUAL weekly-off from the roster ──────────────
+  // Hard-coding Sat/Sun (isDefaultWeekoff) over/under-charges leave for tenants
+  // whose weekly off isn't Sat/Sun (retail, manufacturing, Gulf Fri-Sat) and
+  // diverges from what attendance/payroll later compute. Resolve roster + site
+  // timezone exactly as computeWorkingLeaveDays does, with a Sat/Sun fallback.
+  const orgCtx        = await resolveEmployeeOrgContext(supabase, tenantId, employeeId, fromDate)
+  const weeklyOffDays = getWeeklyOffDays([], orgCtx.emp_roster_weekly_off, orgCtx.site_default_roster_weekly_off)
+  const isWeeklyOff   = (date: string): boolean =>
+    weeklyOffDays.length > 0
+      ? weeklyOffDays.includes(getLocalDayOfWeek(date, orgCtx.site_timezone))
+      : isDefaultWeekoff(date)
+
   // ── Build per-day context for the duration engine ─────────────────────────
   const spanDates  = buildDateRange(fromDate, toDate)
   const dayInfo: DayContext[] = spanDates.map(date => ({
     date,
     is_holiday:    holidayMap.has(date),
-    is_weekly_off: isDefaultWeekoff(date),
+    is_weekly_off: isWeeklyOff(date),
     holiday_name:  holidayMap.get(date),
   }))
 
