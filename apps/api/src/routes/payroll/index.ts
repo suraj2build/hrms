@@ -215,6 +215,9 @@ import {
   validateSnapshotIntegrity,
 } from '../../lib/payroll-snapshot-engine.js'
 import {
+  buildDeptSnapshots,
+} from '../../lib/payroll-dept-snapshot.js'
+import {
   buildPayrollFinancialLedger,
   reversePayrollLedger,
   exportGeneralLedger,
@@ -2019,6 +2022,19 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         event_type: 'snapshot_integrity_failed',
         payload:    { reason: String(snapErr?.message ?? snapErr), stage: 'finalize_auto_snapshot' },
       }).catch(() => void 0)
+    }
+
+    // ── Populate the canonical department cost snapshot ──────────────────────
+    // payroll_dept_snapshots is the single source of truth the executive
+    // Financial/CEO dashboards read. Rebuild it from this run's slips so OT and
+    // per-department cost stop reading as ₹0. Non-fatal: finalize still succeeds.
+    try {
+      const deptRes = await buildDeptSnapshots({ supabase: fastify.supabase, tenantId, month: run.month, runId: id })
+      if (!deptRes.ok) {
+        req.log.warn({ run_id: id, reason: deptRes.error }, 'payroll finalize: dept snapshot build failed (non-fatal)')
+      }
+    } catch (deptErr: any) {
+      req.log.warn({ err: deptErr, run_id: id }, 'payroll finalize: dept snapshot exception (non-fatal)')
     }
 
     await logAction(fastify.supabase, {

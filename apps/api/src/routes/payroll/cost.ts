@@ -14,21 +14,9 @@
 
 import type { FastifyInstance } from 'fastify'
 import { eventBus }            from '../../lib/event-bus.js'
+import { otFromBreakdown }     from '../../lib/payroll-dept-snapshot.js'
 
 const monthRe = /^\d{4}-\d{2}$/
-
-/** Best-effort overtime cost from a payroll slip's component_breakdown JSONB. */
-function otFromBreakdown(cb: unknown): number {
-  if (!Array.isArray(cb)) return 0
-  let ot = 0
-  for (const c of cb as any[]) {
-    const key = `${c?.code ?? ''} ${c?.name ?? ''} ${c?.type ?? ''}`.toLowerCase()
-    if (/over\s*time|overtime|(^|[^a-z])ot([^a-z]|$)/.test(key)) {
-      ot += Number(c?.amount ?? c?.value ?? 0) || 0
-    }
-  }
-  return ot
-}
 
 function currentMonth(): string {
   const d = new Date()
