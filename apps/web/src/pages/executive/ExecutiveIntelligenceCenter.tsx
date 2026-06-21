@@ -12,9 +12,9 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity, AlertTriangle, ArrowRight,
-  Clock, Download, Gauge, IndianRupee, Lightbulb,
+  Download, Gauge, IndianRupee, Lightbulb,
   Sparkles, Target,
-  UserMinus, UserPlus, Users, Wallet, CalendarCheck, Info, ChevronRight,
+  UserMinus, Users, Wallet, CalendarCheck, Info, ChevronRight,
 } from 'lucide-react'
 import {
   Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart,
@@ -363,10 +363,8 @@ export default function ExecutiveIntelligenceCenter() {
         </section>
 
         {/* Position ageing / tenure / reasons — all empty */}
+        {/* Roadmap analytics — fill once the relevant module/engine is enabled */}
         <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-          <Panel icon={Clock} iconClass="text-warning" title="Open Position Ageing" subtitle="Days since requisition opened">
-            <EmptyBody text="Requisition ageing isn't surfaced here yet. Open requisitions and the hiring funnel live in the CHRO view → Talent Acquisition." />
-          </Panel>
           <Panel icon={UserMinus} iconClass="text-destructive" title="Attrition Ageing · Tenure" subtitle="Exits by tenure band">
             <EmptyBody text="Tenure-band attrition isn't available yet." />
           </Panel>
@@ -374,14 +372,7 @@ export default function ExecutiveIntelligenceCenter() {
             badge={<Badge variant="secondary" className="ml-auto">Exit interviews</Badge>}>
             <EmptyBody text="Exit-reason analysis needs exit-interview capture, which isn't wired yet." />
           </Panel>
-        </section>
-
-        {/* Hiring funnel (empty) + Diversity (empty) */}
-        <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-          <Panel icon={UserPlus} iconClass="text-info" title="Hiring Funnel" subtitle="Conversion across stages">
-            <EmptyBody text="The hiring funnel and offer-acceptance rate are published in the CHRO view → Talent Acquisition (canonical surface)." />
-          </Panel>
-          <Panel className="xl:col-span-2" icon={Target} iconClass="text-primary" title="Gender Diversity by Department"
+          <Panel icon={Target} iconClass="text-primary" title="Gender Diversity by Department"
             subtitle="Per-department breakdown not available"
             badge={genderFemalePct != null ? <Badge variant="secondary" className="ml-auto">Org-wide F: {genderFemalePct.toFixed(0)}%</Badge> : undefined}>
             <EmptyBody text="Diversity is only available org-wide right now, not per department. Per-department gender will appear once it's modelled." />
