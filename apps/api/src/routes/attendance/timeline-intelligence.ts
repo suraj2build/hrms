@@ -147,7 +147,10 @@ export default async function timelineIntelligenceRoute(fastify: FastifyInstance
         // 2. attendance_inference_log
         fastify.supabase
           .from('attendance_inference_log')
-          .select('id, type, reason, confidence_penalty, explanation')
+          // Alias real columns (migration 082) to the field names used below —
+          // type/reason/confidence_penalty/explanation don't exist as bare columns
+          // and made this query 500.
+          .select('id, type:inference_type, reason:inference_reason, confidence_penalty:inference_confidence_penalty, explanation:inference_explanation')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .eq('date', date)

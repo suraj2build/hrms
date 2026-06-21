@@ -53,8 +53,10 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       .from('attendance_inference_log')
       .select(
         `
-          id, date, inference_type, inferred_status, confidence_penalty,
-          reason, approved_by, approved_at, created_at,
+          id, date, inference_type,
+          confidence_penalty:inference_confidence_penalty,
+          reason:inference_reason, inference_explanation,
+          approved_by, approved_at, created_at,
           employees!inner(id, first_name, last_name, employee_code)
         `,
         { count: 'exact' },
@@ -119,7 +121,7 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
     const { data, error } = await fastify.supabase
       .from('attendance_inference_log')
       .select(
-        'id, date, inference_type, inferred_status, confidence_penalty, reason, approved_by, approved_at, created_at',
+        'id, date, inference_type, confidence_penalty:inference_confidence_penalty, reason:inference_reason, inference_explanation, approved_by, approved_at, created_at',
       )
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
@@ -136,9 +138,9 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       id: string
       date: string
       inference_type: string
-      inferred_status: string | null
       confidence_penalty: number | null
       reason: string | null
+      inference_explanation: string | null
       approved_by: string | null
       approved_at: string | null
       created_at: string

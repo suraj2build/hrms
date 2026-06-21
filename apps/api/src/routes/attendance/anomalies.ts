@@ -508,20 +508,24 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     // Deduplicate by employee_id+date to avoid redundant recomputes when
     // multiple anomalies for the same date are resolved in one batch.
     const recomputeTargets = new Map<string, { employee_id: string; date: string; tenant_id: string }>()
+    const keyToAnomalyIds  = new Map<string, string[]>()
     for (const row of resolvedRows) {
       if (row.employee_id && row.date) {
-        recomputeTargets.set(`${row.employee_id}:${row.date}`, {
+        const key = `${row.employee_id}:${row.date}`
+        recomputeTargets.set(key, {
           employee_id: row.employee_id,
           date:        row.date,
           tenant_id:   row.tenant_id,
         })
+        keyToAnomalyIds.set(key, [...(keyToAnomalyIds.get(key) ?? []), row.id])
       }
     }
 
     let recomputeAttempted = 0
     let recomputeFailed    = 0
+    const failedAnomalyIds: string[] = []
 
-    for (const { employee_id, date, tenant_id } of recomputeTargets.values()) {
+    for (const [key, { employee_id, date, tenant_id }] of recomputeTargets) {
       recomputeAttempted++
       try {
         await recomputeRange(fastify.supabase, {
@@ -533,25 +537,34 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
         })
       } catch (recomputeErr) {
         recomputeFailed++
+        failedAnomalyIds.push(...(keyToAnomalyIds.get(key) ?? []))
         req.log.warn(
           { err: recomputeErr, employee_id, date },
-          'bulk anomaly resolve: attendance recompute failed for employee+date (non-fatal — anomaly is resolved but attendance_daily may be stale)',
+          'bulk anomaly resolve: attendance recompute failed — re-opening the anomaly so it is not falsely marked resolved',
         )
       }
     }
 
-    if (recomputeFailed > 0) {
+    // Re-open the anomalies whose corrective recompute failed — marking them
+    // resolved while attendance_daily stays stale would hide a real gap from
+    // payroll. Only the verified-corrected anomalies remain resolved.
+    if (failedAnomalyIds.length > 0) {
+      await fastify.supabase
+        .from('attendance_anomalies')
+        .update({ resolved: false, resolved_by: null, resolved_at: null, updated_at: new Date().toISOString() })
+        .in('id', failedAnomalyIds)
+        .eq('tenant_id', req.tenantId)
       req.log.warn(
-        { recompute_attempted: recomputeAttempted, recompute_failed: recomputeFailed, resolved_count: resolvedRows.length },
-        'bulk anomaly resolve: some recomputes failed — payroll may reflect stale attendance for affected dates',
+        { recompute_attempted: recomputeAttempted, recompute_failed: recomputeFailed, reopened: failedAnomalyIds.length },
+        'bulk anomaly resolve: some recomputes failed — affected anomalies re-opened',
       )
     }
 
     return reply.send({
-      resolved_count:      resolvedRows.length,
+      resolved_count:      resolvedRows.length - failedAnomalyIds.length,
       recompute_attempted: recomputeAttempted,
-      // Only include failure field when there were failures (keeps happy-path response clean)
-      ...(recomputeFailed > 0 && { recompute_failed: recomputeFailed }),
+      // Only include failure fields when there were failures (keeps happy-path clean)
+      ...(recomputeFailed > 0 && { recompute_failed: recomputeFailed, reopened: failedAnomalyIds.length }),
     })
   })
 
