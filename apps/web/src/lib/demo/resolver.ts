@@ -740,6 +740,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (mm) return { data: fx.demoBgvCase(mm[1]) }
   mm = path.match(/^\/recruitment\/requisitions\/([^/]+)\/approvals$/)
   if (mm) return { data: fx.demoRequisitionApprovals() }
+  mm = path.match(/^\/recruitment\/requisitions\/([^/]+)\/postings$/)
+  if (mm) return { data: [
+    { id: 'jbp-1', board: 'Naukri', external_url: 'https://naukri.com/job/demo', status: 'posted', posted_at: new Date().toISOString() },
+    { id: 'jbp-2', board: 'LinkedIn', external_url: 'https://linkedin.com/jobs/demo', status: 'posted', posted_at: new Date().toISOString() },
+  ] }
   if (path.startsWith('/recruitment/')) return { data: [] }
 
   // ── Metrics (prometheus-style text) ────────────────────────────────────────

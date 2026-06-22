@@ -13,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Briefcase, Plus, RefreshCw, Search,
   CheckCircle2, PauseCircle, XCircle, MoreHorizontal,
-  Users, CalendarClock, MapPin, Trash2,
+  Users, CalendarClock, MapPin, Trash2, ExternalLink,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/select'
 import { api }           from '@/lib/api/client'
 import { RequisitionApprovalDialog } from '@/components/recruitment/RequisitionApprovalDialog'
+import { JobBoardPostingsDialog } from '@/components/recruitment/JobBoardPostingsDialog'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
@@ -118,6 +119,7 @@ export function AdminRecruitment() {
   const [sheetOpen,  setSheetOpen]  = useState(false)
   const [editTarget, setEditTarget] = useState<Requisition | null>(null)
   const [approvalReq, setApprovalReq] = useState<Requisition | null>(null)
+  const [postingsReq, setPostingsReq] = useState<Requisition | null>(null)
   const [form,       setForm]       = useState<ReqForm>(EMPTY_FORM)
   const [saving,     setSaving]     = useState(false)
 
@@ -435,6 +437,9 @@ export function AdminRecruitment() {
                                 <CheckCircle2 className="h-3.5 w-3.5 mr-2" />Approval chain
                               </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem onClick={() => setPostingsReq(r)}>
+                              <ExternalLink className="h-3.5 w-3.5 mr-2" />Job-board postings
+                            </DropdownMenuItem>
                             {canApprove && (
                               <DropdownMenuItem
                                 className="text-success"
@@ -698,6 +703,15 @@ export function AdminRecruitment() {
           status={approvalReq.status}
           open={!!approvalReq}
           onOpenChange={(v) => { if (!v) setApprovalReq(null) }}
+        />
+      )}
+
+      {postingsReq && (
+        <JobBoardPostingsDialog
+          requisitionId={postingsReq.id}
+          title={postingsReq.title}
+          open={!!postingsReq}
+          onOpenChange={(v) => { if (!v) setPostingsReq(null) }}
         />
       )}
     </PageContainer>

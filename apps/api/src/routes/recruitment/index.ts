@@ -537,6 +537,37 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ message: `Step ${parsed.data.decision}`, opened: false })
   })
 
+  // ── Job-board postings (sourcing) ──────────────────────────────────────────
+  // Manual tracking now; an automated connector can write the same rows once a
+  // board's API credentials are configured in job_board_connectors.
+  fastify.get('/requisitions/:id/postings', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('job_board_postings').select('*').eq('requisition_id', req.params.id).eq('tenant_id', req.tenantId).order('posted_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/requisitions/:id/postings', hrAdminAuth, async (req: any, reply) => {
+    const parsed = z.object({
+      board: z.string().min(1).max(40), external_url: z.string().max(500).optional().nullable(), external_ref: z.string().max(200).optional().nullable(),
+    }).safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+    const { data, error } = await fastify.supabase
+      .from('job_board_postings')
+      .insert({ tenant_id: req.tenantId, requisition_id: req.params.id, board: parsed.data.board, external_url: parsed.data.external_url ?? null, external_ref: parsed.data.external_ref ?? null, status: 'posted', posted_by: req.userId })
+      .select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.delete('/requisitions/postings/:postingId', hrAdminAuth, async (req: any, reply) => {
+    const { error } = await fastify.supabase
+      .from('job_board_postings').delete().eq('id', req.params.postingId).eq('tenant_id', req.tenantId)
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(204).send()
+  })
+
+
   fastify.post('/requisitions/:id/hold', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
