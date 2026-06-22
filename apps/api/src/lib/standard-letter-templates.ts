@@ -41,6 +41,12 @@ const V = {
   company_name:    { key: 'company_name',    label: 'Company Name',    source: 'company',  required: true },
   current_date:    { key: 'current_date',    label: 'Date',            source: 'computed', required: true },
   last_working_day:{ key: 'last_working_day',label: 'Last Working Day',source: 'manual',   required: false },
+  old_designation: { key: 'old_designation', label: 'Current Designation', source: 'manual', required: false },
+  new_designation: { key: 'new_designation', label: 'New Designation',  source: 'manual',   required: true },
+  effective_date:  { key: 'effective_date',  label: 'Effective Date',   source: 'manual',   required: true },
+  reason:          { key: 'reason',          label: 'Reason / Details', source: 'manual',   required: true },
+  review_period:   { key: 'review_period',   label: 'Review Period',    source: 'manual',   required: true },
+  performance_rating: { key: 'performance_rating', label: 'Rating', source: 'manual', required: false },
 } as const
 
 export const STANDARD_LETTER_TEMPLATES: StandardLetterTemplate[] = [
@@ -139,5 +145,60 @@ export const STANDARD_LETTER_TEMPLATES: StandardLetterTemplate[] = [
       '<p>For {{company_name}},<br/>HR Department</p>',
     variables: [V.employee_name, V.employee_code, V.designation, V.work_location, V.date_of_joining, V.company_name],
     requires_approval: false, approval_levels: 1,
+  },
+  {
+    name: 'Promotion Letter', code: 'promotion_letter', category: 'hr_initiated', letter_type: 'promotion',
+    subject_template: 'Promotion Letter — {{new_designation}}',
+    body_html:
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>We are delighted to inform you that, in recognition of your performance and contribution, you have been ' +
+      'promoted from <strong>{{old_designation}}</strong> to <strong>{{new_designation}}</strong>, effective {{effective_date}}.</p>' +
+      '<p>Your new role carries enhanced responsibilities, and we are confident you will continue to excel. ' +
+      'Revised compensation, if any, will be communicated separately.</p>' +
+      '<p>Congratulations!</p><p>Warm regards,<br/>HR Department<br/>{{company_name}}</p>',
+    variables: [V.employee_name, V.old_designation, V.new_designation, V.effective_date, V.company_name],
+    requires_approval: true, approval_levels: 1,
+  },
+  {
+    name: 'Warning / Show-Cause Notice', code: 'warning_letter', category: 'hr_initiated', letter_type: 'warning',
+    subject_template: 'Show-Cause Notice',
+    body_html:
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>This letter serves as a formal notice in connection with the following: <strong>{{reason}}</strong>, ' +
+      'brought to our attention on or around {{current_date}}.</p>' +
+      '<p>You are hereby required to show cause, in writing within seven (7) days of receipt of this notice, as to why ' +
+      'disciplinary action should not be taken against you. Your explanation will be reviewed before any decision is made.</p>' +
+      '<p>This matter is being treated as confidential.</p>' +
+      '<p>For {{company_name}},<br/>HR Department</p>',
+    variables: [V.employee_name, V.designation, V.reason, V.current_date, V.company_name],
+    requires_approval: true, approval_levels: 1,
+  },
+  {
+    name: 'Performance Improvement Plan (PIP)', code: 'pip_letter', category: 'hr_initiated', letter_type: 'pip',
+    subject_template: 'Performance Improvement Plan',
+    body_html:
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>Following a review of your performance as <strong>{{designation}}</strong>, you are being placed on a ' +
+      'Performance Improvement Plan (PIP) for the period <strong>{{review_period}}</strong>, commencing {{current_date}}.</p>' +
+      '<p>The specific objectives, expectations, and support available to you will be discussed and documented with your ' +
+      'manager. Your progress will be reviewed periodically through this period.</p>' +
+      '<p>We are committed to supporting you in meeting these expectations.</p>' +
+      '<p>Regards,<br/>HR Department<br/>{{company_name}}</p>',
+    variables: [V.employee_name, V.designation, V.review_period, V.current_date, V.company_name],
+    requires_approval: true, approval_levels: 1,
+  },
+  {
+    name: 'Appraisal Letter', code: 'appraisal_letter', category: 'hr_initiated', letter_type: 'appraisal',
+    subject_template: 'Performance Appraisal — {{review_period}}',
+    body_html:
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>Following your performance appraisal for <strong>{{review_period}}</strong>, we are pleased to share that your ' +
+      'overall rating is <strong>{{performance_rating}}</strong>.</p>' +
+      '<p>In recognition of your performance, your revised annual CTC will be <strong>₹{{ctc_annual}}</strong>, ' +
+      'effective {{effective_date}}, in your role as {{designation}}.</p>' +
+      '<p>Thank you for your contribution. We look forward to your continued success.</p>' +
+      '<p>Regards,<br/>HR Department<br/>{{company_name}}</p>',
+    variables: [V.employee_name, V.designation, V.review_period, V.performance_rating, V.ctc_annual, V.effective_date, V.company_name],
+    requires_approval: true, approval_levels: 2,
   },
 ]
