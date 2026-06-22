@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Copy, Check, Eye, UserCheck, UserX, Trash2, Link,
   Users, Clock, ClipboardList, CheckCircle2, Sparkles,
-  UserPlus, Package, Search, Loader2, X,
+  UserPlus, Package, Search, Loader2, X, RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -848,6 +848,19 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
     onError: () => toast.error('Failed to delete invitation'),
   })
 
+  const resendMutation = useMutation({
+    mutationFn: (id: string) => api.post<{ email_sent: boolean; email_skipped: boolean }>(`/onboarding/pre-joinee/${id}/resend`),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
+      qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
+      toast.success(
+        res?.email_sent ? 'Invite resent — a fresh link was emailed to the candidate'
+                        : 'Invite link refreshed (email not configured — copy the link to share)',
+      )
+    },
+    onError: (e: Error) => toast.error('Failed to resend invite', { description: e.message }),
+  })
+
   const setBuddyMutation = useMutation({
     mutationFn: ({ id, buddy_employee_id }: { id: string; buddy_employee_id: string | null }) =>
       api.patch(`/onboarding/pre-joinee/${id}/buddy`, { buddy_employee_id }),
@@ -1045,6 +1058,19 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
                               <Link className="mr-1 h-3 w-3" />
                             )}
                             Copy Link
+                          </Button>
+                        )}
+                        {['pending', 'expired', 'changes_requested'].includes(inv.status) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => resendMutation.mutate(inv.id)}
+                            disabled={resendMutation.isPending && resendMutation.variables === inv.id}
+                            className="h-7 px-2 text-xs"
+                            title="Email a fresh link and extend the expiry by 30 days"
+                          >
+                            <RefreshCw className={`mr-1 h-3 w-3 ${resendMutation.isPending && resendMutation.variables === inv.id ? 'animate-spin' : ''}`} />
+                            Resend
                           </Button>
                         )}
                         {inv.status === 'approved' && (

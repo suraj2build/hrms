@@ -242,7 +242,7 @@ type SubmissionBody       = z.infer<typeof submissionSchema>
 // ── Helper: token expiry (7 days) ─────────────────────────────────────────────
 function tokenExpiresAt(): string {
   const d = new Date()
-  d.setDate(d.getDate() + 7)
+  d.setDate(d.getDate() + 30)   // 30 days — matches the invite email copy + DB default
   return d.toISOString()
 }
 
@@ -682,6 +682,73 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         email_sent:   emailResult.sent,
         email_skipped: emailResult.skipped ?? false,
       },
+    })
+  })
+
+  // ── 2b. POST /onboarding/pre-joinee/:id/resend — re-send + extend the link ──
+  // Re-emails the candidate and pushes the expiry out so an expired/old link
+  // works again. Keeps the same token (the previously emailed link stays valid).
+  fastify.post('/onboarding/pre-joinee/:id/resend', auth, async (req: any, reply) => {
+    const tenantId: string = req.tenantId
+    const { id } = req.params as { id: string }
+
+    const { data: inv, error: fetchErr } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .select('id, tenant_id, token, first_name, last_name, email, joining_date, status')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (fetchErr) return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+    if (!inv)     return reply.code(404).send({ error: 'NOT_FOUND', message: 'Invitation not found' })
+
+    // Only resend while the candidate still has work to do.
+    if (!['pending', 'expired', 'changes_requested'].includes(inv.status)) {
+      return reply.code(409).send({
+        error: 'INVALID_STATE',
+        message: `Cannot resend — this invitation has already been ${inv.status}.`,
+      })
+    }
+
+    const expiresAt = tokenExpiresAt()                         // fresh 30-day window
+    const newStatus = inv.status === 'expired' ? 'pending' : inv.status
+    const { error: updErr } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .update({ expires_at: expiresAt, status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (updErr) return reply.code(500).send({ error: 'DB_ERROR', message: updErr.message })
+
+    const fullInviteUrl = `${APP_PUBLIC_URL}/pre-join/${inv.token}`
+    let emailResult: SendEmailResult = { sent: false, skipped: true }
+    try {
+      const { data: tenant } = await fastify.supabase
+        .from('tenants').select('name').eq('id', tenantId).maybeSingle()
+      const tmpl = preJoineeInviteEmail({
+        candidateName: `${inv.first_name ?? ''} ${inv.last_name ?? ''}`.trim(),
+        companyName:   tenant?.name ?? 'our company',
+        joiningDate:   inv.joining_date,
+        inviteUrl:     fullInviteUrl,
+      })
+      emailResult = await sendEmail({ to: inv.email, subject: tmpl.subject, html: tmpl.html })
+    } catch (e) {
+      fastify.log.warn({ event: 'pre_joinee.resend_email', invitation_id: id, err: e })
+    }
+
+    await logAction(fastify.supabase, {
+      tenantId, tableName: 'pre_joinee_invitations', recordId: id,
+      action: 'UPDATE', performedBy: req.userId,
+      newData: { resent: true, status: newStatus, expires_at: expiresAt },
+    })
+
+    return reply.send({
+      message:       'Invitation resent',
+      id,
+      invite_url:    `/pre-join/${inv.token}`,
+      email_sent:    emailResult.sent,
+      email_skipped: emailResult.skipped ?? false,
+      expires_at:    expiresAt,
     })
   })
 
