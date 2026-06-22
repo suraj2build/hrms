@@ -46,6 +46,7 @@ import {
   IndianRupee,
   UserCog,
   Package,
+  Home,
   LifeBuoy,
 } from 'lucide-react'
 import { cn }         from '@/lib/utils'
@@ -102,6 +103,7 @@ const BASE_SECTIONS: NavSection[] = [
           { label: 'My Attendance',    icon: CalendarDays, href: '/manager/self/attendance',   exact: true },
           { label: 'Leave & Comp-Off', icon: Scale,        href: '/manager/self/leave/balance'             },
           { label: 'Company Holidays', icon: CalendarDays, href: '/manager/self/company-holidays'          },
+          { label: 'Work From Home',   icon: Home,         href: '/manager/self/wfh'                       },
         ],
       },
       {
@@ -117,6 +119,7 @@ const BASE_SECTIONS: NavSection[] = [
       {
         label: 'Documents & Support',
         items: [
+          { label: 'My Assets',    icon: Package,        href: '/manager/self/assets'      },
           { label: 'My Documents', icon: FileText,       href: '/manager/self/documents'   },
           { label: 'Policies',     icon: BookMarked,     href: '/manager/self/policies'    },
           { label: 'How-To Guides', icon: HelpCircle,    href: '/manager/self/runbooks'    },

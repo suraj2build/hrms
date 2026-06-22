@@ -950,6 +950,8 @@ export default function App() {
                 <Route path="/manager/self/compensation"                 element={<EssCompensation />} />
                 <Route path="/manager/self/declarations"                 element={<Navigate to="/manager/self/salary/tax-planner" replace />} />
                 <Route path="/manager/self/reimbursements"               element={<EssReimbursements />} />
+                <Route path="/manager/self/assets"                       element={<EssAssets />} />
+                <Route path="/manager/self/wfh"                          element={<EssWfh />} />
                 <Route path="/manager/self/loans"                        element={<EssLoansAdvances />} />
                 <Route path="/manager/self/documents"                    element={<EssDocuments />} />
                 <Route path="/manager/self/letters"                      element={<EssLetters />} />

@@ -32,6 +32,8 @@ import {
   ScrollText,
   Wallet,
   LogOut,
+  Package,
+  Home,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -76,6 +78,7 @@ const BASE_GROUPS: NavGroup[] = [
       { label: "Who's Off",         icon: Users,        href: '/ess/whos-off'                        },
       { label: 'Company Holidays',  icon: CalendarDays, href: '/ess/company-holidays'                 },
       { label: 'Optional Holidays', icon: CalendarOff,  href: '/ess/optional-holidays'               },
+      { label: 'Work From Home',    icon: Home,         href: '/ess/wfh'                              },
       { label: 'Approvals',         icon: CheckSquare,  href: '/ess/approvals'                             }, // manager-only
     ],
   },
@@ -95,6 +98,7 @@ const BASE_GROUPS: NavGroup[] = [
   {
     label: 'Documents & Support',
     items: [
+      { label: 'My Assets',    icon: Package,        href: '/ess/assets'      },
       { label: 'My Documents', icon: FileText,       href: '/ess/documents'   },
       { label: 'Letters',      icon: Mail,           href: '/ess/letters'     },
       { label: 'Resignation & Exit', icon: LogOut,   href: '/ess/separation'  },

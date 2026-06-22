@@ -8,11 +8,12 @@
  * Access: hr_admin / super_admin.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Kanban, RefreshCw, Star, GripVertical, UserCircle2,
-  Building2, Briefcase, Plus, ArrowRight,
+  Building2, Briefcase, Plus, ArrowRight, Mail, CalendarDays,
+  Clock, GitBranch, MessagesSquare,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -22,6 +23,9 @@ import { Button }        from '@/components/ui/button'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -63,6 +67,26 @@ interface Requisition {
   status: string
 }
 
+interface TimelineRound {
+  id:            string
+  round_number:  number
+  round_type?:   string | null
+  status?:       string | null
+  scheduled_at?: string | null
+  interview_panel?:  Array<{ profiles?: { full_name?: string | null } | null }> | null
+  interview_scores?: Array<{ overall_score?: number | null; recommendation?: string | null }> | null
+}
+
+interface TimelineActivity {
+  id:          string
+  activity_type?: string | null
+  note?:       string | null
+  created_at:  string
+  from_stage?: { name?: string | null; color?: string | null } | null
+  to_stage?:   { name?: string | null; color?: string | null } | null
+  actor?:      { full_name?: string | null } | null
+}
+
 const SOURCE_COLORS: Record<string, string> = {
   linkedin: 'bg-info/15 text-info',
   naukri:   'bg-accent-coral/15 text-accent-coral',
@@ -84,6 +108,141 @@ function scoreColor(s: number): string {
   return 'text-destructive'
 }
 
+function fmtDate(d?: string | null): string {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+// ── Candidate detail popup ────────────────────────────────────────────────────
+
+function PipelineCandidateDialog({ app, onClose }: { app: Application | null; onClose: () => void }) {
+  const { data, isLoading } = useQuery<{ rounds: TimelineRound[]; activity: TimelineActivity[] }>({
+    queryKey: ['recruitment', 'timeline', app?.id],
+    queryFn:  () => api.get(`/recruitment/applications/${app!.id}/timeline`),
+    enabled:  !!app,
+  })
+  const rounds   = data?.rounds ?? []
+  const activity = data?.activity ?? []
+
+  if (!app) return null
+  const c = app.candidates
+  const stage = app.recruitment_pipeline_stages
+
+  return (
+    <Dialog open={!!app} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <UserCircle2 className="h-7 w-7 text-muted-foreground shrink-0" />
+            <div className="min-w-0">
+              <p className="truncate">{c.first_name} {c.last_name}</p>
+              {c.current_title && <p className="text-xs font-normal text-muted-foreground truncate">{c.current_title}</p>}
+            </div>
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Summary chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          {stage && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 border" style={{ borderColor: stage.color, color: stage.color }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stage.color }} />{stage.name}
+            </span>
+          )}
+          <span className={cn('text-[11px] font-medium rounded-full px-2 py-0.5', SOURCE_COLORS[c.source] ?? SOURCE_COLORS.other)}>{c.source}</span>
+          {c.total_experience != null && <span className="text-[11px] text-muted-foreground">{c.total_experience}y exp</span>}
+          {app.overall_score != null && (
+            <span className={cn('text-[11px] font-bold inline-flex items-center gap-0.5', scoreColor(app.overall_score))}>
+              <Star className="h-3 w-3 fill-current" />{app.overall_score}/10
+            </span>
+          )}
+        </div>
+
+        {/* Key facts */}
+        <div className="grid grid-cols-1 gap-2 text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Mail className="h-3.5 w-3.5 shrink-0" />
+            <a href={`mailto:${c.email}`} className="text-foreground hover:underline truncate">{c.email}</a>
+          </div>
+          {c.current_company && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Building2 className="h-3.5 w-3.5 shrink-0" /><span className="text-foreground">{c.current_company}</span>
+            </div>
+          )}
+          {app.job_requisitions && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Briefcase className="h-3.5 w-3.5 shrink-0" /><span className="text-foreground">{app.job_requisitions.title}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <CalendarDays className="h-3.5 w-3.5 shrink-0" />Applied {fmtDate(app.created_at)}
+          </div>
+        </div>
+
+        {/* Interview rounds */}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
+            <MessagesSquare className="h-3.5 w-3.5" />Interview Rounds
+          </p>
+          {isLoading ? (
+            <div className="flex justify-center py-3"><RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+          ) : rounds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No interview rounds yet.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {rounds.map(r => {
+                const scores = r.interview_scores ?? []
+                const avg = scores.length ? (scores.reduce((a, s) => a + (s.overall_score ?? 0), 0) / scores.length).toFixed(1) : null
+                const panel = (r.interview_panel ?? []).map(p => p.profiles?.full_name).filter(Boolean).join(', ')
+                return (
+                  <div key={r.id} className="rounded-lg border border-border p-2.5 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">Round {r.round_number}{r.round_type ? ` · ${r.round_type}` : ''}</span>
+                      {r.status && <span className="text-[11px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{r.status}</span>}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+                      {r.scheduled_at && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{fmtDate(r.scheduled_at)}</span>}
+                      {panel && <span className="truncate">Panel: {panel}</span>}
+                      {avg != null && <span className={cn('font-semibold', scoreColor(Number(avg)))}>Avg {avg}/10</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Stage history */}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
+            <GitBranch className="h-3.5 w-3.5" />Stage History
+          </p>
+          {isLoading ? (
+            <div className="flex justify-center py-3"><RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+          ) : activity.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No stage movements recorded.</p>
+          ) : (
+            <ol className="space-y-1.5">
+              {activity.map(a => (
+                <li key={a.id} className="flex items-start gap-2 text-xs">
+                  <span className="mt-1 w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-foreground">
+                      {a.from_stage?.name ? `${a.from_stage.name} → ` : ''}{a.to_stage?.name ?? a.activity_type ?? 'Updated'}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {fmtDate(a.created_at)}{a.actor?.full_name ? ` · ${a.actor.full_name}` : ''}{a.note ? ` · ${a.note}` : ''}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function AdminPipeline() {
@@ -94,6 +253,10 @@ export function AdminPipeline() {
   const [selectedReqId, setSelectedReqId] = useState<string>('all')
   const [draggedId,     setDraggedId]     = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
+  const [detailApp,     setDetailApp]     = useState<Application | null>(null)
+  // Suppress the click that fires after a drag-and-drop so dropping a card
+  // never accidentally opens the detail popup.
+  const didDragRef = useRef(false)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -144,6 +307,7 @@ export function AdminPipeline() {
   // ── Drag handlers ──────────────────────────────────────────────────────────
 
   function onDragStart(e: React.DragEvent, appId: string) {
+    didDragRef.current = true
     setDraggedId(appId)
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -151,6 +315,8 @@ export function AdminPipeline() {
   function onDragEnd() {
     setDraggedId(null)
     setDragOverStage(null)
+    // Reset on the next tick so the trailing click (if any) is still suppressed.
+    setTimeout(() => { didDragRef.current = false }, 0)
   }
 
   function onDragOver(e: React.DragEvent, stageId: string) {
@@ -201,9 +367,14 @@ export function AdminPipeline() {
         draggable
         onDragStart={e => onDragStart(e, app.id)}
         onDragEnd={onDragEnd}
+        onClick={() => { if (!didDragRef.current) setDetailApp(app) }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailApp(app) } }}
+        title="Click for details · drag to move stage"
         className={cn(
           'bg-background rounded-lg border border-border p-3 cursor-grab active:cursor-grabbing select-none transition-all',
-          isDragging ? 'opacity-40 scale-95' : 'hover:shadow-sm hover:border-primary/30',
+          isDragging ? 'opacity-40 scale-95' : 'hover:shadow-sm hover:border-primary/40 hover:ring-1 hover:ring-primary/20',
         )}
       >
         <div className="flex items-start justify-between gap-2">
@@ -391,6 +562,8 @@ export function AdminPipeline() {
           })}
         </div>
       )}
+
+      <PipelineCandidateDialog app={detailApp} onClose={() => setDetailApp(null)} />
     </PageContainer>
   )
 }
