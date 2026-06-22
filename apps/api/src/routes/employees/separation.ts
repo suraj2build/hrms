@@ -13,6 +13,8 @@ const schema = z.object({
   exit_interview_date:  z.string().optional(),
   clearance_done:       z.boolean().optional().default(false),
   remarks:              z.string().optional(),
+  notice_period_days_override: z.number().int().min(0).max(365).optional().nullable(),
+  notice_waived:        z.boolean().optional(),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {

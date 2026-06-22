@@ -374,6 +374,8 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
 function FnFSection({ row }: { row: SeparationRow }) {
   const qc = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
+  const [noticeOverride, setNoticeOverride] = useState('')
+  const [noticeWaived, setNoticeWaived] = useState(false)
 
   const emptyFnF = {
     last_payroll_amount: 0, leave_encashment_amount: 0, gratuity_amount: 0,
@@ -406,6 +408,13 @@ function FnFSection({ row }: { row: SeparationRow }) {
       setEditOpen(false)
     },
     onError: (e: Error) => toast.error('Save failed', { description: e.message }),
+  })
+
+  const noticeMutation = useMutation({
+    mutationFn: (body: { notice_period_days_override: number | null; notice_waived: boolean }) =>
+      api.put(`/employees/${row.employee_id}/separation`, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['separations'] }); toast.success('Notice settings saved — re-run Auto-calculate to apply') },
+    onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
   const approveMutation = useMutation({
@@ -455,6 +464,23 @@ function FnFSection({ row }: { row: SeparationRow }) {
             <Edit2 className="h-3.5 w-3.5" />{f ? 'Edit' : 'Set Values'}
           </Button>
         </div>
+      </div>
+
+      {/* Notice period: override (e.g. by grade) + waiver / buyout */}
+      <div className="rounded-lg border border-border/60 bg-muted/20 p-3 flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Notice period override (days)</label>
+          <Input type="number" value={noticeOverride} onChange={e => setNoticeOverride(e.target.value)} placeholder="category default" className="h-8 w-40 text-xs" />
+        </div>
+        <label className="flex items-center gap-1.5 text-xs h-8">
+          <input type="checkbox" checked={noticeWaived} onChange={e => setNoticeWaived(e.target.checked)} />
+          Waive notice shortfall (buyout)
+        </label>
+        <Button size="sm" variant="outline" className="h-8 text-xs"
+          disabled={noticeMutation.isPending}
+          onClick={() => noticeMutation.mutate({ notice_period_days_override: noticeOverride ? Number(noticeOverride) : null, notice_waived: noticeWaived })}>
+          Save notice
+        </Button>
       </div>
 
       {f ? (

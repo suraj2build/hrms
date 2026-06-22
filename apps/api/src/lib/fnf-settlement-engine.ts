@@ -59,7 +59,7 @@ export async function computeFnfSettlement(
   // 1. Separation dates
   const { data: sep } = await supabase
     .from('employee_separation')
-    .select('notice_date, last_working_date')
+    .select('notice_date, last_working_date, notice_period_days_override, notice_waived')
     .eq('employee_id', employeeId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
@@ -155,12 +155,17 @@ export async function computeFnfSettlement(
   const encashRate = round2(basisAmount / 26)
   const leaveEncashment = round2(encashDays * encashRate)
 
-  // 7. Notice shortfall — gross/30 × unserved days
+  // 7. Notice shortfall — gross/30 × unserved days.
+  // A per-separation override takes precedence over the category notice period;
+  // a waiver (e.g. employer-agreed buyout/waiver) zeroes the deduction.
+  const overrideDays = (sep as any).notice_period_days_override
+  if (overrideDays != null) noticePeriodDays = overrideDays
   let shortfallDays = 0
   if ((sep as any).notice_date) {
     const served = daysBetween((sep as any).notice_date, lastWorking)
     shortfallDays = Math.max(0, noticePeriodDays - served)
   }
+  if ((sep as any).notice_waived) shortfallDays = 0
   const noticeDeduction = round2(shortfallDays * (gross / 30))
 
   return {
