@@ -1466,6 +1466,58 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── 7-bis. POST /onboarding/pre-join/:token/request-new-link ───────────────
+  // PUBLIC self-service: a candidate on the "link expired" screen renews their
+  // own link. Extends the expiry on the SAME token (so the page they're on works
+  // again on reload) and re-emails it. Knowing the 32-byte token is the auth.
+  fastify.post('/onboarding/pre-join/:token/request-new-link', async (req: any, reply) => {
+    const { token } = req.params as { token: string }
+
+    const { data: inv } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .select('id, tenant_id, token, first_name, last_name, email, joining_date, status')
+      .eq('token', token)
+      .maybeSingle()
+
+    // Generic OK if the token is unknown — never reveal whether it exists.
+    if (!inv) {
+      return reply.send({ ok: true, message: 'If this invitation is still active, a fresh link has been sent.' })
+    }
+
+    // Already finished — there's nothing to renew.
+    if (['submitted', 'approved', 'rejected'].includes(inv.status)) {
+      return reply.code(409).send({
+        error: 'NOT_RESUMABLE',
+        message: `This onboarding has already been ${inv.status}. Please contact your HR team.`,
+      })
+    }
+
+    const expiresAt = tokenExpiresAt()
+    const newStatus = inv.status === 'expired' ? 'pending' : inv.status
+    await fastify.supabase
+      .from('pre_joinee_invitations')
+      .update({ expires_at: expiresAt, status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', inv.id)
+      .eq('tenant_id', inv.tenant_id)
+
+    try {
+      const { data: tenant } = await fastify.supabase
+        .from('tenants').select('name').eq('id', inv.tenant_id).maybeSingle()
+      const tmpl = preJoineeInviteEmail({
+        candidateName: `${inv.first_name ?? ''} ${inv.last_name ?? ''}`.trim(),
+        companyName:   tenant?.name ?? 'our company',
+        joiningDate:   inv.joining_date,
+        inviteUrl:     `${APP_PUBLIC_URL}/pre-join/${inv.token}`,
+      })
+      await sendEmail({ to: inv.email, subject: tmpl.subject, html: tmpl.html })
+    } catch (e) {
+      fastify.log.warn({ event: 'pre_joinee.self_request_link', token, err: e })
+    }
+
+    const masked = (inv.email ?? '').replace(/^(.).*(@.*)$/, (_m: string, a: string, b: string) => `${a}***${b}`)
+    return reply.send({ ok: true, message: 'Your link has been renewed.', email_masked: masked })
+  })
+
   // ── 7a. POST /onboarding/pre-join/:token/upload-url — signed upload URL ─────
 
   fastify.post('/onboarding/pre-join/:token/upload-url', async (req: any, reply) => {

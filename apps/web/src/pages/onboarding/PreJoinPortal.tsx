@@ -781,7 +781,31 @@ function CenterScreen({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ExpiredScreen() {
+function ExpiredScreen({ token }: { token?: string }) {
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [msg, setMsg] = useState("");
+
+  async function renew() {
+    if (!token) return;
+    setState("sending");
+    try {
+      const res = await fetch(`${API_BASE}/onboarding/pre-join/${token}/request-new-link`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setState("error");
+        setMsg(body?.message ?? "Couldn't renew the link. Please contact your HR team.");
+        return;
+      }
+      setState("sent");
+      setMsg(body?.message ?? "Your link has been renewed.");
+      // The same link now works — reopen the form automatically.
+      setTimeout(() => window.location.reload(), 1600);
+    } catch {
+      setState("error");
+      setMsg("Network error. Please try again or contact your HR team.");
+    }
+  }
+
   return (
     <CenterScreen>
       <div className="mb-4 flex justify-center">
@@ -791,10 +815,31 @@ function ExpiredScreen() {
           </svg>
         </div>
       </div>
-      <h2 className="text-xl font-semibold text-foreground mb-2">Link expired or invalid</h2>
-      <p className="text-muted-foreground text-sm">
-        This pre-onboarding link is no longer valid. Please contact your HR team for a new link.
-      </p>
+      <h2 className="text-xl font-semibold text-foreground mb-2">Link expired</h2>
+
+      {state === "sent" ? (
+        <p className="text-success text-sm">
+          {msg} Reopening your form…
+        </p>
+      ) : (
+        <>
+          <p className="text-muted-foreground text-sm mb-5">
+            This pre-onboarding link has expired. You can renew it instantly below — we'll also email you a fresh copy.
+          </p>
+          <button
+            type="button"
+            onClick={renew}
+            disabled={state === "sending"}
+            className="inline-flex items-center justify-center rounded-lg bg-[#2E6FE6] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#1A4D8F] active:bg-[#163E72] transition disabled:opacity-60"
+          >
+            {state === "sending" ? "Renewing…" : "Get a new link"}
+          </button>
+          {state === "error" && <p className="text-destructive text-xs mt-3">{msg}</p>}
+          <p className="text-muted-foreground text-xs mt-4">
+            Still stuck? Please contact your HR team.
+          </p>
+        </>
+      )}
     </CenterScreen>
   );
 }
@@ -1373,7 +1418,7 @@ export function PreJoinPortal() {
 
   // ---- Render states ----
   if (pageState === "loading") return <LoadingScreen />;
-  if (pageState === "expired") return <ExpiredScreen />;
+  if (pageState === "expired") return <ExpiredScreen token={token} />;
   if (pageState === "already_submitted") return <AlreadySubmittedScreen />;
   if (pageState === "success") return <SuccessScreen candidateName={meta?.candidate_name} />;
 
