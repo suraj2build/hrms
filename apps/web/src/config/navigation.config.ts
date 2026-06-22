@@ -84,7 +84,7 @@ import {
   DollarSign, FileText, Stamp, Bell, BarChart3,
   Building2, Database, Upload, Settings, PlayCircle,
   PieChart, Shield, Users as UsersIcon, Radio,
-  Landmark, Receipt, CreditCard, Banknote, TrendingDown,
+  Landmark, Receipt, CreditCard, Banknote, TrendingDown, Package,
   Scale, BookMarked, Inbox,
   Layers, FlaskConical, Search, Activity, GitMerge as GitMergeIcon,
   FolderUp, UserPlus, ShieldAlert,
@@ -1707,6 +1707,16 @@ export const ESS_NAV_ITEMS: NavItem[] = [
     section:     'ess',
     keywords:    ['claim', 'expense', 'medical', 'reimbursement'],
     description: 'Submit and track expense reimbursement claims',
+  },
+  {
+    id:          'ess-assets',
+    label:       'My Assets',
+    route:       '/ess/assets',
+    icon:        Package,
+    groupId:     'ess-main',
+    section:     'ess',
+    keywords:    ['asset', 'laptop', 'equipment', 'request asset', 'hardware'],
+    description: 'View assigned assets and raise asset requests',
   },
   // ess-leave-ledger removed from nav — accrual ledger is now the "Ledger" tab inside /ess/leave/balance
   {

@@ -1994,6 +1994,21 @@ export function demoCompensationRevisions(status?: string) {
   return { data, total: data.length, limit: 50, offset: 0 }
 }
 
+// ── Asset requests ───────────────────────────────────────────────────────────
+export function demoAssetRequestsMine() {
+  return [
+    { id: 'areq-1', category_name: 'Laptop', item_name: null, reason: 'Current one is slow', status: 'fulfilled', requested_at: ISO(daysAgo(20)), decision_remarks: 'Allocated MacBook Pro' },
+    { id: 'areq-2', category_name: null, item_name: 'External monitor', reason: 'Dual-screen setup', status: 'pending', requested_at: ISO(daysAgo(2)), decision_remarks: null },
+  ]
+}
+export function demoAssetRequestsAll() {
+  return [
+    { id: 'areq-2', category_name: null, item_name: 'External monitor', reason: 'Dual-screen setup', status: 'pending', requested_at: ISO(daysAgo(2)), employee_name: 'Sneha Reddy', employee_code: 'SAAR005' },
+    { id: 'areq-3', category_name: 'Headset', item_name: null, reason: 'For client calls', status: 'approved', requested_at: ISO(daysAgo(4)), employee_name: 'Arjun Nair', employee_code: 'SAAR006' },
+    { id: 'areq-1', category_name: 'Laptop', item_name: null, reason: 'Current one is slow', status: 'fulfilled', requested_at: ISO(daysAgo(20)), employee_name: 'Imran Khan', employee_code: 'SAAR022' },
+  ]
+}
+
 // ── Background verification (GET /recruitment/applications/:id/bgv) ──────────
 export function demoBgvCase(appId: string) {
   const mk = (check_type: string, status: string, ref: string | null, remarks: string | null) =>

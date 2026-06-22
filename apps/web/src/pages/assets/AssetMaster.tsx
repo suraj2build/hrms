@@ -5,6 +5,7 @@ import { Package, Plus, Pencil, Trash2, Loader2, UserPlus, Undo2 } from 'lucide-
 import { PageContainer }                          from '@/components/layout/PageContainer'
 import { PageHeader }                             from '@/components/layout/PageHeader'
 import { SectionCard }                            from '@/components/layout/SectionCard'
+import { AssetRequestsDialog }                    from '@/components/assets/AssetRequestsDialog'
 import { Button }                                 from '@/components/ui/button'
 import { Input }                                  from '@/components/ui/input'
 import { Badge, type BadgeProps }                 from '@/components/ui/badge'
@@ -69,6 +70,7 @@ export function AssetMaster() {
   const [err, setErr]           = useState('')
 
   const [assignFor, setAssignFor]   = useState<Asset | null>(null)
+  const [requestsOpen, setRequestsOpen] = useState(false)
   const [assignEmp, setAssignEmp]   = useState('')
   const [assignNotes, setAssignNotes] = useState('')
 
@@ -187,7 +189,12 @@ export function AssetMaster() {
       <PageHeader
         title="Assets"
         subtitle="Track company assets and their assignment to employees"
-        actions={isAdmin && <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" />Add Asset</Button>}
+        actions={isAdmin && (
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setRequestsOpen(true)}>Requests</Button>
+            <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" />Add Asset</Button>
+          </div>
+        )}
       />
 
       {/* Stats */}
@@ -399,6 +406,8 @@ export function AssetMaster() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AssetRequestsDialog open={requestsOpen} onOpenChange={setRequestsOpen} />
     </PageContainer>
   )
 }

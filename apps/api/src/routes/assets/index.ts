@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
+import { resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -343,5 +344,112 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('status', 'assigned')
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.send({ data: { count: count ?? 0 } })
+  })
+
+  // ── Asset requests (ESS request → HR approve → allocate) ───────────────────
+  const requestSchema = z.object({
+    category_id: z.string().uuid().optional().nullable(),
+    item_name:   z.string().max(160).optional().nullable(),
+    reason:      z.string().max(1000).optional().nullable(),
+  })
+
+  // ESS: create a request
+  fastify.post('/ess/me/asset-requests', auth, async (req: any, reply) => {
+    const empId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+    if (!empId) return reply.code(400).send({ error: 'NO_EMPLOYEE', message: 'Profile not linked to an employee record' })
+    const parsed = requestSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+    if (!parsed.data.category_id && !parsed.data.item_name) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'Pick a category or describe the item' })
+    }
+    const { data, error } = await fastify.supabase
+      .from('asset_requests')
+      .insert({ tenant_id: req.tenantId, employee_id: empId, ...parsed.data, status: 'pending' })
+      .select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  // ESS: list own requests
+  fastify.get('/ess/me/asset-requests', auth, async (req: any, reply) => {
+    const empId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+    if (!empId) return reply.send({ data: [] })
+    const { data, error } = await fastify.supabase
+      .from('asset_requests')
+      .select('*, asset_categories(name)')
+      .eq('tenant_id', req.tenantId).eq('employee_id', empId)
+      .order('requested_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: (data ?? []).map((r: any) => ({ ...r, category_name: r.asset_categories?.name ?? null, asset_categories: undefined })) })
+  })
+
+  // HR: list all requests
+  fastify.get('/asset-requests', hrAdminAuth, async (req: any, reply) => {
+    const status = (req.query as any)?.status as string | undefined
+    let q = fastify.supabase
+      .from('asset_requests')
+      .select('*, asset_categories(name), employees(first_name, last_name, employee_code)')
+      .eq('tenant_id', req.tenantId).order('requested_at', { ascending: false })
+    if (status && status !== 'all') q = q.eq('status', status)
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: (data ?? []).map((r: any) => ({
+      ...r,
+      category_name:  r.asset_categories?.name ?? null,
+      employee_name:  empName(r.employees),
+      employee_code:  r.employees?.employee_code ?? null,
+      asset_categories: undefined, employees: undefined,
+    })) })
+  })
+
+  // HR: approve / reject
+  fastify.patch('/asset-requests/:id/decide', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const parsed = z.object({ decision: z.enum(['approved', 'rejected']), remarks: z.string().max(1000).optional().nullable() }).safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+    const { data, error } = await fastify.supabase
+      .from('asset_requests')
+      .update({ status: parsed.data.decision, decision_remarks: parsed.data.remarks ?? null, decided_by: req.userId, decided_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'pending').select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!data) return reply.code(409).send({ error: 'NOT_PENDING', message: 'Request not found or already decided' })
+    return reply.send({ data })
+  })
+
+  // HR: fulfill an approved request by allocating an available asset
+  fastify.post('/asset-requests/:id/fulfill', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const parsed = z.object({ asset_id: z.string().uuid() }).safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+
+    const { data: reqRow } = await fastify.supabase
+      .from('asset_requests').select('id, employee_id, status').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!reqRow) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Request not found' })
+    if (reqRow.status !== 'approved') return reply.code(409).send({ error: 'NOT_APPROVED', message: 'Only approved requests can be fulfilled' })
+
+    const { data: asset } = await fastify.supabase
+      .from('assets').select('id, status, asset_code').eq('id', parsed.data.asset_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!asset) return reply.code(404).send({ error: 'ASSET_NOT_FOUND', message: 'Asset not found' })
+    if (asset.status !== 'available') return reply.code(409).send({ error: 'NOT_AVAILABLE', message: `Asset is '${asset.status}'.` })
+
+    // Assign the asset (mirror /assets/:id/assign) + log the movement.
+    await fastify.supabase.from('assets')
+      .update({ status: 'assigned', assigned_to: reqRow.employee_id, updated_at: new Date().toISOString() })
+      .eq('id', asset.id).eq('tenant_id', req.tenantId)
+    await fastify.supabase.from('employee_asset_ledger').insert({
+      tenant_id: req.tenantId, asset_id: asset.id, employee_id: reqRow.employee_id,
+      action: 'assigned', condition_notes: 'Fulfilled asset request', performed_by: req.userId,
+    })
+    eventBus.emit({
+      type: 'asset.assigned', tenantId: req.tenantId, correlationId: req.correlationId,
+      payload: { tenantId: req.tenantId, assetId: asset.id, employeeId: reqRow.employee_id, assetCode: asset.asset_code },
+    })
+
+    const { data, error } = await fastify.supabase
+      .from('asset_requests')
+      .update({ status: 'fulfilled', fulfilled_asset_id: asset.id, updated_at: new Date().toISOString() })
+      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data })
   })
 }

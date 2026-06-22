@@ -273,6 +273,7 @@ const NotificationTemplates = lazy(() => import('@/pages/notifications/Notificat
 const OperationalInbox      = lazy(() => import('@/pages/notifications/OperationalInbox').then(m => ({ default: m.OperationalInbox })))
 // ESS payroll
 const EssReimbursements     = lazy(() => import('@/pages/ess/EssReimbursements').then(m => ({ default: m.EssReimbursements })))
+const EssAssets             = lazy(() => import('@/pages/ess/EssAssets').then(m => ({ default: m.EssAssets })))
 const EssLoansAdvances      = lazy(() => import('@/pages/ess/EssLoansAdvances').then(m => ({ default: m.EssLoansAdvances })))
 const ManagerLoanApprovals  = lazy(() => import('@/pages/manager/ManagerLoanApprovals').then(m => ({ default: m.ManagerLoanApprovals })))
 const ManagerRequisition    = lazy(() => import('@/pages/manager/ManagerRequisition').then(m => ({ default: m.ManagerRequisition })))
@@ -1014,6 +1015,7 @@ export default function App() {
                   <Route path="tds-recovery"      element={<TDSRecovery />} />
                 </Route>
                 <Route path="/ess/reimbursements"         element={<EssReimbursements />} />
+                <Route path="/ess/assets"                 element={<EssAssets />} />
                 <Route path="/ess/loans"                  element={<EssLoansAdvances />} />
                 <Route path="/ess/approvals"              element={<EssApprovals />} />
                 <Route path="/ess/leave/balance"          element={<EssLeaveBalance />} />
