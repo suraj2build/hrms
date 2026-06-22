@@ -1994,6 +1994,24 @@ export function demoCompensationRevisions(status?: string) {
   return { data, total: data.length, limit: 50, offset: 0 }
 }
 
+// ── Background verification (GET /recruitment/applications/:id/bgv) ──────────
+export function demoBgvCase(appId: string) {
+  const mk = (check_type: string, status: string, ref: string | null, remarks: string | null) =>
+    ({ id: `bgvc-${appId}-${check_type}`, check_type, status, vendor_ref: ref, remarks })
+  return {
+    id: `bgv-${appId}`, application_id: appId, status: 'in_progress', vendor: 'AuthBridge',
+    initiated_at: ISO(daysAgo(8)), completed_at: null, overall_remarks: null,
+    checks: [
+      mk('identity',   'clear',       'AB-IDN-2231', 'Aadhaar & PAN verified'),
+      mk('education',  'clear',       'AB-EDU-2231', 'Degree confirmed with university'),
+      mk('employment', 'in_progress', 'AB-EMP-2231', 'Awaiting previous employer response'),
+      mk('criminal',   'clear',       'AB-CRM-2231', 'No records found'),
+      mk('address',    'initiated',   null,          null),
+      mk('reference',  'pending',     null,          null),
+    ],
+  }
+}
+
 // ── Recruitment offer (GET /recruitment/offers/:appId) ───────────────────────
 export function demoRecruitmentOffer(appId: string) {
   return {

@@ -817,7 +817,19 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     const { data, error, count } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
+
+    // Attach BGV status per application (for the pipeline badge / gate).
+    const rows = data ?? []
+    const appIds = rows.map((r: any) => r.id)
+    const bgvByApp: Record<string, string> = {}
+    if (appIds.length) {
+      const { data: cases } = await fastify.supabase
+        .from('bgv_cases').select('application_id, status').eq('tenant_id', req.tenantId).in('application_id', appIds)
+      for (const c of cases ?? []) bgvByApp[(c as any).application_id] = (c as any).status
+    }
+    const enriched = rows.map((r: any) => ({ ...r, bgv_status: bgvByApp[r.id] ?? null }))
+
+    return reply.send({ data: enriched, total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
   fastify.post('/applications/:id/initiate-preboarding', hrAdminAuth, async (req: any, reply) => {
@@ -1814,6 +1826,135 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
 
     return reply.send({ sent: true })
+  })
+
+  // ── Background Verification (BGV) ──────────────────────────────────────────
+  const BGV_CHECK_TYPES = ['identity', 'education', 'employment', 'criminal', 'address', 'reference'] as const
+
+  // Get the BGV case + checks for an application (null if not initiated).
+  fastify.get('/applications/:id/bgv', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data: bgvCase } = await fastify.supabase
+      .from('bgv_cases').select('*').eq('application_id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!bgvCase) return reply.send({ data: null })
+    const { data: checks } = await fastify.supabase
+      .from('bgv_checks').select('*').eq('case_id', bgvCase.id).eq('tenant_id', req.tenantId).order('created_at')
+    return reply.send({ data: { ...bgvCase, checks: checks ?? [] } })
+  })
+
+  // Initiate a BGV case (seeds the standard checks).
+  fastify.post('/applications/:id/bgv/initiate', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      vendor:      z.string().optional().nullable(),
+      check_types: z.array(z.enum(BGV_CHECK_TYPES)).optional(),
+    })
+    const parsed = schema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const { data: app } = await fastify.supabase
+      .from('applications').select('id, candidate_id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!app) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
+
+    const { data: existing } = await fastify.supabase
+      .from('bgv_cases').select('id').eq('application_id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (existing) return reply.code(409).send({ error: 'ALREADY_INITIATED', message: 'BGV has already been initiated for this application' })
+
+    const { data: bgvCase, error: caseErr } = await fastify.supabase
+      .from('bgv_cases')
+      .insert({
+        tenant_id: req.tenantId, application_id: id, candidate_id: (app as any).candidate_id,
+        status: 'in_progress', vendor: parsed.data.vendor ?? null, initiated_by: req.userId,
+      })
+      .select().single()
+    if (caseErr || !bgvCase) return reply.code(500).send({ error: 'DB_ERROR', message: caseErr?.message ?? 'Failed to open BGV case' })
+
+    const types = parsed.data.check_types?.length ? parsed.data.check_types : BGV_CHECK_TYPES
+    const rows = types.map(t => ({ tenant_id: req.tenantId, case_id: bgvCase.id, check_type: t, status: 'pending' }))
+    await fastify.supabase.from('bgv_checks').insert(rows)
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'bgv_cases', recordId: bgvCase.id,
+      action: 'INSERT', performedBy: req.userId, newData: { application_id: id, vendor: parsed.data.vendor ?? null },
+    })
+
+    const { data: checks } = await fastify.supabase
+      .from('bgv_checks').select('*').eq('case_id', bgvCase.id).eq('tenant_id', req.tenantId).order('created_at')
+    return reply.code(201).send({ data: { ...bgvCase, checks: checks ?? [] } })
+  })
+
+  // Update a single check (status, vendor ref, remarks, report document).
+  fastify.patch('/bgv/checks/:checkId', hrAdminAuth, async (req: any, reply) => {
+    const { checkId } = req.params as { checkId: string }
+    const schema = z.object({
+      status:        z.enum(['pending','initiated','in_progress','clear','flagged','not_applicable']).optional(),
+      vendor_ref:    z.string().optional().nullable(),
+      remarks:       z.string().optional().nullable(),
+      document_path: z.string().optional().nullable(),
+      document_name: z.string().optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const patch: Record<string, unknown> = { ...parsed.data, updated_at: new Date().toISOString() }
+    if (parsed.data.status === 'clear' || parsed.data.status === 'flagged') {
+      patch.verified_by = req.userId
+      patch.verified_at = new Date().toISOString()
+    }
+    const { data, error } = await fastify.supabase
+      .from('bgv_checks').update(patch).eq('id', checkId).eq('tenant_id', req.tenantId).select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Check not found' })
+    return reply.send({ data })
+  })
+
+  // Finalize the case (clear / flagged), with an auto-suggested verdict.
+  fastify.post('/bgv/cases/:caseId/finalize', hrAdminAuth, async (req: any, reply) => {
+    const { caseId } = req.params as { caseId: string }
+    const schema = z.object({
+      status:          z.enum(['clear','flagged','cancelled']),
+      overall_remarks: z.string().optional().nullable(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const { data, error } = await fastify.supabase
+      .from('bgv_cases')
+      .update({
+        status: parsed.data.status, overall_remarks: parsed.data.overall_remarks ?? null,
+        completed_at: parsed.data.status === 'cancelled' ? null : new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', caseId).eq('tenant_id', req.tenantId).select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'BGV case not found' })
+    return reply.send({ data })
+  })
+
+  // BGV dashboard list (cases + a check-status rollup) for HR.
+  fastify.get('/bgv', hrAdminAuth, async (req: any, reply) => {
+    const { data: cases } = await fastify.supabase
+      .from('bgv_cases')
+      .select(`*, applications(candidates(first_name, last_name), job_requisitions(title))`)
+      .eq('tenant_id', req.tenantId).order('initiated_at', { ascending: false })
+    const ids = (cases ?? []).map((c: any) => c.id)
+    const byCase: Record<string, any[]> = {}
+    if (ids.length) {
+      const { data: checks } = await fastify.supabase
+        .from('bgv_checks').select('case_id, check_type, status').eq('tenant_id', req.tenantId).in('case_id', ids)
+      for (const ch of checks ?? []) (byCase[ch.case_id] ??= []).push(ch)
+    }
+    const rows = (cases ?? []).map((c: any) => {
+      const cand = c.applications?.candidates
+      return {
+        id: c.id, application_id: c.application_id, status: c.status, vendor: c.vendor,
+        initiated_at: c.initiated_at, completed_at: c.completed_at,
+        candidate_name: `${cand?.first_name ?? ''} ${cand?.last_name ?? ''}`.trim(),
+        job_title: c.applications?.job_requisitions?.title ?? '',
+        checks: byCase[c.id] ?? [],
+      }
+    })
+    return reply.send({ data: rows })
   })
 
   // ── Public Candidate Portal ───────────────────────────────────────────────

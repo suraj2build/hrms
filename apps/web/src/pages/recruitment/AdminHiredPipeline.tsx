@@ -11,7 +11,7 @@ import { Link } from 'react-router-dom'
 import {
   UserCheck, ArrowRight, CheckCircle2,
   RefreshCw, Mail, Calendar, Briefcase,
-  AlertCircle,
+  AlertCircle, ShieldCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { BgvDialog, bgvStatusClass } from '@/components/recruitment/BgvDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ interface HiredApplication {
   expected_joining:         string | null
   preboarding_initiated_at: string | null
   pre_joinee_invitation_id: string | null
+  bgv_status:               string | null
   created_at:               string
   updated_at:               string
   candidates: {
@@ -78,6 +80,7 @@ export function AdminHiredPipeline() {
   const [joiningDate, setJoiningDate] = useState('')
   const [designation, setDesignation] = useState('')
   const [dept, setDept]               = useState('')
+  const [bgvApp, setBgvApp]           = useState<HiredApplication | null>(null)
 
   const params = new URLSearchParams({ preboarding_status: filter, limit: '100' })
   const { data, isLoading, refetch } = useQuery<{ data: HiredApplication[]; total: number }>({
@@ -206,6 +209,17 @@ export function AdminHiredPipeline() {
                     </div>
                   </div>
 
+                  {/* BGV status + action */}
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={cn('text-[10px] capitalize', bgvStatusClass(app.bgv_status ?? 'pending'))}>
+                      BGV: {app.bgv_status ? app.bgv_status.replace('_', ' ') : 'not started'}
+                    </Badge>
+                    <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={() => setBgvApp(app)}>
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      BGV
+                    </Button>
+                  </div>
+
                   {/* Preboarding status */}
                   <div className="flex items-center gap-3">
                     {pj ? (
@@ -324,6 +338,15 @@ export function AdminHiredPipeline() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {bgvApp && (
+        <BgvDialog
+          appId={bgvApp.id}
+          candidateName={`${bgvApp.candidates?.first_name ?? ''} ${bgvApp.candidates?.last_name ?? ''}`.trim() || 'Candidate'}
+          open={!!bgvApp}
+          onOpenChange={(v) => { if (!v) setBgvApp(null) }}
+        />
+      )}
     </PageContainer>
   )
 }
