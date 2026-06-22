@@ -60,6 +60,7 @@ import emergencyContactsRoutes from './routes/employees/emergency-contacts.js'
 import addressesRoutes         from './routes/employees/addresses.js'
 import separationRoutes         from './routes/employees/separation.js'
 import separationWorkflowRoutes from './routes/employees/separation-workflow.js'
+import exitInterviewRoutes      from './routes/employees/exit-interview.js'
 import assetsRoutes              from './routes/assets/index.js'
 import intelligenceRoutes        from './routes/intelligence/index.js'
 import complianceRoutes          from './routes/compliance/index.js'
@@ -550,6 +551,7 @@ async function start() {
   await fastify.register(addressesRoutes)
   await fastify.register(separationRoutes)
   await fastify.register(separationWorkflowRoutes)
+  await fastify.register(exitInterviewRoutes)
   await fastify.register(assetsRoutes)             // /assets/* + /employees/:id/assets[/outstanding-count]
   await fastify.register(intelligenceRoutes, { prefix: '/intelligence' }) // AI Workforce OS — read-only intelligence
   await fastify.register(complianceRoutes, { prefix: '/compliance' })     // P2.1 statutory deadline calendar
