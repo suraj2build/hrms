@@ -1993,3 +1993,34 @@ export function demoCompensationRevisions(status?: string) {
   const data = status && status !== 'all' ? all.filter(r => r.status === status) : all
   return { data, total: data.length, limit: 50, offset: 0 }
 }
+
+// ── Workforce › Expiry Management (GET /workforce/expiry) ─────────────────────
+export function demoExpiryRegister() {
+  const mk = (
+    id: string, category: string, empId: string, label: string, detail: string,
+    days: number, bucket: string, severity: string,
+  ) => {
+    const e = demoEmployeeList.find(x => x.id === empId) ?? demoEmployeeList[0]
+    return {
+      id, category, source_table: category, source_id: `${id}-src`,
+      employee_id: e.id, employee_name: `${e.first_name} ${e.last_name}`, employee_code: e.employee_code,
+      department_id: e.department?.id ?? null, department_name: e.department?.name ?? null,
+      label, detail, due_date: DAY(daysAgo(-days)), days_to_due: days, bucket, severity,
+    }
+  }
+  const data = [
+    mk('exp-1', 'identity',      'emp-0006', 'Aadhaar verification', 'KYC re-verification due',     -3, 'overdue', 'high'),
+    mk('exp-2', 'contract',      'emp-0010', 'Fixed-term contract',  'Contract end date approaching', 5, 'due_7',   'high'),
+    mk('exp-3', 'probation',     'emp-0017', 'Probation confirmation', 'Confirmation review pending', 12, 'due_30',  'medium'),
+    mk('exp-4', 'passport',      'emp-0007', 'Passport',             'Passport expiry',             26, 'due_30',  'medium'),
+    mk('exp-5', 'certification', 'emp-0002', 'AWS Solutions Architect', 'Recertification due',      58, 'due_90',  'low'),
+    mk('exp-6', 'document',      'emp-0013', 'Police verification',  'Document renewal',            80, 'due_90',  'low'),
+  ]
+  const by_bucket: Record<string, number> = { overdue: 0, due_7: 0, due_30: 0, due_90: 0 }
+  for (const i of data) by_bucket[i.bucket] = (by_bucket[i.bucket] ?? 0) + 1
+  return {
+    data,
+    summary: { total: data.length, by_bucket, by_category: {} },
+    departments: demoDepartments.map(d => ({ id: d.id, name: d.name })),
+  }
+}

@@ -555,6 +555,9 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   // /intelligence/* catch-all
   if (path.startsWith('/intelligence/')) return { data: {} }
 
+  // ── Workforce lifecycle ────────────────────────────────────────────────────
+  if (path === '/workforce/expiry') return fx.demoExpiryRegister()
+
   // ── Reports ────────────────────────────────────────────────────────────────
   if (path === '/reports/headcount') {
     const employees = fx.demoEmployeeList.map(e => ({
