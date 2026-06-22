@@ -119,6 +119,15 @@ interface ApproveResponse {
 }
 
 interface PreJoineeSubmission {
+  // Candidate-confirmed identity/role (may differ from HR's invite — see edited_fields)
+  confirmed_first_name?: string | null
+  confirmed_last_name?: string | null
+  confirmed_email?: string | null
+  confirmed_phone?: string | null
+  confirmed_designation?: string | null
+  confirmed_department?: string | null
+  confirmed_joining_date?: string | null
+  edited_fields?: string[]
   // Personal
   dob?: string | null
   gender?: string | null
@@ -410,6 +419,39 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, r
             <p className="text-sm text-muted-foreground">No submission data available.</p>
           ) : (
             <>
+              {(() => {
+                const edited = new Set(s.edited_fields ?? [])
+                const idRows: { key: string; label: string; value?: string | null }[] = [
+                  { key: 'first_name',   label: 'First Name',   value: s.confirmed_first_name ?? joinee?.first_name },
+                  { key: 'last_name',    label: 'Last Name',    value: s.confirmed_last_name ?? joinee?.last_name },
+                  { key: 'email',        label: 'Email',        value: s.confirmed_email ?? joinee?.email },
+                  { key: 'phone',        label: 'Phone',        value: s.confirmed_phone },
+                  { key: 'designation',  label: 'Designation',  value: s.confirmed_designation ?? joinee?.designation },
+                  { key: 'department',   label: 'Department',   value: s.confirmed_department ?? joinee?.department },
+                  { key: 'joining_date', label: 'Joining Date', value: formatDate(s.confirmed_joining_date ?? joinee?.joining_date) },
+                ]
+                return (
+                  <Section title="Candidate-Confirmed Details">
+                    {edited.size > 0 && (
+                      <div className="mb-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                        The candidate changed {edited.size} HR-provided field{edited.size > 1 ? 's' : ''}. Review the highlighted value{edited.size > 1 ? 's' : ''} below.
+                      </div>
+                    )}
+                    {idRows.map((r) =>
+                      r.value === undefined || r.value === null || r.value === '' ? null : (
+                        <div key={r.key} className="flex gap-3 py-1.5 items-center">
+                          <span className="w-40 shrink-0 text-sm text-muted-foreground">{r.label}</span>
+                          <span className="text-sm font-medium">{r.value}</span>
+                          {edited.has(r.key) && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Edited</span>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </Section>
+                )
+              })()}
+
               <Section title="Personal Info">
                 <Row label="Date of Birth" value={formatDate(s.dob)} />
                 <Row label="Gender" value={s.gender} />

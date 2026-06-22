@@ -28,6 +28,17 @@ const rejectSchema = z.object({
 // names. All optional so either source validates; mapping to DB columns happens
 // in the submit handler via resolveSubmission().
 const submissionSchema = z.object({
+  // HR-prefilled identity/role — editable by the candidate but flagged for review.
+  first_name:                 z.string().optional(),
+  last_name:                  z.string().optional(),
+  email:                      z.string().optional(),
+  phone:                      z.string().optional(),
+  designation:                z.string().optional(),
+  department:                 z.string().optional(),
+  joining_date:               z.string().optional(),
+  // Names of the identity fields the candidate changed away from the HR values.
+  edited_fields:              z.array(z.string()).optional(),
+
   // Personal — portal sends date_of_birth, API/db uses dob
   dob:                        z.string().optional(),
   date_of_birth:              z.string().optional(),
@@ -87,9 +98,27 @@ function normLower(v?: string | null): string | null {
   return t ? t.toLowerCase() : null
 }
 
+// Identity/role fields HR pre-fills and the candidate may edit (and we flag).
+const IDENTITY_FIELDS = [
+  'first_name', 'last_name', 'email', 'phone',
+  'designation', 'department', 'joining_date',
+] as const
+
 // Maps a validated submission body (either field-name convention) to DB columns.
 function resolveSubmission(body: SubmissionBody) {
+  // Keep only recognised identity fields the candidate flagged as edited.
+  const editedFields = (body.edited_fields ?? []).filter(
+    (f): f is string => IDENTITY_FIELDS.includes(f as any)
+  )
   return {
+    confirmed_first_name:       norm(body.first_name),
+    confirmed_last_name:        norm(body.last_name),
+    confirmed_email:            norm(body.email),
+    confirmed_phone:            norm(body.phone),
+    confirmed_designation:      norm(body.designation),
+    confirmed_department:       norm(body.department),
+    confirmed_joining_date:     norm(body.joining_date),
+    edited_fields:              editedFields,
     dob:                        norm(body.dob ?? body.date_of_birth),
     gender:                     normLower(body.gender),
     blood_group:                norm(body.blood_group),
@@ -145,6 +174,14 @@ function tokenExpiresAt(): string {
 function mapSubmissionRow(row: any) {
   if (!row) return null
   return {
+    confirmed_first_name:   row.confirmed_first_name ?? null,
+    confirmed_last_name:    row.confirmed_last_name ?? null,
+    confirmed_email:        row.confirmed_email ?? null,
+    confirmed_phone:        row.confirmed_phone ?? null,
+    confirmed_designation:  row.confirmed_designation ?? null,
+    confirmed_department:   row.confirmed_department ?? null,
+    confirmed_joining_date: row.confirmed_joining_date ?? null,
+    edited_fields:          Array.isArray(row.edited_fields) ? row.edited_fields : [],
     dob:                  row.dob ?? null,
     gender:               row.gender ?? null,
     blood_group:          row.blood_group ?? null,
@@ -1071,7 +1108,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     const { data: invitation, error } = await fastify.supabase
       .from('pre_joinee_invitations')
-      .select('id, tenant_id, first_name, last_name, email, designation, department, joining_date, status, expires_at')
+      .select('id, tenant_id, first_name, last_name, email, phone, designation, department, joining_date, status, expires_at')
       .eq('token', token)
       .maybeSingle()
 
@@ -1117,6 +1154,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       candidate_name: candidateName,
       company_name:   companyName,
       email:          invitation.email,
+      phone:          invitation.phone ?? null,
       designation:    invitation.designation ?? null,
       department:     invitation.department ?? null,
       joining_date:   invitation.joining_date,
@@ -1287,6 +1325,14 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         {
           tenant_id:                   tenantId,
           invitation_id:               invitation.id,
+          confirmed_first_name:        sub.confirmed_first_name,
+          confirmed_last_name:         sub.confirmed_last_name,
+          confirmed_email:             sub.confirmed_email,
+          confirmed_phone:             sub.confirmed_phone,
+          confirmed_designation:       sub.confirmed_designation,
+          confirmed_department:        sub.confirmed_department,
+          confirmed_joining_date:      sub.confirmed_joining_date,
+          edited_fields:               sub.edited_fields,
           dob:                         sub.dob,
           gender:                      sub.gender,
           blood_group:                 sub.blood_group,

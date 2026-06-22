@@ -17,6 +17,14 @@ interface OnboardingMeta {
 }
 
 interface FormData {
+  // Step 0 — HR-prefilled identity/role (editable, but changes are flagged for HR)
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  designation: string;
+  department: string;
+  joining_date: string;
   // Step 1
   date_of_birth: string;
   gender: string;
@@ -45,6 +53,13 @@ interface FormData {
 }
 
 const emptyForm: FormData = {
+  first_name: "",
+  last_name: "",
+  email: "",
+  phone: "",
+  designation: "",
+  department: "",
+  joining_date: "",
   date_of_birth: "",
   gender: "",
   blood_group: "",
@@ -97,6 +112,79 @@ const inputClass =
 
 const selectClass =
   "w-full rounded-lg border border-border px-3 py-2.5 text-sm text-muted-foreground bg-white focus:border-[#2E6FE6] focus:outline-none focus:ring-2 focus:ring-[#2E6FE6]/20 transition";
+
+// ---------------------------------------------------------------------------
+// HR-prefilled identity/role fields (editable, but edits are flagged for HR)
+// ---------------------------------------------------------------------------
+
+type IdentityKey =
+  | "first_name" | "last_name" | "email" | "phone"
+  | "designation" | "department" | "joining_date";
+
+const IDENTITY_FIELDS: { key: IdentityKey; label: string; type: "text" | "email" | "tel" | "date"; required?: boolean }[] = [
+  { key: "first_name",   label: "First Name",   type: "text",  required: true },
+  { key: "last_name",    label: "Last Name",    type: "text",  required: true },
+  { key: "email",        label: "Email",        type: "email", required: true },
+  { key: "phone",        label: "Phone",        type: "tel" },
+  { key: "designation",  label: "Designation",  type: "text" },
+  { key: "department",   label: "Department",   type: "text" },
+  { key: "joining_date", label: "Joining Date", type: "date" },
+];
+
+// A field is "edited" when HR provided a value and the candidate changed it.
+function isIdentityEdited(key: IdentityKey, form: FormData, prefilled: Partial<Record<IdentityKey, string>>): boolean {
+  const orig = (prefilled[key] ?? "").trim();
+  return orig !== "" && (form[key] ?? "").trim() !== orig;
+}
+
+// Returns the identity fields the candidate changed away from the HR values.
+function editedIdentityFields(form: FormData, prefilled: Partial<Record<IdentityKey, string>>): IdentityKey[] {
+  return IDENTITY_FIELDS.map((f) => f.key).filter((k) => isIdentityEdited(k, form, prefilled));
+}
+
+function IdentitySection({
+  form,
+  prefilled,
+  onChange,
+}: {
+  form: FormData;
+  prefilled: Partial<Record<IdentityKey, string>>;
+  onChange: (k: keyof FormData, v: string) => void;
+}) {
+  return (
+    <div className="mb-6 rounded-xl border border-border bg-muted/30 p-4 sm:p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-sm font-semibold text-foreground">Confirm your details</h3>
+      </div>
+      <p className="text-xs text-muted-foreground mb-4">
+        These were provided by your employer. Please review them — you can make
+        corrections, but any change will be flagged for HR to confirm.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {IDENTITY_FIELDS.map((f) => {
+          const edited = isIdentityEdited(f.key, form, prefilled);
+          return (
+            <FieldRow key={f.key} label={f.label} required={f.required}>
+              <div className="relative">
+                <input
+                  type={f.type}
+                  className={inputClass}
+                  value={form[f.key]}
+                  onChange={(e) => onChange(f.key, e.target.value)}
+                />
+                {edited && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                    Edited
+                  </span>
+                )}
+              </div>
+            </FieldRow>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Step components
@@ -753,6 +841,9 @@ function DocumentsStep({
 
 function validateStep(step: number, form: FormData): string | null {
   if (step === 0) {
+    if (!form.first_name.trim()) return "First name is required.";
+    if (!form.last_name.trim()) return "Last name is required.";
+    if (!form.email.trim()) return "Email is required.";
     if (!form.date_of_birth) return "Date of birth is required.";
     if (!form.gender) return "Gender is required.";
     if (!form.nationality.trim()) return "Nationality is required.";
@@ -790,6 +881,8 @@ export function PreJoinPortal() {
   const [pageState, setPageState] = useState<PageState>("loading");
   const [meta, setMeta] = useState<OnboardingMeta | null>(null);
   const [form, setForm] = useState<FormData>(emptyForm);
+  // HR-provided identity values, kept so we can flag candidate edits.
+  const [prefilled, setPrefilled] = useState<Partial<Record<IdentityKey, string>>>({});
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -833,6 +926,19 @@ export function PreJoinPortal() {
           joining_date: data.joining_date ?? "",
           candidate_name: data.candidate_name ?? "",
         });
+        // Seed the HR-prefilled identity/role fields into the form, and remember
+        // the originals so we can flag any field the candidate edits.
+        const identity: Partial<Record<IdentityKey, string>> = {
+          first_name:   data.first_name ?? "",
+          last_name:    data.last_name ?? "",
+          email:        data.email ?? "",
+          phone:        data.phone ?? "",
+          designation:  data.designation ?? "",
+          department:   data.department ?? "",
+          joining_date: data.joining_date ?? "",
+        };
+        setForm((prev) => ({ ...prev, ...identity }));
+        setPrefilled(identity);
         setPageState("form");
       })
       .catch(() => setPageState("expired"));
@@ -926,7 +1032,7 @@ export function PreJoinPortal() {
       const res = await fetch(`${API_BASE}/onboarding/pre-join/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, edited_fields: editedIdentityFields(form, prefilled) }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -1028,7 +1134,12 @@ export function PreJoinPortal() {
           </p>
 
           {/* Step content */}
-          {currentStep === 0 && <Step1 form={form} onChange={handleChange} />}
+          {currentStep === 0 && (
+            <>
+              <IdentitySection form={form} prefilled={prefilled} onChange={handleChange} />
+              <Step1 form={form} onChange={handleChange} />
+            </>
+          )}
           {currentStep === 1 && <Step2 form={form} onChange={handleChange} />}
           {currentStep === 2 && <Step3 form={form} onChange={handleChange} />}
           {currentStep === 3 && (
