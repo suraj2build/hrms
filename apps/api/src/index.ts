@@ -51,6 +51,7 @@ import mastersRoutes from './routes/masters/index.js'
 import personalInfoRoutes      from './routes/employees/personal-info.js'
 import bankStatutoryRoutes     from './routes/employees/bank-statutory.js'
 import previousEmploymentRoutes from './routes/employees/previous-employment.js'
+import educationRoutes         from './routes/employees/education.js'
 import identityRoutes          from './routes/employees/identity.js'
 import contractsRoutes         from './routes/employees/contracts.js'
 import familyRoutes            from './routes/employees/family.js'
@@ -540,6 +541,7 @@ async function start() {
   await fastify.register(personalInfoRoutes)
   await fastify.register(bankStatutoryRoutes)
   await fastify.register(previousEmploymentRoutes)
+  await fastify.register(educationRoutes)
   await fastify.register(identityRoutes)
   await fastify.register(contractsRoutes)
   await fastify.register(familyRoutes)

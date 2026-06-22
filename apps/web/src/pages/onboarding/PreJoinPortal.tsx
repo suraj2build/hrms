@@ -187,6 +187,100 @@ function IdentitySection({
 }
 
 // ---------------------------------------------------------------------------
+// Previous employment (candidate-declared work history, 0..N entries)
+// ---------------------------------------------------------------------------
+
+interface PrevEmployer {
+  company_name: string;
+  designation: string;
+  from_date: string;
+  to_date: string;
+  last_ctc: string;
+  reason_for_leaving: string;
+}
+
+const emptyPrevEmployer: PrevEmployer = {
+  company_name: "",
+  designation: "",
+  from_date: "",
+  to_date: "",
+  last_ctc: "",
+  reason_for_leaving: "",
+};
+
+function PrevEmploymentSection({
+  employers,
+  onChange,
+}: {
+  employers: PrevEmployer[];
+  onChange: (next: PrevEmployer[]) => void;
+}) {
+  function update(i: number, key: keyof PrevEmployer, val: string) {
+    onChange(employers.map((e, idx) => (idx === i ? { ...e, [key]: val } : e)));
+  }
+  function add() {
+    onChange([...employers, { ...emptyPrevEmployer }]);
+  }
+  function remove(i: number) {
+    onChange(employers.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="space-y-4">
+      {employers.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          If you have prior work experience, add your previous employer(s) below.
+          You can skip this if you are a fresher.
+        </p>
+      )}
+
+      {employers.map((emp, i) => (
+        <div key={i} className="rounded-xl border border-border p-4 sm:p-5 relative">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-semibold text-foreground">Employer {i + 1}</span>
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="text-xs font-medium text-destructive hover:underline"
+            >
+              Remove
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FieldRow label="Company Name" required>
+              <input className={inputClass} value={emp.company_name} onChange={(e) => update(i, "company_name", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Designation">
+              <input className={inputClass} value={emp.designation} onChange={(e) => update(i, "designation", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="From">
+              <input type="date" className={inputClass} value={emp.from_date} onChange={(e) => update(i, "from_date", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="To">
+              <input type="date" className={inputClass} value={emp.to_date} onChange={(e) => update(i, "to_date", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Last Annual CTC (₹)">
+              <input type="number" inputMode="numeric" className={inputClass} value={emp.last_ctc} onChange={(e) => update(i, "last_ctc", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Reason for Leaving">
+              <input className={inputClass} value={emp.reason_for_leaving} onChange={(e) => update(i, "reason_for_leaving", e.target.value)} />
+            </FieldRow>
+          </div>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={add}
+        className="w-full rounded-lg border border-dashed border-[#2E6FE6]/50 py-2.5 text-sm font-semibold text-[#2E6FE6] hover:bg-[#2E6FE6]/5 transition"
+      >
+        + Add {employers.length === 0 ? "previous employer" : "another employer"}
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step components
 // ---------------------------------------------------------------------------
 
@@ -657,13 +751,15 @@ const STEPS = [
   { label: "Personal" },
   { label: "Address" },
   { label: "Bank & Tax" },
+  { label: "Experience" },
   { label: "Documents" },
   { label: "Review" },
 ];
 
 // Step indices (single source of truth for navigation logic).
-const STEP_DOCUMENTS = 3;
-const STEP_REVIEW = 4;
+const STEP_EXPERIENCE = 3;
+const STEP_DOCUMENTS = 4;
+const STEP_REVIEW = 5;
 
 function ProgressBar({ current }: { current: number }) {
   return (
@@ -734,10 +830,10 @@ const DOC_SLOTS: DocSlotDef[] = [
   { type: "pan", label: "PAN Card", hint: "PDF or image", accept: ".pdf,image/*", required: true },
   { type: "aadhaar", label: "Aadhaar Card", hint: "PDF or image", accept: ".pdf,image/*", required: true },
   { type: "cheque", label: "Cancelled Cheque", hint: "PDF or image", accept: ".pdf,image/*", required: true },
-  { type: "photo", label: "Passport Photo", hint: "Image only (optional)", accept: "image/*", required: false },
+  { type: "photo", label: "Passport Photo", hint: "Image only", accept: "image/*", required: true },
 ];
 
-const MANDATORY_DOC_TYPES: DocType[] = ["cv", "pan", "aadhaar", "cheque"];
+const MANDATORY_DOC_TYPES: DocType[] = ["cv", "pan", "aadhaar", "cheque", "photo"];
 
 interface DocSlotState {
   status: UploadStatus;
@@ -883,6 +979,8 @@ export function PreJoinPortal() {
   const [form, setForm] = useState<FormData>(emptyForm);
   // HR-provided identity values, kept so we can flag candidate edits.
   const [prefilled, setPrefilled] = useState<Partial<Record<IdentityKey, string>>>({});
+  // Candidate-declared previous employment (optional; freshers leave empty).
+  const [prevEmployers, setPrevEmployers] = useState<PrevEmployer[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1001,7 +1099,7 @@ export function PreJoinPortal() {
       return;
     }
     if (currentStep === STEP_DOCUMENTS && !allMandatoryUploaded) {
-      setError("All 4 required documents must be uploaded to continue.");
+      setError(`All ${MANDATORY_DOC_TYPES.length} required documents must be uploaded to continue.`);
       return;
     }
     setError(null);
@@ -1023,7 +1121,7 @@ export function PreJoinPortal() {
       return;
     }
     if (!allMandatoryUploaded) {
-      setError("All 4 required documents must be uploaded before submitting.");
+      setError(`All ${MANDATORY_DOC_TYPES.length} required documents must be uploaded before submitting.`);
       return;
     }
     setSubmitting(true);
@@ -1032,7 +1130,11 @@ export function PreJoinPortal() {
       const res = await fetch(`${API_BASE}/onboarding/pre-join/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, edited_fields: editedIdentityFields(form, prefilled) }),
+        body: JSON.stringify({
+          ...form,
+          edited_fields: editedIdentityFields(form, prefilled),
+          previous_employment: prevEmployers.filter((e) => e.company_name.trim()),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -1122,15 +1224,17 @@ export function PreJoinPortal() {
             {currentStep === 0 && "Personal Information"}
             {currentStep === 1 && "Address & Emergency Contact"}
             {currentStep === 2 && "Bank & Compliance Details"}
-            {currentStep === 3 && "Documents"}
-            {currentStep === 4 && "Review & Submit"}
+            {currentStep === STEP_EXPERIENCE && "Previous Employment"}
+            {currentStep === STEP_DOCUMENTS && "Documents"}
+            {currentStep === STEP_REVIEW && "Review & Submit"}
           </h2>
           <p className="text-sm text-muted-foreground mb-6">
             {currentStep === 0 && "Tell us a bit about yourself."}
             {currentStep === 1 && "Your current address and someone we can contact in emergencies."}
             {currentStep === 2 && "Needed for salary processing and statutory compliance."}
-            {currentStep === 3 && "Upload the required documents below."}
-            {currentStep === 4 && "Please review all your details before submitting."}
+            {currentStep === STEP_EXPERIENCE && "Add your prior work experience. Skip if you are a fresher."}
+            {currentStep === STEP_DOCUMENTS && "Upload the required documents below."}
+            {currentStep === STEP_REVIEW && "Please review all your details before submitting."}
           </p>
 
           {/* Step content */}
@@ -1142,7 +1246,10 @@ export function PreJoinPortal() {
           )}
           {currentStep === 1 && <Step2 form={form} onChange={handleChange} />}
           {currentStep === 2 && <Step3 form={form} onChange={handleChange} />}
-          {currentStep === 3 && (
+          {currentStep === STEP_EXPERIENCE && (
+            <PrevEmploymentSection employers={prevEmployers} onChange={setPrevEmployers} />
+          )}
+          {currentStep === STEP_DOCUMENTS && (
             <>
               <DocumentsStep slots={docSlots} onSelect={handleDocUpload} />
               <p
@@ -1151,11 +1258,11 @@ export function PreJoinPortal() {
                   allMandatoryUploaded ? "text-success" : "text-muted-foreground",
                 ].join(" ")}
               >
-                All 4 required documents must be uploaded to continue.
+                All {MANDATORY_DOC_TYPES.length} required documents must be uploaded to continue.
               </p>
             </>
           )}
-          {currentStep === 4 && (
+          {currentStep === STEP_REVIEW && (
             <Step4
               form={form}
               onDeclarationChange={(v) =>

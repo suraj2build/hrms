@@ -81,6 +81,16 @@ const submissionSchema = z.object({
   aadhaar:                    z.string().optional(),
   uan:                        z.string().optional(),
 
+  // Previous employment — candidate-declared prior work experience (0..N entries)
+  previous_employment:        z.array(z.object({
+    company_name:       z.string().optional(),
+    designation:        z.string().optional(),
+    from_date:          z.string().optional(),
+    to_date:            z.string().optional(),
+    last_ctc:           z.union([z.string(), z.number()]).optional(),
+    reason_for_leaving: z.string().optional(),
+  })).optional(),
+
   // Declaration — portal sends `declaration`, API/db uses declaration_accepted
   declaration_accepted:       z.boolean().optional(),
   declaration:                z.boolean().optional(),
@@ -104,6 +114,27 @@ const IDENTITY_FIELDS = [
   'designation', 'department', 'joining_date',
 ] as const
 
+// Normalises candidate-declared previous employment: drops blank rows, coerces
+// last_ctc to a number, trims strings. Returns a clean array safe to store/copy.
+function resolvePreviousEmployment(body: SubmissionBody) {
+  return (body.previous_employment ?? [])
+    .map((e) => {
+      const ctcRaw = e.last_ctc
+      const ctcNum = ctcRaw === undefined || ctcRaw === '' || ctcRaw === null
+        ? null
+        : Number(ctcRaw)
+      return {
+        company_name:       norm(e.company_name),
+        designation:        norm(e.designation),
+        from_date:          norm(e.from_date),
+        to_date:            norm(e.to_date),
+        last_ctc:           Number.isFinite(ctcNum) ? ctcNum : null,
+        reason_for_leaving: norm(e.reason_for_leaving),
+      }
+    })
+    .filter((e) => e.company_name) // company name is the minimum to keep a row
+}
+
 // Maps a validated submission body (either field-name convention) to DB columns.
 function resolveSubmission(body: SubmissionBody) {
   // Keep only recognised identity fields the candidate flagged as edited.
@@ -111,6 +142,7 @@ function resolveSubmission(body: SubmissionBody) {
     (f): f is string => IDENTITY_FIELDS.includes(f as any)
   )
   return {
+    previous_employment:        resolvePreviousEmployment(body),
     confirmed_first_name:       norm(body.first_name),
     confirmed_last_name:        norm(body.last_name),
     confirmed_email:            norm(body.email),
@@ -144,7 +176,7 @@ function resolveSubmission(body: SubmissionBody) {
 }
 
 const DOC_TYPES = ['cv', 'pan', 'aadhaar', 'cheque', 'photo'] as const
-const MANDATORY_DOCS = ['cv', 'pan', 'aadhaar', 'cheque'] as const
+const MANDATORY_DOCS = ['cv', 'pan', 'aadhaar', 'cheque', 'photo'] as const
 
 const uploadUrlSchema = z.object({
   document_type: z.enum(DOC_TYPES),
@@ -182,6 +214,7 @@ function mapSubmissionRow(row: any) {
     confirmed_department:   row.confirmed_department ?? null,
     confirmed_joining_date: row.confirmed_joining_date ?? null,
     edited_fields:          Array.isArray(row.edited_fields) ? row.edited_fields : [],
+    previous_employment:    Array.isArray(row.previous_employment) ? row.previous_employment : [],
     dob:                  row.dob ?? null,
     gender:               row.gender ?? null,
     blood_group:          row.blood_group ?? null,
@@ -903,6 +936,30 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       fastify.log.warn({ event: 'pre_joinee.approve.job_insert', tenant_id: tenantId, employee_id: employeeId, err: jobErr })
     }
 
+    // ── Previous employment (candidate-declared work history) ─────────────────
+    if (submission && Array.isArray(submission.previous_employment) && submission.previous_employment.length > 0) {
+      const prevRows = submission.previous_employment
+        .filter((e: any) => e?.company_name)
+        .map((e: any) => ({
+          tenant_id:          tenantId,
+          employee_id:        employeeId,
+          company_name:       e.company_name,
+          designation:        e.designation ?? null,
+          from_date:          e.from_date ?? null,
+          to_date:            e.to_date ?? null,
+          last_ctc:           e.last_ctc ?? null,
+          reason_for_leaving: e.reason_for_leaving ?? null,
+        }))
+      if (prevRows.length > 0) {
+        const { error: prevErr } = await fastify.supabase
+          .from('previous_employment')
+          .insert(prevRows)
+        if (prevErr) {
+          fastify.log.warn({ event: 'pre_joinee.approve.prev_emp_insert', tenant_id: tenantId, employee_id: employeeId, err: prevErr })
+        }
+      }
+    }
+
     // ── Bank details ─────────────────────────────────────────────────────────
     if (
       submission &&
@@ -1313,7 +1370,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     if (missing.length > 0) {
       return reply.code(400).send({
         error: 'DOCUMENTS_REQUIRED',
-        message: 'Please upload all required documents (CV, PAN, Aadhaar, Cancelled Cheque)',
+        message: 'Please upload all required documents (CV, PAN, Aadhaar, Cancelled Cheque, Passport Photo)',
         missing,
       })
     }
@@ -1333,6 +1390,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           confirmed_department:        sub.confirmed_department,
           confirmed_joining_date:      sub.confirmed_joining_date,
           edited_fields:               sub.edited_fields,
+          previous_employment:         sub.previous_employment,
           dob:                         sub.dob,
           gender:                      sub.gender,
           blood_group:                 sub.blood_group,

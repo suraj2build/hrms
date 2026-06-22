@@ -152,6 +152,15 @@ interface PreJoineeSubmission {
   pan?: string | null
   aadhaar?: string | null
   uan?: string | null
+  // Previous employment (candidate-declared)
+  previous_employment?: Array<{
+    company_name?: string | null
+    designation?: string | null
+    from_date?: string | null
+    to_date?: string | null
+    last_ctc?: number | string | null
+    reason_for_leaving?: string | null
+  }>
   // Documents / declaration
   documents_uploaded?: boolean
   declaration_accepted?: boolean
@@ -485,6 +494,27 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, r
                 <Row label="Aadhaar" value={s.aadhaar} />
                 <Row label="UAN" value={s.uan} />
               </Section>
+
+              {(s.previous_employment?.length ?? 0) > 0 && (
+                <Section title="Previous Employment">
+                  {s.previous_employment!.map((pe, i) => (
+                    <div key={i} className="py-2 border-b last:border-b-0 border-border/50">
+                      <p className="text-sm font-medium">{pe.company_name ?? '—'}</p>
+                      {pe.designation && <p className="text-xs text-muted-foreground">{pe.designation}</p>}
+                      <p className="text-xs text-muted-foreground">
+                        {[
+                          pe.from_date ? formatDate(pe.from_date) : null,
+                          pe.to_date ? formatDate(pe.to_date) : null,
+                        ].filter(Boolean).join(' – ') || '—'}
+                        {pe.last_ctc ? ` · CTC ₹${pe.last_ctc}` : ''}
+                      </p>
+                      {pe.reason_for_leaving && (
+                        <p className="text-xs text-muted-foreground">Reason: {pe.reason_for_leaving}</p>
+                      )}
+                    </div>
+                  ))}
+                </Section>
+              )}
 
               <Section title="Documents & Declaration">
                 <Row label="Documents Uploaded" value={s.documents_uploaded} />
