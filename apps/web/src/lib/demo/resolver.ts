@@ -558,6 +558,10 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   // /intelligence/* catch-all
   if (path.startsWith('/intelligence/')) return { data: {} }
 
+  // ── WFH requests ───────────────────────────────────────────────────────────
+  if (path === '/attendance/wfh/my')      return { data: fx.demoWfhMine() }
+  if (path === '/attendance/wfh/pending') return { data: fx.demoWfhPending() }
+
   // ── Asset requests ─────────────────────────────────────────────────────────
   if (path === '/ess/me/asset-requests') return { data: fx.demoAssetRequestsMine() }
   if (path === '/asset-requests')        return { data: fx.demoAssetRequestsAll() }

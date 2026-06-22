@@ -1994,6 +1994,20 @@ export function demoCompensationRevisions(status?: string) {
   return { data, total: data.length, limit: 50, offset: 0 }
 }
 
+// ── WFH requests ─────────────────────────────────────────────────────────────
+export function demoWfhMine() {
+  return [
+    { id: 'wfh-1', from_date: DAY(daysAgo(-3)), to_date: DAY(daysAgo(-3)), days: 1, reason: 'Plumber visit', status: 'pending', decision_remarks: null },
+    { id: 'wfh-2', from_date: DAY(daysAgo(10)), to_date: DAY(daysAgo(8)), days: 3, reason: 'Recovering from fever', status: 'approved', decision_remarks: 'Take care' },
+  ]
+}
+export function demoWfhPending() {
+  return [
+    { id: 'wfh-3', from_date: DAY(daysAgo(-2)), to_date: DAY(daysAgo(-1)), days: 2, reason: 'Home internet install', status: 'pending', employee_name: 'Sneha Reddy', employee_code: 'SAAR005' },
+    { id: 'wfh-4', from_date: DAY(daysAgo(-5)), to_date: DAY(daysAgo(-5)), days: 1, reason: 'Personal errand', status: 'pending', employee_name: 'Arjun Nair', employee_code: 'SAAR006' },
+  ]
+}
+
 // ── Asset requests ───────────────────────────────────────────────────────────
 export function demoAssetRequestsMine() {
   return [
