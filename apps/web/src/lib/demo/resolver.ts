@@ -168,6 +168,9 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/masters/sites') return { data: fx.demoSites }
   if (path === '/masters/work-locations') return { data: fx.demoWorkLocations }
   if (path === '/masters/cost-centers') return { data: fx.demoCostCenters }
+  if (path === '/masters/clusters') return { data: fx.demoClusters }
+  if (path === '/masters/rosters') return { data: fx.demoRosters }
+  if (path === '/masters/rotation-policies') return { data: fx.demoRotationPolicies }
   if (path === '/masters/identity-types') return { data: fx.demoIdentityTypes }
   if (path === '/masters/relationship-types') return { data: fx.demoRelationshipTypes }
   if (path === '/masters/leave-types' || path === '/leave-types') return { data: fx.demoLeaveTypes }

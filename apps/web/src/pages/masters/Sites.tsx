@@ -22,9 +22,9 @@ import {
   Plus, Pencil, Trash2, Globe, MapPin,
   ChevronRight, ChevronDown, ExternalLink, Loader2,
   CalendarDays, CalendarClock, ShieldCheck,
+  Layers, AlertTriangle, CheckCircle2, Users,
 } from 'lucide-react'
 import { PageContainer }    from '@/components/layout/PageContainer'
-import { PageHeader }       from '@/components/layout/PageHeader'
 import { Button }           from '@/components/ui/button'
 import { Input }            from '@/components/ui/input'
 import { Badge }            from '@/components/ui/badge'
@@ -33,6 +33,7 @@ import {
   DialogTitle, DialogFooter,
 }                           from '@/components/ui/dialog'
 import { MergeDeleteDialog } from '@/components/ui/merge-delete-dialog'
+import { OrgGovernancePanel } from '@/components/org/OrgGovernancePanel'
 import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
 import { cn }               from '@/lib/utils'
@@ -335,6 +336,46 @@ function SiteCard({
   )
 }
 
+// ── Governance stat card (mirrors the Work Locations console) ──────────────────
+
+interface EmpItem { id: string; work_location?: { id: string } | null }
+
+interface StatCardProps {
+  label:    string
+  value:    number | string
+  icon:     React.ReactNode
+  tone:     'neutral' | 'success' | 'warning' | 'info' | 'primary'
+  onClick?: () => void
+}
+
+function StatCard({ label, value, icon, tone, onClick }: StatCardProps) {
+  const toneCls = {
+    neutral: 'text-muted-foreground', success: 'text-success', warning: 'text-warning',
+    info: 'text-info', primary: 'text-primary',
+  }[tone]
+  const bgCls = {
+    neutral: 'bg-muted/30', success: 'bg-success/10', warning: 'bg-warning/10',
+    info: 'bg-info/10', primary: 'bg-primary/10',
+  }[tone]
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      className={cn(
+        'flex flex-col gap-1 rounded-lg border border-border/60 px-4 py-3 text-left transition-colors',
+        bgCls,
+        onClick ? 'hover:bg-muted/50 cursor-pointer' : 'cursor-default',
+      )}
+    >
+      <div className={cn('flex items-center gap-1.5', toneCls)}>
+        <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">{icon}</span>
+        <span className="text-xs font-medium">{label}</span>
+      </div>
+      <span className={cn('text-xl font-bold tabular-nums', toneCls)}>{value}</span>
+    </button>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function Sites() {
@@ -347,6 +388,7 @@ export function Sites() {
   const [form,     setForm]           = useState(EMPTY_FORM)
   const [err,      setErr]            = useState('')
   const [search,   setSearch]         = useState('')
+  const [clusterFilter, setClusterFilter] = useState<string>('all')
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
 
   const { data: sitesData, isLoading, isError, error } = useQuery<{ data: Site[] }>({
@@ -390,6 +432,12 @@ export function Sites() {
     queryFn:  () => api.get('/masters/clusters'),
     staleTime: 5 * 60_000,
   })
+  // Employee counts — shares cache with the employee list; zero cost if already fetched.
+  const { data: empData } = useQuery<{ data: EmpItem[]; total: number }>({
+    queryKey: ['employees'],
+    queryFn:  () => api.get('/employees'),
+    staleTime: 120_000,
+  })
   const statesList   = statesData?.data   ?? []
   const clustersList = clustersData?.data ?? []
 
@@ -412,16 +460,71 @@ export function Sites() {
     return map
   }, [workLocs])
 
-  const filteredSites = useMemo(() => {
-    if (!search.trim()) return sites
-    const q = search.toLowerCase()
-    return sites.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      s.code?.toLowerCase().includes(q) ||
-      s.location?.toLowerCase().includes(q),
-    )
-  }, [sites, search])
+  const employees = useMemo<EmpItem[]>(() => empData?.data ?? [], [empData])
 
+  /** work_location.id → site_id (mapped locations only) */
+  const locToSite = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const l of workLocs) if (l.site_id) m.set(l.id, l.site_id)
+    return m
+  }, [workLocs])
+
+  /** site_id → employee count (rolled up through work locations) */
+  const empCountBySite = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const e of employees) {
+      const sid = e.work_location?.id ? locToSite.get(e.work_location.id) : undefined
+      if (sid) m.set(sid, (m.get(sid) ?? 0) + 1)
+    }
+    return m
+  }, [employees, locToSite])
+
+  const clusterName = (id: string | null) =>
+    id ? (clustersList.find(c => c.id === id)?.name ?? 'Unknown cluster') : 'Unmapped'
+
+  // ── Governance stats ──────────────────────────────────────────────────────
+  const stats = useMemo(() => ({
+    total:      sites.length,
+    clusters:   new Set(sites.filter(s => s.cluster_id).map(s => s.cluster_id)).size,
+    workLocs:   workLocs.filter(l => l.site_id).length,
+    employees:  [...empCountBySite.values()].reduce((a, b) => a + b, 0),
+    governance: sites.filter(s => s.default_roster_id && s.default_rotation_policy_id).length,
+    unmapped:   sites.filter(s => !s.cluster_id).length,
+  }), [sites, workLocs, empCountBySite])
+
+  const filteredSites = useMemo(() => {
+    let list = sites
+    if (clusterFilter === '__unmapped__') list = list.filter(s => !s.cluster_id)
+    else if (clusterFilter !== 'all')     list = list.filter(s => s.cluster_id === clusterFilter)
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        s.code?.toLowerCase().includes(q) ||
+        s.location?.toLowerCase().includes(q) ||
+        s.city?.toLowerCase().includes(q),
+      )
+    }
+    return list
+  }, [sites, search, clusterFilter])
+
+  // ── Group sites by cluster (unmapped last) ────────────────────────────────
+  const groups = useMemo(() => {
+    const byCluster = new Map<string | null, Site[]>()
+    for (const s of filteredSites) {
+      const key = s.cluster_id ?? null
+      const arr = byCluster.get(key) ?? []
+      arr.push(s)
+      byCluster.set(key, arr)
+    }
+    const result: Array<{ clusterId: string | null; sites: Site[] }> = []
+    for (const c of clustersList) if (byCluster.has(c.id)) result.push({ clusterId: c.id, sites: byCluster.get(c.id)! })
+    for (const [key, arr] of byCluster) if (key && !clustersList.some(c => c.id === key)) result.push({ clusterId: key, sites: arr })
+    if (byCluster.has(null)) result.push({ clusterId: null, sites: byCluster.get(null)! })
+    return result
+  }, [filteredSites, clustersList])
+
+  const hasActiveFilter = !!search || clusterFilter !== 'all'
   const unassignedCount = workLocs.filter(l => !l.site_id).length
 
   function openCreate() {
@@ -538,53 +641,102 @@ export function Sites() {
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Sites"
-        subtitle="Physical campuses and branches — configure workforce governance defaults per site"
-        actions={
-          isAdmin
-            ? <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1.5" />Add Site</Button>
-            : undefined
-        }
-      />
-
-      {/* Summary strip */}
-      <div className="flex items-center gap-4 text-xs text-muted-foreground pb-1">
-        <span className="flex items-center gap-1.5">
-          <Globe className="h-3.5 w-3.5" />
-          <strong className="text-foreground">{sites.length}</strong> site{sites.length !== 1 ? 's' : ''}
-        </span>
-        <span className="text-border">·</span>
-        <span className="flex items-center gap-1.5">
-          <MapPin className="h-3.5 w-3.5" />
-          <strong className="text-foreground">{workLocs.length}</strong> work location{workLocs.length !== 1 ? 's' : ''}
-        </span>
-        {unassignedCount > 0 && (
-          <>
-            <span className="text-border">·</span>
-            <button
-              onClick={() => navigateToLocations()}
-              className="flex items-center gap-1 text-warning hover:underline"
-            >
-              <span className="font-medium">{unassignedCount}</span> unassigned
-            </button>
-          </>
+      {/* ── A — Header ──────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-md bg-primary/10 p-2 shrink-0">
+            <Globe className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground tracking-tight">Sites</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {isLoading
+                ? 'Loading…'
+                : `${stats.total} site${stats.total !== 1 ? 's' : ''} across ${stats.clusters} cluster${stats.clusters !== 1 ? 's' : ''}`}
+              {stats.unmapped > 0 && !isLoading && (
+                <span className="ml-2 text-warning font-medium">· {stats.unmapped} unmapped</span>
+              )}
+            </p>
+          </div>
+        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate('/masters/work-locations')}>
+              <MapPin className="h-3.5 w-3.5 mr-1.5" />Manage Locations
+            </Button>
+            <Button size="sm" className="h-8 text-xs" onClick={openCreate}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />Add Site
+            </Button>
+          </div>
         )}
       </div>
 
-      {/* Search */}
-      {sites.length > 4 && (
-        <div className="relative max-w-xs">
-          <Input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Filter sites…"
-            className="h-8 text-sm pl-3"
-          />
+      {/* ── B — Governance summary strip ───────────────────────────────────── */}
+      {!isLoading && sites.length > 0 && (
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-4">
+          <StatCard label="Total" value={stats.total} icon={<Globe />} tone="neutral" />
+          <StatCard label="Clusters" value={stats.clusters} icon={<Layers />} tone="info" onClick={() => navigate('/masters/clusters')} />
+          <StatCard label="Work Locations" value={stats.workLocs} icon={<MapPin />} tone="success" onClick={() => navigate('/masters/work-locations')} />
+          <StatCard label="Governance" value={stats.governance} icon={<ShieldCheck />} tone={stats.total > 0 && stats.governance === stats.total ? 'success' : 'neutral'} />
+          <StatCard label="Employees" value={stats.employees} icon={<Users />} tone="primary" />
+          <StatCard label="Unmapped" value={stats.unmapped} icon={<AlertTriangle />} tone={stats.unmapped > 0 ? 'warning' : 'neutral'} onClick={stats.unmapped > 0 ? () => setClusterFilter('__unmapped__') : undefined} />
         </div>
       )}
 
-      {/* Site cards */}
+      {/* ── Two-column layout: list + governance sidebar ───────────────────── */}
+      <div className="flex gap-5 items-start">
+        <div className="flex-1 min-w-0 space-y-3">
+
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[200px] max-w-xs">
+              <Input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search sites…"
+                className="h-8 text-sm"
+              />
+            </div>
+            <select
+              value={clusterFilter}
+              onChange={e => setClusterFilter(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+            >
+              <option value="all">All clusters</option>
+              {clustersList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {stats.unmapped > 0 && <option value="__unmapped__">Unmapped</option>}
+            </select>
+            {hasActiveFilter && (
+              <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground" onClick={() => { setSearch(''); setClusterFilter('all') }}>
+                Clear
+              </Button>
+            )}
+          </div>
+
+          {/* Governance gap banner */}
+          {!isLoading && stats.unmapped > 0 && clusterFilter === 'all' && (
+            <div className="flex items-start justify-between gap-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-warning">
+                    Governance gap — {stats.unmapped} unmapped site{stats.unmapped !== 1 ? 's' : ''}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Sites without a cluster weaken regional roll-ups, break cascading filters on reports, and reduce reporting accuracy.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate('/masters/clusters')}
+                className="text-xs font-medium text-primary hover:underline flex items-center gap-1 shrink-0"
+              >
+                Configure Clusters <ChevronRight className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          {/* Site cards */}
       {isLoading ? (
         <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
@@ -606,22 +758,51 @@ export function Sites() {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {filteredSites.map(site => (
-            <SiteCard
-              key={site.id}
-              site={site}
-              locations={locsBySite.get(site.id) ?? []}
-              rosters={rosters}
-              rotationPolicies={rotationPolicies}
-              isAdmin={isAdmin}
-              onEdit={openEdit}
-              onDelete={id => setDeleteTarget({ id, name: sites.find(s => s.id === id)?.name ?? id })}
-              onNavigate={navigateToLocations}
-            />
-          ))}
+        <div className="space-y-4">
+          {groups.map(group => {
+            const locCount = group.sites.reduce((n, s) => n + (locsBySite.get(s.id)?.length ?? 0), 0)
+            const empCount = group.sites.reduce((n, s) => n + (empCountBySite.get(s.id) ?? 0), 0)
+            return (
+              <div key={group.clusterId ?? '__unmapped__'} className="space-y-2">
+                {/* Cluster group header */}
+                <div className="flex items-center gap-2 px-1">
+                  {group.clusterId
+                    ? <Layers className="h-3.5 w-3.5 text-info" />
+                    : <AlertTriangle className="h-3.5 w-3.5 text-warning" />}
+                  <span className={cn('text-xs font-semibold uppercase tracking-wide', group.clusterId ? 'text-foreground' : 'text-warning')}>
+                    {clusterName(group.clusterId)}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {group.sites.length} site{group.sites.length !== 1 ? 's' : ''} · {locCount} location{locCount !== 1 ? 's' : ''} · {empCount} employee{empCount !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {group.sites.map(site => (
+                    <SiteCard
+                      key={site.id}
+                      site={site}
+                      locations={locsBySite.get(site.id) ?? []}
+                      rosters={rosters}
+                      rotationPolicies={rotationPolicies}
+                      isAdmin={isAdmin}
+                      onEdit={openEdit}
+                      onDelete={id => setDeleteTarget({ id, name: sites.find(s => s.id === id)?.name ?? id })}
+                      onNavigate={navigateToLocations}
+                    />
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
+        </div>
+
+        {/* Governance sidebar (mirrors the Work Locations console) */}
+        <aside className="hidden xl:block w-72 shrink-0 sticky top-4">
+          <OrgGovernancePanel />
+        </aside>
+      </div>
 
       {deleteTarget && (
         <MergeDeleteDialog

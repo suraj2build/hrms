@@ -95,16 +95,34 @@ export const demoGrades: Grade[] = [
 
 // ── Work locations / sites ─────────────────────────────────────────────────────
 
+// Work locations — two mapped to sites, one left unassigned (governance-gap demo).
 export const demoWorkLocations = [
-  { id: 'loc-blr', tenant_id: DEMO_TENANT_ID, name: 'Bengaluru HQ', code: 'BLR', city: 'Bengaluru', state: 'Karnataka', country: 'India', pincode: '560103', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
-  { id: 'loc-mum', tenant_id: DEMO_TENANT_ID, name: 'Mumbai Office', code: 'MUM', city: 'Mumbai', state: 'Maharashtra', country: 'India', pincode: '400051', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
-  { id: 'loc-del', tenant_id: DEMO_TENANT_ID, name: 'Delhi NCR Office', code: 'DEL', city: 'New Delhi', state: 'Delhi', country: 'India', pincode: '110019', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+  { id: 'loc-blr', tenant_id: DEMO_TENANT_ID, name: 'Bengaluru HQ', code: 'BLR', site_id: 'site-blr', city: 'Bengaluru', state: 'Karnataka', country: 'India', pincode: '560103', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+  { id: 'loc-mum', tenant_id: DEMO_TENANT_ID, name: 'Mumbai Office', code: 'MUM', site_id: 'site-mum', city: 'Mumbai', state: 'Maharashtra', country: 'India', pincode: '400051', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+  { id: 'loc-del', tenant_id: DEMO_TENANT_ID, name: 'Delhi NCR Office', code: 'DEL', site_id: null, city: 'New Delhi', state: 'Delhi', country: 'India', pincode: '110019', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
 ]
 
+// Clusters — regional grouping of sites.
+export const demoClusters = [
+  { id: 'cluster-south', tenant_id: DEMO_TENANT_ID, name: 'South Cluster', created_at: ISO(daysAgo(800)) },
+  { id: 'cluster-west',  tenant_id: DEMO_TENANT_ID, name: 'West Cluster',  created_at: ISO(daysAgo(800)) },
+]
+
+// Sites — two mapped to clusters with governance defaults; one left unmapped.
 export const demoSites = [
-  { id: 'site-blr', tenant_id: DEMO_TENANT_ID, name: 'Bengaluru HQ', code: 'BLR', city: 'Bengaluru', state: 'Karnataka', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
-  { id: 'site-mum', tenant_id: DEMO_TENANT_ID, name: 'Mumbai Office', code: 'MUM', city: 'Mumbai', state: 'Maharashtra', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
-  { id: 'site-del', tenant_id: DEMO_TENANT_ID, name: 'Delhi NCR Office', code: 'DEL', city: 'New Delhi', state: 'Delhi', is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+  { id: 'site-blr', tenant_id: DEMO_TENANT_ID, name: 'Bengaluru HQ', code: 'BLR', short_name: 'BLR', location: 'Bengaluru, Karnataka', timezone: 'Asia/Kolkata', city: 'Bengaluru', state: 'Karnataka', state_code: 'KA', cluster_id: 'cluster-south', region: 'South', zone: 'South', site_type: 'HQ', sanctioned_headcount: 60, default_roster_id: 'ros-std', default_rotation_policy_id: 'rot-std', default_leave_policy_id: null, holiday_group_id: null, is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+  { id: 'site-mum', tenant_id: DEMO_TENANT_ID, name: 'Mumbai Office', code: 'MUM', short_name: 'MUM', location: 'Mumbai, Maharashtra', timezone: 'Asia/Kolkata', city: 'Mumbai', state: 'Maharashtra', state_code: 'MH', cluster_id: 'cluster-west', region: 'West', zone: 'West', site_type: 'branch', sanctioned_headcount: 30, default_roster_id: 'ros-std', default_rotation_policy_id: 'rot-std', default_leave_policy_id: null, holiday_group_id: null, is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+  { id: 'site-del', tenant_id: DEMO_TENANT_ID, name: 'Delhi NCR Office', code: 'DEL', short_name: 'DEL', location: 'New Delhi, Delhi', timezone: 'Asia/Kolkata', city: 'New Delhi', state: 'Delhi', state_code: 'DL', cluster_id: null, region: 'North', zone: 'North', site_type: 'branch', sanctioned_headcount: 20, default_roster_id: null, default_rotation_policy_id: null, default_leave_policy_id: null, holiday_group_id: null, is_active: true, created_at: ISO(daysAgo(800)), updated_at: ISO(daysAgo(800)) },
+]
+
+export const demoRosters = [
+  { id: 'ros-std', tenant_id: DEMO_TENANT_ID, name: 'Standard 5-Day Week', code: 'STD5', created_at: ISO(daysAgo(800)) },
+  { id: 'ros-6day', tenant_id: DEMO_TENANT_ID, name: '6-Day Week', code: 'STD6', created_at: ISO(daysAgo(800)) },
+]
+
+export const demoRotationPolicies = [
+  { id: 'rot-std', tenant_id: DEMO_TENANT_ID, name: 'General Shift', code: 'GEN', created_at: ISO(daysAgo(800)) },
+  { id: 'rot-3shift', tenant_id: DEMO_TENANT_ID, name: '3-Shift Rotation', code: 'ROT3', created_at: ISO(daysAgo(800)) },
 ]
 
 export const demoCostCenters = [
