@@ -991,6 +991,43 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       fastify.log.warn({ event: 'pre_joinee.approve.job_insert', tenant_id: tenantId, employee_id: employeeId, err: jobErr })
     }
 
+    // ── Personal info + profile photo ─────────────────────────────────────────
+    // Persist the candidate's personal details and promote the mandatory
+    // passport photo to the employee's profile photo (it already lives in the
+    // employee-files bucket, so the stored path resolves directly).
+    {
+      const { data: photoDoc } = await fastify.supabase
+        .from('pre_joinee_documents')
+        .select('storage_path')
+        .eq('invitation_id', id)
+        .eq('tenant_id', tenantId)
+        .eq('document_type', 'photo')
+        .maybeSingle()
+
+      const okGender  = new Set(['male', 'female', 'other'])
+      const okMarital = new Set(['single', 'married', 'divorced', 'widowed'])
+      const piGender  = submission?.gender && okGender.has(submission.gender) ? submission.gender : null
+      const piMarital = submission?.marital_status && okMarital.has(submission.marital_status) ? submission.marital_status : null
+
+      if (photoDoc?.storage_path || submission?.dob || piGender || submission?.blood_group || piMarital) {
+        const { error: piErr } = await fastify.supabase
+          .from('employee_personal_info')
+          .insert({
+            tenant_id:      tenantId,
+            employee_id:    employeeId,
+            dob:            submission?.dob ?? null,
+            gender:         piGender,
+            blood_group:    submission?.blood_group ?? null,
+            marital_status: piMarital,
+            ...(submission?.nationality ? { nationality: submission.nationality } : {}),
+            profile_photo:  photoDoc?.storage_path ?? null,
+          })
+        if (piErr) {
+          fastify.log.warn({ event: 'pre_joinee.approve.personal_info_insert', tenant_id: tenantId, employee_id: employeeId, err: piErr })
+        }
+      }
+    }
+
     // ── Previous employment (candidate-declared work history) ─────────────────
     if (submission && Array.isArray(submission.previous_employment) && submission.previous_employment.length > 0) {
       const prevRows = submission.previous_employment
