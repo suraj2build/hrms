@@ -473,6 +473,70 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Requisition approved and opened' })
   })
 
+  // ── Multi-stage requisition approval ───────────────────────────────────────
+  const DEFAULT_REQ_CHAIN = [
+    { step_order: 1, label: 'Reporting Manager' },
+    { step_order: 2, label: 'HR Head' },
+    { step_order: 3, label: 'Finance Head' },
+  ]
+
+  // Submit a draft requisition into the approval chain (seeds the steps).
+  fastify.post('/requisitions/:id/submit-approval', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data: r } = await fastify.supabase
+      .from('job_requisitions').select('status').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!r) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
+    if (r.status !== 'draft') return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only draft requisitions can be submitted for approval' })
+
+    // Reset any prior steps (e.g. resubmission after a rejection).
+    await fastify.supabase.from('requisition_approvals').delete().eq('requisition_id', id).eq('tenant_id', req.tenantId)
+    const rows = DEFAULT_REQ_CHAIN.map(s => ({ tenant_id: req.tenantId, requisition_id: id, step_order: s.step_order, label: s.label, status: 'pending' }))
+    const { error } = await fastify.supabase.from('requisition_approvals').insert(rows)
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(201).send({ message: 'Submitted for approval', steps: rows.length })
+  })
+
+  // List a requisition's approval steps.
+  fastify.get('/requisitions/:id/approvals', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data, error } = await fastify.supabase
+      .from('requisition_approvals').select('*').eq('requisition_id', id).eq('tenant_id', req.tenantId).order('step_order')
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // Approve / reject the current (lowest-order pending) step.
+  fastify.patch('/requisitions/approvals/:stepId/decide', hrAdminAuth, async (req: any, reply) => {
+    const { stepId } = req.params as { stepId: string }
+    const parsed = z.object({ decision: z.enum(['approved', 'rejected']), remarks: z.string().max(1000).optional().nullable() }).safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+
+    const { data: step } = await fastify.supabase
+      .from('requisition_approvals').select('*').eq('id', stepId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!step) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval step not found' })
+    if (step.status !== 'pending') return reply.code(409).send({ error: 'NOT_PENDING', message: 'Step already decided' })
+
+    // Enforce sequential order: must be the lowest-order pending step.
+    const { data: steps } = await fastify.supabase
+      .from('requisition_approvals').select('id, step_order, status').eq('requisition_id', step.requisition_id).eq('tenant_id', req.tenantId).order('step_order')
+    const firstPending = (steps ?? []).find((s: any) => s.status === 'pending')
+    if (firstPending?.id !== stepId) return reply.code(409).send({ error: 'OUT_OF_ORDER', message: 'Earlier approval steps are still pending' })
+
+    await fastify.supabase.from('requisition_approvals')
+      .update({ status: parsed.data.decision, decided_by: req.userId, decided_at: new Date().toISOString(), remarks: parsed.data.remarks ?? null, updated_at: new Date().toISOString() })
+      .eq('id', stepId).eq('tenant_id', req.tenantId)
+
+    // Final approval opens the requisition; a rejection leaves it as draft.
+    const remaining = (steps ?? []).filter((s: any) => s.id !== stepId && s.status === 'pending')
+    if (parsed.data.decision === 'approved' && remaining.length === 0) {
+      await fastify.supabase.from('job_requisitions')
+        .update({ status: 'open', approved_by: req.userId, approved_at: new Date().toISOString() })
+        .eq('id', step.requisition_id).eq('tenant_id', req.tenantId)
+      return reply.send({ message: 'Final approval — requisition opened', opened: true })
+    }
+    return reply.send({ message: `Step ${parsed.data.decision}`, opened: false })
+  })
+
   fastify.post('/requisitions/:id/hold', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 

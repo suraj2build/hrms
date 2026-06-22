@@ -35,6 +35,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { api }           from '@/lib/api/client'
+import { RequisitionApprovalDialog } from '@/components/recruitment/RequisitionApprovalDialog'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
@@ -116,6 +117,7 @@ export function AdminRecruitment() {
 
   const [sheetOpen,  setSheetOpen]  = useState(false)
   const [editTarget, setEditTarget] = useState<Requisition | null>(null)
+  const [approvalReq, setApprovalReq] = useState<Requisition | null>(null)
   const [form,       setForm]       = useState<ReqForm>(EMPTY_FORM)
   const [saving,     setSaving]     = useState(false)
 
@@ -429,6 +431,11 @@ export function AdminRecruitment() {
                               </DropdownMenuItem>
                             )}
                             {canApprove && (
+                              <DropdownMenuItem onClick={() => setApprovalReq(r)}>
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-2" />Approval chain
+                              </DropdownMenuItem>
+                            )}
+                            {canApprove && (
                               <DropdownMenuItem
                                 className="text-success"
                                 onClick={() => runAction(`/recruitment/requisitions/${r.id}/approve`, 'Approved and opened')}
@@ -683,6 +690,16 @@ export function AdminRecruitment() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {approvalReq && (
+        <RequisitionApprovalDialog
+          requisitionId={approvalReq.id}
+          title={approvalReq.title}
+          status={approvalReq.status}
+          open={!!approvalReq}
+          onOpenChange={(v) => { if (!v) setApprovalReq(null) }}
+        />
+      )}
     </PageContainer>
   )
 }

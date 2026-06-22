@@ -2041,6 +2041,15 @@ export function demoBgvCase(appId: string) {
   }
 }
 
+// ── Requisition approvals (GET /recruitment/requisitions/:id/approvals) ──────
+export function demoRequisitionApprovals() {
+  return [
+    { id: 'rqa-1', step_order: 1, label: 'Reporting Manager', status: 'approved', remarks: null },
+    { id: 'rqa-2', step_order: 2, label: 'HR Head', status: 'pending', remarks: null },
+    { id: 'rqa-3', step_order: 3, label: 'Finance Head', status: 'pending', remarks: null },
+  ]
+}
+
 // ── Recruitment offer (GET /recruitment/offers/:appId) ───────────────────────
 export function demoRecruitmentOffer(appId: string) {
   return {
