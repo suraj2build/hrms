@@ -493,7 +493,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
         id, employee_id, subject, approval_status, current_level,
         issued_at, created_at, missing_vars,
         template:letter_templates(name, letter_type, category),
-        employee:employees(first_name, last_name, employee_code, designations(name))
+        employee:employees!employee_id(first_name, last_name, employee_code, designations(name))
       `, { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
@@ -521,7 +521,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
           *,
           template:letter_templates(name,letter_type,category,requires_approval,approval_levels,variables,
             approval_chains:letter_approval_chains(level,approver_role,label)),
-          employee:employees(first_name,last_name,employee_code,designations(name),
+          employee:employees!employee_id(first_name,last_name,employee_code,designations(name),
             departments!department_id(name))
         `)
         .eq('id', letterId)
@@ -529,7 +529,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
         .single(),
       supabase
         .from('letter_approval_log')
-        .select(`*, actor:employees(first_name, last_name, designations(name))`)
+        .select(`*, actor:employees!actor_id(first_name, last_name, designations(name))`)
         .eq('letter_id', letterId)
         .order('acted_at', { ascending: true }),
     ])
@@ -861,7 +861,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select(`
         id, reason, status, requested_at, processed_at, rejection_reason,
         template:letter_templates(name, letter_type),
-        employee:employees(first_name, last_name, employee_code, designations(name),
+        employee:employees!employee_id(first_name, last_name, employee_code, designations(name),
           departments!department_id(name))
       `, { count: 'exact' })
       .eq('tenant_id', tenantId)

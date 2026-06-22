@@ -13,7 +13,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Kanban, RefreshCw, Star, GripVertical, UserCircle2,
   Building2, Briefcase, Plus, ArrowRight, Mail, CalendarDays,
-  Clock, GitBranch, MessagesSquare,
+  Clock, GitBranch, MessagesSquare, Phone, FileText, Linkedin,
+  StickyNote, Award, Hourglass, CheckCircle2, Circle, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -52,6 +53,10 @@ interface Application {
     first_name:       string
     last_name:        string
     email:            string
+    phone:            string | null
+    resume_url:       string | null
+    linkedin_url:     string | null
+    notes:            string | null
     current_company:  string | null
     current_title:    string | null
     source:           string
@@ -113,9 +118,27 @@ function fmtDate(d?: string | null): string {
   return new Date(d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function initials(first: string, last: string): string {
+  return `${(first?.[0] ?? '').toUpperCase()}${(last?.[0] ?? '').toUpperCase()}` || '?'
+}
+
+function StatCell({ icon: Icon, label, value, tint }: {
+  icon: React.ElementType; label: string; value: string; tint: string
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-3 text-center">
+      <Icon className={cn('h-4 w-4 mx-auto mb-1', tint)} />
+      <p className="text-lg font-bold leading-none tabular-nums">{value}</p>
+      <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wide">{label}</p>
+    </div>
+  )
+}
+
 // ── Candidate detail popup ────────────────────────────────────────────────────
 
-function PipelineCandidateDialog({ app, onClose }: { app: Application | null; onClose: () => void }) {
+function PipelineCandidateDialog({ app, stages, onClose }: {
+  app: Application | null; stages: Stage[]; onClose: () => void
+}) {
   const { data, isLoading } = useQuery<{ rounds: TimelineRound[]; activity: TimelineActivity[] }>({
     queryKey: ['recruitment', 'timeline', app?.id],
     queryFn:  () => api.get(`/recruitment/applications/${app!.id}/timeline`),
@@ -127,116 +150,203 @@ function PipelineCandidateDialog({ app, onClose }: { app: Application | null; on
   if (!app) return null
   const c = app.candidates
   const stage = app.recruitment_pipeline_stages
+  const accent = stage?.color ?? '#2E6FE6'
+  const currentIdx = stages.findIndex(s => s.id === app.stage_id)
+  const daysInPipe = daysSince(app.created_at)
 
   return (
     <Dialog open={!!app} onOpenChange={v => { if (!v) onClose() }}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2.5">
-            <UserCircle2 className="h-7 w-7 text-muted-foreground shrink-0" />
-            <div className="min-w-0">
-              <p className="truncate">{c.first_name} {c.last_name}</p>
-              {c.current_title && <p className="text-xs font-normal text-muted-foreground truncate">{c.current_title}</p>}
-            </div>
-          </DialogTitle>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-xl max-h-[88vh] overflow-y-auto p-0 gap-0">
+        {/* ── Banner header ─────────────────────────────────────────────── */}
+        <div className="relative px-5 pt-5 pb-4" style={{ background: `linear-gradient(135deg, ${accent}14, transparent 70%)` }}>
+          <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: accent }} />
+          <DialogHeader className="space-y-0">
+            <DialogTitle className="flex items-center gap-3">
+              <div
+                className="h-12 w-12 rounded-full flex items-center justify-center text-base font-bold text-white shrink-0 shadow-sm"
+                style={{ backgroundColor: accent }}
+              >
+                {initials(c.first_name, c.last_name)}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-base">{c.first_name} {c.last_name}</p>
+                <p className="text-xs font-normal text-muted-foreground truncate">
+                  {c.current_title || '—'}{c.current_company ? ` · ${c.current_company}` : ''}
+                </p>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
 
-        {/* Summary chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          {stage && (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 border" style={{ borderColor: stage.color, color: stage.color }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stage.color }} />{stage.name}
-            </span>
-          )}
-          <span className={cn('text-[11px] font-medium rounded-full px-2 py-0.5', SOURCE_COLORS[c.source] ?? SOURCE_COLORS.other)}>{c.source}</span>
-          {c.total_experience != null && <span className="text-[11px] text-muted-foreground">{c.total_experience}y exp</span>}
-          {app.overall_score != null && (
-            <span className={cn('text-[11px] font-bold inline-flex items-center gap-0.5', scoreColor(app.overall_score))}>
-              <Star className="h-3 w-3 fill-current" />{app.overall_score}/10
-            </span>
-          )}
-        </div>
-
-        {/* Key facts */}
-        <div className="grid grid-cols-1 gap-2 text-sm">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Mail className="h-3.5 w-3.5 shrink-0" />
-            <a href={`mailto:${c.email}`} className="text-foreground hover:underline truncate">{c.email}</a>
+          {/* Stage + source chips */}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {stage && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 text-white" style={{ backgroundColor: accent }}>
+                {stage.name}
+              </span>
+            )}
+            <span className={cn('text-[11px] font-medium rounded-full px-2 py-0.5', SOURCE_COLORS[c.source] ?? SOURCE_COLORS.other)}>{c.source}</span>
+            {app.job_requisitions && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground rounded-full bg-muted px-2 py-0.5">
+                <Briefcase className="h-3 w-3" />{app.job_requisitions.title}
+              </span>
+            )}
           </div>
-          {c.current_company && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Building2 className="h-3.5 w-3.5 shrink-0" /><span className="text-foreground">{c.current_company}</span>
-            </div>
-          )}
-          {app.job_requisitions && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Briefcase className="h-3.5 w-3.5 shrink-0" /><span className="text-foreground">{app.job_requisitions.title}</span>
-            </div>
-          )}
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <CalendarDays className="h-3.5 w-3.5 shrink-0" />Applied {fmtDate(app.created_at)}
+
+          {/* Quick actions */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-3">
+            <a href={`mailto:${c.email}`} className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 hover:border-primary/40 hover:text-primary transition-colors">
+              <Mail className="h-3.5 w-3.5" />Email
+            </a>
+            {c.phone && (
+              <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 hover:border-primary/40 hover:text-primary transition-colors">
+                <Phone className="h-3.5 w-3.5" />{c.phone}
+              </a>
+            )}
+            {c.resume_url && (
+              <a href={c.resume_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 hover:border-primary/40 hover:text-primary transition-colors">
+                <FileText className="h-3.5 w-3.5" />Résumé
+              </a>
+            )}
+            {c.linkedin_url && (
+              <a href={c.linkedin_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 hover:border-primary/40 hover:text-primary transition-colors">
+                <Linkedin className="h-3.5 w-3.5" />LinkedIn
+              </a>
+            )}
           </div>
         </div>
 
-        {/* Interview rounds */}
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
-            <MessagesSquare className="h-3.5 w-3.5" />Interview Rounds
-          </p>
-          {isLoading ? (
-            <div className="flex justify-center py-3"><RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" /></div>
-          ) : rounds.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No interview rounds yet.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {rounds.map(r => {
-                const scores = r.interview_scores ?? []
-                const avg = scores.length ? (scores.reduce((a, s) => a + (s.overall_score ?? 0), 0) / scores.length).toFixed(1) : null
-                const panel = (r.interview_panel ?? []).map(p => p.profiles?.full_name).filter(Boolean).join(', ')
-                return (
-                  <div key={r.id} className="rounded-lg border border-border p-2.5 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">Round {r.round_number}{r.round_type ? ` · ${r.round_type}` : ''}</span>
-                      {r.status && <span className="text-[11px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{r.status}</span>}
+        <div className="px-5 pb-5 space-y-5">
+          {/* ── Stats grid ──────────────────────────────────────────────── */}
+          <div className="grid grid-cols-4 gap-2">
+            <StatCell icon={Award}      label="Experience" value={c.total_experience != null ? `${c.total_experience}y` : '—'} tint="text-accent-violet" />
+            <StatCell icon={Star}       label="Score"      value={app.overall_score != null ? `${app.overall_score}` : '—'} tint={app.overall_score != null ? scoreColor(app.overall_score) : 'text-muted-foreground'} />
+            <StatCell icon={MessagesSquare} label="Rounds" value={`${rounds.length}`} tint="text-info" />
+            <StatCell icon={Hourglass}  label="In Pipeline" value={`${daysInPipe}d`} tint="text-warning" />
+          </div>
+
+          {/* ── Stage progress stepper ──────────────────────────────────── */}
+          {stages.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">Pipeline Progress</p>
+              <div className="flex items-center">
+                {stages.map((s, i) => {
+                  const done    = currentIdx >= 0 && i < currentIdx
+                  const current = i === currentIdx
+                  return (
+                    <div key={s.id} className="flex items-center flex-1 last:flex-none">
+                      <div className="flex flex-col items-center gap-1">
+                        {current ? (
+                          <CheckCircle2 className="h-5 w-5" style={{ color: s.color }} fill="none" />
+                        ) : done ? (
+                          <CheckCircle2 className="h-5 w-5 text-success" />
+                        ) : (
+                          <Circle className="h-5 w-5 text-muted-foreground/30" />
+                        )}
+                        <span className={cn('text-[9px] text-center leading-tight max-w-[52px]', current ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
+                          {s.name}
+                        </span>
+                      </div>
+                      {i < stages.length - 1 && (
+                        <div className={cn('h-0.5 flex-1 mx-1 mb-4 rounded-full', done ? 'bg-success' : 'bg-muted')} />
+                      )}
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
-                      {r.scheduled_at && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{fmtDate(r.scheduled_at)}</span>}
-                      {panel && <span className="truncate">Panel: {panel}</span>}
-                      {avg != null && <span className={cn('font-semibold', scoreColor(Number(avg)))}>Avg {avg}/10</span>}
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           )}
-        </div>
 
-        {/* Stage history */}
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
-            <GitBranch className="h-3.5 w-3.5" />Stage History
-          </p>
-          {isLoading ? (
-            <div className="flex justify-center py-3"><RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" /></div>
-          ) : activity.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No stage movements recorded.</p>
-          ) : (
-            <ol className="space-y-1.5">
-              {activity.map(a => (
-                <li key={a.id} className="flex items-start gap-2 text-xs">
-                  <span className="mt-1 w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-foreground">
-                      {a.from_stage?.name ? `${a.from_stage.name} → ` : ''}{a.to_stage?.name ?? a.activity_type ?? 'Updated'}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {fmtDate(a.created_at)}{a.actor?.full_name ? ` · ${a.actor.full_name}` : ''}{a.note ? ` · ${a.note}` : ''}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
+          {/* ── Recruiter notes ─────────────────────────────────────────── */}
+          {c.notes && (
+            <div className="rounded-xl border border-border bg-amber-50/40 dark:bg-amber-950/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                <StickyNote className="h-3.5 w-3.5" />Notes
+              </p>
+              <p className="text-sm text-foreground whitespace-pre-wrap">{c.notes}</p>
+            </div>
           )}
+
+          {/* ── Interview rounds ────────────────────────────────────────── */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
+              <MessagesSquare className="h-3.5 w-3.5" />Interview Rounds
+            </p>
+            {isLoading ? (
+              <div className="flex justify-center py-3"><RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            ) : rounds.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-1">No interviews scheduled yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {rounds.map(r => {
+                  const scores = r.interview_scores ?? []
+                  const avg = scores.length ? (scores.reduce((a, s) => a + (s.overall_score ?? 0), 0) / scores.length) : null
+                  const panel = (r.interview_panel ?? []).map(p => p.profiles?.full_name).filter(Boolean).join(', ')
+                  const recs = scores.map(s => s.recommendation).filter(Boolean)
+                  const positive = recs.filter(r => /hire|yes|strong|advance/i.test(r ?? '')).length
+                  return (
+                    <div key={r.id} className="rounded-xl border border-border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">Round {r.round_number}{r.round_type ? ` · ${r.round_type}` : ''}</span>
+                        <div className="flex items-center gap-1.5">
+                          {avg != null && (
+                            <span className={cn('text-xs font-bold inline-flex items-center gap-0.5', scoreColor(avg))}>
+                              <Star className="h-3 w-3 fill-current" />{avg.toFixed(1)}
+                            </span>
+                          )}
+                          {r.status && <span className="text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground capitalize">{r.status}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
+                        {r.scheduled_at && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{fmtDate(r.scheduled_at)}</span>}
+                        {panel && <span className="inline-flex items-center gap-1 truncate"><UserCircle2 className="h-3 w-3" />{panel}</span>}
+                        {recs.length > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            {positive >= recs.length - positive
+                              ? <ThumbsUp className="h-3 w-3 text-success" />
+                              : <ThumbsDown className="h-3 w-3 text-destructive" />}
+                            {positive}/{recs.length} recommend
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── Stage history timeline ──────────────────────────────────── */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
+              <GitBranch className="h-3.5 w-3.5" />Activity History
+            </p>
+            {isLoading ? (
+              <div className="flex justify-center py-3"><RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            ) : activity.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-1">
+                Applied {fmtDate(app.created_at)} — no further activity recorded.
+              </p>
+            ) : (
+              <ol className="relative border-l border-border ml-1.5 space-y-3 pl-4">
+                {activity.map(a => (
+                  <li key={a.id} className="relative">
+                    <span
+                      className="absolute -left-[21px] top-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-background"
+                      style={{ backgroundColor: a.to_stage?.color ?? accent }}
+                    />
+                    <p className="text-sm text-foreground">
+                      {a.from_stage?.name ? <span className="text-muted-foreground">{a.from_stage.name} → </span> : ''}
+                      <span className="font-medium">{a.to_stage?.name ?? a.activity_type ?? 'Updated'}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {fmtDate(a.created_at)}{a.actor?.full_name ? ` · ${a.actor.full_name}` : ''}
+                    </p>
+                    {a.note && <p className="text-xs text-foreground/80 mt-0.5">{a.note}</p>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -563,7 +673,7 @@ export function AdminPipeline() {
         </div>
       )}
 
-      <PipelineCandidateDialog app={detailApp} onClose={() => setDetailApp(null)} />
+      <PipelineCandidateDialog app={detailApp} stages={stages} onClose={() => setDetailApp(null)} />
     </PageContainer>
   )
 }

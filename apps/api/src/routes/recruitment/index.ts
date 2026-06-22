@@ -732,7 +732,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .from('applications')
       .select(`
         *,
-        candidates(id, first_name, last_name, email, phone, current_company, current_title, source, total_experience),
+        candidates(id, first_name, last_name, email, phone, resume_url, linkedin_url, notes, current_company, current_title, source, total_experience),
         job_requisitions(id, title, department_id),
         recruitment_pipeline_stages(id, name, color, stage_order)
       `, { count: 'exact' })
