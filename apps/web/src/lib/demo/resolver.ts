@@ -176,10 +176,19 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     const year = Number(q.year) || new Date().getFullYear()
     return { data: fx.demoHolidays(year) }
   }
-  if (path === '/positions') return { data: [] }
-  if (path === '/positions/summary') return { data: {} }
-  if (path === '/masters/salary-components') return { data: [] }
-  if (path === '/masters/salary-structures') return { data: [] }
+  if (path === '/positions/summary') return fx.demoPositionsSummary()
+  if (path === '/positions') {
+    let ps = fx.demoPositions()
+    if (q.status)        ps = ps.filter(p => p.status === q.status)
+    if (q.department_id) ps = ps.filter(p => p.department_id === q.department_id)
+    if (q.site_id)       ps = ps.filter(p => p.site_id === q.site_id)
+    return { data: ps }
+  }
+  if (path === '/masters/salary-components') {
+    const cs = fx.demoSalaryComponents()
+    return { data: q.component_type ? cs.filter(c => c.component_type === q.component_type) : cs }
+  }
+  if (path === '/masters/salary-structures') return { data: fx.demoSalaryStructures() }
   // /masters/employee-shifts/:id/history
   mm = path.match(/^\/masters\/employee-shifts\/([^/]+)\/history$/)
   if (mm) return { data: [] }
@@ -254,7 +263,7 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/attendance/leave/my') return { data: fx.demoMyLeaveRequests() }
   if (path === '/leave-requests') return { data: fx.demoMyLeaveRequests() }
   if (path.startsWith('/attendance/leave/balance')) return { data: fx.demoLeaveBalances() }
-  if (path === '/attendance/leave/team-balances') return { data: [] }
+  if (path === '/attendance/leave/team-balances') return { data: fx.demoTeamLeaveBalances(q.include_liability === 'true') }
   // ledger reads r.data.data → nested envelope
   if (path.startsWith('/attendance/leave/ledger/')) return { data: { data: [] } }
   if (path === '/leave/optional-holidays') return { data: [] }
@@ -327,26 +336,35 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
     const empId = path.split('/').pop() ?? 'emp-0001'
     return { data: fx.demoActiveComp(empId) }
   }
-  if (path.startsWith('/payroll/ledger/')) return { data: [] }
+  if (path.startsWith('/payroll/ledger/')) return fx.demoPayrollLedger()
   if (path.startsWith('/payroll/revisions')) return { data: [] }
   if (path === '/payroll/statutory/ptax/states') return fx.demoPtaxStates()
   if (path === '/payroll/statutory/lwf/states')  return fx.demoLwfStates()
   if (path.startsWith('/payroll/statutory')) return { data: [] }
-  if (path.startsWith('/payroll/reimbursements')) return { data: [] }
-  if (path.startsWith('/payroll/ess/my-advances')) return { data: [] }
-  if (path.startsWith('/payroll/ess/my-loans')) return { data: [] }
-  if (path === '/payroll/variable-pay/my') return { data: [] }
+  if (path.startsWith('/payroll/reimbursements')) return fx.demoEssReimbursements(q.status)
+  if (path.startsWith('/payroll/ess/my-advances')) return { data: fx.demoEssAdvances() }
+  if (path.startsWith('/payroll/ess/my-loans')) return { data: fx.demoEssLoans() }
+  if (path === '/payroll/variable-pay/my') return fx.demoVariablePayMy()
 
-  // ── Benefits ───────────────────────────────────────────────────────────────
+  // ── Benefits / FBP ─────────────────────────────────────────────────────────
+  if (path === '/benefits/plans')      return { data: fx.demoBenefitPlans() }
+  if (path === '/benefits/my')         return { data: fx.demoBenefitMy() }
+  if (path === '/benefits/dependents') return { data: fx.demoBenefitDependents() }
   if (path.startsWith('/benefits/')) return { data: [] }
 
   // ── Compensation revisions ─────────────────────────────────────────────────
+  if (path === '/compensation/revisions') return fx.demoCompensationRevisions(q.status)
+  mm = path.match(/^\/compensation\/revisions\/([^/]+)$/)
+  if (mm) {
+    const all = fx.demoCompensationRevisions().data
+    return { data: all.find((r: any) => r.id === mm![1]) ?? all[0] }
+  }
   if (path.startsWith('/compensation/revisions/')) return { data: [] }
 
   // ── ESS ────────────────────────────────────────────────────────────────────
-  if (path === '/ess/me/expiry')       return { data: [] }
-  if (path === '/ess/me/documents')    return { data: [] }
-  if (path === '/ess/me/assets')       return { data: [] }
+  if (path === '/ess/me/expiry')       return fx.demoEssExpiry()
+  if (path === '/ess/me/documents')    return { data: fx.demoEssDocuments() }
+  if (path === '/ess/me/assets')       return fx.demoEssAssets()
   if (path === '/ess/me/separation')   return { data: null }
   if (path === '/ess/workforce-notifications') return { data: [] }
   if (path === '/ess/operational-summary') {
@@ -390,11 +408,12 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
       },
     }
   }
-  if (path === '/approvals/pending') return { data: [] }
+  if (path === '/approvals/pending') return fx.demoApprovalsPending()
 
   // ── Helpdesk ───────────────────────────────────────────────────────────────
-  if (path.startsWith('/helpdesk/tickets/')) return { data: null }
-  if (path === '/helpdesk/tickets') return { data: [] }
+  if (path === '/helpdesk/tickets' || path === '/helpdesk/tickets/my') return { data: fx.demoHelpdeskTickets() }
+  mm = path.match(/^\/helpdesk\/tickets\/([^/]+)$/)
+  if (mm) return { data: fx.demoHelpdeskTicket(mm[1]) }
 
   // ── Billing / system ───────────────────────────────────────────────────────
   if (path === '/billing/status') return { data: { status: 'active', plan: 'enterprise' } }

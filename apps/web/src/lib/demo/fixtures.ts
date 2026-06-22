@@ -1667,3 +1667,311 @@ export function demoRecruitmentInterviewers() {
     id: e.id, full_name: `${e.first_name} ${e.last_name}`, role: e.user_account?.role ?? 'employee',
   }))
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// ESS self-service, Manager/Approvals/Helpdesk, and Comp & Payroll lists
+// (fills demo pages that previously returned empty)
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── ESS › My Documents (GET /ess/me/documents) ──────────────────────────────
+export function demoEssDocuments() {
+  const mk = (id: string, name: string, doc_type: string, days: number) => ({
+    id, name, doc_type, storage_path: `demo/${id}.pdf`, file_size: 184_320,
+    mime_type: 'application/pdf', expires_at: null as string | null, is_own: true,
+    signed_url: null as string | null, signed_url_expires_in: 3600, created_at: ISO(daysAgo(days)),
+  })
+  return [
+    mk('doc-offer', 'Offer Letter.pdf', 'other', 540),
+    mk('doc-pan', 'PAN Card.pdf', 'pan', 535),
+    mk('doc-aadhaar', 'Aadhaar Card.pdf', 'aadhaar', 535),
+    mk('doc-degree', 'Degree Certificate.pdf', 'certificate', 530),
+  ]
+}
+
+// ── ESS › My Assets (GET /ess/me/assets) ─────────────────────────────────────
+export function demoEssAssets() {
+  const data = [
+    { id: 'asset-1', asset_code: 'LAP-0042', name: 'MacBook Pro 14"', category_id: 'cat-laptop', serial_number: 'C02XX1234567', status: 'assigned', assigned_to: DEMO_SELF_EMPLOYEE_ID, notes: 'Issued on joining' },
+    { id: 'asset-2', asset_code: 'PHN-0017', name: 'iPhone 14', category_id: 'cat-phone', serial_number: 'FK3YY7654321', status: 'assigned', assigned_to: DEMO_SELF_EMPLOYEE_ID, notes: 'Work phone' },
+    { id: 'asset-3', asset_code: 'CRD-0088', name: 'Access Card', category_id: 'cat-card', serial_number: 'AC-88-2310', status: 'assigned', assigned_to: DEMO_SELF_EMPLOYEE_ID, notes: null },
+  ]
+  return { data, outstanding_count: data.filter(a => a.status === 'assigned').length }
+}
+
+// ── ESS › Expiring items (GET /ess/me/expiry) ────────────────────────────────
+export function demoEssExpiry() {
+  const data = [
+    { id: 'exp-1', employee_id: DEMO_SELF_EMPLOYEE_ID, category: 'document', label: 'Passport', detail: 'Renew before expiry', due_date: DAY(daysAgo(-58)), days_to_due: 58, bucket: 'due_90' },
+    { id: 'exp-2', employee_id: DEMO_SELF_EMPLOYEE_ID, category: 'certification', label: 'AWS Solutions Architect', detail: 'Recertification due', due_date: DAY(daysAgo(-24)), days_to_due: 24, bucket: 'due_30' },
+  ]
+  return {
+    data,
+    summary: { total: data.length, by_bucket: { overdue: 0, due_7: 0, due_30: 1, due_90: 1 } },
+  }
+}
+
+// ── ESS › Salary Advances (GET /payroll/ess/my-advances) ─────────────────────
+export function demoEssAdvances() {
+  return [
+    { id: 'adv-1', requested_amount: 50000, approved_amount: 50000, purpose: 'Medical emergency', recovery_months: 5, status: 'recovering', requested_date: DAY(daysAgo(120)), submitted_via_ess: true },
+    { id: 'adv-2', requested_amount: 30000, approved_amount: null, purpose: 'Home repair', recovery_months: 3, status: 'pending_manager', requested_date: DAY(daysAgo(4)), submitted_via_ess: true },
+  ]
+}
+
+// ── ESS › Loans (GET /payroll/ess/my-loans) ──────────────────────────────────
+export function demoEssLoans() {
+  return [
+    { id: 'loan-1', loan_type: 'personal', principal_amount: 200000, disbursed_amount: 200000, interest_rate_pct: 8, tenure_months: 24, emi_amount: 9050, outstanding_balance: 126700, status: 'recovering', purpose: 'Personal', first_emi_month: '2025-09', submitted_via_ess: true },
+  ]
+}
+
+// ── ESS › Reimbursements (GET /payroll/reimbursements/my) ────────────────────
+const REIMB_CATS = [
+  { id: 'rc-travel', name: 'Travel', code: 'TRAVEL', category_type: 'travel' },
+  { id: 'rc-internet', name: 'Internet & Telephone', code: 'NET', category_type: 'communication' },
+  { id: 'rc-medical', name: 'Medical', code: 'MED', category_type: 'medical' },
+]
+export function demoEssReimbursements(status?: string) {
+  const all = [
+    { id: 'rmb-1', category_id: 'rc-travel', claim_month: new Date().toISOString().slice(0, 7), claimed_amount: 4200, approved_amount: 4200, description: 'Client visit cab fare', status: 'approved', submitted_at: ISO(daysAgo(12)), created_at: ISO(daysAgo(14)), reimbursement_categories: REIMB_CATS[0] },
+    { id: 'rmb-2', category_id: 'rc-internet', claim_month: new Date().toISOString().slice(0, 7), claimed_amount: 1500, approved_amount: null, description: 'Broadband — June', status: 'submitted', submitted_at: ISO(daysAgo(3)), created_at: ISO(daysAgo(3)), reimbursement_categories: REIMB_CATS[1] },
+    { id: 'rmb-3', category_id: 'rc-medical', claim_month: '2026-05', claimed_amount: 2800, approved_amount: 2800, description: 'Pharmacy bills', status: 'paid', submitted_at: ISO(daysAgo(40)), created_at: ISO(daysAgo(42)), reimbursement_categories: REIMB_CATS[2] },
+  ]
+  const data = status ? all.filter(r => r.status === status) : all
+  return { data, total: data.length }
+}
+
+// ── ESS › Variable Pay (GET /payroll/variable-pay/my) ────────────────────────
+export function demoVariablePayMy() {
+  const data = [
+    { id: 'vp-1', amount: 75000, status: 'approved', performance_period: 'Q4 FY25', performance_notes: 'Exceeded targets', award_name: 'Quarterly Performance Bonus', award_type: 'bonus', is_taxable: true, batch_name: 'Q4 FY25 Bonus', payout_month: '2026-04', approved_at: ISO(daysAgo(70)), created_at: ISO(daysAgo(80)) },
+    { id: 'vp-2', amount: 25000, status: 'approved', performance_period: 'FY25', performance_notes: 'Spot recognition', award_name: 'Spot Award', award_type: 'incentive', is_taxable: true, batch_name: 'Spot Awards', payout_month: '2026-02', approved_at: ISO(daysAgo(130)), created_at: ISO(daysAgo(135)) },
+  ]
+  return { data, total_awarded: data.reduce((s, v) => s + v.amount, 0) }
+}
+
+// ── ESS › Benefits / FBP ─────────────────────────────────────────────────────
+export function demoBenefitPlans() {
+  return [
+    { id: 'bp-health', name: 'Group Health Insurance', plan_type: 'health', provider: 'Star Health', description: 'Family floater ₹5L cover', coverage_amount: 500000, employee_cost: 0, employer_cost: 12000, allows_dependents: true, enrollment_opens_at: DAY(daysAgo(20)), enrollment_closes_at: DAY(daysAgo(-15)), is_active: true, is_open: true },
+    { id: 'bp-term', name: 'Term Life Insurance', plan_type: 'term_life', provider: 'HDFC Life', description: '3x annual CTC cover', coverage_amount: 5000000, employee_cost: 0, employer_cost: 6000, allows_dependents: false, enrollment_opens_at: DAY(daysAgo(20)), enrollment_closes_at: DAY(daysAgo(-15)), is_active: true, is_open: true },
+    { id: 'bp-meal', name: 'Meal Card', plan_type: 'meal', provider: 'Sodexo', description: '₹2,200/month tax-free meal allowance', coverage_amount: 26400, employee_cost: 0, employer_cost: 0, allows_dependents: false, enrollment_opens_at: DAY(daysAgo(20)), enrollment_closes_at: DAY(daysAgo(-15)), is_active: true, is_open: true },
+  ]
+}
+export function demoBenefitMy() {
+  return [
+    { id: 'be-1', plan_id: 'bp-health', status: 'enrolled', dependent_ids: ['dep-1', 'dep-2'], notes: null, enrolled_at: ISO(daysAgo(60)), updated_at: ISO(daysAgo(60)), benefit_plans: { name: 'Group Health Insurance', plan_type: 'health', coverage_amount: 500000, allows_dependents: true } },
+    { id: 'be-2', plan_id: 'bp-term', status: 'enrolled', dependent_ids: [], notes: null, enrolled_at: ISO(daysAgo(60)), updated_at: ISO(daysAgo(60)), benefit_plans: { name: 'Term Life Insurance', plan_type: 'term_life', coverage_amount: 5000000, allows_dependents: false } },
+  ]
+}
+export function demoBenefitDependents() {
+  return [
+    { id: 'dep-1', name: 'Aarav Sharma', dob: '2015-06-12', gender: 'male', relationship: 'Son' },
+    { id: 'dep-2', name: 'Anjali Sharma', dob: '1988-03-22', gender: 'female', relationship: 'Spouse' },
+  ]
+}
+
+// ── Manager › Team Leave Balances (GET /attendance/leave/team-balances) ──────
+export function demoTeamLeaveBalances(includeLiability = false) {
+  const teamIds = ['emp-0002', 'emp-0007', 'emp-0011', 'emp-0013', 'emp-0016', 'emp-0014']
+  return teamIds.map((id, idx) => {
+    const e = demoEmployeeList.find(x => x.id === id) ?? demoEmployeeList[idx]
+    const comp = demoActiveComp(id)
+    const dailyRate = Math.round(comp.ctc_monthly / 26)
+    const bals = [
+      { type: demoLeaveTypes[0], balance: 6 + (idx % 4) },
+      { type: demoLeaveTypes[1], balance: 8 - (idx % 3) },
+      { type: demoLeaveTypes[2], balance: 12 + (idx % 6) },
+    ]
+    return {
+      employee: {
+        id: e.id, first_name: e.first_name, last_name: e.last_name,
+        employee_code: e.employee_code, department: { name: e.department?.name ?? '—' },
+      },
+      leave_balances: bals.map(b => ({
+        leave_type_id: b.type.id, leave_type_name: b.type.name,
+        balance: b.balance, accrued: b.balance + 3, is_paid: b.type.is_paid,
+        ...(includeLiability ? { daily_rate: dailyRate, liability_value: Math.round(b.balance * dailyRate) } : {}),
+      })),
+    }
+  })
+}
+
+// ── Manager/HR › Approvals inbox (GET /approvals/pending) ─────────────────────
+export function demoApprovalsPending() {
+  const emp = (id: string) => {
+    const e = demoEmployeeList.find(x => x.id === id) ?? demoEmployeeList[0]
+    return { id: e.id, first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code }
+  }
+  const leave_requests = [
+    { id: 'lr-ap-1', from_date: DAY(daysAgo(-3)), to_date: DAY(daysAgo(-1)), computed_days: 3, half_day: false, reason: 'Family function', status: 'pending', created_at: ISO(daysAgo(1)), leave_types: { id: 'lt-cl', name: 'Casual Leave', is_paid: true }, employees: emp('emp-0006') },
+    { id: 'lr-ap-2', from_date: DAY(daysAgo(-7)), to_date: DAY(daysAgo(-7)), computed_days: 1, half_day: true, reason: 'Medical appointment', status: 'pending', created_at: ISO(daysAgo(2)), leave_types: { id: 'lt-sl', name: 'Sick Leave', is_paid: true }, employees: emp('emp-0009') },
+  ]
+  const regularisations = [
+    { id: 'reg-ap-1', date: DAY(daysAgo(4)), requested_check_in: '09:15', requested_check_out: '18:30', reason: 'Forgot to punch in', status: 'pending', created_at: ISO(daysAgo(3)), employees: emp('emp-0018') },
+  ]
+  return {
+    leave_requests, regularisations,
+    pagination: { page: 1, limit: 20, leave_total: leave_requests.length, reg_total: regularisations.length },
+  }
+}
+
+// ── Helpdesk tickets (GET /helpdesk/tickets, /helpdesk/tickets/my) ────────────
+export function demoHelpdeskTickets() {
+  const mk = (id: string, subject: string, category: string, priority: string, status: string, days: number, breached = false) => ({
+    id, ticket_number: `HD-${id.slice(-4)}`, subject,
+    description: `${subject} — submitted via the employee helpdesk.`,
+    category, priority, status, employee_id: DEMO_SELF_EMPLOYEE_ID,
+    sla_hours: 24, sla_due_at: ISO(daysAgo(days - 1)), resolution_due_at: ISO(daysAgo(days - 1)),
+    sla_breached: breached, created_at: ISO(daysAgo(days)), created_by: DEMO_USER_ID,
+  })
+  return [
+    mk('tkt-1001', 'Payslip not visible for May', 'payroll', 'high', 'in_progress', 2),
+    mk('tkt-1002', 'Update bank account details', 'hr_policy', 'medium', 'open', 1),
+    mk('tkt-1003', 'Laptop running slow', 'it', 'low', 'awaiting_employee', 5),
+    mk('tkt-1004', 'Leave balance mismatch', 'leave', 'high', 'resolved', 12, false),
+  ]
+}
+export function demoHelpdeskTicket(id: string) {
+  const t = demoHelpdeskTickets().find(x => x.id === id) ?? demoHelpdeskTickets()[0]
+  return { ...t, assigned_to: 'emp-0011', updated_at: ISO(daysAgo(1)) }
+}
+
+// ── Masters › Salary Components (GET /masters/salary-components) ──────────────
+export function demoSalaryComponents() {
+  const mk = (id: string, name: string, code: string, component_type: string, opts: Record<string, unknown> = {}) => ({
+    id, name, code, component_type,
+    is_taxable: true, is_pf_applicable: false, is_esi_applicable: false,
+    is_pt_applicable: false, is_lwf_applicable: false, is_variable: false, is_active: true,
+    display_order: 0, default_calculation_type: 'fixed', default_value: 0,
+    is_reimbursement: false, exemption_limit_annual: null,
+    created_at: ISO(daysAgo(800)), ...opts,
+  })
+  return [
+    mk('sc-basic', 'Basic Salary', 'BASIC', 'earning', { is_pf_applicable: true, is_esi_applicable: true, is_pt_applicable: true, default_calculation_type: 'pct_of_ctc', default_value: 40, display_order: 1 }),
+    mk('sc-hra', 'House Rent Allowance', 'HRA', 'earning', { default_calculation_type: 'pct_of_basic', default_value: 50, display_order: 2 }),
+    mk('sc-conv', 'Conveyance Allowance', 'CONV', 'earning', { default_value: 1600, display_order: 3 }),
+    mk('sc-special', 'Special Allowance', 'SPL', 'earning', { default_calculation_type: 'pct_of_ctc', default_value: 25, display_order: 4 }),
+    mk('sc-pf-ee', 'Provident Fund (Employee)', 'PF_EE', 'deduction', { is_taxable: false, is_pf_applicable: true, default_calculation_type: 'pct_of_basic', default_value: 12, display_order: 5 }),
+    mk('sc-pt', 'Professional Tax', 'PT', 'deduction', { is_taxable: false, is_pt_applicable: true, default_value: 200, display_order: 6 }),
+    mk('sc-pf-er', 'Provident Fund (Employer)', 'PF_ER', 'employer_contribution', { is_taxable: false, is_pf_applicable: true, default_calculation_type: 'pct_of_basic', default_value: 12, display_order: 7 }),
+    mk('sc-gratuity', 'Gratuity', 'GRAT', 'employer_contribution', { is_taxable: false, default_calculation_type: 'pct_of_basic', default_value: 4.81, display_order: 8 }),
+  ]
+}
+
+// ── Masters › Salary Structures (GET /masters/salary-structures) ─────────────
+export function demoSalaryStructures() {
+  const comps = demoSalaryComponents()
+  const cmp = (code: string) => comps.find(c => c.code === code)!
+  const line = (id: string, code: string, calculation_type: string, value: number, order: number) => ({
+    id, salary_component_id: cmp(code).id, calculation_type, value, display_order: order,
+    salary_components: { id: cmp(code).id, name: cmp(code).name, code: cmp(code).code, component_type: cmp(code).component_type },
+  })
+  return [
+    {
+      id: 'ss-staff', name: 'Standard Staff Structure', code: 'STD', is_active: true, created_at: ISO(daysAgo(700)),
+      salary_structure_components: [
+        line('ssc-1', 'BASIC', 'pct_of_ctc', 40, 1),
+        line('ssc-2', 'HRA', 'pct_of_basic', 50, 2),
+        line('ssc-3', 'CONV', 'fixed', 1600, 3),
+        line('ssc-4', 'SPL', 'pct_of_ctc', 25, 4),
+        line('ssc-5', 'PF_EE', 'pct_of_basic', 12, 5),
+        line('ssc-6', 'PT', 'fixed', 200, 6),
+      ],
+    },
+    {
+      id: 'ss-lead', name: 'Leadership Structure', code: 'LEAD', is_active: true, created_at: ISO(daysAgo(700)),
+      salary_structure_components: [
+        line('ssc-7', 'BASIC', 'pct_of_ctc', 35, 1),
+        line('ssc-8', 'HRA', 'pct_of_basic', 50, 2),
+        line('ssc-9', 'SPL', 'pct_of_ctc', 30, 3),
+        line('ssc-10', 'PF_EE', 'pct_of_basic', 12, 4),
+      ],
+    },
+  ]
+}
+
+// ── Positions (GET /positions, /positions/summary) ───────────────────────────
+export function demoPositions() {
+  const ref = (id: string, name: string) => ({ id, name })
+  const mk = (
+    id: string, code: string, title: string, sanctioned: number, filled: number,
+    desig: [string, string], grade: [string, string], dept: [string, string],
+  ) => ({
+    id, code, title, sanctioned_count: sanctioned, status: 'active',
+    effective_date: DAY(daysAgo(400)), abolished_date: null, notes: null,
+    designation_id: desig[0], grade_id: grade[0], department_id: dept[0],
+    work_location_id: 'loc-blr', cost_center_id: null, site_id: 'site-blr',
+    designations: ref(...desig), grades: ref(...grade), departments: ref(...dept),
+    work_locations: ref('loc-blr', 'Bengaluru HQ'), sites: ref('site-blr', 'Bengaluru'),
+    filled_count: filled, open_vacancies: Math.max(sanctioned - filled, 0), is_overfilled: filled > sanctioned,
+  })
+  return [
+    mk('pos-1', 'POS-ENG-SSE', 'Senior Software Engineer', 6, 4, ['desig-sse', 'Senior Software Engineer'], ['grade-l3', 'L3 — Senior'], ['dept-eng', 'Engineering']),
+    mk('pos-2', 'POS-ENG-SE', 'Software Engineer', 8, 8, ['desig-se', 'Software Engineer'], ['grade-l2', 'L2 — Associate'], ['dept-eng', 'Engineering']),
+    mk('pos-3', 'POS-SAL-BDE', 'Business Development Executive', 5, 3, ['desig-bde', 'Business Development Executive'], ['grade-l2', 'L2 — Associate'], ['dept-sales', 'Sales']),
+    mk('pos-4', 'POS-HR-HRBP', 'HR Business Partner', 2, 2, ['desig-hrbp', 'HR Business Partner'], ['grade-l3', 'L3 — Senior'], ['dept-hr', 'HR']),
+    mk('pos-5', 'POS-FIN-FA', 'Finance Analyst', 3, 2, ['desig-fa', 'Finance Analyst'], ['grade-l2', 'L2 — Associate'], ['dept-fin', 'Finance']),
+  ]
+}
+export function demoPositionsSummary() {
+  const ps = demoPositions()
+  const sanctioned = ps.reduce((s, p) => s + p.sanctioned_count, 0)
+  const filled = ps.reduce((s, p) => s + p.filled_count, 0)
+  const vacancies = ps.reduce((s, p) => s + p.open_vacancies, 0)
+  const byDept: Record<string, { department: string; sanctioned: number; filled: number; vacancies: number }> = {}
+  for (const p of ps) {
+    const name = p.departments.name
+    byDept[name] ??= { department: name, sanctioned: 0, filled: 0, vacancies: 0 }
+    byDept[name].sanctioned += p.sanctioned_count
+    byDept[name].filled += p.filled_count
+    byDept[name].vacancies += p.open_vacancies
+  }
+  return {
+    meta: { generated_at: ISO(NOW) },
+    summary: {
+      sanctioned_strength: sanctioned, filled_count: filled, total_vacancies: vacancies,
+      open_positions: ps.filter(p => p.open_vacancies > 0).length,
+      avg_vacancy_age_days: 38, vacancy_fill_rate: Math.round((filled / sanctioned) * 100),
+    },
+    by_department: Object.values(byDept),
+  }
+}
+
+// ── Payroll › Compensation Ledger (GET /payroll/ledger/:employeeId) ──────────
+export function demoPayrollLedger() {
+  const data = [
+    { id: 'pl-1', event_type: 'payroll_finalized', event_description: 'May 2026 payroll finalized', impact_type: 'neutral', impact_amount: 0, before_value: null, after_value: null, source_entity_type: 'payroll_run', source_entity_id: 'run-2026-05', created_at: ISO(daysAgo(22)), created_by_name: 'System' },
+    { id: 'pl-2', event_type: 'ot_added', event_description: 'Overtime 4h added', impact_type: 'credit', impact_amount: 1800, before_value: null, after_value: null, source_entity_type: 'attendance', source_entity_id: 'att-1', created_at: ISO(daysAgo(25)), created_by_name: 'Manager' },
+    { id: 'pl-3', event_type: 'leave_deducted', event_description: 'LOP 1 day applied', impact_type: 'debit', impact_amount: 2400, before_value: null, after_value: null, source_entity_type: 'leave', source_entity_id: 'lv-1', created_at: ISO(daysAgo(40)), created_by_name: 'System' },
+  ]
+  return { data, total: data.length }
+}
+
+// ── Compensation Revisions (GET /compensation/revisions) ─────────────────────
+export function demoCompensationRevisions(status?: string) {
+  const mk = (
+    id: string, empId: string, revision_type: string, status: string,
+    beforeCtc: number, newCtc: number, days: number,
+  ) => {
+    const e = demoEmployeeList.find(x => x.id === empId) ?? demoEmployeeList[0]
+    const delta = newCtc - beforeCtc
+    return {
+      id, revision_type, effective_date: DAY(daysAgo(days - 30)), status,
+      reason: revision_type === 'promotion' ? 'Promotion to next grade' : 'Annual increment cycle',
+      submitted_at: ISO(daysAgo(days)), decided_at: status === 'pending' ? null : ISO(daysAgo(days - 5)),
+      before_ctc_annual: beforeCtc, new_ctc_annual: newCtc,
+      delta_amount: delta, delta_pct: Math.round((delta / beforeCtc) * 1000) / 10, retro_months: 0,
+      employee: { id: e.id, name: `${e.first_name} ${e.last_name}`, code: e.employee_code },
+      requested_by_name: 'Priya Sharma', approved_by_name: status === 'approved' ? 'Priya Sharma' : null,
+    }
+  }
+  const all = [
+    mk('rev-1', 'emp-0005', 'increment', 'approved', 1000000, 1100000, 60),
+    mk('rev-2', 'emp-0006', 'promotion', 'pending', 980000, 1180000, 5),
+    mk('rev-3', 'emp-0018', 'increment', 'approved', 980000, 1080000, 90),
+    mk('rev-4', 'emp-0009', 'revision', 'rejected', 780000, 900000, 30),
+  ]
+  const data = status && status !== 'all' ? all.filter(r => r.status === status) : all
+  return { data, total: data.length, limit: 50, offset: 0 }
+}
