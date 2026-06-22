@@ -28,6 +28,7 @@ import { Textarea }      from '@/components/ui/textarea'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { ExitInterviewForm } from '@/components/separation/ExitInterviewForm'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,8 @@ function AssetObligations() {
 // ── Tracking view ─────────────────────────────────────────────────────────────────
 
 function SeparationTracking({ sep, clearances, ff }: { sep: Separation; clearances: Clearance[]; ff: FfSummary | null }) {
+  const { profile } = useAuthStore()
+  const employeeId = profile?.employee_id ?? null
   const clearedCount = clearances.filter(c => c.status === 'cleared').length
 
   return (
@@ -304,6 +307,17 @@ function SeparationTracking({ sep, clearances, ff }: { sep: Separation; clearanc
           </div>
         )}
       </SectionCard>
+
+      {/* Exit Interview */}
+      {employeeId && (
+        <SectionCard
+          title="Exit Interview"
+          description="Your candid feedback helps us improve. This is shared only with HR."
+          icon={<ClipboardCheck className="h-4 w-4 text-muted-foreground" />}
+        >
+          <ExitInterviewForm employeeId={employeeId} />
+        </SectionCard>
+      )}
 
       {/* Full & Final */}
       <SectionCard

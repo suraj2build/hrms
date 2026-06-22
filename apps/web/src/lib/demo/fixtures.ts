@@ -1994,6 +1994,49 @@ export function demoCompensationRevisions(status?: string) {
   return { data, total: data.length, limit: 50, offset: 0 }
 }
 
+// ── Exit interview (separation) ──────────────────────────────────────────────
+const EXIT_QUESTIONS = [
+  { id: 'eq-1', category: 'reason',       question_text: 'What is the primary reason for your departure?', response_type: 'single_choice', options: ['Better opportunity','Compensation & benefits','Work-life balance','Relationship with manager','Career growth','Relocation','Personal reasons','Other'], is_required: true,  display_order: 0 },
+  { id: 'eq-2', category: 'job_role',     question_text: 'How satisfied were you with your role and responsibilities?', response_type: 'rating', options: [] as string[], is_required: true,  display_order: 1 },
+  { id: 'eq-3', category: 'manager',      question_text: 'How would you rate your relationship with your manager?', response_type: 'rating', options: [] as string[], is_required: false, display_order: 2 },
+  { id: 'eq-4', category: 'culture',      question_text: 'How would you rate the company culture and work environment?', response_type: 'rating', options: [] as string[], is_required: false, display_order: 3 },
+  { id: 'eq-5', category: 'compensation', question_text: 'How satisfied were you with your compensation and benefits?', response_type: 'rating', options: [] as string[], is_required: false, display_order: 4 },
+  { id: 'eq-6', category: 'growth',       question_text: 'Were there adequate opportunities for learning and growth?', response_type: 'rating', options: [] as string[], is_required: false, display_order: 5 },
+  { id: 'eq-7', category: 'work_life',    question_text: 'How would you rate your work-life balance?', response_type: 'rating', options: [] as string[], is_required: false, display_order: 6 },
+  { id: 'eq-8', category: 'other',        question_text: 'What did you like most about working here?', response_type: 'text', options: [] as string[], is_required: false, display_order: 7 },
+  { id: 'eq-9', category: 'other',        question_text: 'What could we have done better?', response_type: 'text', options: [] as string[], is_required: false, display_order: 8 },
+]
+export function demoExitInterview(employeeId: string) {
+  return {
+    separation_id: `sep-${employeeId}`, status: 'not_started',
+    overall_comments: null, would_recommend: null, submitted: false, submitted_date: null,
+    template: { id: 'eit-1', name: 'Standard Exit Interview', is_active: true },
+    questions: EXIT_QUESTIONS, responses: [] as unknown[],
+  }
+}
+export function demoExitTemplate() {
+  return { template: { id: 'eit-1', name: 'Standard Exit Interview', is_active: true }, questions: EXIT_QUESTIONS }
+}
+export function demoExitAnalytics() {
+  return {
+    total: 7, would_recommend_pct: 71,
+    by_category: [
+      { category: 'job_role',     avg_rating: 4.1, responses: 7 },
+      { category: 'manager',      avg_rating: 3.6, responses: 7 },
+      { category: 'culture',      avg_rating: 4.3, responses: 7 },
+      { category: 'compensation', avg_rating: 2.9, responses: 7 },
+      { category: 'growth',       avg_rating: 3.2, responses: 6 },
+      { category: 'work_life',    avg_rating: 3.8, responses: 7 },
+    ],
+    top_reasons: [
+      { reason: 'Better opportunity', count: 3 },
+      { reason: 'Compensation & benefits', count: 2 },
+      { reason: 'Career growth', count: 1 },
+      { reason: 'Relocation', count: 1 },
+    ],
+  }
+}
+
 // ── Workforce › Expiry Management (GET /workforce/expiry) ─────────────────────
 export function demoExpiryRegister() {
   const mk = (

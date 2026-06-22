@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LogOut, CheckCircle2, XCircle, Clock, ChevronRight,
   Edit2, X, DollarSign, Users, Loader2, ExternalLink, Calculator,
+  ClipboardList, BarChart3,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -18,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { ExitInterviewForm, ExitAnalyticsCard } from '@/components/separation/ExitInterviewForm'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -565,6 +567,7 @@ export function SeparationWorkflow() {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<FilterTab>('all')
   const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('employee'))
+  const [showInsights, setShowInsights] = useState(false)
 
   const { data, isLoading } = useQuery<{ data: SeparationRow[] }>({
     queryKey: ['separations'],
@@ -605,7 +608,27 @@ export function SeparationWorkflow() {
               Manage employee offboarding, clearances, and full &amp; final settlement.
             </p>
           </div>
+          <Button
+            size="sm"
+            variant={showInsights ? 'secondary' : 'outline'}
+            className="h-8 text-xs gap-1.5 shrink-0"
+            onClick={() => setShowInsights(v => !v)}
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            Exit Insights
+          </Button>
         </div>
+
+        {showInsights && (
+          <Card className="mt-4">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">Exit interview insights</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ExitAnalyticsCard />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Filter Tabs */}
         <div className="flex gap-1 mt-4">
@@ -759,6 +782,19 @@ export function SeparationWorkflow() {
                 </CardHeader>
                 <CardContent>
                   <ClearancePanel row={selected} onClose={() => setSelectedId(null)} />
+                </CardContent>
+              </Card>
+
+              {/* Exit interview */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <ClipboardList className="h-4 w-4 text-muted-foreground" />
+                    Exit Interview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ExitInterviewForm employeeId={selected.employee_id} />
                 </CardContent>
               </Card>
             </div>

@@ -154,6 +154,9 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   // /employees/:id/org-context
   mm = path.match(/^\/employees\/([^/]+)\/org-context$/)
   if (mm) return { data: { manager: null, reportees: [], skip_levels: [] } }
+  // /employees/:id/exit-interview
+  mm = path.match(/^\/employees\/([^/]+)\/exit-interview$/)
+  if (mm) return { data: fx.demoExitInterview(mm[1]) }
   // /employees/:id/<subresource> → empty list (job-history, contracts, family, etc.)
   mm = path.match(/^\/employees\/([^/]+)\/[^/]+$/)
   if (mm) return { data: [] }
@@ -554,6 +557,11 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   }
   // /intelligence/* catch-all
   if (path.startsWith('/intelligence/')) return { data: {} }
+
+  // ── Separation / exit interview ────────────────────────────────────────────
+  if (path === '/separations')                 return { data: [] }
+  if (path === '/separations/exit-analytics') return { data: fx.demoExitAnalytics() }
+  if (path === '/exit-interview/template')     return { data: fx.demoExitTemplate() }
 
   // ── Workforce lifecycle ────────────────────────────────────────────────────
   if (path === '/workforce/expiry') return fx.demoExpiryRegister()
