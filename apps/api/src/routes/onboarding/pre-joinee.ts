@@ -91,6 +91,17 @@ const submissionSchema = z.object({
     reason_for_leaving: z.string().optional(),
   })).optional(),
 
+  // Education — candidate-declared qualifications with optional certificate (0..N)
+  education:                  z.array(z.object({
+    qualification:      z.string().optional(),
+    institution:        z.string().optional(),
+    specialization:     z.string().optional(),
+    year_of_completion: z.union([z.string(), z.number()]).optional(),
+    grade:              z.string().optional(),
+    document_path:      z.string().optional(),
+    document_name:      z.string().optional(),
+  })).optional(),
+
   // Declaration — portal sends `declaration`, API/db uses declaration_accepted
   declaration_accepted:       z.boolean().optional(),
   declaration:                z.boolean().optional(),
@@ -135,6 +146,29 @@ function resolvePreviousEmployment(body: SubmissionBody) {
     .filter((e) => e.company_name) // company name is the minimum to keep a row
 }
 
+// Normalises candidate-declared education: drops blank rows (no qualification),
+// coerces year_of_completion to an integer, trims strings, keeps the uploaded
+// certificate's storage path. Returns a clean array safe to store/copy.
+function resolveEducation(body: SubmissionBody) {
+  return (body.education ?? [])
+    .map((e) => {
+      const yearRaw = e.year_of_completion
+      const yearNum = yearRaw === undefined || yearRaw === '' || yearRaw === null
+        ? null
+        : parseInt(String(yearRaw), 10)
+      return {
+        qualification:      norm(e.qualification),
+        institution:        norm(e.institution),
+        specialization:     norm(e.specialization),
+        year_of_completion: Number.isFinite(yearNum) ? yearNum : null,
+        grade:              norm(e.grade),
+        document_path:      norm(e.document_path),
+        document_name:      norm(e.document_name),
+      }
+    })
+    .filter((e) => e.qualification) // qualification is the minimum to keep a row
+}
+
 // Maps a validated submission body (either field-name convention) to DB columns.
 function resolveSubmission(body: SubmissionBody) {
   // Keep only recognised identity fields the candidate flagged as edited.
@@ -143,6 +177,7 @@ function resolveSubmission(body: SubmissionBody) {
   )
   return {
     previous_employment:        resolvePreviousEmployment(body),
+    education:                  resolveEducation(body),
     confirmed_first_name:       norm(body.first_name),
     confirmed_last_name:        norm(body.last_name),
     confirmed_email:            norm(body.email),
@@ -175,7 +210,7 @@ function resolveSubmission(body: SubmissionBody) {
   }
 }
 
-const DOC_TYPES = ['cv', 'pan', 'aadhaar', 'cheque', 'photo'] as const
+const DOC_TYPES = ['cv', 'pan', 'aadhaar', 'cheque', 'photo', 'education'] as const
 const MANDATORY_DOCS = ['cv', 'pan', 'aadhaar', 'cheque', 'photo'] as const
 
 const uploadUrlSchema = z.object({
@@ -215,6 +250,7 @@ function mapSubmissionRow(row: any) {
     confirmed_joining_date: row.confirmed_joining_date ?? null,
     edited_fields:          Array.isArray(row.edited_fields) ? row.edited_fields : [],
     previous_employment:    Array.isArray(row.previous_employment) ? row.previous_employment : [],
+    education:              Array.isArray(row.education) ? row.education : [],
     dob:                  row.dob ?? null,
     gender:               row.gender ?? null,
     blood_group:          row.blood_group ?? null,
@@ -239,6 +275,25 @@ function mapSubmissionRow(row: any) {
     declaration_accepted: row.declaration_accepted ?? false,
     submitted_at:         row.submitted_at ?? null,
   }
+}
+
+// Enriches a mapped submission's education entries with short-lived signed URLs
+// so HR can view the uploaded certificates in the review drawer. Safe on null /
+// empty education. Never throws — a failed signature just yields a null URL.
+async function signSubmissionEducation(fastify: FastifyInstance, submission: any) {
+  if (!submission || !Array.isArray(submission.education) || submission.education.length === 0) {
+    return submission
+  }
+  const education = await Promise.all(
+    submission.education.map(async (e: any) => {
+      if (!e?.document_path) return { ...e, document_url: null }
+      const { data } = await fastify.supabase.storage
+        .from('employee-files')
+        .createSignedUrl(e.document_path, 3600)
+      return { ...e, document_url: data?.signedUrl ?? null }
+    }),
+  )
+  return { ...submission, education }
 }
 
 // ── Shared merge helper ─────────────────────────────────────────────────────
@@ -493,16 +548,16 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       for (const s of subs ?? []) subsByInvitation[s.invitation_id] = s
     }
 
-    const mapped = invitations.map((inv: any) => {
+    const mapped = await Promise.all(invitations.map(async (inv: any) => {
       const subRow = subsByInvitation[inv.id] ?? null
       return {
         ...inv,
         invite_token: inv.token,
         invite_url:   `/pre-join/${inv.token}`,
         submitted_at: subRow?.submitted_at ?? null,
-        submission:   mapSubmissionRow(subRow),
+        submission:   await signSubmissionEducation(fastify, mapSubmissionRow(subRow)),
       }
-    })
+    }))
 
     return reply.send({ data: mapped, total: mapped.length })
   })
@@ -960,6 +1015,31 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // ── Education (candidate-declared qualifications + certificates) ──────────
+    if (submission && Array.isArray(submission.education) && submission.education.length > 0) {
+      const eduRows = submission.education
+        .filter((e: any) => e?.qualification)
+        .map((e: any) => ({
+          tenant_id:          tenantId,
+          employee_id:        employeeId,
+          qualification:      e.qualification,
+          institution:        e.institution ?? null,
+          specialization:     e.specialization ?? null,
+          year_of_completion: e.year_of_completion ?? null,
+          grade:              e.grade ?? null,
+          document_path:      e.document_path ?? null,
+          document_name:      e.document_name ?? null,
+        }))
+      if (eduRows.length > 0) {
+        const { error: eduErr } = await fastify.supabase
+          .from('employee_education')
+          .insert(eduRows)
+        if (eduErr) {
+          fastify.log.warn({ event: 'pre_joinee.approve.education_insert', tenant_id: tenantId, employee_id: employeeId, err: eduErr })
+        }
+      }
+    }
+
     // ── Bank details ─────────────────────────────────────────────────────────
     if (
       submission &&
@@ -1147,10 +1227,10 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         invite_token: invitation.token,
         invite_url:   `/pre-join/${invitation.token}`,
         submitted_at: submission?.submitted_at ?? null,
-        submission:   mapSubmissionRow(submission),
+        submission:   await signSubmissionEducation(fastify, mapSubmissionRow(submission)),
       },
       invitation,
-      submission: mapSubmissionRow(submission),
+      submission: await signSubmissionEducation(fastify, mapSubmissionRow(submission)),
     })
   })
 
@@ -1391,6 +1471,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           confirmed_joining_date:      sub.confirmed_joining_date,
           edited_fields:               sub.edited_fields,
           previous_employment:         sub.previous_employment,
+          education:                   sub.education,
           dob:                         sub.dob,
           gender:                      sub.gender,
           blood_group:                 sub.blood_group,

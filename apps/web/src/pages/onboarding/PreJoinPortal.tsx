@@ -281,6 +281,116 @@ function PrevEmploymentSection({
 }
 
 // ---------------------------------------------------------------------------
+// Education (candidate-declared qualifications + optional certificate, 0..N)
+// ---------------------------------------------------------------------------
+
+interface EduEntry {
+  qualification: string;
+  institution: string;
+  specialization: string;
+  year_of_completion: string;
+  grade: string;
+  document_path?: string;
+  document_name?: string;
+  uploading?: boolean;
+  uploadError?: string;
+}
+
+const emptyEduEntry: EduEntry = {
+  qualification: "",
+  institution: "",
+  specialization: "",
+  year_of_completion: "",
+  grade: "",
+};
+
+function EducationSection({
+  entries,
+  onChange,
+  onFileSelect,
+}: {
+  entries: EduEntry[];
+  onChange: (next: EduEntry[]) => void;
+  onFileSelect: (index: number, file: File) => void;
+}) {
+  function update(i: number, key: keyof EduEntry, val: string) {
+    onChange(entries.map((e, idx) => (idx === i ? { ...e, [key]: val } : e)));
+  }
+  function add() {
+    onChange([...entries, { ...emptyEduEntry }]);
+  }
+  function remove(i: number) {
+    onChange(entries.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="space-y-4">
+      {entries.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          Add your qualifications, starting with the highest. You can attach a
+          certificate for each (PDF or image).
+        </p>
+      )}
+
+      {entries.map((ed, i) => (
+        <div key={i} className="rounded-xl border border-border p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-semibold text-foreground">Qualification {i + 1}</span>
+            <button type="button" onClick={() => remove(i)} className="text-xs font-medium text-destructive hover:underline">
+              Remove
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FieldRow label="Qualification" required>
+              <input className={inputClass} placeholder="e.g. B.Tech, MBA, 12th" value={ed.qualification} onChange={(e) => update(i, "qualification", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Institution">
+              <input className={inputClass} value={ed.institution} onChange={(e) => update(i, "institution", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Specialization / Stream">
+              <input className={inputClass} value={ed.specialization} onChange={(e) => update(i, "specialization", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Year of Completion">
+              <input type="number" inputMode="numeric" className={inputClass} value={ed.year_of_completion} onChange={(e) => update(i, "year_of_completion", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Grade / %">
+              <input className={inputClass} value={ed.grade} onChange={(e) => update(i, "grade", e.target.value)} />
+            </FieldRow>
+            <FieldRow label="Certificate">
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer rounded-lg bg-[#2E6FE6] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1A4D8F] transition inline-block shrink-0">
+                  {ed.uploading ? "Uploading…" : ed.document_path ? "Replace" : "Upload"}
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    disabled={ed.uploading}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) onFileSelect(i, f); e.target.value = ""; }}
+                  />
+                </label>
+                <span className="text-xs text-muted-foreground truncate">
+                  {ed.uploadError
+                    ? <span className="text-destructive">{ed.uploadError}</span>
+                    : ed.document_name ?? "No file chosen"}
+                </span>
+              </div>
+            </FieldRow>
+          </div>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={add}
+        className="w-full rounded-lg border border-dashed border-[#2E6FE6]/50 py-2.5 text-sm font-semibold text-[#2E6FE6] hover:bg-[#2E6FE6]/5 transition"
+      >
+        + Add {entries.length === 0 ? "qualification" : "another qualification"}
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step components
 // ---------------------------------------------------------------------------
 
@@ -981,6 +1091,8 @@ export function PreJoinPortal() {
   const [prefilled, setPrefilled] = useState<Partial<Record<IdentityKey, string>>>({});
   // Candidate-declared previous employment (optional; freshers leave empty).
   const [prevEmployers, setPrevEmployers] = useState<PrevEmployer[]>([]);
+  // Candidate-declared education (optional; each may carry a certificate upload).
+  const [eduEntries, setEduEntries] = useState<EduEntry[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1091,6 +1203,29 @@ export function PreJoinPortal() {
     }
   }
 
+  // ---- Education certificate upload (signed-URL flow, stored on the entry) ----
+  async function uploadEducationCert(file: File): Promise<{ path: string; name: string }> {
+    const urlRes = await fetch(`${API_BASE}/onboarding/pre-join/${token}/upload-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_type: "education", file_name: file.name }),
+    });
+    if (!urlRes.ok) throw new Error("Could not start upload");
+    const { data: urlData } = await urlRes.json();
+    await uploadToSignedUrl(urlData.path, urlData.token, file);
+    return { path: urlData.path, name: file.name };
+  }
+
+  async function handleEduFile(i: number, file: File) {
+    setEduEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, uploading: true, uploadError: undefined } : e)));
+    try {
+      const { path, name } = await uploadEducationCert(file);
+      setEduEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, uploading: false, document_path: path, document_name: name } : e)));
+    } catch (err) {
+      setEduEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, uploading: false, uploadError: err instanceof Error ? err.message : "Upload failed" } : e)));
+    }
+  }
+
   // ---- Navigation ----
   function handleNext() {
     const err = validateStep(currentStep, form);
@@ -1124,6 +1259,10 @@ export function PreJoinPortal() {
       setError(`All ${MANDATORY_DOC_TYPES.length} required documents must be uploaded before submitting.`);
       return;
     }
+    if (eduEntries.some((e) => e.uploading)) {
+      setError("Please wait for certificate uploads to finish.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -1134,6 +1273,11 @@ export function PreJoinPortal() {
           ...form,
           edited_fields: editedIdentityFields(form, prefilled),
           previous_employment: prevEmployers.filter((e) => e.company_name.trim()),
+          education: eduEntries
+            .filter((e) => e.qualification.trim())
+            .map(({ qualification, institution, specialization, year_of_completion, grade, document_path, document_name }) => ({
+              qualification, institution, specialization, year_of_completion, grade, document_path, document_name,
+            })),
         }),
       });
       if (!res.ok) {
@@ -1224,7 +1368,7 @@ export function PreJoinPortal() {
             {currentStep === 0 && "Personal Information"}
             {currentStep === 1 && "Address & Emergency Contact"}
             {currentStep === 2 && "Bank & Compliance Details"}
-            {currentStep === STEP_EXPERIENCE && "Previous Employment"}
+            {currentStep === STEP_EXPERIENCE && "Experience & Education"}
             {currentStep === STEP_DOCUMENTS && "Documents"}
             {currentStep === STEP_REVIEW && "Review & Submit"}
           </h2>
@@ -1232,7 +1376,7 @@ export function PreJoinPortal() {
             {currentStep === 0 && "Tell us a bit about yourself."}
             {currentStep === 1 && "Your current address and someone we can contact in emergencies."}
             {currentStep === 2 && "Needed for salary processing and statutory compliance."}
-            {currentStep === STEP_EXPERIENCE && "Add your prior work experience. Skip if you are a fresher."}
+            {currentStep === STEP_EXPERIENCE && "Add your prior work experience and education. Skip experience if you are a fresher."}
             {currentStep === STEP_DOCUMENTS && "Upload the required documents below."}
             {currentStep === STEP_REVIEW && "Please review all your details before submitting."}
           </p>
@@ -1247,7 +1391,16 @@ export function PreJoinPortal() {
           {currentStep === 1 && <Step2 form={form} onChange={handleChange} />}
           {currentStep === 2 && <Step3 form={form} onChange={handleChange} />}
           {currentStep === STEP_EXPERIENCE && (
-            <PrevEmploymentSection employers={prevEmployers} onChange={setPrevEmployers} />
+            <div className="space-y-8">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-3">Previous Employment</h3>
+                <PrevEmploymentSection employers={prevEmployers} onChange={setPrevEmployers} />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-3">Education</h3>
+                <EducationSection entries={eduEntries} onChange={setEduEntries} onFileSelect={handleEduFile} />
+              </div>
+            </div>
           )}
           {currentStep === STEP_DOCUMENTS && (
             <>

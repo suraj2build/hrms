@@ -161,6 +161,16 @@ interface PreJoineeSubmission {
     last_ctc?: number | string | null
     reason_for_leaving?: string | null
   }>
+  // Education (candidate-declared, with optional certificate)
+  education?: Array<{
+    qualification?: string | null
+    institution?: string | null
+    specialization?: string | null
+    year_of_completion?: number | null
+    grade?: string | null
+    document_url?: string | null
+    document_name?: string | null
+  }>
   // Documents / declaration
   documents_uploaded?: boolean
   declaration_accepted?: boolean
@@ -510,6 +520,26 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, r
                       </p>
                       {pe.reason_for_leaving && (
                         <p className="text-xs text-muted-foreground">Reason: {pe.reason_for_leaving}</p>
+                      )}
+                    </div>
+                  ))}
+                </Section>
+              )}
+
+              {(s.education?.length ?? 0) > 0 && (
+                <Section title="Education">
+                  {s.education!.map((ed, i) => (
+                    <div key={i} className="py-2 border-b last:border-b-0 border-border/50">
+                      <p className="text-sm font-medium">{ed.qualification ?? '—'}</p>
+                      {ed.specialization && <p className="text-xs text-muted-foreground">{ed.specialization}</p>}
+                      {ed.institution && <p className="text-xs text-muted-foreground">{ed.institution}</p>}
+                      <p className="text-xs text-muted-foreground">
+                        {[ed.year_of_completion ? `Year ${ed.year_of_completion}` : null, ed.grade ? `Grade ${ed.grade}` : null].filter(Boolean).join(' · ')}
+                      </p>
+                      {ed.document_url && (
+                        <a href={ed.document_url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
+                          View certificate{ed.document_name ? ` (${ed.document_name})` : ''}
+                        </a>
                       )}
                     </div>
                   ))}
