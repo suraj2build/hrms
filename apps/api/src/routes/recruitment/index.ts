@@ -12,6 +12,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { randomUUID } from 'crypto'
 import { logAction }    from '../../lib/audit-service.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import {
@@ -53,6 +54,82 @@ async function getAppEmailCtx(
       companyName:    tenant?.name ?? 'Our Company',
     }
   } catch { return null }
+}
+
+// Create the pre-joinee invitation for a hired application (shared by the manual
+// "initiate preboarding" action and the automatic offer-acceptance flow).
+async function createPreJoineeFromApp(
+  fastify: any,
+  tenantId: string,
+  applicationId: string,
+  opts: { joining_date: string; designation?: string | null; department?: string | null; invited_by?: string | null },
+): Promise<{ ok: true; invitation_id: string; already?: boolean } | { ok: false; code: number; message: string }> {
+  const { data: app } = await fastify.supabase
+    .from('applications')
+    .select(`id, pre_joinee_invitation_id, tenant_id,
+             candidates(id, first_name, last_name, email, phone),
+             job_requisitions(title, departments(name))`)
+    .eq('id', applicationId)
+    .eq('tenant_id', tenantId)
+    .single()
+
+  if (!app) return { ok: false, code: 404, message: 'Application not found' }
+  if (app.pre_joinee_invitation_id) {
+    return { ok: true, invitation_id: app.pre_joinee_invitation_id, already: true }
+  }
+
+  const cand = app.candidates
+  const reqn = app.job_requisitions
+  const token = randomUUID()
+
+  const { data: invitation, error } = await fastify.supabase
+    .from('pre_joinee_invitations')
+    .insert({
+      tenant_id:             tenantId,
+      first_name:            cand?.first_name ?? '',
+      last_name:             cand?.last_name  ?? '',
+      email:                 cand?.email      ?? '',
+      phone:                 cand?.phone      ?? null,
+      designation:           opts.designation ?? reqn?.title ?? null,
+      department:            opts.department  ?? reqn?.departments?.name ?? null,
+      joining_date:          opts.joining_date,
+      source_application_id: applicationId,
+      source_candidate_id:   cand?.id ?? null,
+      invited_by:            opts.invited_by ?? null,
+      token,
+      expires_at:            new Date(Date.now() + 30 * 86400000).toISOString(),
+    })
+    .select('id, token')
+    .single()
+
+  if (error || !invitation) return { ok: false, code: 500, message: error?.message ?? 'Failed to create invitation' }
+
+  await fastify.supabase
+    .from('applications')
+    .update({ pre_joinee_invitation_id: invitation.id, preboarding_initiated_at: new Date().toISOString() })
+    .eq('id', applicationId)
+    .eq('tenant_id', tenantId)
+
+  // Fire the pre-join invite email (best-effort).
+  void (async () => {
+    try {
+      const { preJoineeInviteEmail, sendEmail, APP_PUBLIC_URL } = await import('../../lib/email-service.js')
+      const { data: tenant } = await fastify.supabase.from('tenants').select('name').eq('id', tenantId).maybeSingle()
+      if (cand?.email) {
+        await sendEmail({
+          to: cand.email,
+          ...preJoineeInviteEmail({
+            candidateName: `${cand.first_name ?? ''} ${cand.last_name ?? ''}`.trim(),
+            joiningDate:   opts.joining_date,
+            inviteUrl:     `${APP_PUBLIC_URL}/pre-join/${invitation.token}`,
+            companyName:   tenant?.name ?? 'our company',
+          }),
+        })
+      }
+    } catch { /* non-throwing */ }
+  })()
+
+  return { ok: true, invitation_id: invitation.id }
 }
 
 const HR_ADMIN_ROLES = ['super_admin', 'hr_admin'] as const
@@ -774,41 +851,13 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'ALREADY_INITIATED', message: 'Preboarding has already been initiated for this application' })
     }
 
-    const cand = (app as any).candidates
-    const reqn = (app as any).job_requisitions
-
-    // Create the pre-joinee invitation from candidate data
-    const { data: invitation, error: invErr } = await fastify.supabase
-      .from('pre_joinee_invitations')
-      .insert({
-        tenant_id:             req.tenantId,
-        first_name:            cand?.first_name ?? '',
-        last_name:             cand?.last_name  ?? '',
-        email:                 cand?.email      ?? '',
-        phone:                 cand?.phone      ?? null,
-        designation:           parsed.data.designation ?? reqn?.title ?? null,
-        department:            parsed.data.department  ?? reqn?.departments?.name ?? null,
-        joining_date:          parsed.data.joining_date,
-        source_application_id: id,
-        source_candidate_id:   cand?.id ?? null,
-        invited_by:            req.userId,
-        token:                 require('crypto').randomUUID(),
-        expires_at:            new Date(Date.now() + 30 * 86400000).toISOString(),
-      })
-      .select()
-      .single()
-
-    if (invErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: invErr.message })
-
-    // Link the invitation back to the application
-    await fastify.supabase
-      .from('applications')
-      .update({
-        pre_joinee_invitation_id: (invitation as any).id,
-        preboarding_initiated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
+    const result = await createPreJoineeFromApp(fastify, req.tenantId, id, {
+      joining_date: parsed.data.joining_date,
+      designation:  parsed.data.designation,
+      department:   parsed.data.department,
+      invited_by:   req.userId,
+    })
+    if (!result.ok) return reply.code(result.code).send({ error: 'INSERT_FAILED', message: result.message })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -816,30 +865,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       recordId:    id,
       action:      'UPDATE',
       performedBy: req.userId,
-      newData:     { pre_joinee_invitation_id: (invitation as any).id, preboarding_initiated_at: new Date().toISOString() },
+      newData:     { pre_joinee_invitation_id: result.invitation_id, preboarding_initiated_at: new Date().toISOString() },
     })
 
-    // Send pre-join invitation email (non-blocking)
-    void (async () => {
-      try {
-        const { preJoineeInviteEmail, sendEmail, APP_PUBLIC_URL } = await import('../../lib/email-service.js')
-        const portalUrl = `${APP_PUBLIC_URL}/pre-join/${(invitation as any).token}`
-        if (cand?.email) {
-          await sendEmail({
-            to: cand.email,
-            ...preJoineeInviteEmail({
-              candidateName: `${cand.first_name} ${cand.last_name}`.trim(),
-              joiningDate:   parsed.data.joining_date,
-              inviteUrl:     portalUrl,
-              companyName:   'Company',
-            }),
-          })
-        }
-      } catch { /* non-throwing */ }
-    })()
-
     return reply.code(201).send({
-      data: invitation,
+      data: { id: result.invitation_id },
       message: 'Preboarding initiated. Invitation email sent to candidate.',
     })
   })
@@ -1703,6 +1733,13 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const cand = (app as any).candidates
     const reqn = (app as any).job_requisitions
 
+    // Latest persisted offer (status/amount/dates) so the dialog reflects state.
+    const { data: offer } = await fastify.supabase
+      .from('recruitment_offer_letters')
+      .select('id, status, offered_amount, joining_date, valid_until, accepted_at, declined_at')
+      .eq('application_id', appId).eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+
     return reply.send({
       data: {
         id:              appId,
@@ -1714,6 +1751,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         department:      reqn?.departments?.name ?? '',
         company_name:    (tenant as any)?.name ?? '',
         applied_at:      (app as any).created_at,
+        offer:           offer ?? null,
       },
     })
   })
@@ -1721,18 +1759,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   // Send the generated offer letter HTML to the candidate via email
   fastify.post('/offers/:appId/send', hrAdminAuth, async (req: any, reply) => {
     const { appId } = req.params as { appId: string }
-    const { letter_html, recipient_email, candidate_name, job_title, company_name } = req.body as any
+    const { letter_html, recipient_email, job_title, company_name, offered_amount, joining_date, valid_until } = req.body as any
 
     if (!recipient_email || !letter_html) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'recipient_email and letter_html are required' })
     }
 
-    // Verify app belongs to tenant
+    // Verify app belongs to tenant (need candidate/requisition ids to persist the offer)
     const { data: app } = await fastify.supabase
-      .from('applications').select('id').eq('id', appId).eq('tenant_id', req.tenantId).maybeSingle()
+      .from('applications').select('id, candidate_id, requisition_id').eq('id', appId).eq('tenant_id', req.tenantId).maybeSingle()
     if (!app) return reply.code(404).send({ error: 'NOT_FOUND' })
 
-    const { sendEmail } = await import('../../lib/email-service.js')
     const result = await sendEmail({
       to:      recipient_email,
       subject: `Offer Letter — ${job_title} at ${company_name}`,
@@ -1743,13 +1780,37 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'EMAIL_FAILED', message: result.error })
     }
 
+    // Persist the offer + move the application to 'offer' when we have the
+    // structured fields the candidate needs to accept (amount + joining date).
+    const amount = offered_amount != null && offered_amount !== '' ? Number(offered_amount) : null
+    const jdate  = typeof joining_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(joining_date) ? joining_date : null
+    if (amount != null && Number.isFinite(amount) && jdate) {
+      const { data: existing } = await fastify.supabase
+        .from('recruitment_offer_letters')
+        .select('id').eq('application_id', appId).eq('tenant_id', req.tenantId)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const row = {
+        tenant_id: req.tenantId, application_id: appId,
+        candidate_id: (app as any).candidate_id, requisition_id: (app as any).requisition_id,
+        offered_amount: amount, joining_date: jdate, valid_until: valid_until || null,
+        status: 'sent', html_content: letter_html, updated_at: new Date().toISOString(),
+      }
+      if (existing) await fastify.supabase.from('recruitment_offer_letters').update(row).eq('id', existing.id)
+      else          await fastify.supabase.from('recruitment_offer_letters').insert(row)
+
+      await fastify.supabase
+        .from('applications')
+        .update({ status: 'offer', offer_amount: amount, expected_joining: jdate, offer_date: new Date().toISOString().slice(0, 10) })
+        .eq('id', appId).eq('tenant_id', req.tenantId)
+    }
+
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'applications',
       recordId:    appId,
       action:      'UPDATE',
       performedBy: req.userId,
-      newData:     { offer_letter_sent_to: recipient_email },
+      newData:     { offer_letter_sent_to: recipient_email, offer_amount: amount, joining_date: jdate },
     })
 
     return reply.send({ sent: true })
@@ -1795,6 +1856,13 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const cand = (app as any).candidates
     const reqn = (app as any).job_requisitions
 
+    // Surface a live offer (sent/accepted/declined) so the candidate can act on it.
+    const { data: offer } = await fastify.supabase
+      .from('recruitment_offer_letters')
+      .select('id, status, offered_amount, joining_date, valid_until, html_content, accepted_at, declined_at')
+      .eq('application_id', appId).eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+
     return reply.send({
       data: {
         id:               (app as any).id,
@@ -1815,7 +1883,94 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
           duration_mins: i.duration_mins,
           status:       i.status,
         })),
+        offer: offer ? {
+          id:             offer.id,
+          status:         offer.status,
+          offered_amount: offer.offered_amount,
+          joining_date:   offer.joining_date,
+          valid_until:    offer.valid_until,
+          html_content:   offer.html_content,
+          accepted_at:    offer.accepted_at,
+          declined_at:    offer.declined_at,
+        } : null,
       },
     })
+  })
+
+  // ── Public offer accept / decline (UUID = access token) ────────────────────
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  async function loadPortalOffer(appId: string) {
+    const { data: app } = await fastify.supabase
+      .from('applications')
+      .select('id, tenant_id, pre_joinee_invitation_id, job_requisitions(title, departments(name))')
+      .eq('id', appId)
+      .maybeSingle()
+    if (!app) return null
+    const { data: offer } = await fastify.supabase
+      .from('recruitment_offer_letters')
+      .select('id, status, joining_date, valid_until')
+      .eq('application_id', appId).eq('tenant_id', (app as any).tenant_id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    return { app, offer }
+  }
+
+  fastify.post('/portal/candidate/:appId/offer/accept', async (req: any, reply) => {
+    const { appId } = req.params as { appId: string }
+    if (!UUID_RE.test(appId)) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const ctx = await loadPortalOffer(appId)
+    if (!ctx || !ctx.offer) return reply.code(404).send({ error: 'NO_OFFER', message: 'No offer found for this application.' })
+    if (ctx.offer.status === 'accepted') return reply.send({ ok: true, message: 'Offer already accepted.' })
+    if (ctx.offer.status !== 'sent') {
+      return reply.code(409).send({ error: 'NOT_ACTIONABLE', message: `This offer is ${ctx.offer.status} and can no longer be accepted.` })
+    }
+    if (ctx.offer.valid_until && new Date(ctx.offer.valid_until) < new Date(new Date().toISOString().slice(0, 10))) {
+      return reply.code(410).send({ error: 'EXPIRED', message: 'This offer has expired. Please contact the recruiter.' })
+    }
+
+    const tenantId = (ctx.app as any).tenant_id
+    const reqn = (ctx.app as any).job_requisitions
+    const now = new Date().toISOString()
+
+    await fastify.supabase.from('recruitment_offer_letters')
+      .update({ status: 'accepted', accepted_at: now, updated_at: now }).eq('id', ctx.offer.id).eq('tenant_id', tenantId)
+    await fastify.supabase.from('applications')
+      .update({ status: 'hired', offer_accepted: true }).eq('id', appId).eq('tenant_id', tenantId)
+
+    // Auto-create the pre-joinee invitation (closes recruitment → onboarding).
+    const result = await createPreJoineeFromApp(fastify, tenantId, appId, {
+      joining_date: ctx.offer.joining_date,
+      designation:  reqn?.title ?? null,
+      department:   reqn?.departments?.name ?? null,
+      invited_by:   null,
+    })
+
+    return reply.send({
+      ok: true,
+      message: 'Offer accepted. Your onboarding link is on its way to your email.',
+      preboarding: result.ok,
+    })
+  })
+
+  fastify.post('/portal/candidate/:appId/offer/decline', async (req: any, reply) => {
+    const { appId } = req.params as { appId: string }
+    if (!UUID_RE.test(appId)) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const ctx = await loadPortalOffer(appId)
+    if (!ctx || !ctx.offer) return reply.code(404).send({ error: 'NO_OFFER', message: 'No offer found for this application.' })
+    if (ctx.offer.status === 'declined') return reply.send({ ok: true, message: 'Offer already declined.' })
+    if (ctx.offer.status !== 'sent') {
+      return reply.code(409).send({ error: 'NOT_ACTIONABLE', message: `This offer is ${ctx.offer.status} and can no longer be declined.` })
+    }
+
+    const tenantId = (ctx.app as any).tenant_id
+    const now = new Date().toISOString()
+    await fastify.supabase.from('recruitment_offer_letters')
+      .update({ status: 'declined', declined_at: now, updated_at: now }).eq('id', ctx.offer.id).eq('tenant_id', tenantId)
+    await fastify.supabase.from('applications')
+      .update({ status: 'rejected', offer_accepted: false, rejection_reason: 'Offer declined by candidate' }).eq('id', appId).eq('tenant_id', tenantId)
+
+    return reply.send({ ok: true, message: 'You have declined the offer. Thank you for letting us know.' })
   })
 }

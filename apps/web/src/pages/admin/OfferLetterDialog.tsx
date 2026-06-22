@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -32,6 +32,14 @@ interface OfferData {
   job_title:       string
   department:      string
   company_name:    string
+  offer?: {
+    status:         string
+    offered_amount: number | null
+    joining_date:   string | null
+    valid_until:    string | null
+    accepted_at:    string | null
+    declined_at:    string | null
+  } | null
 }
 
 // ── Offer letter HTML builder ──────────────────────────────────────────────────
@@ -246,9 +254,13 @@ export function OfferLetterDialog({
   onOpenChange:   (v: boolean) => void
 }) {
   const [startDate,    setStartDate]    = useState('')
+  const [joiningDate,  setJoiningDate]  = useState('')   // YYYY-MM-DD — drives the persisted offer
+  const [offeredAmount, setOfferedAmount] = useState('') // annual CTC (number)
+  const [validUntil,   setValidUntil]   = useState('')
   const [compensation, setCompensation] = useState('')
   const [extraTerms,   setExtraTerms]   = useState('')
   const [sending,      setSending]      = useState(false)
+  const qc = useQueryClient()
 
   const { data: res, isLoading } = useQuery<{ data: OfferData }>({
     queryKey: ['recruitment', 'offer', appId],
@@ -309,8 +321,16 @@ export function OfferLetterDialog({
         candidate_name:  offer.candidate_name,
         job_title:       offer.job_title,
         company_name:    offer.company_name,
+        offered_amount:  offeredAmount ? Number(offeredAmount) : undefined,
+        joining_date:    joiningDate || undefined,
+        valid_until:     validUntil || undefined,
       })
-      toast.success(`Offer letter sent to ${offer.candidate_email}`)
+      toast.success(
+        joiningDate && offeredAmount
+          ? `Offer sent to ${offer.candidate_email} — they can accept it from their candidate portal`
+          : `Offer letter sent to ${offer.candidate_email}`,
+      )
+      qc.invalidateQueries({ queryKey: ['recruitment', 'offer', appId] })
       onOpenChange(false)
     } catch {
       toast.error('Failed to send email')
@@ -342,14 +362,53 @@ export function OfferLetterDialog({
               <p className="text-muted-foreground text-xs">{offer.company_name}</p>
             </div>
 
+            {/* Offer status (once sent) */}
+            {offer?.offer && (
+              <div className={`rounded-md px-3 py-2 text-xs font-medium ${
+                offer.offer.status === 'accepted' ? 'bg-success/10 text-success'
+                : offer.offer.status === 'declined' ? 'bg-destructive/10 text-destructive'
+                : 'bg-info/10 text-info'}`}>
+                Offer {offer.offer.status}
+                {offer.offer.status === 'accepted' && ' — onboarding has been triggered for this candidate.'}
+              </div>
+            )}
+
             {/* Editable fields */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label className="text-xs">Date of Joining</Label>
+                <Label className="text-xs">Date of Joining <span className="text-muted-foreground font-normal">(shown in letter)</span></Label>
                 <Input
                   placeholder="e.g. 1st July 2026"
                   value={startDate}
                   onChange={e => setStartDate(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Annual CTC (₹) <span className="text-muted-foreground font-normal">(for tracking)</span></Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 1200000"
+                  value={offeredAmount}
+                  onChange={e => setOfferedAmount(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Joining date <span className="text-muted-foreground font-normal">(for tracking)</span></Label>
+                <Input
+                  type="date"
+                  value={joiningDate}
+                  onChange={e => setJoiningDate(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Offer valid until <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Input
+                  type="date"
+                  value={validUntil}
+                  onChange={e => setValidUntil(e.target.value)}
                   className="h-9 text-sm"
                 />
               </div>

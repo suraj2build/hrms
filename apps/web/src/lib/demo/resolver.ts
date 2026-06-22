@@ -719,6 +719,8 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
                : all
     return { data: rows, total: rows.length }
   }
+  mm = path.match(/^\/recruitment\/offers\/([^/]+)$/)
+  if (mm) return { data: fx.demoRecruitmentOffer(mm[1]) }
   if (path.startsWith('/recruitment/')) return { data: [] }
 
   // ── Metrics (prometheus-style text) ────────────────────────────────────────

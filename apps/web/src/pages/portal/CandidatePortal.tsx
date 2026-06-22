@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Briefcase, Calendar, Clock, CheckCircle2, XCircle, Loader2, MapPin, Video, Phone, Users } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
@@ -34,6 +34,16 @@ interface PortalData {
   current_stage_id: string | null
   stages:           Stage[]
   interviews:       Interview[]
+  offer?: {
+    id:             string
+    status:         string
+    offered_amount: number | null
+    joining_date:   string | null
+    valid_until:    string | null
+    html_content:   string | null
+    accepted_at:    string | null
+    declined_at:    string | null
+  } | null
 }
 
 // ── Status display config ──────────────────────────────────────────────────────
@@ -224,18 +234,42 @@ export function CandidatePortal() {
   const [data,    setData]    = useState<PortalData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [acting,  setActing]  = useState<null | 'accept' | 'decline'>(null)
+  const [actionError, setActionError] = useState('')
 
-  useEffect(() => {
+  const API_URL = (import.meta as ImportMeta & { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || ''
+
+  const load = useCallback(async () => {
     if (!token) { setNotFound(true); setLoading(false); return }
-    const API_URL = (import.meta as ImportMeta & { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || ''
-    fetch(`${API_URL}/recruitment/portal/candidate/${token}`)
-      .then(r => {
-        if (!r.ok) throw new Error('not_found')
-        return r.json()
-      })
-      .then(json => { setData(json.data); setLoading(false) })
-      .catch(() => { setNotFound(true); setLoading(false) })
-  }, [token])
+    try {
+      const r = await fetch(`${API_URL}/recruitment/portal/candidate/${token}`)
+      if (!r.ok) throw new Error('not_found')
+      const json = await r.json()
+      setData(json.data)
+    } catch {
+      setNotFound(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [token, API_URL])
+
+  useEffect(() => { void load() }, [load])
+
+  async function respondToOffer(decision: 'accept' | 'decline') {
+    if (!token) return
+    setActing(decision)
+    setActionError('')
+    try {
+      const r = await fetch(`${API_URL}/recruitment/portal/candidate/${token}/offer/${decision}`, { method: 'POST' })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) { setActionError(body?.message ?? 'Something went wrong. Please contact the recruiter.'); return }
+      await load()
+    } catch {
+      setActionError('Network error. Please try again.')
+    } finally {
+      setActing(null)
+    }
+  }
 
   if (loading) {
     return (
@@ -333,8 +367,67 @@ export function CandidatePortal() {
         </div>
       )}
 
-      {/* Status message for terminal states */}
-      {(data.status === 'hired' || data.status === 'offer') && (
+      {/* Offer — actionable */}
+      {data.offer && (
+        <div className="bg-white rounded-2xl border border-border shadow-sm p-6">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Your Offer</h2>
+
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            {data.offer.offered_amount != null && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Annual CTC</p>
+                <p className="text-base font-bold text-foreground tabular-nums">₹{Number(data.offer.offered_amount).toLocaleString('en-IN')}</p>
+              </div>
+            )}
+            {data.offer.joining_date && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Joining date</p>
+                <p className="text-sm font-medium">{fmtDate(data.offer.joining_date, false)}</p>
+              </div>
+            )}
+            {data.offer.valid_until && data.offer.status === 'sent' && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Respond by</p>
+                <p className="text-sm font-medium">{fmtDate(data.offer.valid_until, false)}</p>
+              </div>
+            )}
+          </div>
+
+          {data.offer.status === 'sent' ? (
+            <>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => respondToOffer('accept')}
+                  disabled={acting !== null}
+                  className="flex-1 inline-flex items-center justify-center rounded-lg bg-[#15B8A6] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0D9488] transition disabled:opacity-60"
+                >
+                  {acting === 'accept' ? 'Accepting…' : 'Accept Offer'}
+                </button>
+                <button
+                  onClick={() => respondToOffer('decline')}
+                  disabled={acting !== null}
+                  className="flex-1 inline-flex items-center justify-center rounded-lg border border-border px-4 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-muted transition disabled:opacity-60"
+                >
+                  {acting === 'decline' ? 'Declining…' : 'Decline'}
+                </button>
+              </div>
+              {actionError && <p className="text-destructive text-xs mt-3">{actionError}</p>}
+            </>
+          ) : data.offer.status === 'accepted' ? (
+            <div className="bg-success/10 border border-success/30 rounded-lg p-4 text-center">
+              <p className="text-success font-semibold text-sm">🎉 You accepted this offer!</p>
+              <p className="text-success text-sm mt-1">Check your email for the onboarding link to complete your joining formalities.</p>
+            </div>
+          ) : (
+            <div className="bg-muted border border-border rounded-lg p-4 text-center">
+              <p className="text-muted-foreground text-sm">You declined this offer.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Generic congrats — only when there's no actionable/explicit offer card */}
+      {!data.offer && (data.status === 'hired' || data.status === 'offer') && (
         <div className="bg-success/10 border border-success/30 rounded-2xl p-5 text-center">
           <p className="text-success font-semibold text-sm">🎉 Congratulations!</p>
           <p className="text-success text-sm mt-1">

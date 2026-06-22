@@ -1994,6 +1994,16 @@ export function demoCompensationRevisions(status?: string) {
   return { data, total: data.length, limit: 50, offset: 0 }
 }
 
+// ── Recruitment offer (GET /recruitment/offers/:appId) ───────────────────────
+export function demoRecruitmentOffer(appId: string) {
+  return {
+    id: appId, status: 'interviewing',
+    candidate_name: 'Arjun Mehta', first_name: 'Arjun', candidate_email: 'arjun.mehta@gmail.com',
+    job_title: 'Senior Software Engineer', department: 'Engineering', company_name: 'Saar Technologies Pvt Ltd',
+    offer: null as unknown,
+  }
+}
+
 // ── Exit interview (separation) ──────────────────────────────────────────────
 const EXIT_QUESTIONS = [
   { id: 'eq-1', category: 'reason',       question_text: 'What is the primary reason for your departure?', response_type: 'single_choice', options: ['Better opportunity','Compensation & benefits','Work-life balance','Relationship with manager','Career growth','Relocation','Personal reasons','Other'], is_required: true,  display_order: 0 },
