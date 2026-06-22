@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { ExitInterviewForm, ExitAnalyticsCard } from '@/components/separation/ExitInterviewForm'
+import { ClearanceSetupDialog } from '@/components/separation/ClearanceSetupDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ function LifecycleActions({ row }: { row: SeparationRow }) {
   const qc = useQueryClient()
   const stage = row.lifecycle_stage ?? 'initiated'
   const approval = row.approval_status ?? 'pending'
-  const clearanceDone = clearanceCount(row.clearances) === CLEARANCE_DEPTS.length
+  const clearanceDone = clearanceCount(row.clearances) === (row.clearances.length || CLEARANCE_DEPTS.length)
   const fnfPaid = row.fnf?.status === 'paid'
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['separations'] })
@@ -283,7 +284,7 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
   const qc = useQueryClient()
   const [remarkMap, setRemarkMap] = useState<Record<string, string>>({})
   const cleared = clearanceCount(row.clearances)
-  const allCleared = cleared === CLEARANCE_DEPTS.length
+  const allCleared = cleared === (row.clearances.length || CLEARANCE_DEPTS.length)
 
   const markMutation = useMutation({
     mutationFn: ({ deptId, action, remarks }: { deptId: string; action: 'cleared' | 'rejected'; remarks?: string }) =>
@@ -298,7 +299,7 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
   return (
     <div className="space-y-6">
       {/* Progress */}
-      <ProgressBar value={cleared} max={CLEARANCE_DEPTS.length} />
+      <ProgressBar value={cleared} max={(row.clearances.length || CLEARANCE_DEPTS.length)} />
 
       {allCleared && (
         <div className="flex items-center gap-2 rounded-lg bg-success/10 border border-success/20 px-4 py-3">
@@ -594,6 +595,7 @@ export function SeparationWorkflow() {
   const [activeTab, setActiveTab] = useState<FilterTab>('all')
   const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('employee'))
   const [showInsights, setShowInsights] = useState(false)
+  const [clearanceSetupOpen, setClearanceSetupOpen] = useState(false)
 
   const { data, isLoading } = useQuery<{ data: SeparationRow[] }>({
     queryKey: ['separations'],
@@ -605,7 +607,7 @@ export function SeparationWorkflow() {
 
   const filtered = rows.filter(r => {
     if (activeTab === 'all') return true
-    if (activeTab === 'pending_clearance') return clearanceCount(r.clearances) < CLEARANCE_DEPTS.length
+    if (activeTab === 'pending_clearance') return clearanceCount(r.clearances) < (r.clearances.length || CLEARANCE_DEPTS.length)
     if (activeTab === 'fnf_pending') return !r.fnf || r.fnf.status !== 'paid'
     if (activeTab === 'completed') return r.status === 'completed'
     return true
@@ -634,15 +636,20 @@ export function SeparationWorkflow() {
               Manage employee offboarding, clearances, and full &amp; final settlement.
             </p>
           </div>
-          <Button
-            size="sm"
-            variant={showInsights ? 'secondary' : 'outline'}
-            className="h-8 text-xs gap-1.5 shrink-0"
-            onClick={() => setShowInsights(v => !v)}
-          >
-            <BarChart3 className="h-3.5 w-3.5" />
-            Exit Insights
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setClearanceSetupOpen(true)}>
+              Clearance setup
+            </Button>
+            <Button
+              size="sm"
+              variant={showInsights ? 'secondary' : 'outline'}
+              className="h-8 text-xs gap-1.5"
+              onClick={() => setShowInsights(v => !v)}
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              Exit Insights
+            </Button>
+          </div>
         </div>
 
         {showInsights && (
@@ -715,11 +722,11 @@ export function SeparationWorkflow() {
                       <td className="px-4 py-3 whitespace-nowrap">{fmtDate(row.last_working_date)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">{cleared}/{CLEARANCE_DEPTS.length}</span>
+                          <span className="text-xs text-muted-foreground">{cleared}/{(row.clearances.length || CLEARANCE_DEPTS.length)}</span>
                           <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
                             <div
-                              className={cn('h-full rounded-full', cleared === CLEARANCE_DEPTS.length ? 'bg-success' : 'bg-primary')}
-                              style={{ width: `${(cleared / CLEARANCE_DEPTS.length) * 100}%` }}
+                              className={cn('h-full rounded-full', cleared === (row.clearances.length || CLEARANCE_DEPTS.length) ? 'bg-success' : 'bg-primary')}
+                              style={{ width: `${(cleared / (row.clearances.length || CLEARANCE_DEPTS.length)) * 100}%` }}
                             />
                           </div>
                         </div>
@@ -827,6 +834,8 @@ export function SeparationWorkflow() {
           </div>
         )}
       </div>
+
+      <ClearanceSetupDialog open={clearanceSetupOpen} onOpenChange={setClearanceSetupOpen} />
     </div>
   )
 }

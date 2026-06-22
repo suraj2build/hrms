@@ -27,6 +27,23 @@ const ffBodySchema = z.object({
 
 const CLEARANCE_DEPARTMENTS = ['it', 'finance', 'manager', 'admin', 'hr'] as const
 
+const DEFAULT_CLEARANCE_DEPTS = [
+  { code: 'it', label: 'IT' }, { code: 'finance', label: 'Finance' },
+  { code: 'manager', label: 'Reporting Manager' }, { code: 'admin', label: 'Admin' }, { code: 'hr', label: 'HR' },
+]
+
+// The tenant's active clearance departments (seeds the defaults on first use).
+async function getClearanceDepts(fastify: any, tenantId: string) {
+  const { data } = await fastify.supabase
+    .from('clearance_departments')
+    .select('id, code, label, display_order, is_active')
+    .eq('tenant_id', tenantId).order('display_order')
+  if (data && data.length > 0) return data
+  const rows = DEFAULT_CLEARANCE_DEPTS.map((d, i) => ({ tenant_id: tenantId, code: d.code, label: d.label, display_order: i }))
+  const { data: seeded } = await fastify.supabase.from('clearance_departments').insert(rows).select('id, code, label, display_order, is_active')
+  return seeded ?? []
+}
+
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
     .from('employees')
@@ -174,7 +191,8 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (existing && existing.length > 0)
       return reply.code(409).send({ error: 'ALREADY_INITIALIZED', message: 'Clearances already initialized for this employee.' })
 
-    const rows = CLEARANCE_DEPARTMENTS.map(dept => ({
+    const depts = await getClearanceDepts(fastify, req.tenantId)
+    const rows = (depts.length ? depts.map((d: any) => d.code) : CLEARANCE_DEPARTMENTS).map((dept: string) => ({
       employee_id:    req.params.id,
       tenant_id:      req.tenantId,
       separation_id:  separation.id,
@@ -851,5 +869,39 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     })
 
     return reply.send({ data })
+  })
+
+  // ── Configurable clearance departments ─────────────────────────────────────
+  fastify.get('/settlement/clearance-departments', hrAdminAuth, async (req: any, reply) => {
+    return reply.send({ data: await getClearanceDepts(fastify, req.tenantId) })
+  })
+
+  fastify.post('/settlement/clearance-departments', hrAdminAuth, async (req: any, reply) => {
+    const parsed = z.object({ code: z.string().min(1).max(40), label: z.string().min(1).max(80), display_order: z.number().int().optional() }).safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    const code = parsed.data.code.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+    const { data, error } = await fastify.supabase
+      .from('clearance_departments')
+      .insert({ tenant_id: req.tenantId, code, label: parsed.data.label, display_order: parsed.data.display_order ?? 99 })
+      .select().single()
+    if (error) return reply.code(error.code === '23505' ? 409 : 500).send({ error: 'DB_ERROR', message: error.code === '23505' ? 'A department with this code already exists' : error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.patch('/settlement/clearance-departments/:id', hrAdminAuth, async (req: any, reply) => {
+    const parsed = z.object({ label: z.string().min(1).max(80).optional(), is_active: z.boolean().optional(), display_order: z.number().int().optional() }).safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    const { data, error } = await fastify.supabase
+      .from('clearance_departments').update(parsed.data).eq('id', req.params.id).eq('tenant_id', req.tenantId).select().single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Department not found' })
+    return reply.send({ data })
+  })
+
+  fastify.delete('/settlement/clearance-departments/:id', hrAdminAuth, async (req: any, reply) => {
+    const { error } = await fastify.supabase
+      .from('clearance_departments').delete().eq('id', req.params.id).eq('tenant_id', req.tenantId)
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.code(204).send()
   })
 }

@@ -567,6 +567,13 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   if (path === '/asset-requests')        return { data: fx.demoAssetRequestsAll() }
 
   // ── Separation / exit interview ────────────────────────────────────────────
+  if (path === '/settlement/clearance-departments') return { data: [
+    { id: 'cd-it', code: 'it', label: 'IT', is_active: true, display_order: 0 },
+    { id: 'cd-fin', code: 'finance', label: 'Finance', is_active: true, display_order: 1 },
+    { id: 'cd-mgr', code: 'manager', label: 'Reporting Manager', is_active: true, display_order: 2 },
+    { id: 'cd-adm', code: 'admin', label: 'Admin', is_active: true, display_order: 3 },
+    { id: 'cd-hr', code: 'hr', label: 'HR', is_active: true, display_order: 4 },
+  ] }
   if (path === '/separations')                 return { data: [] }
   if (path === '/separations/exit-analytics') return { data: fx.demoExitAnalytics() }
   if (path === '/exit-interview/template')     return { data: fx.demoExitTemplate() }
