@@ -53,7 +53,7 @@ function errMessage(e: unknown): string {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type InviteStatus = 'pending' | 'submitted' | 'approved' | 'rejected' | 'expired'
+type InviteStatus = 'pending' | 'submitted' | 'approved' | 'rejected' | 'expired' | 'changes_requested'
 
 interface PreJoinee {
   id: string
@@ -214,6 +214,7 @@ const STATUS_CONFIG: Record<InviteStatus, { label: string; className: string }> 
   approved:  { label: 'Approved',  className: 'bg-success/15 text-success border-success/30' },
   rejected:  { label: 'Rejected',  className: 'bg-destructive/15 text-destructive border-destructive/30' },
   expired:   { label: 'Expired',   className: 'bg-muted text-muted-foreground border-border' },
+  changes_requested: { label: 'Re-upload requested', className: 'bg-amber-100 text-amber-700 border-amber-300' },
 }
 
 function StatusBadge({ status }: { status: InviteStatus }) {
@@ -379,14 +380,38 @@ interface ReviewDrawerProps {
   onClose: () => void
   onApprove: (id: string) => void
   onReject: (id: string, notes: string) => void
+  onRequestReupload: (id: string, items: { document_type: string; reason: string }[], message: string) => void
   approving: boolean
   rejecting: boolean
+  requesting: boolean
 }
 
-function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, rejecting }: ReviewDrawerProps) {
+const REUPLOAD_DOCS: { type: string; label: string }[] = [
+  { type: 'cv',      label: 'CV / Resume' },
+  { type: 'pan',     label: 'PAN Card' },
+  { type: 'aadhaar', label: 'Aadhaar Card' },
+  { type: 'cheque',  label: 'Cancelled Cheque' },
+  { type: 'photo',   label: 'Passport Photo' },
+]
+
+function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReupload, approving, rejecting, requesting }: ReviewDrawerProps) {
   const [rejectNotes, setRejectNotes] = useState('')
   const [showRejectBox, setShowRejectBox] = useState(false)
+  const [showReupload, setShowReupload] = useState(false)
+  const [reuploadSel, setReuploadSel] = useState<Record<string, { checked: boolean; reason: string }>>({})
+  const [reuploadMsg, setReuploadMsg] = useState('')
   const s = joinee?.submission
+
+  function handleRequestReupload() {
+    if (!joinee) return
+    if (!showReupload) { setShowReupload(true); return }
+    const items = REUPLOAD_DOCS
+      .filter(d => reuploadSel[d.type]?.checked)
+      .map(d => ({ document_type: d.type, reason: (reuploadSel[d.type]?.reason ?? '').trim() }))
+    if (items.length === 0) { toast.error('Select at least one document to re-request'); return }
+    if (items.some(i => !i.reason)) { toast.error('Add a reason for each flagged document'); return }
+    onRequestReupload(joinee.id, items, reuploadMsg.trim())
+  }
 
   function handleApprove() {
     if (!joinee) return
@@ -566,27 +591,83 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, approving, r
               />
             </div>
           )}
+
+          {showReupload && (
+            <div className="space-y-3 pt-2 rounded-lg border border-amber-300 bg-amber-50/60 p-4">
+              <p className="text-sm font-semibold text-amber-800">Request document re-upload</p>
+              <p className="text-xs text-amber-700 -mt-1">
+                Flag the document(s) the candidate must redo and why. Their portal re-opens pre-filled; they revise only what's flagged and resubmit.
+              </p>
+              {REUPLOAD_DOCS.map(d => {
+                const sel = reuploadSel[d.type] ?? { checked: false, reason: '' }
+                return (
+                  <div key={d.type} className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={sel.checked}
+                        onChange={e => setReuploadSel(p => ({ ...p, [d.type]: { ...sel, checked: e.target.checked } }))}
+                      />
+                      <span className="font-medium">{d.label}</span>
+                    </label>
+                    {sel.checked && (
+                      <input
+                        value={sel.reason}
+                        onChange={e => setReuploadSel(p => ({ ...p, [d.type]: { ...sel, reason: e.target.value } }))}
+                        placeholder="Reason (e.g. blurry scan, name mismatch)…"
+                        className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs"
+                      />
+                    )}
+                  </div>
+                )
+              })}
+              <textarea
+                value={reuploadMsg}
+                onChange={e => setReuploadMsg(e.target.value)}
+                placeholder="Optional message to the candidate…"
+                rows={2}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs resize-none"
+              />
+            </div>
+          )}
         </div>
 
         {joinee?.status === 'submitted' && (
-          <div className="border-t px-6 py-4 flex items-center gap-3 bg-background">
-            <Button
-              className="flex-1"
-              onClick={handleApprove}
-              disabled={approving || rejecting}
-            >
-              <UserCheck className="mr-2 h-4 w-4" />
-              {approving ? 'Approving…' : 'Approve & Create Employee'}
-            </Button>
+          <div className="border-t px-6 py-4 space-y-2 bg-background">
+            <div className="flex items-center gap-3">
+              <Button
+                className="flex-1"
+                onClick={handleApprove}
+                disabled={approving || rejecting || requesting}
+              >
+                <UserCheck className="mr-2 h-4 w-4" />
+                {approving ? 'Approving…' : 'Approve & Create Employee'}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1 border-destructive text-destructive hover:bg-destructive/10"
+                onClick={handleReject}
+                disabled={approving || rejecting || requesting}
+              >
+                <UserX className="mr-2 h-4 w-4" />
+                {rejecting ? 'Rejecting…' : showRejectBox ? 'Confirm Reject' : 'Reject'}
+              </Button>
+            </div>
             <Button
               variant="outline"
-              className="flex-1 border-destructive text-destructive hover:bg-destructive/10"
-              onClick={handleReject}
-              disabled={approving || rejecting}
+              className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
+              onClick={handleRequestReupload}
+              disabled={approving || rejecting || requesting}
             >
-              <UserX className="mr-2 h-4 w-4" />
-              {rejecting ? 'Rejecting…' : showRejectBox ? 'Confirm Reject' : 'Reject'}
+              {requesting ? 'Sending…' : showReupload ? 'Send re-upload request' : 'Request document re-upload'}
             </Button>
+          </div>
+        )}
+
+        {joinee?.status === 'changes_requested' && (
+          <div className="border-t px-6 py-4 bg-amber-50">
+            <p className="text-sm text-amber-800 font-medium">Awaiting candidate re-upload</p>
+            <p className="text-xs text-amber-700 mt-0.5">The candidate has been asked to revise their documents and resubmit.</p>
           </div>
         )}
       </SheetContent>
@@ -742,6 +823,18 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
       toast.success('Candidate rejected')
     },
     onError: () => toast.error('Failed to reject candidate'),
+  })
+
+  const requestReuploadMutation = useMutation({
+    mutationFn: ({ id, items, message }: { id: string; items: { document_type: string; reason: string }[]; message: string }) =>
+      api.post(`/onboarding/pre-joinee/${id}/request-reupload`, { items, message: message || undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
+      qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
+      setDrawerOpen(false)
+      toast.success('Re-upload requested — the candidate has been notified')
+    },
+    onError: (e: Error) => toast.error('Failed to request re-upload', { description: e.message }),
   })
 
   const deleteMutation = useMutation({
@@ -1156,8 +1249,10 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
         onClose={() => { setDrawerOpen(false); setDrawerJoinee(null) }}
         onApprove={id => approveMutation.mutate({ id })}
         onReject={(id, notes) => rejectMutation.mutate({ id, notes })}
+        onRequestReupload={(id, items, message) => requestReuploadMutation.mutate({ id, items, message })}
         approving={approveMutation.isPending}
         rejecting={rejectMutation.isPending}
+        requesting={requestReuploadMutation.isPending}
       />
 
       {/* ── Buddy Assignment Dialog ─────────────────────────────────────────── */}

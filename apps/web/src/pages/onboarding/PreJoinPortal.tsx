@@ -955,19 +955,28 @@ function DocSlot({
   def,
   state,
   onSelect,
+  flagged,
 }: {
   def: DocSlotDef;
   state: DocSlotState;
   onSelect: (file: File) => void;
+  flagged?: string;
 }) {
   const { status, fileName, error } = state;
   return (
-    <div className="rounded-xl border border-border p-4 flex items-center gap-4">
+    <div className={[
+      "rounded-xl border p-4 flex items-center gap-4",
+      flagged ? "border-amber-300 bg-amber-50/60" : "border-border",
+    ].join(" ")}>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-foreground">{def.label}</span>
           {def.required && <span className="text-destructive">*</span>}
+          {flagged && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Re-upload requested</span>
+          )}
         </div>
+        {flagged && <p className="text-xs text-amber-700 mt-0.5">{flagged}</p>}
         {status === "done" && fileName ? (
           <p className="text-xs text-success mt-0.5 truncate flex items-center gap-1">
             <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1023,9 +1032,11 @@ function DocSlot({
 function DocumentsStep({
   slots,
   onSelect,
+  flaggedReasons,
 }: {
   slots: Record<DocType, DocSlotState>;
   onSelect: (type: DocType, file: File) => void;
+  flaggedReasons?: Record<string, string>;
 }) {
   return (
     <div className="space-y-3">
@@ -1035,6 +1046,7 @@ function DocumentsStep({
           def={def}
           state={slots[def.type]}
           onSelect={(file) => onSelect(def.type, file)}
+          flagged={flaggedReasons?.[def.type]}
         />
       ))}
     </div>
@@ -1093,6 +1105,8 @@ export function PreJoinPortal() {
   const [prevEmployers, setPrevEmployers] = useState<PrevEmployer[]>([]);
   // Candidate-declared education (optional; each may carry a certificate upload).
   const [eduEntries, setEduEntries] = useState<EduEntry[]>([]);
+  // Set when HR sent the form back for re-upload: [{ document_type, reason }].
+  const [requestedChanges, setRequestedChanges] = useState<{ document_type: string; reason: string }[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1149,6 +1163,70 @@ export function PreJoinPortal() {
         };
         setForm((prev) => ({ ...prev, ...identity }));
         setPrefilled(identity);
+
+        // Re-opened for re-upload: pre-fill the candidate's prior submission so
+        // they only revise what's flagged, and show which documents to redo.
+        if (data.status === "changes_requested") {
+          setRequestedChanges(Array.isArray(data.requested_changes) ? data.requested_changes : []);
+          const s = data.submission;
+          if (s) {
+            setForm((prev) => ({
+              ...prev,
+              date_of_birth:          s.dob ?? "",
+              gender:                 s.gender ?? "",
+              blood_group:            s.blood_group ?? "",
+              marital_status:         s.marital_status ?? "",
+              nationality:            s.nationality ?? "",
+              address_line1:          s.address_line1 ?? "",
+              address_line2:          s.address_line2 ?? "",
+              city:                   s.city ?? "",
+              state:                  s.state ?? "",
+              pincode:                s.pincode ?? "",
+              emergency_name:         s.emergency_name ?? "",
+              emergency_phone:        s.emergency_phone ?? "",
+              emergency_relationship: s.emergency_relation ?? "",
+              bank_name:              s.bank_name ?? "",
+              account_number:         s.account_number ?? "",
+              ifsc_code:              s.ifsc ?? "",
+              account_type:           s.account_type ?? "",
+              pan_number:             s.pan ?? "",
+              aadhaar_number:         s.aadhaar ?? "",
+              uan_number:             s.uan ?? "",
+            }));
+            if (Array.isArray(s.previous_employment)) {
+              setPrevEmployers(s.previous_employment.map((e: any) => ({
+                company_name:       e.company_name ?? "",
+                designation:        e.designation ?? "",
+                from_date:          e.from_date ?? "",
+                to_date:            e.to_date ?? "",
+                last_ctc:           e.last_ctc != null ? String(e.last_ctc) : "",
+                reason_for_leaving: e.reason_for_leaving ?? "",
+              })));
+            }
+            if (Array.isArray(s.education)) {
+              setEduEntries(s.education.map((e: any) => ({
+                qualification:      e.qualification ?? "",
+                institution:        e.institution ?? "",
+                specialization:     e.specialization ?? "",
+                year_of_completion: e.year_of_completion != null ? String(e.year_of_completion) : "",
+                grade:              e.grade ?? "",
+                document_path:      e.document_path ?? undefined,
+                document_name:      e.document_name ?? undefined,
+              })));
+            }
+          }
+          const uploaded: string[] = Array.isArray(data.uploaded_documents) ? data.uploaded_documents : [];
+          if (uploaded.length) {
+            setDocSlots((prev) => {
+              const next = { ...prev };
+              for (const t of uploaded) {
+                if (t in next) next[t as DocType] = { status: "done", fileName: "Previously uploaded" };
+              }
+              return next;
+            });
+          }
+        }
+
         setPageState("form");
       })
       .catch(() => setPageState("expired"));
@@ -1327,6 +1405,29 @@ export function PreJoinPortal() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-8">
+        {/* Changes-requested banner — shown on every step until resubmitted */}
+        {requestedChanges.length > 0 && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 mb-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <svg className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-800">Action needed — please update the following</p>
+                <p className="text-xs text-amber-700 mt-0.5">Your details are saved. Revise what's flagged below and resubmit.</p>
+                <ul className="mt-3 space-y-1.5">
+                  {requestedChanges.map((c, i) => (
+                    <li key={i} className="text-sm text-amber-900">
+                      <span className="font-medium capitalize">{c.document_type.replace(/_/g, " ")}</span>
+                      <span className="text-amber-700"> — {c.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Welcome banner — only step 0 */}
         {currentStep === 0 && (
           <div className="rounded-2xl p-6 mb-6 text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${brandConfig.colors.primary} 0%, ${brandConfig.colors.navy} 100%)` }}>
@@ -1404,7 +1505,11 @@ export function PreJoinPortal() {
           )}
           {currentStep === STEP_DOCUMENTS && (
             <>
-              <DocumentsStep slots={docSlots} onSelect={handleDocUpload} />
+              <DocumentsStep
+                slots={docSlots}
+                onSelect={handleDocUpload}
+                flaggedReasons={Object.fromEntries(requestedChanges.map((c) => [c.document_type, c.reason]))}
+              />
               <p
                 className={[
                   "text-xs mt-4",

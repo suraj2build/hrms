@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { crossCheckIdentity } from '../../lib/onboarding/identity-check.js'
+import { reopenInvitationForReupload } from '../../lib/onboarding/reopen-invitation.js'
 import {
   emitOnboardingSessionApproved,
   emitOnboardingSessionRejected,
@@ -19,6 +20,14 @@ const fieldOverridesSchema = z.object({
 
 const rejectSchema = z.object({
   reason: z.string().min(1),
+})
+
+const reuploadSchema = z.object({
+  items: z.array(z.object({
+    document_type: z.string().min(1),
+    reason:        z.string().min(1),
+  })).min(1),
+  message: z.string().optional(),
 })
 
 // ─── Validation helpers ────────────────────────────────────────────────────
@@ -681,5 +690,84 @@ export default async function draftRoutes(fastify: FastifyInstance) {
     })
 
     return reply.send({ data: updatedDraft })
+  })
+
+  // ── POST /onboarding/drafts/:id/request-reupload ──────────────────────────
+  // Send the originating pre-join candidate back to revise/re-upload the flagged
+  // document(s). Re-opens their portal and closes this draft/session.
+  fastify.post('/drafts/:id/request-reupload', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
+    const { id } = req.params as { id: string }
+    const parsed = reuploadSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
+    }
+
+    const { data: draft } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .select('id, session_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!draft) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
+    }
+
+    // Resolve the originating pre-join invitation from the session.
+    const { data: invitation } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('session_id', draft.session_id)
+      .maybeSingle()
+
+    if (!invitation) {
+      return reply.code(409).send({
+        error: 'NO_PRE_JOIN_LINK',
+        message: 'This onboarding session is not linked to a pre-join invitation, so it cannot be sent back for re-upload.',
+      })
+    }
+
+    // Map onboarding document types back to the candidate portal's upload slots
+    // (resume→cv, bank_proof→cheque) so the right slot is highlighted for the candidate.
+    const PRE_JOIN_TYPE: Record<string, string> = { resume: 'cv', bank_proof: 'cheque', pan: 'pan', aadhaar: 'aadhaar', photo: 'photo' }
+    const mappedItems = parsed.data.items.map(i => ({
+      document_type: PRE_JOIN_TYPE[i.document_type] ?? i.document_type,
+      reason:        i.reason,
+    }))
+
+    const result = await reopenInvitationForReupload(
+      fastify, req.tenantId, invitation.id, mappedItems, parsed.data.message ?? null,
+    )
+    if (!result.ok) {
+      return reply.code(result.code).send({ error: result.error, message: result.message })
+    }
+
+    // Close out this draft/session — the candidate's resubmission opens a fresh one.
+    const reason = `Sent back to candidate for document re-upload: ${parsed.data.items.map(i => i.document_type).join(', ')}`
+    await fastify.supabase
+      .from('draft_employee_profiles')
+      .update({ status: 'rejected', rejection_reason: reason, updated_at: new Date().toISOString() })
+      .eq('id', id)
+    await fastify.supabase
+      .from('onboarding_sessions')
+      .update({ status: 'rejected' })
+      .eq('id', draft.session_id)
+    await fastify.supabase
+      .from('onboarding_audit_log')
+      .insert({
+        tenant_id: req.tenantId,
+        session_id: draft.session_id,
+        draft_id: id,
+        action: 'reupload_requested',
+        actor_id: req.userId,
+        details: { items: parsed.data.items, message: parsed.data.message ?? null },
+      })
+
+    return reply.send({ message: 'Re-upload requested', invitation_id: invitation.id })
   })
 }

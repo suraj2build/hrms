@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { OnboardingReadiness } from '@/pages/intelligence/OnboardingReadiness'
 import { ReadinessCard }       from '@/components/onboarding/ReadinessCard'
@@ -699,6 +699,103 @@ function RejectDialog({ open, onOpenChange, draftId, onRejected }: RejectDialogP
   )
 }
 
+// ── Request re-upload dialog ───────────────────────────────────────────────────
+
+interface ReuploadDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  draftId: string
+  documents: { id: string; document_type: string; extraction_status: string; extraction_error?: string | null }[]
+  onDone: () => void
+}
+
+function ReuploadDialog({ open, onOpenChange, draftId, documents, onDone }: ReuploadDialogProps) {
+  const [sel, setSel] = useState<Record<string, { checked: boolean; reason: string }>>({})
+  const [message, setMessage] = useState('')
+
+  // On open, pre-check any rejected documents using their extraction_error as the reason.
+  useEffect(() => {
+    if (!open) return
+    const init: Record<string, { checked: boolean; reason: string }> = {}
+    for (const d of documents) {
+      if (d.extraction_status === 'rejected') init[d.document_type] = { checked: true, reason: d.extraction_error ?? '' }
+    }
+    setSel(init)
+    setMessage('')
+  }, [open, documents])
+
+  const types = Array.from(new Set(documents.map(d => d.document_type)))
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => {
+      const items = types
+        .filter(t => sel[t]?.checked)
+        .map(t => ({ document_type: t, reason: (sel[t]?.reason ?? '').trim() }))
+      return api.post(`/onboarding/drafts/${draftId}/request-reupload`, { items, message: message.trim() || undefined })
+    },
+    onSuccess: () => {
+      onDone()
+      onOpenChange(false)
+      toast.success('Re-upload requested', { description: 'The candidate has been notified to revise their documents.' })
+    },
+    onError: (e: Error) => toast.error('Failed to request re-upload', { description: e.message }),
+  })
+
+  const checkedCount = types.filter(t => sel[t]?.checked).length
+  const allReasons   = types.filter(t => sel[t]?.checked).every(t => (sel[t]?.reason ?? '').trim())
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Request document re-upload</DialogTitle>
+          <DialogDescription>
+            Flag the document(s) the candidate must redo. Their pre-onboarding re-opens pre-filled; they revise only what's flagged and resubmit.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2 max-h-[50vh] overflow-y-auto">
+          {types.map(t => {
+            const cur = sel[t] ?? { checked: false, reason: '' }
+            return (
+              <div key={t} className="space-y-1.5">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={cur.checked}
+                    onChange={e => setSel(p => ({ ...p, [t]: { ...cur, checked: e.target.checked } }))}
+                  />
+                  <span className="font-medium capitalize">{t.replace(/_/g, ' ')}</span>
+                </label>
+                {cur.checked && (
+                  <input
+                    value={cur.reason}
+                    onChange={e => setSel(p => ({ ...p, [t]: { ...cur, reason: e.target.value } }))}
+                    placeholder="Reason (e.g. blurry scan, name mismatch)…"
+                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs"
+                  />
+                )}
+              </div>
+            )
+          })}
+          <textarea
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            placeholder="Optional message to the candidate…"
+            rows={2}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs resize-none"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+          <Button onClick={() => mutate()} disabled={checkedCount === 0 || !allReasons || isPending}>
+            {isPending ? 'Sending…' : 'Send re-upload request'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function HRReviewWorkspace() {
@@ -738,6 +835,7 @@ export function HRReviewWorkspace() {
   const [activeTab, setActiveTab] = useState<'extracted' | 'validation'>('extracted')
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
+  const [reuploadDialogOpen, setReuploadDialogOpen] = useState(false)
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null)
   // Drives live polling + the progress banner while extraction is running
   const [isExtracting, setIsExtracting] = useState(false)
@@ -1088,6 +1186,12 @@ export function HRReviewWorkspace() {
                         </Badge>
                       )}
                     </div>
+                    {doc.extraction_status === 'rejected' && doc.extraction_error && (
+                      <p className="mt-1.5 flex items-start gap-1 text-[10px] leading-snug text-destructive bg-destructive/10 border border-destructive/20 rounded px-1.5 py-1">
+                        <AlertTriangle className="h-3 w-3 mt-px shrink-0" />
+                        <span>{doc.extraction_error}</span>
+                      </p>
+                    )}
                   </button>
                 ))
               )}
@@ -1529,6 +1633,19 @@ export function HRReviewWorkspace() {
                 </Button>
               )}
 
+              {/* Request re-upload — bounce back to candidate to revise documents */}
+              {draftProfileId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start h-9 border-amber-400 text-amber-700 hover:bg-amber-50"
+                  onClick={() => setReuploadDialogOpen(true)}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-2" />
+                  Request Re-upload
+                </Button>
+              )}
+
               {/* Reject */}
               {draftProfileId && (
                 <Button
@@ -1564,6 +1681,19 @@ export function HRReviewWorkspace() {
           draftId={draftProfileId}
           onRejected={() => {
             qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
+          }}
+        />
+      )}
+
+      {draftProfileId && (
+        <ReuploadDialog
+          open={reuploadDialogOpen}
+          onOpenChange={setReuploadDialogOpen}
+          draftId={draftProfileId}
+          documents={documents}
+          onDone={() => {
+            qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
+            navigate('/admin/onboarding')
           }}
         />
       )}

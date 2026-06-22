@@ -128,6 +128,47 @@ export function preJoineeInviteEmail(opts: {
   return { subject, html }
 }
 
+// ── Pre-onboarding: HR requests document re-upload ─────────────────────────────
+
+export function preJoineeReuploadEmail(opts: {
+  candidateName: string
+  companyName:   string
+  inviteUrl:     string
+  items:         { document_type: string; reason: string }[]
+  message?:      string | null
+}): { subject: string; html: string } {
+  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const subject = `Action needed — please update your onboarding documents`
+  const { primary, teal } = brandConfig.colors
+  const rows = opts.items.map(i => `
+    <li style="margin:0 0 8px;color:#475569;font-size:14px;line-height:1.5;">
+      <strong style="color:#0f172a;text-transform:capitalize;">${i.document_type.replace(/_/g, ' ')}</strong> — ${i.reason}
+    </li>`).join('')
+  const html = shell(`
+    <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Hi ${firstName}, a quick update is needed</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Thanks for submitting your details to <strong>${opts.companyName}</strong>. Our team reviewed them and
+      needs you to re-upload the following document${opts.items.length !== 1 ? 's' : ''}:
+    </p>
+    <ul style="margin:0 0 16px;padding-left:20px;">${rows}</ul>
+    ${opts.message ? `<p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px;"><em>${opts.message}</em></p>` : ''}
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Your details are saved — just open the link, update what's flagged, and resubmit.
+    </p>
+    <div style="text-align:center;margin:28px 0;">
+      <a href="${opts.inviteUrl}"
+         style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;letter-spacing:0.02em;">
+        Update My Documents
+      </a>
+    </div>
+    <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:16px 0 0;">
+      Or paste this link into your browser:<br>
+      <a href="${opts.inviteUrl}" style="color:${teal};word-break:break-all;">${opts.inviteUrl}</a>
+    </p>
+  `)
+  return { subject, html }
+}
+
 // ── ONB-04: Post-joining welcome email to new employee ─────────────────────────
 
 export function joiningWelcomeEmail(opts: {

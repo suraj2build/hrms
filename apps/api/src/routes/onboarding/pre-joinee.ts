@@ -6,6 +6,7 @@ import {
   type SendEmailResult,
 } from '../../lib/email-service.js'
 import { emitPreJoineeJoiningCompleted } from '../../lib/onboarding-orchestrator.js'
+import { reopenInvitationForReupload } from '../../lib/onboarding/reopen-invitation.js'
 import { logAction } from '../../lib/audit-service.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -22,6 +23,14 @@ const createInvitationSchema = z.object({
 
 const rejectSchema = z.object({
   notes: z.string().min(1, 'notes is required'),
+})
+
+const reuploadSchema = z.object({
+  items: z.array(z.object({
+    document_type: z.string().min(1),
+    reason:        z.string().min(1, 'reason is required'),
+  })).min(1, 'At least one document must be flagged'),
+  message: z.string().optional(),
 })
 
 // Accepts BOTH the candidate-portal "friendly" field names and the DB-style
@@ -1228,6 +1237,37 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Invitation rejected', id, notes })
   })
 
+  // ── 5b. POST /onboarding/pre-joinee/:id/request-reupload ──────────────────
+  // Bounce a submitted invitation back to the candidate to revise/re-upload the
+  // flagged document(s). Re-opens their portal (status → changes_requested).
+  fastify.post('/onboarding/pre-joinee/:id/request-reupload', auth, async (req: any, reply) => {
+    const tenantId: string = req.tenantId
+    const { id } = req.params as { id: string }
+
+    const parsed = reuploadSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+
+    const result = await reopenInvitationForReupload(
+      fastify, tenantId, id, parsed.data.items, parsed.data.message ?? null,
+    )
+    if (!result.ok) {
+      return reply.code(result.code).send({ error: result.error, message: result.message })
+    }
+
+    await logAction(fastify.supabase, {
+      tenantId,
+      tableName:   'pre_joinee_invitations',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { status: 'changes_requested', requested_changes: parsed.data.items },
+    })
+
+    return reply.send({ message: 'Re-upload requested', id, status: 'changes_requested' })
+  })
+
   // ── 6. GET /onboarding/pre-joinee/:id/submission — get submission for HR ───
 
   fastify.get('/onboarding/pre-joinee/:id/submission', auth, async (req: any, reply) => {
@@ -1282,7 +1322,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     const { data: invitation, error } = await fastify.supabase
       .from('pre_joinee_invitations')
-      .select('id, tenant_id, first_name, last_name, email, phone, designation, department, joining_date, status, expires_at')
+      .select('id, tenant_id, first_name, last_name, email, phone, designation, department, joining_date, status, expires_at, requested_changes')
       .eq('token', token)
       .maybeSingle()
 
@@ -1321,6 +1361,25 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     const candidateName = `${invitation.first_name ?? ''} ${invitation.last_name ?? ''}`.trim()
 
+    // When re-opened for re-upload, return the candidate's prior submission +
+    // flagged docs so the portal pre-fills and highlights what to revise.
+    let submission: any = null
+    let uploadedDocuments: string[] = []
+    if (invitation.status === 'changes_requested') {
+      const { data: subRow } = await fastify.supabase
+        .from('pre_joinee_submissions')
+        .select('*')
+        .eq('invitation_id', invitation.id)
+        .maybeSingle()
+      submission = await signSubmissionEducation(fastify, mapSubmissionRow(subRow))
+      const { data: docRows } = await fastify.supabase
+        .from('pre_joinee_documents')
+        .select('document_type')
+        .eq('invitation_id', invitation.id)
+        .eq('tenant_id', invitation.tenant_id)
+      uploadedDocuments = (docRows ?? []).map((d: any) => d.document_type)
+    }
+
     return reply.send({
       id:             invitation.id,
       first_name:     invitation.first_name,
@@ -1334,6 +1393,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       joining_date:   invitation.joining_date,
       status:         invitation.status,
       expires_at:     invitation.expires_at ?? null,
+      requested_changes:  Array.isArray(invitation.requested_changes) ? invitation.requested_changes : [],
+      submission,
+      uploaded_documents: uploadedDocuments,
     })
   })
 
@@ -1462,7 +1524,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       return reply.code(410).send({ error: 'GONE', message: 'This invitation link has expired' })
     }
 
-    if (invitation.status !== 'pending') {
+    if (invitation.status !== 'pending' && invitation.status !== 'changes_requested') {
       return reply.code(409).send({
         error: 'ALREADY_SUBMITTED',
         message: `Invitation has already been ${invitation.status}`,
@@ -1544,7 +1606,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     // Update invitation status to 'submitted'
     const { error: updateErr } = await fastify.supabase
       .from('pre_joinee_invitations')
-      .update({ status: 'submitted', updated_at: new Date().toISOString() })
+      .update({ status: 'submitted', requested_changes: [], updated_at: new Date().toISOString() })
       .eq('id', invitation.id)
       .eq('tenant_id', tenantId)
 
