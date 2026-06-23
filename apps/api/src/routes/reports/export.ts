@@ -373,7 +373,7 @@ async function fetchComparisonRows(
   // so we do not create phantom LOP.  This mirrors payroll-engine.ts.
   const { data: attRows } = await supabase
     .from('attendance_daily')
-    .select('employee_id, day_fraction, updated_at')
+    .select('employee_id, day_fraction, updated_at:date')
     .eq('tenant_id', tenantId)
     .gte('date', fromDate)
     .lte('date', toDate)

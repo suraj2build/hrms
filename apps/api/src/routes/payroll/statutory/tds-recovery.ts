@@ -145,7 +145,7 @@ async function buildRecoveryFromSlips(
       .order('month', { ascending: true }),
     fastify.supabase
       .from('tds_monthly_projections')
-      .select('projection_month, projected_annual_tax, tds_this_month')
+      .select('projection_month, projected_annual_tax:tax_liability, tds_this_month')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
       .order('projection_month', { ascending: false })

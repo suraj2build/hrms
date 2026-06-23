@@ -356,12 +356,12 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       // Resolution hours for resolved exceptions
       fastify.supabase
         .from('attendance_exceptions')
-        .select('resolution_hours')
+        .select('created_at, resolved_at')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'resolved')
         .gte('created_at', range.from)
         .lte('created_at', range.to)
-        .not('resolution_hours', 'is', null),
+        .not('resolved_at', 'is', null),
     ])
 
     const exc_total   = excTotalRes.count   ?? 0
@@ -374,7 +374,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     const resRows = resolutionRes.data ?? []
     const avg_resolution_hours = resRows.length > 0
       ? parseFloat(
-          (resRows.reduce((s: number, r: any) => s + (r.resolution_hours ?? 0), 0) / resRows.length).toFixed(1),
+          (resRows.reduce((s: number, r: any) => s + ((r.resolved_at && r.created_at) ? (new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3_600_000 : 0), 0) / resRows.length).toFixed(1),
         )
       : 0
 
