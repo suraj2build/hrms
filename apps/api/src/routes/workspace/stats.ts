@@ -947,7 +947,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     ] = await Promise.all([
       // Active incidents
       fastify.supabase
-        .from('system_incidents')
+        .from('operational_incidents')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .in('status', ['open', 'investigating']),
@@ -1022,7 +1022,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const limit = Math.min(Number((req.query as any).limit ?? 15), 50)
 
     const { data: incidents } = await fastify.supabase
-      .from('system_incidents')
+      .from('operational_incidents')
       .select('id, title, severity, status, created_at, updated_at')
       .eq('tenant_id', tenantId)
       .order('updated_at', { ascending: false })

@@ -32,7 +32,7 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active'),
         fastify.supabase
-          .from('employee_compensation')
+          .from('employee_compensations')
           .select('employee_id')
           .eq('tenant_id', req.tenantId)
           .eq('is_active', true),
