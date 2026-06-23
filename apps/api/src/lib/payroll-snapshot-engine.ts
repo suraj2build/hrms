@@ -477,7 +477,7 @@ async function buildValidationSnapshot(
 ): Promise<ValidationSnapshot> {
   const { data: rules } = await supabase
     .from('payroll_validation_rules')
-    .select('rule_code, severity, is_enabled, threshold_value, description')
+    .select('rule_code, severity, is_enabled:enabled, threshold_value:threshold_config, description')
     .eq('tenant_id', tenantId)
     .order('rule_code')
 

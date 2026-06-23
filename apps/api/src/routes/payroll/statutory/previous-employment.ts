@@ -141,7 +141,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
     // Fetch the record first to verify ownership and status
     const { data: existing, error: fetchErr } = await fastify.supabase
       .from('previous_employment_tax_details')
-      .select('id, employee_id, status, verification_status')
+      .select('id, employee_id, status:verification_status, verification_status')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()

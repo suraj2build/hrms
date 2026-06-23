@@ -150,7 +150,7 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
       const [locksRes, anomaliesRes, revisionsRes] = await Promise.all([
         fastify.supabase
           .from('attendance_period_locks')
-          .select('id, status')
+          .select('id, status:state')
           .eq('tenant_id', req.tenantId)
           .eq('month', month)
           .limit(1),
