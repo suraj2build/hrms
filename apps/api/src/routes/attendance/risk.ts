@@ -219,7 +219,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       // Confirm employee belongs to tenant
       const { data: emp } = await fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code, department_id, departments(name)')
+        .select('id, first_name, last_name, employee_code, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
         .eq('id', employeeId)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
@@ -227,6 +227,10 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       if (!emp) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
       }
+
+      const _jh = ((emp as any).job_history ?? []).find((j: any) => j.is_current) ?? ((emp as any).job_history ?? [])[0] ?? null
+      ;(emp as any).department_id = _jh?.department_id ?? null
+      ;(emp as any).departments  = _jh ? { name: _jh.department_name } : null
 
       // Fetch last 2 risk profiles ordered newest first
       const { data: profiles, error } = await fastify.supabase

@@ -603,14 +603,17 @@ export async function buildPayrollFinancialLedger(
   const empIds = (empSnaps as any[]).map(e => e.employee_id)
   const { data: empMeta } = await supabase
     .from('employees')
-    .select('id, department_id, departments ( name )')
+    .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
     .in('id', empIds)
 
   const deptMap = new Map<string, { department_id: string | null; department_name: string | null }>(
-    ((empMeta ?? []) as any[]).map(e => [e.id, {
-      department_id:   e.department_id ?? null,
-      department_name: (e.departments as any)?.name ?? null,
-    }]),
+    ((empMeta ?? []) as any[]).map(e => {
+      const jh = (e.job_history ?? []).find((j: any) => j.is_current) ?? (e.job_history ?? [])[0] ?? null
+      return [e.id, {
+        department_id:   jh?.department_id ?? null,
+        department_name: jh?.department_name ?? null,
+      }]
+    }),
   )
 
   // 5. Load GL mappings

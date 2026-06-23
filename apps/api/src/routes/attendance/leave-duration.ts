@@ -61,10 +61,14 @@ async function resolveEffectiveDurationPolicy(
   //   Fetch the employee's department and work_location so we can search by scope
   const { data: emp } = await supabase
     .from('employees')
-    .select('department_id, work_location_id')
+    .select('work_location_id, job_history!job_history_employee_id_fkey(department_id, is_current)')
     .eq('id', employeeId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (emp) {
+    const jh = ((emp as any).job_history ?? []).find((j: any) => j.is_current) ?? ((emp as any).job_history ?? [])[0] ?? null
+    ;(emp as any).department_id = jh?.department_id ?? null
+  }
 
   // Build a list of scopes to try in priority order
   const scopeCandidates: Array<{ scope_type: string; scope_id: string | null }> = [

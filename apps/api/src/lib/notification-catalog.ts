@@ -123,12 +123,15 @@ export async function resolveNotificationVariables(
     try {
       const { data: e } = await supabase
         .from('employees')
-        .select('first_name, last_name, employee_code, email, department_id, designation_id')
+        .select('first_name, last_name, employee_code, email, job_history!job_history_employee_id_fkey(department_id, designation_id, is_current)')
         .eq('id', opts.employeeId)
         .eq('tenant_id', tenantId)
         .maybeSingle()
       const emp = e as any
       if (emp) {
+        const jh = (emp.job_history ?? []).find((j: any) => j.is_current) ?? (emp.job_history ?? [])[0] ?? null
+        emp.department_id  = jh?.department_id ?? null
+        emp.designation_id = jh?.designation_id ?? null
         values.employee_name = `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim()
         values.first_name    = emp.first_name ?? ''
         values.employee_code = emp.employee_code ?? ''

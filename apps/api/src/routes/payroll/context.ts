@@ -198,11 +198,12 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
           .select('id, name')
           .eq('tenant_id', req.tenantId),
         fastify.supabase
+          // Period locks are tenant+month scoped (not per-department); there is no
+          // department_id column, so dept-level lock filtering degrades to none.
           .from('attendance_period_locks')
-          .select('department_id')
+          .select('id')
           .eq('tenant_id', req.tenantId)
-          .eq('month', month)
-          .not('department_id', 'is', null),
+          .eq('period_month', month),
       ])
 
       const lockedDeptIds = new Set(

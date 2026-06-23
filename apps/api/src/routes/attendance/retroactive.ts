@@ -77,9 +77,9 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
       .from('attendance_retroactive_impacts')
       .select(
         `
-          id, date, impact_type, trigger_source, propagation_status,
-          before_value, after_value, payroll_run_id, note,
-          created_at, updated_at,
+          id, date:affected_date, impact_type:impact_types, trigger_source, propagation_status,
+          before_value:before_status, after_value:after_status, payroll_run_id:payroll_run_ids, note:impact_explanation,
+          created_at, updated_at:created_at,
           employees!inner(id, first_name, last_name, employee_code)
         `,
         { count: 'exact' },
@@ -89,8 +89,8 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
       .range(offset, offset + limit - 1)
 
     if (employee_id)        q = q.eq('employee_id', employee_id)
-    if (from)               q = q.gte('date', from)
-    if (to)                 q = q.lte('date', to)
+    if (from)               q = q.gte('affected_date', from)
+    if (to)                 q = q.lte('affected_date', to)
     if (trigger_source)     q = q.eq('trigger_source', trigger_source)
     if (propagation_status) q = q.eq('propagation_status', propagation_status)
 
@@ -145,12 +145,12 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
     const { data, error } = await fastify.supabase
       .from('attendance_retroactive_impacts')
       .select(
-        'id, date, impact_type, trigger_source, propagation_status, before_value, after_value, payroll_run_id, note, created_at, updated_at',
+        'id, date:affected_date, impact_type:impact_types, trigger_source, propagation_status, before_value:before_status, after_value:after_status, payroll_run_id:payroll_run_ids, note:impact_explanation, created_at, updated_at:created_at',
       )
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
-      .gte('date', from)
-      .lte('date', to)
+      .gte('affected_date', from)
+      .lte('affected_date', to)
       .order('created_at', { ascending: false })
 
     if (error) {

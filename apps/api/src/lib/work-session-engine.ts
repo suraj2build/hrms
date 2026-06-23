@@ -939,11 +939,13 @@ async function resolveShiftForDate(
   // 3. Site/department default shift (via employee → site → default_shift_id)
   const { data: empRow } = await supabase
     .from('employees')
-    .select('site_id, department_id')
+    .select('site_id, job_history!job_history_employee_id_fkey(department_id, is_current)')
     .eq('id', employeeId)
     .maybeSingle()
 
   if (empRow) {
+    const _jh = ((empRow as any).job_history ?? []).find((j: any) => j.is_current) ?? ((empRow as any).job_history ?? [])[0] ?? null
+    ;(empRow as any).department_id = _jh?.department_id ?? null
     const ep = empRow as { site_id?: string; department_id?: string }
     if (ep.site_id) {
       const { data: siteRow } = await supabase
