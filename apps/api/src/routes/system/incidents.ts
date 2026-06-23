@@ -302,13 +302,13 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .from('incident_escalations')
       .select(
         `
-        id, reason, created_at, escalated_by, escalated_to,
+        id, reason:escalation_reason, created_at:escalated_at, escalated_by:escalated_from, escalated_to,
         profiles!incident_escalations_escalated_to_fkey(id, full_name)
         `,
       )
       .eq('incident_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: true })
+      .order('escalated_at', { ascending: true })
 
     if (escalationsError) {
       req.log.error({ err: escalationsError }, 'incident escalations query failed')

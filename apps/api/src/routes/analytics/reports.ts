@@ -414,7 +414,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       .from('employee_bank_statutory')
       .select(`
         employee_id,
-        pan, aadhaar, uan, pf_number, esi_number,
+        pan:pan_number, aadhaar:aadhaar_number, uan:uan_number, pf_number, esi_number,
         pt_applicable, lwf_applicable, tax_regime
       `)
       .eq('tenant_id', tid)

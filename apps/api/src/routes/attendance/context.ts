@@ -84,11 +84,11 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
     try {
       const { data } = await fastify.supabase
         .from('overtime_requests')
-        .select('employee_id, ot_hours, date, employees(first_name, last_name)')
+        .select('employee_id, raw_ot_minutes, attendance_date, employees(first_name, last_name)')
         .eq('tenant_id', req.tenantId)
-        .gte('date', monthStart)
-        .lte('date', today)
-        .order('ot_hours', { ascending: false })
+        .gte('attendance_date', monthStart)
+        .lte('attendance_date', today)
+        .order('raw_ot_minutes', { ascending: false })
         .limit(limit * 5) // over-fetch to allow aggregation
 
       // Aggregate by employee
@@ -96,12 +96,13 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
       for (const r of ((data ?? []) as any[])) {
         const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
         const existing = empMap.get(r.employee_id)
+        const otHours = (r.raw_ot_minutes ?? 0) / 60   // overtime_requests stores minutes
         if (existing) {
-          existing.ot_hours += r.ot_hours ?? 0
+          existing.ot_hours += otHours
         } else {
           empMap.set(r.employee_id, {
             name:      emp ? `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim() : r.employee_id,
-            ot_hours:  r.ot_hours ?? 0,
+            ot_hours:  otHours,
             threshold: 8, // standard monthly OT threshold (hours)
           })
         }

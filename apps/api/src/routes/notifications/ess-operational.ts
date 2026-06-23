@@ -109,7 +109,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // Leave balances
     const { data: leaveBalances } = await fastify.supabase
       .from('employee_leave_balance')
-      .select('leave_type_id, balance_days, leave_types(name)')
+      .select('leave_type_id, balance_days:balance, leave_types(name)')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
 
@@ -226,7 +226,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // b. Low leave balance (< 2 days)
     const { data: leaveBalances } = await fastify.supabase
       .from('employee_leave_balance')
-      .select('balance_days, leave_types(name)')
+      .select('balance_days:balance, leave_types(name)')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
 

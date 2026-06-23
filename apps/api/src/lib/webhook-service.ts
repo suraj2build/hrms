@@ -118,7 +118,7 @@ export class WebhookService {
     // Fetch the original request body from the delivery row
     const { data: deliveryDetail, error: detailErr } = await this.supabase
       .from('webhook_deliveries')
-      .select('request_body, event_type')
+      .select('request_body:payload, event_type')
       .eq('id', deliveryId)
       .single()
 

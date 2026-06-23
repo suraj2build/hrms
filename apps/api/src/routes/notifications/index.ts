@@ -162,7 +162,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('audit_logs')
-      .select('id, action, new_values, created_at')
+      .select('id, action, new_values:new_data, created_at')
       .eq('tenant_id', req.tenantId)
       .in('action', ['DIGEST_SENT', 'DIGEST_FAILED'])
       .order('created_at', { ascending: false })
