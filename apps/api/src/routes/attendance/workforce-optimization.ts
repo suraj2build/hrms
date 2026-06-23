@@ -141,11 +141,11 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       .select(
         `
           id, employee_id, period_start, period_end,
-          ot_fairness_score, weekend_fairness_score, night_fairness_score,
+          ot_fairness_score, weekend_fairness_score, night_fairness_score:night_shift_fairness_score,
           total_ot_hours, weekend_shifts_count, night_shifts_count,
           max_consecutive_days, rest_gap_violations, computed_at,
-          employees!inner(id, first_name, last_name, employee_code, department_id,
-            departments(id, name))
+          employees!inner(id, first_name, last_name, employee_code,
+            job_history!job_history_employee_id_fkey(department_id))
         `,
       )
       .eq('tenant_id', req.tenantId)
@@ -154,7 +154,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       .order('ot_fairness_score', { ascending: true })
 
     if (department_id) {
-      balanceQuery = balanceQuery.eq('employees.department_id', department_id)
+      balanceQuery = balanceQuery.eq('employees.job_history.department_id', department_id)
     }
 
     const { data: balanceRows, error: balanceErr } = await balanceQuery
@@ -168,12 +168,12 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     // Fetch open hints for the period
     const { data: hintRows, error: hintsErr } = await fastify.supabase
       .from('workforce_optimization_hints')
-      .select('id, employee_id, hint_type, severity, message, hint_date, resolved')
+      .select('id, employee_id, hint_type, severity, message:explanation, hint_date:created_at, resolved')
       .eq('tenant_id', req.tenantId)
-      .gte('hint_date', from)
-      .lte('hint_date', to)
+      .gte('created_at', from)
+      .lte('created_at', to)
       .eq('resolved', false)
-      .order('hint_date', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (hintsErr) {
       // Table may not exist yet — continue with empty hints rather than 500
@@ -326,13 +326,9 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       .from('attendance_daily')
       .select(
         `
-          employee_id, date, punch_out,
+          employee_id, date, shift_start_time, shift_end_time,
           employees!inner(id, first_name, last_name, employee_code),
-          shift_roster_id,
-          shift_roster:shift_roster_id(
-            shift_id,
-            shifts(id, name, start_time, end_time)
-          )
+          shifts:expected_shift_id(id, name)
         `,
       )
       .eq('tenant_id', req.tenantId)
@@ -373,21 +369,13 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         const rec1 = records[i]
         const rec2 = records[i + 1]
 
-        const roster1 = Array.isArray(rec1.shift_roster) ? rec1.shift_roster[0] : rec1.shift_roster
-        const roster2 = Array.isArray(rec2.shift_roster) ? rec2.shift_roster[0] : rec2.shift_roster
-        const shift1  = roster1?.shifts ? (Array.isArray(roster1.shifts) ? roster1.shifts[0] : roster1.shifts) : null
-        const shift2  = roster2?.shifts ? (Array.isArray(roster2.shifts) ? roster2.shifts[0] : roster2.shifts) : null
+        const shift1 = Array.isArray(rec1.shifts) ? rec1.shifts[0] : rec1.shifts
+        const shift2 = Array.isArray(rec2.shifts) ? rec2.shifts[0] : rec2.shifts
 
-        // Use actual punch_out if available, fall back to scheduled shift end_time
-        let endStr: string | null = rec1.punch_out ?? null
-        if (!endStr && shift1?.end_time) {
-          endStr = `${rec1.date}T${shift1.end_time}`
-        }
-
-        let startStr: string | null = null
-        if (shift2?.start_time) {
-          startStr = `${rec2.date}T${shift2.start_time}`
-        }
+        // Scheduled shift end of day 1 → next day's scheduled start
+        // (shift times are denormalized onto attendance_daily).
+        const endStr:   string | null = rec1.shift_end_time   ? `${rec1.date}T${rec1.shift_end_time}`   : null
+        const startStr: string | null = rec2.shift_start_time ? `${rec2.date}T${rec2.shift_start_time}` : null
 
         if (!endStr || !startStr) continue
 
@@ -541,8 +529,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       .from('workforce_staffing_snapshots')
       .select(
         `
-          id, snapshot_date, department_id, scheduled_count,
-          present_count, absent_count, coverage_ratio,
+          id, snapshot_date, department_id, scheduled_count:scheduled_headcount,
+          present_count:present_headcount, coverage_ratio,
           staffing_pressure, understaffed, overstaffed,
           departments(id, name)
         `,
@@ -566,7 +554,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         snapshot_date:     r.snapshot_date,
         scheduled_count:   r.scheduled_count,
         present_count:     r.present_count,
-        absent_count:      r.absent_count,
+        absent_count:      Math.max(0, (r.scheduled_count ?? 0) - (r.present_count ?? 0)),
         coverage_ratio:    r.coverage_ratio,
         staffing_pressure: r.staffing_pressure,
         understaffed:      r.understaffed,
@@ -679,18 +667,17 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       .from('workforce_optimization_hints')
       .select(
         `
-          id, employee_id, hint_type, severity, message,
-          hint_date, resolved, resolved_at, resolved_by, created_at,
-          employees!inner(id, first_name, last_name, employee_code, department_id,
-            departments(name))
+          id, employee_id, hint_type, severity, message:explanation,
+          hint_date:created_at, resolved, resolved_at, created_at,
+          employees!inner(id, first_name, last_name, employee_code)
         `,
         { count: 'exact' },
       )
       .eq('tenant_id', req.tenantId)
-      .gte('hint_date', from)
-      .lte('hint_date', to)
+      .gte('created_at', from)
+      .lte('created_at', to)
       .eq('resolved', resolvedBool)
-      .order('hint_date', { ascending: false })
+      .order('created_at', { ascending: false })
       .order('severity', { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -718,7 +705,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         resolved:        h.resolved,
         hint_date:       h.hint_date,
         resolved_at:     h.resolved_at,
-        resolved_by:     h.resolved_by,
+        resolved_by:     null,
         // extras for display
         employee_name:   emp ? `${emp.first_name} ${emp.last_name}` : null,
         employee_code:   emp?.employee_code ?? null,
@@ -809,9 +796,9 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     // ── Step 1: Fetch all active employees for this tenant ──────────────────
     const { data: empRows, error: empErr } = await fastify.supabase
       .from('employees')
-      .select('id, first_name, last_name, employee_code, department_id')
+      .select('id, first_name, last_name, employee_code')
       .eq('tenant_id', req.tenantId)
-      .eq('employment_status', 'active')
+      .eq('status', 'active')
       .limit(1000)
 
     if (empErr) {
@@ -832,11 +819,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       .select(
         `
           employee_id, date, status, overtime_minutes, work_hours,
-          shift_roster_id,
-          shift_roster:shift_roster_id(
-            shift_id,
-            shifts(id, name, start_time, end_time, is_night_shift)
-          )
+          shift_start_time, shift_end_time, shift_is_night_shift
         `,
       )
       .eq('tenant_id', req.tenantId)
@@ -892,10 +875,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       const dow = new Date(`${row.date}T12:00:00Z`).getUTCDay()
       if (dow === 0 || dow === 6) m.weekendShifts++
 
-      // Night shift flag from shift metadata
-      const roster = Array.isArray(row.shift_roster) ? row.shift_roster[0] : row.shift_roster
-      const shift  = roster?.shifts ? (Array.isArray(roster.shifts) ? roster.shifts[0] : roster.shifts) : null
-      if (shift?.is_night_shift) m.nightShifts++
+      // Night shift flag (denormalized on attendance_daily)
+      if (row.shift_is_night_shift) m.nightShifts++
     }
 
     // Compute rest-gap violations per employee
@@ -903,16 +884,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       for (let i = 0; i < m.records.length - 1; i++) {
         const rec1   = m.records[i]
         const rec2   = m.records[i + 1]
-        const roster1 = Array.isArray(rec1.shift_roster) ? rec1.shift_roster[0] : rec1.shift_roster
-        const roster2 = Array.isArray(rec2.shift_roster) ? rec2.shift_roster[0] : rec2.shift_roster
-        const shift1  = roster1?.shifts ? (Array.isArray(roster1.shifts) ? roster1.shifts[0] : roster1.shifts) : null
-        const shift2  = roster2?.shifts ? (Array.isArray(roster2.shifts) ? roster2.shifts[0] : roster2.shifts) : null
-
-        let endStr: string | null = rec1.punch_out ?? null
-        if (!endStr && shift1?.end_time) endStr = `${rec1.date}T${shift1.end_time}`
-
-        let startStr: string | null = null
-        if (shift2?.start_time) startStr = `${rec2.date}T${shift2.start_time}`
+        const endStr:   string | null = rec1.shift_end_time   ? `${rec1.date}T${rec1.shift_end_time}`   : null
+        const startStr: string | null = rec2.shift_start_time ? `${rec2.date}T${rec2.shift_start_time}` : null
 
         if (!endStr || !startStr) continue
 

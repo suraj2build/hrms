@@ -129,7 +129,7 @@ export async function replayBalanceAsOf(
 
     supabase
       .from('leave_balance_ledger')
-      .select('id, delta, txn_type, entry_type, transaction_type, days, effective_date, created_at, lineage_id, snapshot_id, notes')
+      .select('id, delta, txn_type, entry_type:txn_type, transaction_type:txn_type, days:delta, effective_date:created_at, created_at, lineage_id, snapshot_id, notes')
       .eq('tenant_id',     tenantId)
       .eq('employee_id',   employeeId)
       .eq('leave_type_id', leaveTypeId)
