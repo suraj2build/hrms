@@ -25,6 +25,22 @@ function requireAdmin(req: any, reply: any, done: () => void) {
   done()
 }
 
+/**
+ * True when a Supabase/PostgREST error means the underlying table is not
+ * provisioned (schema drift) rather than a real query failure. Lets newer,
+ * optional intelligence surfaces degrade to an empty state instead of 500-ing
+ * the whole workspace when a migration hasn't been applied yet.
+ *
+ *   PGRST205 — "Could not find the table '...' in the schema cache"
+ *   42P01    — Postgres "relation ... does not exist"
+ */
+function isMissingTable(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  if (error.code === 'PGRST205' || error.code === '42P01') return true
+  const msg = error.message ?? ''
+  return /could not find the table|does not exist/i.test(msg)
+}
+
 export default async function securityRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate, requireAdmin] }
 
@@ -211,7 +227,13 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) {
+      if (isMissingTable(error)) {
+        req.log.warn('security_intelligence_events table not provisioned — returning empty (apply migration 188)')
+        return reply.send({ data: [], total: 0, limit, offset, unavailable: true })
+      }
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    }
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -242,7 +264,13 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) {
+      if (isMissingTable(error)) {
+        req.log.warn('verification_events table not provisioned — returning empty')
+        return reply.send({ data: [], total: 0, limit, offset, unavailable: true })
+      }
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    }
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
