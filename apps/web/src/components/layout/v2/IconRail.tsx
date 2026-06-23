@@ -15,8 +15,7 @@ const DOMAIN_MICRO: Record<string, string> = {
   'daily-ops':    'Ops',
   'payroll':      'Pay',
   'compliance':   'Legal',
-  'reports':      'Data',
-  'advanced-ops': 'Adv',
+  'advanced-ops': 'Data',
   'setup':        'Admin',
 }
 

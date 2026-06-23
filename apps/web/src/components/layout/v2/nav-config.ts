@@ -2,10 +2,14 @@
  * nav-config.ts — Enterprise HRMS Navigation
  *
  * ┌─────────────────────────────────────────────────────────────┐
- * │  9 domains — top nav + contextual left sidebar              │
+ * │  8 domains — top nav + contextual left sidebar              │
  * │                                                             │
  * │  Operations · Workforce · Attendance · Leave · Payroll      │
- * │  Compliance · Reports · Intelligence · Setup                │
+ * │  Compliance · Analytics · Setup                             │
+ * │                                                             │
+ * │  (Analytics = Reports + Intelligence, merged. Runbooks      │
+ * │   folded into Operations › Help. Platform/SRE tooling       │
+ * │   folded into Setup › Platform.)                            │
  * └─────────────────────────────────────────────────────────────┘
  *
  * ═══════════════════════════════════════════════════════════════
@@ -177,15 +181,14 @@ export const DOMAINS: Domain[] = [
     matchPrefixes: [
       '/admin/control-center',
       '/admin/dashboard',     // redirect target still activates this domain
-      '/admin/insights',
       '/admin/executive',
       '/admin/readiness',
-      '/admin/intelligence/workforce-command',
       '/admin/my-work-queue',
       '/admin/daily-ops',
       '/admin/approvals/inbox',
       '/admin/notifications/inbox',
       '/admin/helpdesk',
+      '/admin/runbooks',      // Runbooks folded in here (no longer a top tab)
     ],
     defaultRoute: '/admin/control-center',
     groups: [
@@ -193,7 +196,6 @@ export const DOMAINS: Domain[] = [
         label: 'Overview',
         items: [
           { id: 'control-center',  label: 'Command Center',  route: '/admin/control-center', exact: true, icon: Command,  keywords: ['home', 'dashboard', 'overview', 'control center', 'command center', 'ops', 'operations', 'exceptions', 'kpi', 'health'] },
-          { id: 'insights-hub',    label: 'Insights Hub',    route: '/admin/insights',       exact: true, icon: Sparkles, keywords: ['analytics', 'intelligence', 'insights', 'charts', 'workforce data'] },
           { id: 'platform-health', label: 'Platform Health', route: '/admin/readiness',                   icon: Activity, keywords: ['readiness', 'system health', 'uat', 'certification', 'platform status'] },
         ],
       },
@@ -205,6 +207,12 @@ export const DOMAINS: Domain[] = [
           { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare, keywords: ['approve', 'reject', 'pending approvals', 'leave approval', 'attendance approval', 'inbox'] },
           { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen,    keywords: ['notifications', 'alerts', 'messages', 'notification center'] },
           { id: 'hr-helpdesk', label: 'HR Helpdesk',      route: '/admin/helpdesk',            icon: LifeBuoy,    keywords: ['helpdesk', 'tickets', 'support', 'employee tickets', 'hr support', 'service desk', 'grievance', 'issues'] },
+        ],
+      },
+      {
+        label: 'Help',
+        items: [
+          { id: 'runbooks-home', label: 'Runbooks', route: '/admin/runbooks', exact: true, icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
         ],
       },
     ],
@@ -304,6 +312,7 @@ export const DOMAINS: Domain[] = [
     icon:         Clock,
     matchPrefixes: [
       '/admin/attendance',       // catches /admin/attendance/* except Setup-overridden paths
+      '/admin/attendance-workspace', // hyphen sibling — needs its own prefix (not under /admin/attendance/)
       '/admin/employee-shifts',  // operational shift assignment view
       '/admin/roster',           // roster intelligence lives under Attendance > Scheduling
     ],
@@ -358,6 +367,7 @@ export const DOMAINS: Domain[] = [
     icon:         CalendarX,
     matchPrefixes: [
       '/admin/leave',     // catches /admin/leave/* except Setup-overridden paths
+      '/admin/leave-jobs', // hyphen sibling — needs its own prefix (not under /admin/leave/)
       '/admin/comp-off',
       '/admin/overtime',
     ],
@@ -478,8 +488,11 @@ export const DOMAINS: Domain[] = [
     shortLabel:   'Legal',
     icon:         ShieldCheck,
     matchPrefixes: [
-      '/admin/payroll/statutory',        // longer than /admin/payroll — wins
+      '/admin/payroll/statutory',        // longer than /admin/payroll — wins; catches /statutory/* filings
+      '/admin/payroll/statutory-dashboard',      // hyphen sibling (Compliance default landing)
       '/admin/payroll/statutory-groups', // statutory groups page
+      '/admin/payroll/statutory-reconciliation', // hyphen sibling — statutory recon page
+      '/admin/payroll/compliance-calendar',      // compliance calendar (previously mis-resolved to Payroll)
       '/admin/payroll/tax-governance',   // exact match for governance pages
       '/admin/payroll/tax-governance-admin',
       '/admin/payroll/filing-pack',      // Filing Pack Center
@@ -521,53 +534,15 @@ export const DOMAINS: Domain[] = [
     ],
   },
 
-  // ── 6. Reports ────────────────────────────────────────────────────────────────
+  // ── 6. Analytics (Reports + Intelligence, merged) ─────────────────────────────
   //
-  // OUTPUTS ONLY: reports, exports, salary sheets.
-  // Workforce Cost + Payroll Ledger moved here from Payroll Analytics.
-  // Muster Roll is NOT listed here — it's an operational Attendance surface
-  // (/admin/attendance/muster), owned solely by the Attendance domain. The
-  // "All Reports" page still exposes muster as a report/export.
+  // The single home for all analytics, reporting and intelligence — formed by
+  // merging the old "Reports" and "Intelligence" domains and pulling Operations'
+  // "Insights Hub" in here too. Outputs (reports/exports), exploration, and the
+  // advanced risk / simulation / workforce-intelligence tools all live together.
   //
-  {
-    id:           'reports',
-    label:        'Reports',
-    shortLabel:   'Data',
-    icon:         BarChart2,
-    matchPrefixes: [
-      '/admin/reports',
-      '/admin/explorer',   // Data Explorer lives outside /admin/reports — keep Reports tab active
-      '/admin/audit-trail',
-    ],
-    defaultRoute: '/admin/reports',
-    groups: [
-      {
-        label: 'Overview',
-        items: [
-          { id: 'reports-hub',         label: 'Reports Hub',         route: '/admin/reports',             exact: true, icon: BarChart2, keywords: ['reports home', 'all reports', 'reports overview', 'reporting center'] },
-        ],
-      },
-      {
-        label: 'Analytics',
-        items: [
-          { id: 'analytics-studio',    label: 'Analytics Studio',    route: '/admin/reports/analytics',               icon: Sparkles,  keywords: ['analytics studio', 'workforce analytics', 'payroll analytics', 'explore data', 'charts', 'trend', 'department analytics'] },
-          { id: 'data-explorer',       label: 'Data Explorer',       route: '/admin/explorer',                        icon: Search,    keywords: ['data explorer', 'explore', 'group by', 'drill down', 'pivot', 'employee list', 'absenteeism', 'compensation growth', 'export excel'] },
-        ],
-      },
-      {
-        label: 'Operational',
-        items: [
-          { id: 'reports-operational', label: 'Operational Reports', route: '/admin/reports/operational',              icon: FileText,  keywords: ['headcount report', 'attendance report', 'salary register', 'statutory register', 'muster roll', 'leave register', 'payroll register'] },
-          { id: 'audit-trail',         label: 'Audit Trail',         route: '/admin/audit-trail',                      icon: ScrollText, keywords: ['audit log', 'audit trail', 'change history', 'who changed', 'activity log', 'system log', 'data changes', 'compliance log'] },
-        ],
-      },
-    ],
-  },
-
-  // ── 7. Intelligence ──────────────────────────────────────────────────────────
-  //
-  // First-class primary domain for enterprise oversight, risk, simulation, and
-  // advanced workforce intelligence tools.
+  // Platform Orchestration (super_admin SRE/platform tooling) was moved OUT of
+  // here into Setup › Platform — it is not an HR-analytics surface.
   //
   // Positioned BEFORE Setup — these are strategic operational capabilities, not
   // administrative utilities. Config/masters live in Setup.
@@ -579,18 +554,20 @@ export const DOMAINS: Domain[] = [
   //   /admin/attendance/simulate-policy  (33 > /admin/attendance 17)
   //   /admin/attendance/intelligence-center (38 > /admin/attendance 17)
   //   /admin/attendance/health-index     (30 > /admin/attendance 17)
-
   //   /admin/approvals/governance-matrix (no /admin/approvals prefix in other domains)
-  //   /admin/system/*                    (no other domain claims /admin/system)
   //   /admin/workforce/optimization      (no other domain owns /admin/workforce)
-  //   /admin/system/automations|incidents|webhooks  (platform orchestration tools)
   //
   {
     id:           'advanced-ops',
-    label:        'Intelligence',
-    shortLabel:   'Intel',
+    label:        'Analytics',
+    shortLabel:   'Data',
     icon:         Brain,
     matchPrefixes: [
+      // Reports & Exports (merged in from the old Reports domain)
+      '/admin/reports',
+      '/admin/explorer',
+      '/admin/audit-trail',
+      '/admin/insights',          // Insights Hub (moved out of Operations)
       // Risk & Governance
       '/admin/approvals/governance-matrix',
       '/admin/system/event-governance',
@@ -606,21 +583,27 @@ export const DOMAINS: Domain[] = [
       '/admin/analytics/workforce',
       '/admin/intelligence',
       '/admin/operational-health',
-      // Platform Orchestration
-      '/admin/system/orchestration',
-      '/admin/system/observability',
-      '/admin/system/automations',
-      '/admin/system/incidents',
-      '/admin/system/webhooks',
-      '/admin/system/integrations',
-      '/admin/enterprise',
-      '/admin/trust',
-      '/admin/fabric',
       '/admin/governance/privacy',
       '/admin/security/ops',
     ],
-    defaultRoute: '/admin/workforce/optimization',
+    defaultRoute: '/admin/insights',
     groups: [
+      {
+        label: 'Reports & Exports',
+        items: [
+          { id: 'reports-hub',         label: 'Reports Hub',         route: '/admin/reports',             exact: true, icon: BarChart2, keywords: ['reports home', 'all reports', 'reports overview', 'reporting center'] },
+          { id: 'reports-operational', label: 'Operational Reports', route: '/admin/reports/operational',              icon: FileText,  keywords: ['headcount report', 'attendance report', 'salary register', 'statutory register', 'muster roll', 'leave register', 'payroll register'] },
+          { id: 'audit-trail',         label: 'Audit Trail',         route: '/admin/audit-trail',                      icon: ScrollText, keywords: ['audit log', 'audit trail', 'change history', 'who changed', 'activity log', 'system log', 'data changes', 'compliance log'] },
+        ],
+      },
+      {
+        label: 'Explore',
+        items: [
+          { id: 'insights-hub',     label: 'Insights Hub',     route: '/admin/insights',          exact: true, icon: Sparkles, keywords: ['analytics', 'intelligence', 'insights', 'charts', 'workforce data'] },
+          { id: 'analytics-studio', label: 'Analytics Studio', route: '/admin/reports/analytics',              icon: Sparkles, keywords: ['analytics studio', 'workforce analytics', 'payroll analytics', 'explore data', 'charts', 'trend', 'department analytics'] },
+          { id: 'data-explorer',    label: 'Data Explorer',    route: '/admin/explorer',                       icon: Search,   keywords: ['data explorer', 'explore', 'group by', 'drill down', 'pivot', 'employee list', 'absenteeism', 'compensation growth', 'export excel'] },
+        ],
+      },
       {
         label: 'Risk & Governance',
         items: [
@@ -666,26 +649,10 @@ export const DOMAINS: Domain[] = [
           { id: 'uat-certification',     label: 'UAT Testing',            route: '/admin/intelligence/uat-certification', icon: ShieldCheck, roles: ['super_admin'], keywords: ['UAT', 'user acceptance testing', 'certification', 'QA testing'] },
         ],
       },
-      {
-        label: 'Platform Orchestration',
-        // super_admin only — platform/SRE surfaces, not HR-user features (audit D1).
-        roles: ['super_admin'],
-        items: [
-          { id: 'enterprise-control-center', label: 'Enterprise Control Center', route: '/admin/enterprise',           icon: Command,    keywords: ['enterprise', 'tenant management', 'admin center', 'super admin'] },
-          { id: 'trust-workspace',           label: 'Trust Intelligence',        route: '/admin/trust',                icon: ShieldCheck, keywords: ['trust score', 'employee trust', 'document trust', 'trust verification', 'trust intelligence'] },
-          { id: 'fabric-workspace',          label: 'Fabric Intelligence',       route: '/admin/fabric',               icon: Cpu,         keywords: ['fabric', 'data fabric', 'intelligence fabric'] },
-          { id: 'orchestration',             label: 'System Orchestration',      route: '/admin/system/orchestration', icon: GitBranch,   keywords: ['orchestration', 'automation engine', 'workflow engine', 'system flows'] },
-          { id: 'observability',             label: 'System Monitor',            route: '/admin/system/observability', icon: Radio,       keywords: ['monitoring', 'logs', 'metrics', 'system monitor', 'observability'] },
-          { id: 'integration-registry',      label: 'Integration Registry',      route: '/admin/system/integrations',  icon: Zap,         keywords: ['integrations', 'API', 'connectors', 'third party', 'webhook registry'] },
-          { id: 'automations',               label: 'Automations',               route: '/admin/system/automations',   icon: Settings2,   keywords: ['automated rules', 'trigger', 'automation', 'background tasks', 'rules engine'] },
-          { id: 'incidents',                 label: 'Incident Manager',          route: '/admin/system/incidents',     icon: ShieldCheck, keywords: ['incidents', 'system issues', 'incident tracking', 'problems', 'alerts', 'SRE'] },
-          { id: 'webhooks',                  label: 'Webhooks',                  route: '/admin/system/webhooks',      icon: Activity,    keywords: ['webhook', 'event push', 'callback URL', 'integration hook'] },
-        ],
-      },
     ],
   },
 
-  // ── 8. Setup ──────────────────────────────────────────────────────────────────
+  // ── 7. Setup ──────────────────────────────────────────────────────────────────
   //
   // SINGLE SOURCE OF TRUTH for all configuration and master data.
   //
@@ -754,6 +721,16 @@ export const DOMAINS: Domain[] = [
       // Settings sub-pages — longer than Home's /admin/settings (16) → Setup wins
       '/admin/settings/roles',   // 21 chars
       '/admin/settings/users',   // 21 chars
+      // Platform (super_admin SRE/platform tooling — moved here from Intelligence)
+      '/admin/system/orchestration',
+      '/admin/system/observability',
+      '/admin/system/automations',
+      '/admin/system/incidents',
+      '/admin/system/webhooks',
+      '/admin/system/integrations',
+      '/admin/enterprise',
+      '/admin/trust',
+      '/admin/fabric',
     ],
     defaultRoute: '/admin/organization',
     groups: [
@@ -851,29 +828,25 @@ export const DOMAINS: Domain[] = [
         ],
       },
 
-    ],
-  },
-
-  // ── Runbooks ──────────────────────────────────────────────────────────────────
-  //
-  // The single how-to system: step-by-step playbooks with deep-links straight
-  // into each screen (and auto-open of the relevant dialog). Replaces the old
-  // floating Guide drawer; lives as a prime-rail domain (placed after Setup).
-  //
-  {
-    id:           'runbooks',
-    label:        'Runbooks',
-    shortLabel:   'Books',
-    icon:         BookOpen,
-    matchPrefixes: ['/admin/runbooks'],
-    defaultRoute: '/admin/runbooks',
-    groups: [
+      // ── Platform ─────────────────────────────────────────────────────────────
+      // super_admin only — platform/SRE surfaces (moved here from the old
+      // Intelligence domain's "Platform Orchestration" group). Not HR features.
       {
-        label: 'Guides',
+        label: 'Platform',
+        roles: ['super_admin'],
         items: [
-          { id: 'runbooks-home', label: 'All Runbooks', route: '/admin/runbooks', exact: true, icon: BookOpen, keywords: ['runbook', 'how to', 'guide', 'help', 'guidance', 'playbook', 'instructions', 'how do i', 'walkthrough', 'tutorial', 'steps'] },
+          { id: 'enterprise-control-center', label: 'Enterprise Control Center', route: '/admin/enterprise',           icon: Command,    keywords: ['enterprise', 'tenant management', 'admin center', 'super admin'] },
+          { id: 'trust-workspace',           label: 'Trust Intelligence',        route: '/admin/trust',                icon: ShieldCheck, keywords: ['trust score', 'employee trust', 'document trust', 'trust verification', 'trust intelligence'] },
+          { id: 'fabric-workspace',          label: 'Fabric Intelligence',       route: '/admin/fabric',               icon: Cpu,         keywords: ['fabric', 'data fabric', 'intelligence fabric'] },
+          { id: 'orchestration',             label: 'System Orchestration',      route: '/admin/system/orchestration', icon: GitBranch,   keywords: ['orchestration', 'automation engine', 'workflow engine', 'system flows'] },
+          { id: 'observability',             label: 'System Monitor',            route: '/admin/system/observability', icon: Radio,       keywords: ['monitoring', 'logs', 'metrics', 'system monitor', 'observability'] },
+          { id: 'integration-registry',      label: 'Integration Registry',      route: '/admin/system/integrations',  icon: Zap,         keywords: ['integrations', 'API', 'connectors', 'third party', 'webhook registry'] },
+          { id: 'automations',               label: 'Automations',               route: '/admin/system/automations',   icon: Settings2,   keywords: ['automated rules', 'trigger', 'automation', 'background tasks', 'rules engine'] },
+          { id: 'incidents',                 label: 'Incident Manager',          route: '/admin/system/incidents',     icon: ShieldCheck, keywords: ['incidents', 'system issues', 'incident tracking', 'problems', 'alerts', 'SRE'] },
+          { id: 'webhooks',                  label: 'Webhooks',                  route: '/admin/system/webhooks',      icon: Activity,    keywords: ['webhook', 'event push', 'callback URL', 'integration hook'] },
         ],
       },
+
     ],
   },
 
@@ -963,6 +936,16 @@ export const EXECUTIVE_DOMAINS: Domain[] = [
 ]
 
 /**
+ * True when `pathname` is the prefix exactly, or sits underneath it on a path
+ * boundary (`prefix/...`). Deliberately does NOT do a bare `startsWith` — that
+ * would let `/admin/leave` swallow `/admin/leave-types`, so every hyphen-sibling
+ * route (e.g. /admin/attendance-workspace) carries its own explicit prefix.
+ */
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(prefix + '/')
+}
+
+/**
  * Returns the executive-mode domain for the given pathname (longest-prefix).
  * Falls back to null if the path isn't covered by executive domains.
  */
@@ -971,7 +954,7 @@ export function getExecutiveDomainForPath(pathname: string): Domain | null {
   let bestLen = -1
   for (const domain of EXECUTIVE_DOMAINS) {
     for (const prefix of domain.matchPrefixes) {
-      if (pathname === prefix || pathname.startsWith(prefix + '/') || pathname.startsWith(prefix)) {
+      if (matchesPrefix(pathname, prefix)) {
         if (prefix.length > bestLen) {
           bestLen = prefix.length
           best    = domain
@@ -1005,11 +988,7 @@ export function getDomainForPath(pathname: string): Domain | null {
 
   for (const domain of DOMAINS) {
     for (const prefix of domain.matchPrefixes) {
-      if (
-        pathname === prefix ||
-        pathname.startsWith(prefix + '/') ||
-        pathname.startsWith(prefix)
-      ) {
+      if (matchesPrefix(pathname, prefix)) {
         if (prefix.length > bestLen) {
           bestLen = prefix.length
           best    = domain
@@ -1028,9 +1007,7 @@ export function getDomainItems(domain: Domain): DomainNavItem[] {
 
 /** Returns true if any prefix of the domain matches the pathname. */
 export function isDomainActive(domain: Domain, pathname: string): boolean {
-  return domain.matchPrefixes.some(
-    p => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p),
-  )
+  return domain.matchPrefixes.some(p => matchesPrefix(pathname, p))
 }
 
 // ── Role-aware visibility (menu rendering only) ─────────────────────────────────
@@ -1125,12 +1102,9 @@ if (import.meta.env.DEV) {
   for (const domain of allDomains) {
     for (const group of domain.groups) {
       for (const item of group.items) {
-        const covered = domain.matchPrefixes.some(
-          prefix =>
-            item.route === prefix ||
-            item.route.startsWith(prefix + '/') ||
-            item.route.startsWith(prefix),
-        )
+        // Strip any query string — matchPrefixes are path-only.
+        const itemPath = item.route.split('?')[0]
+        const covered = domain.matchPrefixes.some(prefix => matchesPrefix(itemPath, prefix))
         if (!covered) {
           issues.push(
             `[nav] "${item.label}" (${item.route}) is in domain "${domain.label}" ` +

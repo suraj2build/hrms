@@ -2,8 +2,8 @@
  * TopNavV2 — Enterprise HRMS top navigation bar.
  *
  * Layout (left → right):
- *   [Logo + "HRMS"] [separator] [Domain tabs: Workforce · Attendance · Leave ·
- *   Payroll · Compliance · Operations · Reports · Setup]
+ *   [Logo + "HRMS"] [separator] [Domain tabs: Operations · Workforce · Attendance ·
+ *   Leave · Payroll · Compliance · Analytics · Setup]
  *   ────────────────────────────────────────────────────────────
  *   [Search ⌘K] [Tenant name] [Role badge] [Notifications] [Theme] [User ↓]
  *
