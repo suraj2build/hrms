@@ -1012,7 +1012,7 @@ async function isHolidayDate(
   dateStr: string,
 ): Promise<boolean> {
   const { count } = await supabase
-    .from('holidays')
+    .from('holiday_calendar')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
     .eq('date', dateStr)
@@ -1219,7 +1219,7 @@ export async function buildMonthSessionBatch(
 
   // ── Pre-fetch holidays for the month ─────────────────────────────────────
   const { data: holidayRows } = await supabase
-    .from('holidays')
+    .from('holiday_calendar')
     .select('date')
     .eq('tenant_id', tenantId)
     .gte('date', firstDay)

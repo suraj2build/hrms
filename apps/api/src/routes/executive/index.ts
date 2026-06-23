@@ -997,10 +997,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
       // Governance events 30d
       fastify.supabase
-        .from('governance_events')
+        .from('governance_drift_events')
         .select('id, severity', { count: 'exact' })
         .eq('tenant_id', req.tenantId)
-        .gte('created_at', `${from30}T00:00:00`)
+        .gte('detected_at', `${from30}T00:00:00`)
         .limit(200),
 
       // O5.9 — workforce_trust_scores avg + distribution
