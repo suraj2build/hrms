@@ -311,7 +311,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Leave requests last 30 days
       fastify.supabase
         .from('leave_requests')
-        .select('status, total_days')
+        .select('status, total_days:computed_days')
         .eq('tenant_id', req.tenantId)
         .gte('created_at', `${from30}T00:00:00`)
         .lte('created_at', `${to}T23:59:59`),
@@ -1260,7 +1260,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Leave approvals for period
       fastify.supabase
         .from('leave_requests')
-        .select('created_at, status, total_days')
+        .select('created_at, status, total_days:computed_days')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'approved')
         .gte('created_at', `${oldestDate}T00:00:00`),

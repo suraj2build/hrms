@@ -138,7 +138,7 @@ export default async function timelineIntelligenceRoute(fastify: FastifyInstance
         // 1. attendance_exceptions
         fastify.supabase
           .from('attendance_exceptions')
-          .select('id, type, category, severity, status, payroll_impacting, created_at')
+          .select('id, type:exception_type, category:exception_category, severity, status, payroll_impacting, created_at')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .eq('date', date)
@@ -159,7 +159,7 @@ export default async function timelineIntelligenceRoute(fastify: FastifyInstance
         // 3. attendance_policy_conflict_log
         fastify.supabase
           .from('attendance_policy_conflict_log')
-          .select('id, conflict_type, policy_a, policy_b, applied_precedence, explanation')
+          .select('id, conflict_type, policy_a, policy_b, applied_precedence, explanation:conflict_explanation')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .eq('date', date)
@@ -168,7 +168,7 @@ export default async function timelineIntelligenceRoute(fastify: FastifyInstance
         // 4. attendance_retroactive_impacts
         fastify.supabase
           .from('attendance_retroactive_impacts')
-          .select('id, trigger_source, impact_types, before_status, after_status, explanation')
+          .select('id, trigger_source, impact_types, before_status, after_status, explanation:impact_explanation')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .eq('affected_date', date)

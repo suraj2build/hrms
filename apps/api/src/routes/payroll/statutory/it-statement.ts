@@ -133,7 +133,7 @@ async function buildITStatement(
     // Form 16 header: employee PAN
     fastify.supabase
       .from('employee_bank_statutory')
-      .select('pan')
+      .select('pan:pan_number')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
       .maybeSingle(),

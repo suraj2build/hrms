@@ -91,12 +91,12 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
         // 1. Raw device punches (Pipeline A — biometric)
         fastify.supabase
           .from('attendance_raw_logs')
-          .select('id, device_id, punch_time, direction, created_at')
+          .select('id, device_id, punch_time:timestamp, direction, created_at')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
-          .gte('punch_time', `${date}T00:00:00.000Z`)
-          .lte('punch_time', `${date}T23:59:59.999Z`)
-          .order('punch_time', { ascending: true }),
+          .gte('timestamp', `${date}T00:00:00.000Z`)
+          .lte('timestamp', `${date}T23:59:59.999Z`)
+          .order('timestamp', { ascending: true }),
 
         // 2. Processed punch sessions (Pipeline A — biometric)
         fastify.supabase

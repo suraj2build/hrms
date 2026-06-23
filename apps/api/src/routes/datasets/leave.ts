@@ -62,7 +62,7 @@ export default async function leaveDataset(fastify: FastifyInstance) {
     let leaveQuery = fastify.supabase
       .from('leave_requests')
       .select(`
-        id, employee_id, leave_type_id, computed_days, status, start_date,
+        id, employee_id, leave_type_id, computed_days, status, start_date:from_date,
         leave_types ( id, name ),
         employees!inner (
           id,
@@ -74,8 +74,8 @@ export default async function leaveDataset(fastify: FastifyInstance) {
       `)
       .eq('tenant_id', tid)
       .eq('status', 'approved')
-      .gte('start_date', fromFirst)
-      .lte('start_date', toLast) as any
+      .gte('from_date', fromFirst)
+      .lte('from_date', toLast) as any
 
     if (filterDeptId) leaveQuery = leaveQuery.eq('employees.job_history.department_id', filterDeptId)
 
