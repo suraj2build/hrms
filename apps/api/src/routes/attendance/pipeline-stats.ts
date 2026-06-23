@@ -58,11 +58,11 @@ export default async function attendancePipelineStatsRoute(fastify: FastifyInsta
       // attendance_punch_logs — count + min/max date for csv_upload source, last 30d
       fastify.supabase
         .from('attendance_punch_logs')
-        .select('date', { count: 'exact', head: false })
+        .select('date:punched_at', { count: 'exact', head: false })
         .eq('tenant_id', tenantId)
         .eq('source', 'csv_upload')
         .gte('created_at', since30d)
-        .order('date', { ascending: true })
+        .order('punched_at', { ascending: true })
         .limit(1),
 
       // Distinct employees — fetch deduplicated employee_ids (capped at 5000 rows)
@@ -146,11 +146,11 @@ export default async function attendancePipelineStatsRoute(fastify: FastifyInsta
       // Get the latest date in a separate query
       const { data: latestRow } = await fastify.supabase
         .from('attendance_punch_logs')
-        .select('date')
+        .select('date:punched_at')
         .eq('tenant_id', tenantId)
         .eq('source', 'csv_upload')
         .gte('created_at', since30d)
-        .order('date', { ascending: false })
+        .order('punched_at', { ascending: false })
         .limit(1)
         .maybeSingle()
 

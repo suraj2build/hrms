@@ -151,7 +151,7 @@ export async function getBalanceSummary(
 
     supabase
       .from('leave_balance_ledger')
-      .select('id, days, entry_type, transaction_type, days_delta, created_at')
+      .select('id, days:delta, entry_type:txn_type, transaction_type:txn_type, days_delta:delta, created_at')
       .eq('tenant_id',     tenantId)
       .eq('employee_id',   employeeId)
       .eq('leave_type_id', leaveTypeId),
@@ -266,7 +266,7 @@ export async function getAllBalancesForEmployee(
 
     supabase
       .from('leave_balance_ledger')
-      .select('leave_type_id, days, entry_type, transaction_type, days_delta')
+      .select('leave_type_id, days:delta, entry_type:txn_type, transaction_type:txn_type, days_delta:delta')
       .eq('tenant_id',   tenantId)
       .eq('employee_id', employeeId),
   ])

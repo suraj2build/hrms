@@ -187,7 +187,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('payroll_explainability_ledger')
-      .select('event_type, delta')
+      .select('event_type, delta:impact_amount')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('ledger_date', firstOfMonth)
