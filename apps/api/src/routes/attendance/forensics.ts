@@ -101,7 +101,7 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
         // 2. Processed punch sessions (Pipeline A — biometric)
         fastify.supabase
           .from('attendance_logs')
-          .select('id, check_in, check_out, is_complete, work_minutes, created_at')
+          .select('id, check_in, check_out, is_complete, created_at')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .or(`check_in.gte.${date}T00:00:00.000Z,check_in.lte.${date}T23:59:59.999Z`)
@@ -110,7 +110,7 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
         // 3. Computed daily record — includes computed_source to identify which pipeline wrote it
         fastify.supabase
           .from('attendance_daily')
-          .select('id, status, work_hours, late_minutes, overtime_minutes, is_payable, day_fraction, worked_on_holiday, worked_on_weekly_off, computed_source, created_at, updated_at')
+          .select('id, status, work_hours, late_minutes, overtime_minutes, is_payable, day_fraction, worked_on_holiday, worked_on_weekly_off, computed_source, created_at:date, updated_at:date')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
           .eq('date', date)
@@ -292,7 +292,11 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
 
       // ── Processed sessions (biometric pipeline) ──────────────────────────
       for (const s of (processedLogs ?? []) as any[]) {
-        const dur = s.work_minutes != null ? `${Math.round(s.work_minutes)}m` : '?'
+        // work_minutes is derived from the check-in/out pair (not a stored column)
+        const wm = (s.check_in && s.check_out)
+          ? Math.round((new Date(s.check_out).getTime() - new Date(s.check_in).getTime()) / 60000)
+          : null
+        const dur = wm != null ? `${wm}m` : '?'
         timeline.push({
           time:         s.check_in,
           type:         'session_paired',
@@ -301,7 +305,7 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
           actor:        'system',
           severity:     s.is_complete ? 'info' : 'warning',
           source_badge: 'Biometric Device',
-          meta:         { id: s.id, is_complete: s.is_complete, work_minutes: s.work_minutes, pipeline: 'biometric' },
+          meta:         { id: s.id, is_complete: s.is_complete, work_minutes: wm, pipeline: 'biometric' },
         })
       }
 

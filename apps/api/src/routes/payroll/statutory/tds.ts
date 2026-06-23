@@ -398,7 +398,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       fastify.supabase.from('employees').select('first_name, last_name, employee_code, email').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle(),
       fastify.supabase.from('tenants').select('name').eq('id', req.tenantId).maybeSingle(),
       fastify.supabase.from('tax_declarations').select('*').eq('employee_id', employeeId).eq('tenant_id', req.tenantId).eq('financial_year', fy).not('status', 'in', '(rejected,archived)').order('declaration_category', { ascending: true }),
-      fastify.supabase.from('employee_identity').select('identity_type, identity_number').eq('employee_id', employeeId).eq('tenant_id', req.tenantId).maybeSingle(),
+      fastify.supabase.from('employee_identity').select('identity_type:identity_type_id, identity_number').eq('employee_id', employeeId).eq('tenant_id', req.tenantId).maybeSingle(),
     ])
 
     const employeeName   = emp ? `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim() : 'Employee'

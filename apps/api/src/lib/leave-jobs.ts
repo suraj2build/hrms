@@ -1235,10 +1235,13 @@ export async function runLifecycleMonthlyAccrual(
   // Fetch employees
   const { data: employees } = await supabase
     .from('employees')
-    .select('id, joining_date, separation_date')
+    .select('id, joining_date, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
     .eq('tenant_id', tenantId)
     .in('status', ['active', 'inactive'])  // include recent separations for proration
 
+  for (const e of ((employees ?? []) as any[])) {
+    e.separation_date = (e.employee_separation ?? [])[0]?.last_working_date ?? null
+  }
   const empMap = new Map(((employees ?? []) as any[]).map(e => [e.id, e]))
 
   // Fetch tiers and freezes in parallel

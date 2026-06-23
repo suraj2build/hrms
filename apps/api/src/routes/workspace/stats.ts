@@ -443,7 +443,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // Latest run for current month
       fastify.supabase
         .from('payroll_runs')
-        .select('id, month, status, freeze_approved, employee_count')
+        .select('id, month, status, employee_count')
         .eq('tenant_id', tenantId)
         .eq('month', currentMonth)
         .order('created_at', { ascending: false })
@@ -512,7 +512,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     ])
 
     const run     = latestRunResult.data as any
-    const isFrozen = run?.status === 'finalized' || run?.freeze_approved === true
+    const isFrozen = run?.status === 'finalized'
 
     // Blockers = employees missing active compensation
     const blockers = (blockersResult.data ?? []).length

@@ -1788,7 +1788,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         const [{ data: buddy }, { data: tenant }] = await Promise.all([
           req.supabase
             .from('employees')
-            .select('first_name, last_name, email, job_title')
+            .select('first_name, last_name, email, job_history!job_history_employee_id_fkey(designation_name, is_current)')
             .eq('id', buddy_employee_id)
             .eq('tenant_id', tenantId)
             .maybeSingle(),
@@ -1798,6 +1798,10 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
             .eq('id', tenantId)
             .maybeSingle(),
         ])
+        if (buddy) {
+          const _jh = ((buddy as any).job_history ?? []).find((j: any) => j.is_current) ?? ((buddy as any).job_history ?? [])[0] ?? null
+          ;(buddy as any).job_title = _jh?.designation_name ?? null
+        }
 
         if (buddy?.email) {
           const { subject, html } = buddyAssignmentEmail({

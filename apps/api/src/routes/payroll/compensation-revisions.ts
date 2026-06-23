@@ -459,7 +459,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     // any large JSONB payload columns that may exist in the snapshots table.
     const { data, error, count } = await fastify.supabase
       .from('compensation_snapshots')
-      .select('id, snapshot_type, snapshot_date, gross_salary, net_salary, ctc_annual, revision_id, created_by', { count: 'exact' })
+      .select('id, snapshot_type, snapshot_date, gross_salary, net_salary, created_by', { count: 'exact' })
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .order('snapshot_date', { ascending: false })

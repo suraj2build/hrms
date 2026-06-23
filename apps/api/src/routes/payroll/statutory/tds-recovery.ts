@@ -145,7 +145,7 @@ async function buildRecoveryFromSlips(
       .order('month', { ascending: true }),
     fastify.supabase
       .from('tds_monthly_projections')
-      .select('projection_month, projected_annual_tax, tds_this_month')
+      .select('projection_month, projected_annual_tax:tax_liability, tds_this_month')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
       .order('projection_month', { ascending: false })
@@ -296,7 +296,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
       // ── Step 1: Active tax declaration ────────────────────────────────────────
       const { data: declarationRow, error: declErr } = await fastify.supabase
         .from('tax_declarations')
-        .select('id, projected_tax')
+        .select('id')
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employee_id)
         .eq('financial_year', financial_year)

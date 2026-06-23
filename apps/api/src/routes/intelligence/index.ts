@@ -1396,7 +1396,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       // 2. Fetch onboarding documents
       const { data: docRows } = await fastify.supabase
         .from('onboarding_documents')
-        .select('id, status')
+        .select('id, status:extraction_status')
         .eq('session_id', sessionId)
         .eq('tenant_id', tenantId)
         .limit(200)
@@ -1438,7 +1438,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           const inviteId = inviteRows[0].id
           const { data: submRows } = await fastify.supabase
             .from('pre_joinee_submissions')
-            .select('id, status')
+            .select('id')
             .eq('invitation_id', inviteId)
             .limit(1)
           if (submRows && submRows.length > 0) {

@@ -46,11 +46,12 @@ export default async function employeeTrustRoutes(fastify: FastifyInstance) {
     if (!tenantId) return reply.code(401).send({ error: 'UNAUTHORIZED' })
 
     const { data: session } = await fastify.supabase
-      .from('onboarding_sessions').select('id, linked_employee_id')
+      .from('onboarding_sessions').select('id')
       .eq('id', sessionId).eq('tenant_id', tenantId).maybeSingle()
     if (!session) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Session not found' })
 
-    const employeeId: string | null = (session as any).linked_employee_id ?? null
+    // onboarding_sessions has no linked_employee_id column → treat as not-yet-converted
+    const employeeId: string | null = null
 
     if (employeeId) {
       // Session has been converted to an employee — use the full employee trust
