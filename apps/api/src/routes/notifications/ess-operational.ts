@@ -83,7 +83,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // Attendance for current month
     const { data: attendance } = await fastify.supabase
       .from('attendance_daily')
-      .select('status, is_late, total_ot_hours, is_payable, work_duration')
+      .select('status, is_late:late_minutes, total_ot_hours:overtime_minutes, is_payable, work_duration:work_hours')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', from)
@@ -101,7 +101,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       if (status === 'present' || status === 'half_day') present_days++
       if (status === 'absent')                            absent_days++
       if (r.is_late)                                      late_days++
-      total_ot_hours += Number(r.total_ot_hours ?? 0)
+      total_ot_hours += Number(r.total_ot_hours ?? 0) / 60   // overtime_minutes → hours
     }
 
     const lop_days = absent_days
@@ -273,11 +273,11 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // d. Incomplete punches: no check_out in last 7 days
     const sevenDaysAgo = daysAgo(7)
     const { data: incompleteSessions } = await fastify.supabase
-      .from('attendance_daily')
-      .select('date, check_in, check_out')
+      .from('attendance_logs')
+      .select('check_in, check_out, created_at')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .gte('date', sevenDaysAgo)
+      .gte('created_at', sevenDaysAgo)
       .not('check_in', 'is', null)
       .is('check_out', null)
 
@@ -286,9 +286,9 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
         type:        'incomplete_punch',
         severity:    'warning',
         title:       'Incomplete Attendance Session',
-        message:     `You have a missing check-out on ${session.date}. This may affect your attendance record.`,
+        message:     `You have a missing check-out on ${(session.check_in ?? '').slice(0, 10)}. This may affect your attendance record.`,
         action_hint: 'Submit an attendance regularisation request for this date.',
-        date:        session.date,
+        date:        (session.check_in ?? '').slice(0, 10),
         metadata:    { check_in: session.check_in },
       })
     }
@@ -314,17 +314,17 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // Fetch latest shift balance record for this employee
     const { data: shiftBalance } = await fastify.supabase
       .from('workforce_shift_balance')
-      .select('weekend_shifts, night_shifts, total_ot_hours, team_avg_ot_hours, fairness_score, period_from, period_to')
+      .select('weekend_shifts:weekend_shifts_count, night_shifts:night_shifts_count, total_ot_hours, fairness_score:overall_balance_score, period_from:period_start, period_to:period_end')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .order('period_to', { ascending: false })
+      .order('period_end', { ascending: false })
       .limit(1)
       .maybeSingle()
 
     const weekend_shifts   = Number(shiftBalance?.weekend_shifts   ?? 0)
     const night_shifts     = Number(shiftBalance?.night_shifts     ?? 0)
     const total_ot_hours   = Number(shiftBalance?.total_ot_hours   ?? 0)
-    const team_avg_ot_hours = Number(shiftBalance?.team_avg_ot_hours ?? 0)
+    const team_avg_ot_hours = 0   // not tracked per-row on workforce_shift_balance
     const fairness_score   = Number(shiftBalance?.fairness_score   ?? 0)
     const below_team_average = total_ot_hours < team_avg_ot_hours
 
@@ -360,7 +360,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // Attendance for current month
     const { data: attendance } = await fastify.supabase
       .from('attendance_daily')
-      .select('status, is_payable, total_ot_hours, date')
+      .select('status, is_payable, total_ot_hours:overtime_minutes, date')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', from)
@@ -379,7 +379,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       const isAbsent    = r.status === 'absent'
       const isNotPayable = r.is_payable === false
       if (isAbsent && isNotPayable) current_lop_days++
-      current_ot_hours += Number(r.total_ot_hours ?? 0)
+      current_ot_hours += Number(r.total_ot_hours ?? 0) / 60   // overtime_minutes → hours
     }
 
     // Also count absent days where is_payable is not set (treat as LOP-eligible)
@@ -424,7 +424,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
 
     const { data: attendance } = await fastify.supabase
       .from('attendance_daily')
-      .select('work_duration, status, date')
+      .select('work_duration:work_hours, status, date')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', thirtyDaysAgo)
@@ -434,8 +434,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
 
     // Convert work_duration to hours
     const workHoursPerDay = rows.map((r) => {
-      const mins = durationToMinutes(r.work_duration as string | null)
-      return mins / 60
+      return Number(r.work_duration ?? 0)   // work_hours is already in hours
     })
 
     const totalDays     = workHoursPerDay.length
