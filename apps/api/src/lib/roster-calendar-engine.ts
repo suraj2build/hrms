@@ -354,7 +354,7 @@ async function _fetchHoliday(
   groupId:  string | null,
 ): Promise<{ name: string; is_optional: boolean } | null> {
   let q = supabase
-    .from('holidays')
+    .from('holiday_calendar')
     .select('name, is_optional')
     .eq('tenant_id', tenantId)
     .eq('date', dateStr)
@@ -714,7 +714,7 @@ export async function buildEmployeeRosterCalendar(
 
   // Pre-fetch all holidays for the month
   let holidayQ = supabase
-    .from('holidays')
+    .from('holiday_calendar')
     .select('date, name, is_optional')
     .eq('tenant_id', tenantId)
     .gte('date', monthStart)

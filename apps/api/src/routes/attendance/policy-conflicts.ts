@@ -72,8 +72,9 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
       .from('attendance_policy_conflict_log')
       .select(
         `
-          id, date, conflict_type, severity, payroll_impacting,
-          policy_a, policy_b, resolution, note, created_at, updated_at,
+          id, date, conflict_type, severity:conflict_severity, payroll_impacting,
+          policy_a, policy_b, resolution:resolution_source, note:conflict_explanation,
+          created_at, updated_at:created_at,
           employees!inner(id, first_name, last_name, employee_code)
         `,
         { count: 'exact' },
@@ -124,7 +125,7 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
 
     const { data, error } = await fastify.supabase
       .from('attendance_policy_conflict_log')
-      .select('conflict_type, severity, payroll_impacting')
+      .select('conflict_type, severity:conflict_severity, payroll_impacting')
       .eq('tenant_id', req.tenantId)
       .gte('date', from)
       .lte('date', to)
@@ -188,7 +189,7 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
     const { data, error } = await fastify.supabase
       .from('attendance_policy_conflict_log')
       .select(
-        'id, date, conflict_type, severity, payroll_impacting, policy_a, policy_b, resolution, note, created_at, updated_at',
+        'id, date, conflict_type, severity:conflict_severity, payroll_impacting, policy_a, policy_b, resolution:resolution_source, note:conflict_explanation, created_at, updated_at:created_at',
       )
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
