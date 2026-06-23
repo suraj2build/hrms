@@ -179,10 +179,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Exits last 30 days
       fastify.supabase
         .from('employees')
-        .select('id', { count: 'exact', head: true })
+        .select('id, employee_separation!inner(last_working_date)', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .gte('separation_date', from30)
-        .lte('separation_date', to),
+        .gte('employee_separation.last_working_date', from30)
+        .lte('employee_separation.last_working_date', to),
 
       // Attendance last 30 days (for rate)
       fastify.supabase
@@ -539,7 +539,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // All active employees with joining date and type
       fastify.supabase
         .from('employees')
-        .select('id, joining_date, separation_date, employment_type, status, gender')
+        .select('id, joining_date, employment_type, status, gender, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
         .eq('tenant_id', req.tenantId)
         .in('status', ['active', 'separated']),
 
@@ -553,10 +553,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Recent separations for trend
       fastify.supabase
         .from('employees')
-        .select('id, separation_date')
+        .select('id, employee_separation!inner(last_working_date)')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'separated')
-        .gte('separation_date', monthsAgo(monthCount + 1) + '-01'),
+        .gte('employee_separation.last_working_date', monthsAgo(monthCount + 1) + '-01'),
 
       // Recent joiners for trend
       fastify.supabase
@@ -566,9 +566,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .gte('joining_date', monthsAgo(monthCount + 1) + '-01'),
     ])
 
-    const allEmp    = empRes.data ?? []
+    const _flattenSep = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
+    const allEmp    = ((empRes.data ?? []) as any[]).map(_flattenSep)
     const active    = allEmp.filter((e: any) => e.status === 'active')
-    const separated = separationRes.data ?? []
+    const separated = ((separationRes.data ?? []) as any[]).map(_flattenSep)
     const joiners   = joinersRes.data ?? []
 
     // Build month boundaries
@@ -1275,17 +1276,16 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Exits per month
       fastify.supabase
         .from('employees')
-        .select('separation_date')
+        .select('id, employee_separation!inner(last_working_date)')
         .eq('tenant_id', req.tenantId)
-        .gte('separation_date', oldestDate)
-        .not('separation_date', 'is', null),
+        .gte('employee_separation.last_working_date', oldestDate),
     ])
 
     const attRows     = attRes.data ?? []
     const payrollRuns = payrollRunsRes.data ?? []
     const leaveRows   = leaveRes.data ?? []
     const joinerRows  = empJoinerRes.data ?? []
-    const exitRows    = empExitRes.data ?? []
+    const exitRows    = ((empExitRes.data ?? []) as any[]).map((e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null }))
 
     // Build a payroll run map by month
     const payrollByMonth = new Map<string, any>()

@@ -296,7 +296,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
       // ── Step 1: Active tax declaration ────────────────────────────────────────
       const { data: declarationRow, error: declErr } = await fastify.supabase
         .from('tax_declarations')
-        .select('id, projected_tax')
+        .select('id')
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employee_id)
         .eq('financial_year', financial_year)

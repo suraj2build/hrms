@@ -69,10 +69,12 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       // Fetch employee
       const { data: emp } = await fastify.supabase
         .from('employees')
-        .select('id, joining_date, separation_date')
+        .select('id, joining_date, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
         .eq('id', employeeId)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
+
+      if (emp) (emp as any).separation_date = ((emp as any).employee_separation ?? [])[0]?.last_working_date ?? null
 
       if (!emp) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })

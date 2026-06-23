@@ -407,7 +407,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
 
     const { data: rows, error } = await fastify.supabase
       .from('attendance_exceptions')
-      .select('status, severity, exception_type, resolution_hours')
+      .select('status, severity, exception_type, created_at, resolved_at')
       .eq('tenant_id', req.tenantId)
       .gte('created_at', range.from)
       .lte('created_at', range.to)
@@ -417,7 +417,12 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch exception data' })
     }
 
-    const allRows       = rows ?? []
+    const allRows       = ((rows ?? []) as any[]).map((r: any) => ({
+      ...r,
+      resolution_hours: (r.resolved_at && r.created_at)
+        ? (new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3_600_000
+        : null,
+    }))
     const total         = allRows.length
     const resolved      = allRows.filter((r: any) => r.status === 'resolved')
     const resolved_count = resolved.length
