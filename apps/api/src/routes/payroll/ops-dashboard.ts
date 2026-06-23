@@ -233,7 +233,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     if (type === 'all' || type === 'blockers') {
       const { data: blockers } = await fastify.supabase
         .from('payroll_run_blockers')
-        .select('id, blocker_type, employee_id, employee_code, reason, severity, status, created_at, run_id')
+        .select('id, blocker_type:rule_code, employee_id, reason, severity, status, created_at, run_id')
         .eq('tenant_id', tenantId)
         .eq('status', 'open')
         .order('created_at', { ascending: false })

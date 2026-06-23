@@ -387,13 +387,14 @@ async function resolveSessionEmployeeId(
   sessionId: string,
   tenantId:  string,
 ): Promise<string | null> {
+  // onboarding_sessions does not store a linked employee id; the link is not tracked here.
   const { data } = await supabase
     .from('onboarding_sessions')
-    .select('linked_employee_id')
+    .select('id')
     .eq('id', sessionId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
-  return (data as any)?.linked_employee_id ?? null
+  return data ? null : null
 }
 
 // ── Handler registration (call once at startup) ────────────────────────────────
@@ -491,7 +492,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     const [{ data: emp }, { data: tenant }] = await Promise.all([
       supabase
         .from('employees')
-        .select('first_name, last_name, email, reporting_manager_id')
+        .select('first_name, last_name, email, job_history!job_history_employee_id_fkey(manager_id, is_current)')
         .eq('id', employeeId)
         .eq('tenant_id', tenantId)
         .maybeSingle(),
@@ -501,6 +502,10 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
         .eq('id', tenantId)
         .maybeSingle(),
     ])
+    if (emp) {
+      const _jh = ((emp as any).job_history ?? []).find((j: any) => j.is_current) ?? ((emp as any).job_history ?? [])[0] ?? null
+      ;(emp as any).reporting_manager_id = _jh?.manager_id ?? null
+    }
 
     const companyName = (tenant as any)?.name ?? brandConfig.productName
 

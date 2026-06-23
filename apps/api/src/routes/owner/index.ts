@@ -1163,7 +1163,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       // Active profile (user) counts per tenant
       fastify.supabase
         .from('profiles')
-        .select('tenant_id, last_sign_in_at')
+        .select('tenant_id')
         .eq('is_active', true),
 
       // Latest payroll run per tenant (most recent created_at)
@@ -1182,9 +1182,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     const userCount: Record<string, number>     = {}
     const lastLogin: Record<string, string|null> = {}
-    for (const p of (profilesRes.data ?? [])) {
+    for (const p of ((profilesRes.data ?? []) as any[])) {
       userCount[p.tenant_id] = (userCount[p.tenant_id] ?? 0) + 1
-      // Track most recent login per tenant
+      // last_sign_in_at is not tracked on profiles (lives in auth.users) → null
       const existing = lastLogin[p.tenant_id]
       if (!existing || (p.last_sign_in_at && p.last_sign_in_at > existing)) {
         lastLogin[p.tenant_id] = p.last_sign_in_at ?? null

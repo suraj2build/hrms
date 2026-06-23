@@ -70,7 +70,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       .select(`
         employee_id, contribution_month,
         pf_wages, employee_contribution, voluntary_pf,
-        employer_pf, employer_eps, edli_contribution, admin_charges, is_capped,
+        employer_pf, employer_eps, edli_contribution, is_capped,
         employees(employee_code, first_name, last_name, site_id)
       `)
       .eq('tenant_id', req.tenantId)
@@ -347,7 +347,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       .from('tds_declaration_snapshots')
       .select(`
         employee_id, financial_year, snapshot_at,
-        total_declared, total_approved, total_rejected,
+        total_declared, total_approved,
         declaration_items,
         employees(employee_code, first_name, last_name)
       `)
@@ -400,7 +400,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     const [epfResult, esiResult, ptaxResult] = await Promise.all([
       fastify.supabase
         .from('epf_contributions')
-        .select('employee_contribution, employer_pf, employer_eps, edli_contribution, admin_charges, voluntary_pf')
+        .select('employee_contribution, employer_pf, employer_eps, edli_contribution, voluntary_pf')
         .eq('tenant_id', req.tenantId)
         .eq('contribution_month', month),
 

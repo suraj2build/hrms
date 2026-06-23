@@ -192,7 +192,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // a. Workforce optimization hints: shift_overload / ot_concentration
     const { data: hints } = await fastify.supabase
       .from('workforce_optimization_hints')
-      .select('hint_type, details, created_at')
+      .select('hint_type, details:metadata, created_at')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])

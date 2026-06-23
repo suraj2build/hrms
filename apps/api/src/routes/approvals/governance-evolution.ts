@@ -255,7 +255,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .from('approval_delegations')
       .select(`
         id, delegator_id, delegate_id, entity_types, valid_from, valid_until,
-        reason, is_active, revoked_at, created_at
+        reason, is_active, created_at
       `)
       .eq('tenant_id', req.tenantId)
       .eq('is_active', parsed.data.is_active === 'true')

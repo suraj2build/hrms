@@ -81,16 +81,16 @@ export class DuplicateDetectorService {
   }): Promise<DuplicateDetectionResult | null> {
     const normalized = params.phone.replace(/[\s\-\+]/g, '')
     const { data, error } = await supabase
-      .from('employee_personal_info')
-      .select('employee_id, mobile')
+      .from('employees')
+      .select('id, phone')
       .eq('tenant_id', params.tenant_id)
-      .neq('employee_id', params.employee_id)
-      .eq('mobile', params.phone)
+      .neq('id', params.employee_id)
+      .eq('phone', params.phone)
 
     if (error || !data || data.length === 0) return null
 
     return this.buildResult('phone', params.employee_id, 'employee', params.org_id,
-      (data as any[]).map(r => r.employee_id as string),
+      (data as any[]).map(r => r.id as string),
       hash(normalized), 'warning')
   }
 

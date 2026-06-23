@@ -232,7 +232,7 @@ export class TrustIntelligenceService {
 
     const { data: docs } = await supabase
       .from('onboarding_documents')
-      .select('id, document_type, extraction_status, created_at')
+      .select('id, document_type, extraction_status, created_at:uploaded_at')
       .eq('session_id', draft.session_id)
       .eq('tenant_id', input.tenant_id)
 

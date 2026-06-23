@@ -303,11 +303,11 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
     const [empResult, siteResult] = await Promise.all([
       fastify.supabase
         .from('employees')
-        .select('id, display_name, employee_no')
+        .select('id, first_name, last_name, employee_no:employee_code')
         .eq('tenant_id', req.tenantId)
         .eq('rotation_policy_id', pid)
-        .eq('is_active', true)
-        .order('display_name'),
+        .eq('status', 'active')
+        .order('last_name'),
       fastify.supabase
         .from('sites')
         .select('id, name, code')
@@ -320,7 +320,11 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       data: {
         employee_count: empResult.data?.length ?? 0,
         site_count:     siteResult.data?.length ?? 0,
-        employees:      empResult.data  ?? [],
+        employees:      (empResult.data ?? []).map((e: any) => ({
+          id:           e.id,
+          employee_no:  e.employee_no,
+          display_name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
+        })),
         sites:          siteResult.data ?? [],
       },
     })
