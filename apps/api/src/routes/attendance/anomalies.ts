@@ -133,32 +133,34 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     const { data: empDeptRows } = affectedEmpIds.length > 0
       ? await fastify.supabase
           .from('employees')
-          .select('id, department_id, departments(id, name)')
+          .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
           .eq('tenant_id', req.tenantId)
           .in('id', affectedEmpIds)
       : { data: [] }
 
-    // Build employee → dept lookup
+    // Build employee → dept lookup (department lives on job_history)
     const empDeptMap: Record<string, { department_id: string; department_name: string }> = {}
     for (const e of (empDeptRows ?? []) as any[]) {
+      const jh = (e.job_history ?? []).find((j: any) => j.is_current) ?? (e.job_history ?? [])[0] ?? null
       empDeptMap[e.id] = {
-        department_id:   e.department_id ?? '__none__',
-        department_name: e.departments?.name ?? 'Unassigned',
+        department_id:   jh?.department_id ?? '__none__',
+        department_name: jh?.department_name ?? 'Unassigned',
       }
     }
 
     // ── Fetch active employee counts per department (for rate calculation) ────────
     const { data: empCounts } = await fastify.supabase
       .from('employees')
-      .select('department_id, departments(id, name)')
+      .select('job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
 
     // Build dept employee count map
     const deptEmpCount: Record<string, { name: string; count: number }> = {}
     for (const emp of (empCounts ?? []) as any[]) {
-      const deptId   = emp.department_id ?? '__none__'
-      const deptName = emp.departments?.name ?? 'Unassigned'
+      const jh = (emp.job_history ?? []).find((j: any) => j.is_current) ?? (emp.job_history ?? [])[0] ?? null
+      const deptId   = jh?.department_id ?? '__none__'
+      const deptName = jh?.department_name ?? 'Unassigned'
       if (!deptEmpCount[deptId]) deptEmpCount[deptId] = { name: deptName, count: 0 }
       deptEmpCount[deptId].count++
     }

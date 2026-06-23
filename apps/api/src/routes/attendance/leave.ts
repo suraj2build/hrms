@@ -1131,12 +1131,13 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
     const { data: me } = await fastify.supabase
       .from('employees')
-      .select('id, department_id, departments(name)')
+      .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
       .eq('id', myEmpId)
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    const myDeptId = (me as any)?.department_id as string | null
+    const _meJh = ((me as any)?.job_history ?? []).find((j: any) => j.is_current) ?? ((me as any)?.job_history ?? [])[0] ?? null
+    const myDeptId = (_meJh?.department_id ?? null) as string | null
 
     // Team = active employees in the same department (incl. self). No department → self only.
     let memberQuery = fastify.supabase

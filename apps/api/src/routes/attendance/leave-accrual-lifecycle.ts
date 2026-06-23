@@ -555,11 +555,15 @@ async function resolveLifecyclePolicyForEmployee(
   // Fetch employee's department + work_location to support scope resolution
   const { data: emp } = await supabase
     .from('employees')
-    .select('department_id, work_location_id')
+    .select('work_location_id, job_history!job_history_employee_id_fkey(department_id, is_current)')
     .eq('id', employeeId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
+  if (emp) {
+    const jh = ((emp as any).job_history ?? []).find((j: any) => j.is_current) ?? ((emp as any).job_history ?? [])[0] ?? null
+    ;(emp as any).department_id = jh?.department_id ?? null
+  }
   const empData = emp as { department_id: string | null; work_location_id: string | null } | null
 
   // Build scope candidates in priority order

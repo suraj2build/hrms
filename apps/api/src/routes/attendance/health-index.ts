@@ -453,14 +453,15 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
 
       const { data: empDepts } = await fastify.supabase
         .from('employees')
-        .select('id, department_id')
+        .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
         .eq('tenant_id', req.tenantId)
         .in('id', empIds)
 
       const deptScoreMap: Map<string, number[]> = new Map()
       const empDeptLookup: Map<string, string> = new Map()
       for (const e of (empDepts ?? []) as any[]) {
-        if (e.department_id) empDeptLookup.set(e.id, e.department_id)
+        const jh = (e.job_history ?? []).find((j: any) => j.is_current) ?? (e.job_history ?? [])[0] ?? null
+        if (jh?.department_id) empDeptLookup.set(e.id, jh.department_id)
       }
       for (const s of (empScores ?? []) as any[]) {
         const deptId = empDeptLookup.get(s.scope_id)
