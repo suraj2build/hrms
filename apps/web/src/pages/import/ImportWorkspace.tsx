@@ -92,6 +92,7 @@ type MasterType =
   | 'asset_categories'
   | 'holiday_groups'
   | 'important_date_types'
+  | 'rotation_policies'
   // Payroll masters
   | 'salary_structures'
   // Enterprise onboarding imports
@@ -563,6 +564,15 @@ const MASTER_CONFIGS: MasterConfig[] = [
     requiredFields: ['code', 'name'],
     optionalFields: ['description', 'is_active'],
     group: 'reference',
+  },
+  {
+    type: 'rotation_policies',
+    label: 'Rotation Policies',
+    description: 'Condition→shift rotation rules (one row per condition; group by policy name)',
+    icon: CalendarDays,
+    requiredFields: ['policy_name', 'condition_type', 'shift_code'],
+    optionalFields: ['description', 'is_active', 'sort_order'],
+    group: 'enterprise',
   },
   {
     type: 'salary_structures',

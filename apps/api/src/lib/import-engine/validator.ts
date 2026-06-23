@@ -550,6 +550,77 @@ function validateShiftAssignment(
   return { rowNumber, originalData: raw, normalizedData: norm, errors, warnings, isValid: errors.length === 0, isDuplicate }
 }
 
+// ── Rotation Policy validator (grouped multi-row: 1 row per condition rule) ────
+
+const ROTATION_CONDITIONS = ['weekday_working', 'saturday_working', 'sunday_working', 'half_day', 'holiday_working']
+
+function validateRotationPolicy(
+  rowNumber: number,
+  raw: Record<string, string>,
+  batchKeys: Set<string>,
+): ValidatedRow {
+  const errors: RowError[]   = []
+  const warnings: RowError[] = []
+  const norm: Record<string, unknown> = {}
+
+  const d: Record<string, string> = {}
+  for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
+
+  // policy_name — required (group key)
+  if (!d.policy_name) {
+    errors.push({ field: 'policy_name', message: 'Policy name is required', severity: 'error' })
+  } else {
+    norm.policy_name = d.policy_name
+  }
+
+  // condition_type — required, enum
+  if (!d.condition_type) {
+    errors.push({ field: 'condition_type', message: 'Condition is required', severity: 'error' })
+  } else {
+    const ct = d.condition_type.toLowerCase().replace(/[\s-]+/g, '_')
+    if (!ROTATION_CONDITIONS.includes(ct)) {
+      errors.push({ field: 'condition_type', message: `Invalid condition "${d.condition_type}" — expected one of ${ROTATION_CONDITIONS.join(', ')}`, severity: 'error' })
+    } else {
+      norm.condition_type = ct
+    }
+  }
+
+  // shift_code — required (resolved to shift_id in the DB-checks phase)
+  if (!d.shift_code) {
+    errors.push({ field: 'shift_code', message: 'Shift code is required', severity: 'error' })
+  } else {
+    norm.shift_code = d.shift_code.toUpperCase()
+  }
+
+  // description / is_active — policy-level (optional)
+  if (d.description) norm.description = d.description
+  if (d.is_active !== undefined && d.is_active !== '') {
+    norm.is_active = /^(true|yes|1|y|active)$/i.test(d.is_active)
+  }
+
+  // sort_order — optional number
+  if (d.sort_order) {
+    const n = Number(d.sort_order)
+    if (!Number.isFinite(n) || n < 0) {
+      errors.push({ field: 'sort_order', message: `Invalid sort order "${d.sort_order}"`, severity: 'error' })
+    } else {
+      norm.sort_order = Math.trunc(n)
+    }
+  }
+
+  // Batch duplicate: one shift per (policy, condition) — UNIQUE(rotation_policy_id, condition_type)
+  const batchKey = `${(norm.policy_name as string) ?? ''}|${(norm.condition_type as string) ?? ''}`
+  if (norm.policy_name && norm.condition_type) {
+    if (batchKeys.has(batchKey)) {
+      errors.push({ field: 'condition_type', message: `Duplicate "${d.policy_name} / ${d.condition_type}" in this sheet — only one shift per condition per policy`, severity: 'error' })
+    } else {
+      batchKeys.add(batchKey)
+    }
+  }
+
+  return { rowNumber, originalData: raw, normalizedData: norm, errors, warnings, isValid: errors.length === 0, isDuplicate: false }
+}
+
 // ── Compensation Revision validator ───────────────────────────────────────────
 
 function validateCompensationRevision(
@@ -680,6 +751,8 @@ export async function validateImportRows(
       vr = validateShiftAssignment(rowNumber, rows[i], batchCodes)
     } else if (masterType === 'compensation_revisions') {
       vr = validateCompensationRevision(rowNumber, rows[i], batchCodes)
+    } else if (masterType === 'rotation_policies') {
+      vr = validateRotationPolicy(rowNumber, rows[i], batchCodes)
     } else {
       const spec = MASTER_TEMPLATES[masterType]
       if (!spec) {
@@ -1002,6 +1075,57 @@ export async function validateImportRows(
       if (existingAssign) {
         vr.isDuplicate = true // Will overwrite
       }
+    }
+  } else if (masterType === 'rotation_policies') {
+    // Resolve shift_code → shift_id
+    const shiftCodes = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.shift_code)
+          .map((r) => r.normalizedData.shift_code as string),
+      ),
+    ]
+    let shiftCodeMap = new Map<string, string>()
+    if (shiftCodes.length > 0) {
+      const { data: shiftData } = await supabase
+        .from('shifts')
+        .select('id, code')
+        .eq('tenant_id', tenantId)
+        .in('code', shiftCodes)
+      if (shiftData) {
+        shiftCodeMap = new Map((shiftData as any[]).map((r) => [String(r.code).toUpperCase(), r.id as string]))
+      }
+    }
+
+    // Which policy names already exist → mark every row of that policy as duplicate (update path)
+    const policyNames = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.policy_name)
+          .map((r) => r.normalizedData.policy_name as string),
+      ),
+    ]
+    const existingPolicies = new Set<string>()
+    if (policyNames.length > 0) {
+      const { data: polData } = await supabase
+        .from('rotation_policies')
+        .select('name')
+        .eq('tenant_id', tenantId)
+        .in('name', policyNames)
+      if (polData) for (const r of polData as any[]) existingPolicies.add(String(r.name))
+    }
+
+    for (const vr of validatedRows) {
+      if (!vr.isValid) continue
+      const shiftCode = vr.normalizedData.shift_code as string
+      const shiftId   = shiftCodeMap.get(shiftCode.toUpperCase())
+      if (!shiftId) {
+        vr.errors.push({ field: 'shift_code', message: `Shift "${shiftCode}" not found`, severity: 'error' })
+        vr.isValid = false
+        continue
+      }
+      vr.normalizedData.shift_id = shiftId
+      if (existingPolicies.has(vr.normalizedData.policy_name as string)) vr.isDuplicate = true
     }
   } else if (masterType === 'employee_bank_details') {
     // Resolve employee_code → employee_id

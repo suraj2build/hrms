@@ -959,6 +959,104 @@ async function importEmployeeBankDetails(
   return { created, updated, failed, skipped }
 }
 
+/**
+ * Rotation Policies import — grouped multi-row.
+ *
+ * Rows sharing a policy_name form one rotation_policies row plus N
+ * rotation_policy_rules (one per condition_type → shift). The sheet is the
+ * source of truth for a policy's rule set, so on update we replace the rules.
+ */
+async function importRotationPolicies(
+  supabase: SupabaseClient,
+  tenantId: string,
+  _createdBy: string,
+  validRows: ValidatedRow[],
+  _mode: ImportMode,
+): Promise<{ created: number; updated: number; failed: number; skipped: number }> {
+  let created = 0
+  let updated = 0
+  let failed  = 0
+  const skipped = 0
+
+  // Group eligible rows by policy name
+  const groups = new Map<string, ValidatedRow[]>()
+  for (const vr of validRows) {
+    const name = vr.normalizedData.policy_name as string
+    if (!name) continue
+    if (!groups.has(name)) groups.set(name, [])
+    groups.get(name)!.push(vr)
+  }
+
+  for (const [name, rows] of groups) {
+    const first = rows[0]
+    const isUpdate = rows.some((r) => r.isDuplicate)
+    try {
+      // 1. Upsert the policy header
+      let policyId: string
+      const meta = {
+        name,
+        description: (first.normalizedData.description as string) ?? null,
+        is_active:  first.normalizedData.is_active === undefined ? true : (first.normalizedData.is_active as boolean),
+      }
+
+      const { data: existing } = await supabase
+        .from('rotation_policies')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('name', name)
+        .maybeSingle()
+
+      if (existing) {
+        policyId = (existing as any).id
+        const { error: ue } = await supabase
+          .from('rotation_policies')
+          .update({ description: meta.description, is_active: meta.is_active, updated_at: new Date().toISOString() })
+          .eq('id', policyId)
+          .eq('tenant_id', tenantId)
+        if (ue) throw new Error(ue.message)
+      } else {
+        const { data: ins, error: ie } = await supabase
+          .from('rotation_policies')
+          .insert({ tenant_id: tenantId, ...meta })
+          .select('id')
+          .single()
+        if (ie) throw new Error(ie.message)
+        policyId = (ins as any).id
+      }
+
+      // 2. Replace the rule set — sheet is the source of truth for this policy
+      const { error: de } = await supabase
+        .from('rotation_policy_rules')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('rotation_policy_id', policyId)
+      if (de) throw new Error(de.message)
+
+      const ruleRows = rows.map((r, i) => ({
+        tenant_id:          tenantId,
+        rotation_policy_id: policyId,
+        condition_type:     r.normalizedData.condition_type as string,
+        shift_id:           r.normalizedData.shift_id as string,
+        sort_order:         (r.normalizedData.sort_order as number) ?? i,
+      }))
+      const { error: re } = await supabase.from('rotation_policy_rules').insert(ruleRows)
+      if (re) throw new Error(re.message)
+
+      // Count every row in the group
+      for (const _r of rows) { if (isUpdate) updated++; else created++ }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      for (const r of rows) {
+        r.errors.push({ field: '_db', message: msg, severity: 'error' })
+        r.isValid = false
+        failed++
+      }
+    }
+  }
+
+  return { created, updated, failed, skipped }
+}
+
 const CUSTOM_HANDLERS: Record<string, CustomImportHandler> = {
   employees:               importEmployees,
   employee_compensation:   importEmployeeCompensation,
@@ -966,6 +1064,7 @@ const CUSTOM_HANDLERS: Record<string, CustomImportHandler> = {
   leave_opening_balances:  importLeaveOpeningBalances,
   shift_assignments:       importShiftAssignments,
   compensation_revisions:  importCompensationRevisions,
+  rotation_policies:       importRotationPolicies,
 }
 
 // ── Batch insert helper ───────────────────────────────────────────────────────

@@ -1470,6 +1470,23 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
     ],
   },
 
+  rotation_policies: {
+    label: 'Rotation Policies',
+    columns: [
+      { key: 'policy_name',    label: 'Policy Name',    required: true,  type: 'string', example: 'Retail 6-Day', description: 'Rotation policy name. Repeat the same name across rows to add multiple condition→shift rules to one policy.' },
+      { key: 'description',    label: 'Description',    required: false, type: 'string', example: 'Store staff rotating roster', description: 'Policy-level description (taken from the first row of each policy).' },
+      { key: 'is_active',      label: 'Active',         required: false, type: 'boolean', example: 'true', description: 'Whether the policy is active (policy-level).' },
+      { key: 'condition_type', label: 'Condition',      required: true,  type: 'enum', enumValues: ['weekday_working','saturday_working','sunday_working','half_day','holiday_working'], example: 'weekday_working', description: 'Which day-condition this shift applies to. One row per condition.' },
+      { key: 'shift_code',     label: 'Shift Code',     required: true,  type: 'string', example: 'GEN', description: 'Code of an existing Shift to apply for this condition.' },
+      { key: 'sort_order',     label: 'Sort Order',     required: false, type: 'number', example: '0', description: 'Order of the rule within the policy.' },
+    ],
+    sampleRows: [
+      { policy_name: 'Retail 6-Day', description: 'Store staff rotating roster', is_active: 'true', condition_type: 'weekday_working',  shift_code: 'GEN',  sort_order: '0' },
+      { policy_name: 'Retail 6-Day', description: 'Store staff rotating roster', is_active: 'true', condition_type: 'saturday_working', shift_code: 'GEN',  sort_order: '1' },
+      { policy_name: 'Retail 6-Day', description: 'Store staff rotating roster', is_active: 'true', condition_type: 'sunday_working',   shift_code: 'HALF', sort_order: '2' },
+    ],
+  },
+
   positions: {
     label: 'Positions (Sanctioned Strength)',
     columns: [
