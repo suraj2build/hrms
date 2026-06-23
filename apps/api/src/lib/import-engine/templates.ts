@@ -1440,6 +1440,36 @@ export const MASTER_TEMPLATES: Record<string, TemplateSpec> = {
 
   // ── Workforce Planning ────────────────────────────────────────────────────────
 
+  holiday_groups: {
+    label: 'Holiday Groups',
+    columns: [
+      { key: 'code',        label: 'Code',        required: true,  type: 'string',  example: 'HG-NORTH', description: 'Unique holiday group code. Will be uppercased.' },
+      { key: 'name',        label: 'Name',        required: true,  type: 'string',  example: 'North India', description: 'Holiday group display name.' },
+      { key: 'description', label: 'Description', required: false, type: 'string',  example: 'Holiday calendar for north-region sites', description: 'Optional description.' },
+      { key: 'state_code',  label: 'State Code',  required: false, type: 'string',  example: 'DL', description: 'Optional state code this group maps to.' },
+      { key: 'is_active',   label: 'Active',      required: false, type: 'boolean', example: 'true', description: 'Whether this group is active.' },
+    ],
+    sampleRows: [
+      { code: 'HG-NORTH', name: 'North India', description: 'North-region holiday set', state_code: 'DL', is_active: 'true' },
+      { code: 'HG-SOUTH', name: 'South India', description: 'South-region holiday set', state_code: 'KA', is_active: 'true' },
+    ],
+  },
+
+  important_date_types: {
+    label: 'Important Date Types',
+    columns: [
+      { key: 'code',        label: 'Code',        required: true,  type: 'string',  example: 'IDT-BDAY', description: 'Unique date-type code. Will be uppercased.' },
+      { key: 'name',        label: 'Name',        required: true,  type: 'string',  example: 'Birthday', description: 'Display name for the date type.' },
+      { key: 'description', label: 'Description', required: false, type: 'string',  example: 'Employee date of birth', description: 'Optional description.' },
+      { key: 'is_active',   label: 'Active',      required: false, type: 'boolean', example: 'true', description: 'Whether this date type is active.' },
+    ],
+    sampleRows: [
+      { code: 'IDT-BDAY',  name: 'Birthday',          description: 'Employee date of birth', is_active: 'true' },
+      { code: 'IDT-ANNIV', name: 'Work Anniversary',  description: 'Joining anniversary',    is_active: 'true' },
+      { code: 'IDT-SPOUSE', name: 'Spouse Birthday',  description: '', is_active: 'true' },
+    ],
+  },
+
   positions: {
     label: 'Positions (Sanctioned Strength)',
     columns: [

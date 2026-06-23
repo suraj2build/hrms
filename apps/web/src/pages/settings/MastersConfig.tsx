@@ -21,7 +21,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   MapPin, Banknote, FileText, Users, ShieldAlert,
   Plus, Pencil, Trash2, Loader2, Check, X, ToggleLeft,
-  Building2, DollarSign, CreditCard,
+  Building2, DollarSign, CreditCard, CalendarDays,
 } from 'lucide-react'
 
 import { PageContainer }        from '@/components/layout/PageContainer'
@@ -51,6 +51,7 @@ type TabId =
   | 'cost-centers'
   | 'identity-types'
   | 'relationship-types'
+  | 'important-date-types'
   | 'document-types'
   | 'salary-components'
   | 'salary-structures'
@@ -135,6 +136,17 @@ const TABS: TabDef[] = [
     fields: [
       { key: 'name', label: 'Name', type: 'text', required: true },
       { key: 'code', label: 'Code', type: 'text', required: true },
+    ],
+  },
+  {
+    id:       'important-date-types',
+    label:    'Important Date Types',
+    icon:     CalendarDays,
+    endpoint: '/masters/important-date-types',
+    fields: [
+      { key: 'name',        label: 'Name',        type: 'text', required: true },
+      { key: 'code',        label: 'Code',        type: 'text', required: true },
+      { key: 'description', label: 'Description', type: 'text' },
     ],
   },
   {

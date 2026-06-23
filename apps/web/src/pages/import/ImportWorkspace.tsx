@@ -90,6 +90,8 @@ type MasterType =
   | 'employment_categories'
   | 'statutory_groups'
   | 'asset_categories'
+  | 'holiday_groups'
+  | 'important_date_types'
   // Payroll masters
   | 'salary_structures'
   // Enterprise onboarding imports
@@ -543,6 +545,24 @@ const MASTER_CONFIGS: MasterConfig[] = [
     requiredFields: ['code', 'name'],
     optionalFields: ['description', 'depreciation_method', 'useful_life_years', 'requires_return'],
     group: 'enterprise',
+  },
+  {
+    type: 'holiday_groups',
+    label: 'Holiday Groups',
+    description: 'Region / state holiday-calendar groupings',
+    icon: CalendarDays,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'state_code', 'is_active'],
+    group: 'enterprise',
+  },
+  {
+    type: 'important_date_types',
+    label: 'Important Date Types',
+    description: 'Employee milestone date types (birthday, anniversary…)',
+    icon: CalendarDays,
+    requiredFields: ['code', 'name'],
+    optionalFields: ['description', 'is_active'],
+    group: 'reference',
   },
   {
     type: 'salary_structures',

@@ -346,6 +346,31 @@ const TABLE_MAP: Record<string, TableConfig> = {
 
   // ── Workforce planning ──────────────────────────────────────────────────────
 
+  holiday_groups: {
+    table: 'holiday_groups',
+    uniqueColumn: 'code',
+    mapRow: (tenantId, norm) => ({
+      tenant_id:   tenantId,
+      code:        norm.code,
+      name:        norm.name,
+      description: norm.description ?? null,
+      state_code:  norm.state_code ?? null,
+      is_active:   norm.is_active  ?? true,
+    }),
+  },
+
+  important_date_types: {
+    table: 'important_date_types',
+    uniqueColumn: 'code',
+    mapRow: (tenantId, norm) => ({
+      tenant_id:   tenantId,
+      code:        norm.code,
+      name:        norm.name,
+      description: norm.description ?? null,
+      is_active:   norm.is_active  ?? true,
+    }),
+  },
+
   positions: {
     table: 'positions',
     uniqueColumn: 'code',
