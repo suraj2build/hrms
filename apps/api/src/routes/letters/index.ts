@@ -222,7 +222,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     let q = supabase
       .from('letter_templates')
-      .select('id,name,code,category,letter_type,requires_approval,approval_levels,is_active,created_at,updated_at')
+      .select('id,name,code,category,letter_type,variables,requires_approval,approval_levels,is_active,created_at,updated_at')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
 

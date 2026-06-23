@@ -490,7 +490,7 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
             {/* Extra/override variables */}
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Fill / Override Variables</p>
-              {selectedTemplate.variables.filter((v) => !resolvedVars[v.key] || v.key in extraVars).map(v => (
+              {(selectedTemplate.variables ?? []).filter((v) => !resolvedVars[v.key] || v.key in extraVars).map(v => (
                 <div key={v.key} className="flex items-center gap-2">
                   <Label className="text-xs w-40 text-right shrink-0">{v.label}</Label>
                   <Input
@@ -501,7 +501,7 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
                   />
                 </div>
               ))}
-              {selectedTemplate.variables.length === 0 && (
+              {(selectedTemplate.variables ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground">All variables will be auto-resolved from employee data.</p>
               )}
             </div>
