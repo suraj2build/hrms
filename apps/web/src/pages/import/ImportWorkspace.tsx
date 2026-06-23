@@ -552,8 +552,8 @@ const MASTER_CONFIGS: MasterConfig[] = [
     label: 'Holiday Groups',
     description: 'Region / state holiday-calendar groupings',
     icon: CalendarDays,
-    requiredFields: ['code', 'name'],
-    optionalFields: ['description', 'state_code', 'is_active'],
+    requiredFields: ['name'],
+    optionalFields: ['code', 'description', 'state_code', 'is_active'],
     group: 'enterprise',
   },
   {

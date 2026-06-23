@@ -312,6 +312,7 @@ function validateGenericMaster(
   // employee_bank_details keys on employee_code)
   const uniqueKey =
     masterType === 'leave_types' ? 'name' :
+    masterType === 'holiday_groups' ? 'name' :
     masterType === 'employee_bank_details' ? 'employee_code' :
     'code'
   const codeVal = (d[uniqueKey] ?? '').toUpperCase()
@@ -1266,7 +1267,7 @@ export async function validateImportRows(
     }
   } else {
     // Generic code-level DB check
-    const uniqueKey = masterType === 'leave_types' ? 'name' : 'code'
+    const uniqueKey = (masterType === 'leave_types' || masterType === 'holiday_groups') ? 'name' : 'code'
     const tableMap: Record<string, string> = {
       sites:                 'sites',
       states:                'states',
@@ -1294,6 +1295,8 @@ export async function validateImportRows(
       document_types:        'document_types',
       identity_types:        'identity_types',
       relationship_types:    'relationship_types',
+      important_date_types:  'important_date_types',
+      holiday_groups:        'holiday_groups',
     }
     const table = tableMap[masterType]
 

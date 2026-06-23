@@ -58,6 +58,22 @@ function slugifyName(input: unknown): string {
     .slice(0, 60)
 }
 
+/**
+ * Normalise a free-text code into a lowercase snake_case identifier that
+ * satisfies the ^[a-z][a-z0-9_]{0,63}$ CHECK used by reference masters such as
+ * important_date_types. Non-conforming leading characters are prefixed with 't_'.
+ */
+function toIdentifier(input: unknown): string {
+  let s = String(input ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64)
+  if (!/^[a-z]/.test(s)) s = `t_${s}`.slice(0, 64)
+  return s
+}
+
 const TABLE_MAP: Record<string, TableConfig> = {
   employees: {
     table: 'employees',
@@ -348,14 +364,15 @@ const TABLE_MAP: Record<string, TableConfig> = {
 
   holiday_groups: {
     table: 'holiday_groups',
-    uniqueColumn: 'code',
+    // holiday_groups is unique on (tenant_id, name); code is optional/non-unique.
+    uniqueColumn: 'name',
     mapRow: (tenantId, norm) => ({
       tenant_id:   tenantId,
-      code:        norm.code,
       name:        norm.name,
+      code:        norm.code        ?? null,
       description: norm.description ?? null,
-      state_code:  norm.state_code ?? null,
-      is_active:   norm.is_active  ?? true,
+      state_code:  norm.state_code  ?? null,
+      is_active:   norm.is_active   ?? true,
     }),
   },
 
@@ -364,7 +381,9 @@ const TABLE_MAP: Record<string, TableConfig> = {
     uniqueColumn: 'code',
     mapRow: (tenantId, norm) => ({
       tenant_id:   tenantId,
-      code:        norm.code,
+      // code column enforces ^[a-z][a-z0-9_]{0,63}$ — normalise so any reasonable
+      // sheet value (e.g. "Work Anniversary", "IDT-BDAY") becomes a valid identifier.
+      code:        toIdentifier(norm.code),
       name:        norm.name,
       description: norm.description ?? null,
       is_active:   norm.is_active  ?? true,
