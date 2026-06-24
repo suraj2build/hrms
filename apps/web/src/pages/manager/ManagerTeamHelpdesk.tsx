@@ -16,6 +16,7 @@ import { api }           from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { cn }            from '@/lib/utils'
@@ -105,18 +106,13 @@ export function ManagerTeamHelpdesk() {
 
       {/* Summary tiles */}
       {summary && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
-          {[
-            { label: 'Open',       val: summary.open,        cls: 'text-info' },
-            { label: 'In Progress', val: summary.in_progress, cls: 'text-warning' },
-            { label: 'Resolved',   val: summary.resolved,    cls: 'text-success' },
-            { label: 'SLA Breach', val: summary.breached,    cls: 'text-destructive' },
-          ].map(tile => (
-            <div key={tile.label} className="rounded-lg border border-border bg-card p-3">
-              <p className="text-[11px] text-muted-foreground">{tile.label}</p>
-              <p className={cn('text-2xl font-bold tabular-nums', tile.cls)}>{tile.val}</p>
-            </div>
-          ))}
+        <div className="mb-4">
+          <MetricRow cols={4}>
+            <MetricCard label="Open"        value={summary.open}        variant="info" />
+            <MetricCard label="In Progress" value={summary.in_progress} variant="warning" />
+            <MetricCard label="Resolved"    value={summary.resolved}    variant="success" />
+            <MetricCard label="SLA Breach"  value={summary.breached}    variant="destructive" />
+          </MetricRow>
         </div>
       )}
 

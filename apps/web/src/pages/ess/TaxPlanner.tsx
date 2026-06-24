@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
@@ -1054,20 +1055,11 @@ export function TaxPlanner() {
 
           {/* Summary chips */}
           {declarations.length > 0 && (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs text-muted-foreground mb-1">Total Declared</p>
-                <p className="text-base font-semibold">{inr(totalDeclared)}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs text-muted-foreground mb-1">Total Approved</p>
-                <p className="text-base font-semibold text-success">{inr(totalApproved)}</p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs text-muted-foreground mb-1">Pending Review</p>
-                <p className="text-base font-semibold">{pendingCount}</p>
-              </div>
-            </div>
+            <MetricRow cols={3}>
+              <MetricCard label="Total Declared" value={inr(totalDeclared)} compact />
+              <MetricCard label="Total Approved" value={inr(totalApproved)} variant="success" compact />
+              <MetricCard label="Pending Review" value={pendingCount} compact />
+            </MetricRow>
           )}
 
           {/* Tax Regime (read-only — set automatically when a plan is submitted) */}

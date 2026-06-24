@@ -49,5 +49,9 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+        # The @hrms/api project is large enough that tsc can exceed Node's default
+        # ~2GB heap on CI runners (OOM, exit 134). Raise the limit for typecheck.
       - run: npm run typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run test --workspace=apps/api --if-present

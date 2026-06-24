@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
@@ -63,18 +64,6 @@ interface YTDData {
   total_net_pay: number
   monthly_rows: MonthlyRow[]
   employer_rows: EmployerRow[]
-}
-
-// ── Summary card ──────────────────────────────────────────────────────────────
-
-function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-xl font-bold tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-    </div>
-  )
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -158,12 +147,12 @@ export function YTDStatement() {
       {data && (
         <div className="space-y-6">
           {/* Summary cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <SummaryCard label="Total Gross" value={inr(data.total_gross)} sub={`FY ${data.financial_year}`} />
-            <SummaryCard label="Total TDS" value={inr(data.total_tds)} sub="Income tax deducted" />
-            <SummaryCard label="Total PF (Employee)" value={inr(data.total_pf_employee)} sub="Your contribution" />
-            <SummaryCard label="Total Net Pay" value={inr(data.total_net_pay)} sub="Take-home" />
-          </div>
+          <MetricRow cols={4}>
+            <MetricCard label="Total Gross" value={inr(data.total_gross)} variant="info" subtitle={`FY ${data.financial_year}`} />
+            <MetricCard label="Total TDS" value={inr(data.total_tds)} variant="destructive" subtitle="Income tax deducted" />
+            <MetricCard label="Total PF (Employee)" value={inr(data.total_pf_employee)} variant="warning" subtitle="Your contribution" />
+            <MetricCard label="Total Net Pay" value={inr(data.total_net_pay)} variant="success" subtitle="Take-home" />
+          </MetricRow>
 
           {/* Monthly breakdown table */}
           <SectionCard title="Monthly Earnings & Deductions">

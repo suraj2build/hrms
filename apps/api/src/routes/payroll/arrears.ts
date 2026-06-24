@@ -209,17 +209,20 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     const to   = `${(batch as any).to_period}-31`
     const { data: revs, error: revErr } = await fastify.supabase
       .from('compensation_revisions')
-      .select('employee_id, before_ctc_monthly, new_ctc_monthly, effective_date, retro_months')
+      .select('employee_id, before_ctc_monthly, new_ctc_annual, effective_date, retro_months')
       .eq('tenant_id', req.tenantId)
       .gte('effective_date', from)
       .lte('effective_date', to)
     if (revErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: revErr.message })
 
+    // compensation_revisions stores the new CTC annually (new_ctc_annual); the
+    // monthly figure is derived as /12. before_ctc_monthly is stored directly.
     const records = (revs ?? [])
-      .filter((r: any) => (r.new_ctc_monthly ?? 0) !== (r.before_ctc_monthly ?? 0))
       .map((r: any) => {
-        const months = Math.max(1, r.retro_months ?? 1)
-        const monthlyDelta = (r.new_ctc_monthly ?? 0) - (r.before_ctc_monthly ?? 0)
+        const beforeMonthly = r.before_ctc_monthly ?? 0
+        const newMonthly    = Math.round(((r.new_ctc_annual ?? 0) / 12) * 100) / 100
+        const months        = Math.max(1, r.retro_months ?? 1)
+        const monthlyDelta  = newMonthly - beforeMonthly
         return {
           batch_id:          id,
           tenant_id:         req.tenantId,
@@ -227,13 +230,14 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
           period_month:      (batch as any).from_period,
           component_code:    'CTC',
           component_name:    'Monthly CTC',
-          old_amount:        r.before_ctc_monthly ?? 0,
-          new_amount:        r.new_ctc_monthly ?? 0,
+          old_amount:        beforeMonthly,
+          new_amount:        newMonthly,
           arrear_amount:     Math.round(monthlyDelta * months * 100) / 100,
           is_taxable:        true,
           calculation_notes: `Auto: retroactive comp revision × ${months} month(s)`,
         }
       })
+      .filter((rec: any) => rec.new_amount !== rec.old_amount)
 
     // Recompute: clear prior records for the batch, insert fresh
     await fastify.supabase.from('arrear_records').delete().eq('tenant_id', req.tenantId).eq('batch_id', id)
