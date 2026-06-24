@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api } from '@/lib/api/client'
 import { useOpenOnParam } from '@/lib/runbooks/useOpenOnParam'
 
@@ -180,21 +181,16 @@ export function EssReimbursements() {
       />
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="border border-border rounded-lg p-4 bg-muted/20">
-          <p className="text-xs text-muted-foreground mb-1">My Claims</p>
-          <p className="text-2xl font-bold text-foreground">{stats.total}</p>
-        </div>
-        <div className="border border-border rounded-lg p-4 bg-muted/20">
-          <p className="text-xs text-muted-foreground mb-1">Pending Approval</p>
-          <p className="text-2xl font-bold text-warning">{stats.pending}</p>
-        </div>
-        <div className="border border-border rounded-lg p-4 bg-muted/20">
-          <p className="text-xs text-muted-foreground mb-1">Total Approved</p>
-          <p className="text-2xl font-bold text-success">
-            ₹{stats.approvedSum.toLocaleString('en-IN')}
-          </p>
-        </div>
+      <div className="mb-6">
+        <MetricRow cols={3}>
+          <MetricCard label="My Claims" value={stats.total} variant="info" />
+          <MetricCard label="Pending Approval" value={stats.pending} variant="warning" />
+          <MetricCard
+            label="Total Approved"
+            value={`₹${stats.approvedSum.toLocaleString('en-IN')}`}
+            variant="success"
+          />
+        </MetricRow>
       </div>
 
       {/* Claims List */}
