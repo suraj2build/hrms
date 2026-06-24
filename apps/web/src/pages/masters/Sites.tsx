@@ -25,6 +25,7 @@ import {
   Layers, AlertTriangle, CheckCircle2, Users,
 } from 'lucide-react'
 import { PageContainer }    from '@/components/layout/PageContainer'
+import { PageHeader }       from '@/components/layout/PageHeader'
 import { Button }           from '@/components/ui/button'
 import { Input }            from '@/components/ui/input'
 import { Badge }            from '@/components/ui/badge'
@@ -642,34 +643,25 @@ export function Sites() {
   return (
     <PageContainer>
       {/* ── A — Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-md bg-primary/10 p-2 shrink-0">
-            <Globe className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold text-foreground tracking-tight">Sites</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {isLoading
-                ? 'Loading…'
-                : `${stats.total} site${stats.total !== 1 ? 's' : ''} across ${stats.clusters} cluster${stats.clusters !== 1 ? 's' : ''}`}
-              {stats.unmapped > 0 && !isLoading && (
-                <span className="ml-2 text-warning font-medium">· {stats.unmapped} unmapped</span>
-              )}
-            </p>
-          </div>
-        </div>
-        {isAdmin && (
-          <div className="flex items-center gap-2 shrink-0">
+      <PageHeader
+        className="mb-4"
+        title="Sites"
+        subtitle={
+          isLoading
+            ? 'Loading…'
+            : `${stats.total} site${stats.total !== 1 ? 's' : ''} across ${stats.clusters} cluster${stats.clusters !== 1 ? 's' : ''}${stats.unmapped > 0 ? ` · ${stats.unmapped} unmapped` : ''}`
+        }
+        actions={isAdmin ? (
+          <>
             <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate('/masters/work-locations')}>
               <MapPin className="h-3.5 w-3.5 mr-1.5" />Manage Locations
             </Button>
             <Button size="sm" className="h-8 text-xs" onClick={openCreate}>
               <Plus className="h-3.5 w-3.5 mr-1.5" />Add Site
             </Button>
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
 
       {/* ── B — Governance summary strip ───────────────────────────────────── */}
       {!isLoading && sites.length > 0 && (

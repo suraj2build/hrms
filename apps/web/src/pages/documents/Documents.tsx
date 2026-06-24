@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { formatDate } from '@/lib/utils'
 import type { Document, DocType } from '@/types'
 
@@ -143,16 +144,16 @@ export function Documents() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Document Vault</h1>
-          <p className="text-sm text-muted-foreground">{data?.data?.length ?? 0} documents stored</p>
-        </div>
-        <Button size="sm" onClick={() => setUploadDialog(true)}>
-          <Upload className="h-4 w-4 mr-2" />
-          Upload Document
-        </Button>
-      </div>
+      <PageHeader
+        title="Document Vault"
+        subtitle={`${data?.data?.length ?? 0} documents stored`}
+        actions={
+          <Button size="sm" onClick={() => setUploadDialog(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Document
+          </Button>
+        }
+      />
 
       {/* Expiry alert */}
       {expiringDocs.length > 0 && (
