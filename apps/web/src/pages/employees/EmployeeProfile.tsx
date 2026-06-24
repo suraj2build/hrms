@@ -1165,6 +1165,7 @@ export function EmployeeProfile() {
         documents:    { section: 'documents',    subTab: 'documents'    },
         separation:   { section: 'employment',   subTab: 'separation'   },
         payroll:      { section: 'compensation', subTab: 'compensation' },
+        account:      { section: 'core',         subTab: 'account'      },
       }
       const mapped = TAB_MAP[tabParam]
       if (mapped) {

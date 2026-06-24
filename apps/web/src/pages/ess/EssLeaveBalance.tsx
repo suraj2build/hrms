@@ -435,7 +435,23 @@ export function EssLeaveBalance() {
 
   const { data: leaveData, isLoading: leaveLoading, isError: leaveError } = useQuery<{ data: LeaveApp[] }>({
     queryKey:  ['ess-leave-history', employeeId],
-    queryFn:   () => api.get('/attendance/leave/my'),
+    // Canonical source is `leave_requests` (served by /leave/my-requests), the
+    // same table the Apply form writes to and MyLeaveRequests reads — NOT the
+    // legacy `leave_applications` behind /attendance/leave/my, where submitted
+    // leave never appeared. Normalize the row shape to this page's expectations:
+    //   • status: leave_requests is UPPERCASE → lowercase (filters/badges here
+    //     compare lowercase)
+    //   • working_days: leave_requests stores the roster-aware duration as
+    //     computed_days/calculated_days → map it so leaveDays() stays accurate
+    queryFn:   async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: Array<Record<string, unknown>> }
+      const rows: LeaveApp[] = (res.data ?? []).map((r) => ({
+        ...(r as unknown as LeaveApp),
+        status:       String(r.status ?? '').toLowerCase(),
+        working_days: (r.working_days ?? r.computed_days ?? r.calculated_days ?? null) as number | null,
+      }))
+      return { data: rows }
+    },
     enabled:   !!employeeId,
     staleTime: 30_000,
   })
