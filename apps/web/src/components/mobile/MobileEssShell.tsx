@@ -1,0 +1,116 @@
+import { Suspense, useState } from 'react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Bell, User2, Users } from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
+import { useAuthStore } from '@/stores/authStore'
+import { cn } from '@/lib/utils'
+import { HEADER_GRADIENT } from './glossy'
+import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
+import { MobileHome } from './screens/MobileHome'
+import { MobileAttendance } from './screens/MobileAttendance'
+import { MobileLeave } from './screens/MobileLeave'
+import { MobilePayslip } from './screens/MobilePayslip'
+import { MobileApprovals } from './screens/MobileApprovals'
+import { MobileMore } from './screens/MobileMore'
+import { MobileTeam } from './screens/MobileTeam'
+
+type Persona = 'me' | 'team'
+
+function Loader() {
+  return (
+    <div className="flex h-[50vh] items-center justify-center">
+      <div className="h-7 w-7 rounded-full border-2 border-[#2E6FE6] border-t-transparent animate-spin" />
+    </div>
+  )
+}
+
+/**
+ * MobileEssShell — the dedicated phone experience for ESS. Rendered ONLY below
+ * the lg breakpoint (see EssShell). Desktop never touches this. Provides a
+ * glossy header, an optional Employee/Team persona toggle (managers only), a
+ * route-driven content area and a bottom tab bar.
+ */
+export function MobileEssShell() {
+  const { profile } = useAuthStore()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const [persona, setPersona] = useState<Persona>('me')
+
+  const isManager = profile?.role === 'manager' || profile?.role === 'super_admin'
+  const base = pathname.startsWith('/manager/self') ? '/manager/self' : '/ess'
+  const firstName = (profile?.full_name ?? 'there').split(' ')[0]
+
+  const onFab = () => navigate(`${base}/attendance`)
+
+  return (
+    <div className="flex min-h-screen flex-col bg-[#EEF3FF]">
+      {/* ── Glossy header ── */}
+      <header className="relative px-5 pb-5 pt-9 text-white" style={{ background: HEADER_GRADIENT }}>
+        <div className="pointer-events-none absolute inset-0 opacity-40"
+          style={{ background: 'radial-gradient(120% 80% at 80% -10%, rgba(255,255,255,0.45), transparent 60%)' }} />
+        <div className="relative flex items-center justify-between">
+          <span className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white shadow-sm">
+              <LogoMark size={22} />
+            </span>
+            <span className="leading-tight">
+              <span className="block text-[11px] text-white/80">Good day,</span>
+              <span className="block text-base font-extrabold">Hi, {firstName} 👋</span>
+            </span>
+          </span>
+          <button aria-label="Notifications" onClick={() => navigate(`${base}/approvals`)} className="relative">
+            <Bell className="h-5 w-5 text-white/90" />
+            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#2E6FE6]" />
+          </button>
+        </div>
+
+        {/* Persona toggle — managers only */}
+        {isManager && (
+          <div role="tablist" aria-label="Employee or Team view"
+            className="relative mt-4 inline-flex rounded-xl bg-white/15 p-0.5 backdrop-blur">
+            {([['me', 'Me', User2], ['team', 'Team', Users]] as const).map(([id, label, Icon]) => {
+              const active = persona === id
+              return (
+                <button key={id} role="tab" aria-selected={active} onClick={() => setPersona(id)}
+                  className={cn('inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors',
+                    active ? 'bg-white text-[#1A4D8F] shadow-sm' : 'text-white/80')}>
+                  <Icon className="h-3.5 w-3.5" />{label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </header>
+
+      {/* ── Content ── */}
+      <main className="flex-1 px-4 pb-28 pt-4">
+        {persona === 'team' && isManager
+          ? <MobileTeam />
+          : (
+            <Suspense fallback={<Loader />}>
+              <MobileRouter base={base} />
+            </Suspense>
+          )}
+      </main>
+
+      {/* ── Bottom nav (employee persona) ── */}
+      {persona === 'me' && <MobileBottomNav tabs={employeeTabs(base)} onFab={onFab} />}
+    </div>
+  )
+}
+
+/** Route → mobile screen. Unhandled ESS routes fall back to the existing page. */
+function MobileRouter({ base }: { base: string }) {
+  const { pathname } = useLocation()
+  const sub = pathname.replace(base, '') || '/dashboard'
+
+  if (sub === '' || sub === '/' || sub.startsWith('/dashboard')) return <MobileHome base={base} />
+  if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
+  if (sub.startsWith('/leave')) return <MobileLeave base={base} />
+  if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />
+  if (sub.startsWith('/approvals')) return <MobileApprovals base={base} />
+  if (sub.startsWith('/more')) return <MobileMore base={base} />
+
+  // Any other ESS route → render the existing (desktop) page in the mobile container.
+  return <Outlet />
+}

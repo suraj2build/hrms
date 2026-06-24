@@ -14,6 +14,8 @@ import { Topbar } from './Topbar'
 import { useAuthStore } from '@/stores/authStore'
 import { EventToast }    from '@/components/notifications'
 import { api }           from '@/lib/api/client'
+import { useIsMobile }   from '@/hooks/useIsMobile'
+import { MobileEssShell } from '@/components/mobile/MobileEssShell'
 
 interface Anomaly {
   date: string
@@ -106,12 +108,16 @@ function AnomalyLoginAlert() {
 
 export function EssShell() {
   const { profile, isBootstrapping } = useAuthStore()
+  const isMobile = useIsMobile()
 
   // Gate only on the first bootstrap — not on silent token refreshes (TOKEN_REFRESHED).
   if (isBootstrapping) return <LoadingScreen />
 
   // Not authenticated → login
   if (!profile) return <Navigate to="/login" replace />
+
+  // Mobile-only: dedicated phone ESS experience. Desktop is untouched below.
+  if (isMobile) return <MobileEssShell />
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
