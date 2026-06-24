@@ -125,7 +125,6 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
         description:    parsed.data.description,
         status:         'draft',
         claim_date:     new Date().toISOString().slice(0, 10),
-        created_by:     req.userId,
       })
       .select('*, reimbursement_categories(id, name, code, category_type)')
       .single()
@@ -488,7 +487,6 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
         tenant_id: req.tenantId,
         status: 'draft',
         claim_date: new Date().toISOString().slice(0, 10),
-        created_by: req.userId,
       })
       .select()
       .single()

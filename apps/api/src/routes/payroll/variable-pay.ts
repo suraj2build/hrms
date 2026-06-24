@@ -283,7 +283,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId),
       fastify.supabase
         .from('variable_payouts')
-        .update({ status: 'approved', updated_at: now })
+        .update({ status: 'approved' })
         .eq('batch_id', id)
         .eq('tenant_id', req.tenantId),
     ])
@@ -307,7 +307,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId),
       fastify.supabase
         .from('variable_payouts')
-        .update({ status: 'cancelled', updated_at: now })
+        .update({ status: 'cancelled' })
         .eq('batch_id', id)
         .eq('tenant_id', req.tenantId),
     ])

@@ -463,7 +463,6 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           .from('onboarding_documents')
           .update({
             extracted_text:     parseResult.text || null,
-            document_summary:   extractionResult.document_summary || null,
             extraction_version: extractionResult.extraction_version,
           })
           .eq('id', doc.id)

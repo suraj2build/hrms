@@ -1420,7 +1420,7 @@ export async function runImport(
       .update({
         status:      'failed',
         duration_ms: Date.now() - startedAt,
-        error_message: err instanceof Error ? err.message : String(err),
+        error_summary: err instanceof Error ? err.message : String(err),
       })
       .eq('id', jobId)
     throw err

@@ -337,7 +337,6 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .from('approval_delegations')
       .update({
         is_active:  false,
-        revoked_at: new Date().toISOString(),
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
@@ -411,7 +410,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
         valid_until:   parsed.data.valid_until,
         max_uses:      parsed.data.max_uses ?? null,
         is_active:     true,
-        use_count:     0,
+        used_count:    0,
       })
       .select('*')
       .single()
@@ -534,16 +533,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     await fastify.supabase
       .from('governance_simulations')
       .insert({
-        tenant_id:        req.tenantId,
-        entity_type,
-        payroll_amount:   payroll_amount ?? null,
-        department_id:    department_id ?? null,
-        employee_id:      employee_id ?? null,
-        matrix_id:        selectedMatrix.id,
-        matrix_name:      selectedMatrix.name,
-        approval_path,
-        total_sla_hours,
-        simulated_by:     req.userId,
+        tenant_id:    req.tenantId,
+        scenario:     { entity_type, payroll_amount: payroll_amount ?? null, department_id: department_id ?? null, employee_id: employee_id ?? null },
+        matrix_used:  { id: selectedMatrix.id, name: selectedMatrix.name },
+        result:       { approval_path, total_sla_hours },
+        simulated_by: req.userId,
       })
       // Non-blocking — simulation result is still returned on insert failure
       .then(({ error: simErr }: { error: any }) => {
@@ -620,7 +614,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
         rollback_reason: parsed.data.rollback_reason,
         before_state:    parsed.data.before_state,
         after_state:     parsed.data.after_state,
-        initiated_by:    req.userId,
+        rolled_back_by:  req.userId,
         is_completed:    false,
       })
       .select('*')

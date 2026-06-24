@@ -298,7 +298,6 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
       .from('attendance_retroactive_impacts')
       .update({
         propagation_status,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)

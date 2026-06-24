@@ -108,9 +108,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
         ...parsed.data,
         tenant_id:           req.tenantId,
         employee_id:         employeeId,
-        status:              'pending',
         verification_status: 'pending',
-        created_by:          req.userId,
         created_at:          new Date().toISOString(),
         updated_at:          new Date().toISOString(),
       })

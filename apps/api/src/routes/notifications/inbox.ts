@@ -247,7 +247,6 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .insert({
         ...parsed.data,
         tenant_id: req.tenantId,
-        created_by: req.userId,
       })
       .select()
       .single()

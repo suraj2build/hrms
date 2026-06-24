@@ -137,7 +137,7 @@ export async function updateComponent(
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
   const { data, error } = await supabase
     .from('salary_components')
-    .update({ ...parsed.data, updated_at: new Date().toISOString() })
+    .update({ ...parsed.data })
     .eq('id', id)
     .eq('tenant_id', tenantId)
     .select()
@@ -179,7 +179,7 @@ export async function deleteComponent(
   if ((count ?? 0) > 0) {
     const { error } = await supabase
       .from('salary_components')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .update({ is_active: false })
       .eq('id', id)
       .eq('tenant_id', tenantId)
     if (error) return dbFail(error)

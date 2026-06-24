@@ -95,7 +95,7 @@ async function createPreJoineeFromApp(
       joining_date:          opts.joining_date,
       source_application_id: applicationId,
       source_candidate_id:   cand?.id ?? null,
-      invited_by:            opts.invited_by ?? null,
+      created_by:            opts.invited_by ?? null,
       token,
       expires_at:            new Date(Date.now() + 30 * 86400000).toISOString(),
     })

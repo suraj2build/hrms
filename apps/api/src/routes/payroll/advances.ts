@@ -241,7 +241,6 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
         status: 'disbursed',
         disbursed_date: parsed.data.disbursed_date,
         disbursed_amount: parsed.data.disbursed_amount,
-        disbursed_by: req.userId,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -410,8 +409,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .insert({
         ...parsed.data,
         tenant_id: req.tenantId,
-        recovered_by: req.userId,
-        recovered_at: new Date().toISOString(),
+        created_by: req.userId,
       })
       .select()
       .single()
@@ -422,7 +420,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     if (parsed.data.schedule_id) {
       await fastify.supabase
         .from('advance_recovery_schedules')
-        .update({ status: 'recovered', updated_at: new Date().toISOString() })
+        .update({ status: 'recovered' })
         .eq('id', parsed.data.schedule_id)
         .eq('tenant_id', req.tenantId)
     }

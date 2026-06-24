@@ -1058,7 +1058,6 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         effective_from:   invitation.joining_date,
         is_current:       true,
         created_at:       new Date().toISOString(),
-        updated_at:       new Date().toISOString(),
       })
 
     if (jobErr) {

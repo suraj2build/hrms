@@ -759,7 +759,6 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         .update({
           resolved:    true,
           resolved_at: now,
-          resolved_by: req.userId,
         })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
