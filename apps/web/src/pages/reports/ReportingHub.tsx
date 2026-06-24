@@ -24,6 +24,7 @@ import { useAttendanceDataset }  from '@/lib/datasets/attendance'
 import { usePayrollCostDataset } from '@/lib/datasets/payroll-cost'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,18 +109,6 @@ const SECTIONS: ReportSection[] = [
   },
 ]
 
-// ── Quick-glance stat tile ────────────────────────────────────────────────────
-
-function StatTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="surface-premium lift-hover min-w-0 px-3.5 py-2.5">
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</p>
-      <p className="text-lg font-bold text-foreground leading-tight mt-0.5 tabular-nums">{value}</p>
-      {sub && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{sub}</p>}
-    </div>
-  )
-}
-
 // ── ReportingHub ──────────────────────────────────────────────────────────────
 
 export function ReportingHub() {
@@ -138,29 +127,35 @@ export function ReportingHub() {
       />
 
       {/* ── Quick-glance stats ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
-        <StatTile
-          label="Active Headcount"
-          value={fmt(hc?.snapshot.active)}
-          sub={hc ? `+${hc.snapshot.joiners} joined · ${hc.snapshot.exits} left` : undefined}
-        />
-        <StatTile
-          label="Avg Attendance"
-          value={att ? `${fmt(att.summary.avg_attendance_rate, 1)}%` : '—'}
-          sub={att ? `${fmt(att.summary.total_lop_days, 1)} LOP days` : undefined}
-        />
-        <StatTile
-          label="Payroll (Gross)"
-          value={cost ? `₹${fmt(cost.summary.total_gross)}` : '—'}
-          sub={cost?.mom_variance
-            ? `${cost.mom_variance.variance_pct >= 0 ? '+' : ''}${fmt(cost.mom_variance.variance_pct, 1)}% MoM`
-            : undefined}
-        />
-        <StatTile
-          label="Attrition Rate"
-          value={hc ? `${fmt(hc.snapshot.attrition_rate, 1)}%` : '—'}
-          sub={month}
-        />
+      <div className="mb-6">
+        <MetricRow cols={4}>
+          <MetricCard
+            icon={Users}
+            label="Active Headcount"
+            value={fmt(hc?.snapshot.active)}
+            subtitle={hc ? `+${hc.snapshot.joiners} joined · ${hc.snapshot.exits} left` : undefined}
+          />
+          <MetricCard
+            icon={Clock}
+            label="Avg Attendance"
+            value={att ? `${fmt(att.summary.avg_attendance_rate, 1)}%` : '—'}
+            subtitle={att ? `${fmt(att.summary.total_lop_days, 1)} LOP days` : undefined}
+          />
+          <MetricCard
+            icon={Banknote}
+            label="Payroll (Gross)"
+            value={cost ? `₹${fmt(cost.summary.total_gross)}` : '—'}
+            subtitle={cost?.mom_variance
+              ? `${cost.mom_variance.variance_pct >= 0 ? '+' : ''}${fmt(cost.mom_variance.variance_pct, 1)}% MoM`
+              : undefined}
+          />
+          <MetricCard
+            icon={TrendingUp}
+            label="Attrition Rate"
+            value={hc ? `${fmt(hc.snapshot.attrition_rate, 1)}%` : '—'}
+            subtitle={month}
+          />
+        </MetricRow>
       </div>
 
       {/* ── Report sections ────────────────────────────────────────────── */}
