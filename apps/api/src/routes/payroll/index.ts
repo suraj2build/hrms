@@ -3828,7 +3828,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         employees (
           employee_code,
           profiles ( full_name ),
-          bank_details:employee_bank_details ( account_number_masked, bank_name, ifsc_code, is_primary )
+          bank_details:employee_bank_statutory ( account_number_masked:account_number, bank_name, ifsc_code )
         )
       `)
       .eq('run_id', runId)
@@ -4497,7 +4497,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .select(`
         id, employee_id, net_pay,
         employees (
-          bank_details:employee_bank_details ( account_number_masked, ifsc_code, is_primary )
+          bank_details:employee_bank_statutory ( account_number_masked:account_number, ifsc_code )
         )
       `)
       .eq('run_id', id)

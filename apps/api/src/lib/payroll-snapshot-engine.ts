@@ -253,8 +253,8 @@ async function buildCompensationSnapshot(
       id, effective_from, ctc_annual, ctc_monthly,
       salary_structure_id,
       employee_compensation_components (
-        salary_component_id, value, monthly_amount, annual_amount, sequence,
-        salary_components ( id, code, name, component_type, calc_type )
+        salary_component_id, value, monthly_amount:computed_monthly, annual_amount:computed_annual, sequence,
+        salary_components ( id, code, name, component_type, calc_type:default_calculation_type )
       )
     `)
     .eq('tenant_id', tenantId)

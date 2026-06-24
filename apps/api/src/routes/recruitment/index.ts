@@ -895,7 +895,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         candidates(id, first_name, last_name, email, phone, current_title),
         job_requisitions(id, title, departments(name)),
         pre_joinee:pre_joinee_invitations!applications_pre_joinee_invitation_id_fkey(
-          id, status, joining_date, submitted_at
+          id, status, joining_date, submitted_at:created_at
         )
       `, { count: 'exact' })
       .eq('tenant_id', req.tenantId)
@@ -1265,7 +1265,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.get('/interviewers', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('profiles')
-      .select('id, full_name, role, employees(id, employee_code, designations(title))')
+      .select('id, full_name, role, employees(id, employee_code, designations(title:name))')
       .eq('tenant_id', req.tenantId)
       .order('full_name', { ascending: true })
 
