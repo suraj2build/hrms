@@ -12,6 +12,7 @@ import { useCommandPalette } from '@/components/operational/CommandPalette'
 import { SearchFab }         from '@/components/search/SearchFab'
 import { ThemeToggle }         from '@/components/theme-toggle'
 import { RoleSwitcher }        from './RoleSwitcher'
+import { ManagerPersonaToggle } from './ManagerPersonaToggle'
 import { NotificationBell }    from '@/components/notifications'
 import {
   DropdownMenu,
@@ -64,6 +65,10 @@ export function Topbar() {
       {/* Search moved to a floating launcher (bottom-right) — declutters the
           header. ⌘K still opens it. */}
       <SearchFab onClick={openSearch} />
+
+      {/* Employee / Manager persona toggle — only renders inside the Manager
+          Console for manager identities; swaps the left navigation. */}
+      <ManagerPersonaToggle />
 
       <div className="flex items-center gap-2 ml-auto">
         {/* Company name */}

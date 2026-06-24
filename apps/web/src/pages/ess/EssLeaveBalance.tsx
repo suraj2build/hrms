@@ -33,6 +33,7 @@ import { api }               from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
 import { cn }                from '@/lib/utils'
 import { SubTabs }           from '@/components/ui/SubTabs'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import {
   DataTable,
   TableToolbar,
@@ -701,80 +702,45 @@ export function EssLeaveBalance() {
           {tab === 'overview' && (
             <>
               {/* ── Metrics Row ─────────────────────────────────────────── */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <MetricRow cols={3}>
 
                 {/* Approved days */}
-                <div className="bg-card ring-1 ring-black/5 rounded-2xl p-4 flex items-center gap-4">
-                  <div className="w-11 h-11 bg-success/10 text-success rounded-xl flex items-center justify-center border border-success/20 shrink-0">
-                    <CheckCircle2 className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                      Approved {new Date().getFullYear()}
-                    </p>
-                    <p className="text-xl font-bold font-display text-foreground mt-0.5">
-                      {leaveLoading ? '—' : totalApprovedDays}{' '}
-                      <span className="text-xs font-semibold text-muted-foreground font-sans">days taken</span>
-                    </p>
-                  </div>
-                </div>
+                <MetricCard
+                  label={`Approved ${new Date().getFullYear()}`}
+                  value={leaveLoading ? '—' : totalApprovedDays}
+                  icon={CheckCircle2}
+                  variant="success"
+                  subtitle="days taken"
+                />
 
                 {/* Pending days */}
-                <div className="bg-card ring-1 ring-black/5 rounded-2xl p-4 flex items-center gap-4">
-                  <div className="w-11 h-11 bg-primary/10 text-primary rounded-xl flex items-center justify-center border border-primary/20 shrink-0">
-                    <Clock className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                      Awaiting Signoff
-                    </p>
-                    <p className="text-xl font-bold font-display text-foreground mt-0.5">
-                      {leaveLoading ? '—' : totalPendingDays}{' '}
-                      <span className="text-xs font-semibold text-muted-foreground font-sans">days pending</span>
-                    </p>
-                  </div>
-                </div>
+                <MetricCard
+                  label="Awaiting Signoff"
+                  value={leaveLoading ? '—' : totalPendingDays}
+                  icon={Clock}
+                  variant="warning"
+                  subtitle="days pending"
+                />
 
                 {/* Next holiday OR paid balance */}
                 {nextHoliday ? (
-                  <div className="bg-card ring-1 ring-black/5 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-11 h-11 bg-warning/10 text-warning rounded-xl flex items-center justify-center border border-warning/20 shrink-0">
-                      <Calendar className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                        Upcoming Holiday
-                      </p>
-                      <p className="text-sm font-bold font-display text-foreground mt-0.5 truncate">
-                        {nextHoliday.name}
-                      </p>
-                      {(() => {
-                        const rel = getDaysUntil(nextHoliday.date)
-                        return (
-                          <p className="text-[10px] text-warning font-semibold mt-0.5">
-                            {rel ?? fmtDateReadable(nextHoliday.date)}
-                          </p>
-                        )
-                      })()}
-                    </div>
-                  </div>
+                  <MetricCard
+                    label="Upcoming Holiday"
+                    value={nextHoliday.name}
+                    icon={Calendar}
+                    variant="warning"
+                    subtitle={getDaysUntil(nextHoliday.date) ?? fmtDateReadable(nextHoliday.date)}
+                  />
                 ) : (
-                  <div className="bg-card ring-1 ring-black/5 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-11 h-11 bg-info/10 text-info rounded-xl flex items-center justify-center border border-info/20 shrink-0">
-                      <TrendingUp className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                        Paid Balance
-                      </p>
-                      <p className="text-xl font-bold font-display text-foreground mt-0.5">
-                        {balLoading ? '—' : totalBalance}{' '}
-                        <span className="text-xs font-semibold text-muted-foreground font-sans">days left</span>
-                      </p>
-                    </div>
-                  </div>
+                  <MetricCard
+                    label="Paid Balance"
+                    value={balLoading ? '—' : totalBalance}
+                    icon={TrendingUp}
+                    variant="info"
+                    subtitle="days left"
+                  />
                 )}
-              </div>
+              </MetricRow>
 
               {/* ── Main Split: Balances (8) + Holidays (4) ─────────────── */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -1360,26 +1326,21 @@ export function EssLeaveBalance() {
           {tab === 'compoff' && (
             <>
               {/* Stats row */}
-              <div className="grid grid-cols-3 gap-3">
+              <MetricRow cols={3}>
                 {[
-                  { label: 'Pending Approval',  value: coPending.length,        icon: Clock,         cls: 'text-warning' },
-                  { label: 'Total Days Earned',  value: `${coTotalDays}d`,       icon: CheckCircle2,  cls: 'text-success' },
-                  { label: 'Total Requests',     value: coRequests.length,       icon: CalendarRange, cls: 'text-info'    },
-                ].map(({ label, value, icon: Icon, cls }) => (
-                  <div
+                  { label: 'Pending Approval',  value: coPending.length,        icon: Clock,         variant: 'warning' as const },
+                  { label: 'Total Days Earned',  value: `${coTotalDays}d`,       icon: CheckCircle2,  variant: 'success' as const },
+                  { label: 'Total Requests',     value: coRequests.length,       icon: CalendarRange, variant: 'info' as const    },
+                ].map(({ label, value, icon, variant }) => (
+                  <MetricCard
                     key={label}
-                    className="rounded-lg border border-border bg-card p-3 flex items-center gap-3"
-                  >
-                    <div className={cn('p-2 rounded-lg bg-muted/50', cls)}>
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">{label}</p>
-                      <p className={cn('text-xl font-bold tabular-nums font-display', cls)}>{value}</p>
-                    </div>
-                  </div>
+                    label={label}
+                    value={value}
+                    icon={icon}
+                    variant={variant}
+                  />
                 ))}
-              </div>
+              </MetricRow>
 
               {/* Requests list */}
               <SectionCard

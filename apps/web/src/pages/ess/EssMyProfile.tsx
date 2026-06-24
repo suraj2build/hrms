@@ -33,6 +33,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -312,54 +313,6 @@ function ProfileHero({ data }: { data: ProfileData }) {
   )
 }
 
-// ── Status Card ───────────────────────────────────────────────────────────────
-
-function StatusCard({
-  icon: Icon, label, value, sub, color = 'default', href,
-}: {
-  icon:   React.ComponentType<{ className?: string }>
-  label:  string
-  value:  string | number
-  sub?:   string
-  color?: 'default' | 'success' | 'warning' | 'info' | 'muted'
-  href?:  string
-}) {
-  const iconCls = {
-    default: 'text-foreground',
-    success: 'text-success',
-    warning: 'text-warning',
-    info:    'text-info',
-    muted:   'text-muted-foreground',
-  }[color]
-
-  const bgCls = {
-    default: 'bg-muted/30',
-    success: 'bg-success/10',
-    warning: 'bg-warning/10',
-    info:    'bg-info/10',
-    muted:   'bg-muted/20',
-  }[color]
-
-  const inner = (
-    <div className={cn(
-      'flex flex-col gap-1 p-3.5 rounded-xl border border-border/60 transition-colors min-w-[130px]',
-      bgCls,
-      href && 'hover:border-primary/30 hover:bg-primary/5 cursor-pointer',
-    )}>
-      <div className="flex items-center justify-between">
-        <Icon className={cn('h-4 w-4', iconCls)} />
-        {href && <ChevronRight className="h-3 w-3 text-muted-foreground/40" />}
-      </div>
-      <p className="text-lg font-bold text-foreground leading-tight mt-0.5">{value}</p>
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-      {sub && <p className="text-[10px] text-muted-foreground/70 -mt-0.5 truncate">{sub}</p>}
-    </div>
-  )
-
-  if (href) return <Link to={href}>{inner}</Link>
-  return inner
-}
-
 // ── Quick Status Strip ────────────────────────────────────────────────────────
 
 function QuickStatusStrip({
@@ -379,6 +332,7 @@ function QuickStatusStrip({
   holidays:      Holiday[]
   summaryLoading: boolean
 }) {
+  const navigate = useNavigate()
   const today = todayIso()
 
   // Total leave balance (sum all types)
@@ -412,55 +366,57 @@ function QuickStatusStrip({
   const latestSlip = payslips[0] ?? null
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-1 mb-4 scrollbar-none">
-      <StatusCard
-        icon={CalendarDays}
-        label="Present This Month"
-        value={summaryLoading ? '…' : (summary?.present_days ?? 0)}
-        sub={summary ? `${summary.late_days} late · ${summary.absent_days} absent` : undefined}
-        color="success"
-        href="/ess/attendance"
-      />
-      <StatusCard
-        icon={BookOpen}
-        label="Leave Balance"
-        value={summaryLoading ? '…' : `${totalLeaveBalance}d`}
-        sub={summary?.leave_balance_by_type[0]?.leave_type_name ?? undefined}
-        color="info"
-        href="/ess/leave/balance"
-      />
-      <StatusCard
-        icon={Clock}
-        label="Pending Requests"
-        value={pendingCount}
-        sub={pendingCount > 0 ? 'Awaiting approval' : 'All clear'}
-        color={pendingCount > 0 ? 'warning' : 'muted'}
-        href="/ess/approvals"
-      />
-      <StatusCard
-        icon={CalendarOff}
-        label="Comp-off Balance"
-        value={`${compOffBalance}d`}
-        sub="Available to use"
-        color={compOffBalance > 0 ? 'success' : 'muted'}
-        href="/ess/comp-off"
-      />
-      <StatusCard
-        icon={Gift}
-        label="Next Holiday"
-        value={nextHoliday ? fmtDate(nextHoliday.date, { day: 'numeric', month: 'short' }) : '—'}
-        sub={nextHoliday?.name ?? undefined}
-        color="info"
-        href="/ess/optional-holidays"
-      />
-      <StatusCard
-        icon={Wallet}
-        label="Latest Payslip"
-        value={latestSlip ? `${MONTH_NAMES[(latestSlip.month ?? 1) - 1]} ${latestSlip.year}` : '—'}
-        sub={latestSlip?.net_pay != null ? fmtCurrency(latestSlip.net_pay) : undefined}
-        color="default"
-        href="/ess/payroll/my-slips"
-      />
+    <div className="mb-4">
+      <MetricRow cols={3}>
+        <MetricCard
+          icon={CalendarDays}
+          label="Present This Month"
+          value={summaryLoading ? '…' : (summary?.present_days ?? 0)}
+          subtitle={summary ? `${summary.late_days} late · ${summary.absent_days} absent` : undefined}
+          variant="success"
+          onClick={() => navigate('/ess/attendance')}
+        />
+        <MetricCard
+          icon={BookOpen}
+          label="Leave Balance"
+          value={summaryLoading ? '…' : `${totalLeaveBalance}d`}
+          subtitle={summary?.leave_balance_by_type[0]?.leave_type_name ?? undefined}
+          variant="info"
+          onClick={() => navigate('/ess/leave/balance')}
+        />
+        <MetricCard
+          icon={Clock}
+          label="Pending Requests"
+          value={pendingCount}
+          subtitle={pendingCount > 0 ? 'Awaiting approval' : 'All clear'}
+          variant={pendingCount > 0 ? 'warning' : 'neutral'}
+          onClick={() => navigate('/ess/approvals')}
+        />
+        <MetricCard
+          icon={CalendarOff}
+          label="Comp-off Balance"
+          value={`${compOffBalance}d`}
+          subtitle="Available to use"
+          variant={compOffBalance > 0 ? 'success' : 'neutral'}
+          onClick={() => navigate('/ess/comp-off')}
+        />
+        <MetricCard
+          icon={Gift}
+          label="Next Holiday"
+          value={nextHoliday ? fmtDate(nextHoliday.date, { day: 'numeric', month: 'short' }) : '—'}
+          subtitle={nextHoliday?.name ?? undefined}
+          variant="info"
+          onClick={() => navigate('/ess/optional-holidays')}
+        />
+        <MetricCard
+          icon={Wallet}
+          label="Latest Payslip"
+          value={latestSlip ? `${MONTH_NAMES[(latestSlip.month ?? 1) - 1]} ${latestSlip.year}` : '—'}
+          subtitle={latestSlip?.net_pay != null ? fmtCurrency(latestSlip.net_pay) : undefined}
+          variant="info"
+          onClick={() => navigate('/ess/payroll/my-slips')}
+        />
+      </MetricRow>
     </div>
   )
 }

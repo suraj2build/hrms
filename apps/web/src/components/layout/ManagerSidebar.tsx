@@ -247,19 +247,28 @@ export function ManagerSidebar() {
 
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
 
-  // Inject the live pending-approvals badge onto the Approvals item, wherever it
-  // lives (flat items or grouped items).
+  // Active persona is derived from the route so it can never desync from the
+  // top-bar Employee/Manager toggle. `/manager/self/*` = Employee self-service,
+  // everything else under /manager = Manager team ops. Only the active persona's
+  // section renders — the two are no longer stacked in one long sidebar.
+  const persona: 'employee' | 'manager' =
+    location.pathname.startsWith('/manager/self') ? 'employee' : 'manager'
+
+  // Filter to the active persona, then inject the live pending-approvals badge
+  // onto the Approvals item wherever it lives (flat items or grouped items).
   const SECTIONS = useMemo((): NavSection[] => {
     const withBadge = (item: NavItem): NavItem =>
       item.href === '/manager/approvals'
         ? { ...item, badge: pendingCount > 0 ? pendingCount : undefined }
         : item
-    return BASE_SECTIONS.map(s => ({
-      ...s,
-      ...(s.items  && { items:  s.items.map(withBadge) }),
-      ...(s.groups && { groups: s.groups.map(g => ({ ...g, items: g.items.map(withBadge) })) }),
-    }))
-  }, [pendingCount])
+    return BASE_SECTIONS
+      .filter(s => s.type === persona)
+      .map(s => ({
+        ...s,
+        ...(s.items  && { items:  s.items.map(withBadge) }),
+        ...(s.groups && { groups: s.groups.map(g => ({ ...g, items: g.items.map(withBadge) })) }),
+      }))
+  }, [pendingCount, persona])
 
   // Collapsible nav — sections & groups collapsed by default; whichever holds the
   // active route is seeded open, and manual toggles persist for the session.
@@ -307,7 +316,9 @@ export function ManagerSidebar() {
         {!sidebarCollapsed && (
           <div className="leading-tight">
             <Wordmark height={15} />
-            <p className="text-[10px] text-sidebar-foreground/65 mt-1">Manager Console</p>
+            <p className="text-[10px] text-sidebar-foreground/65 mt-1">
+              {persona === 'employee' ? 'Employee View' : 'Manager Console'}
+            </p>
           </div>
         )}
       </div>

@@ -35,6 +35,7 @@ import {
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import {
@@ -463,20 +464,13 @@ function YTDSummary({ slips }: { slips: SlipSummary[] }) {
         <p className="text-sm font-semibold">Year-to-Date Summary</p>
         <span className="text-xs text-muted-foreground ml-1">FY {fyYear}–{fyYear + 1} · {fySlips.length} months</span>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-        {[
-          { label: 'YTD Gross',      value: fmtCurrency(ytdGross),     color: '' },
-          { label: 'YTD Net',        value: fmtCurrency(ytdNet),        color: 'text-success' },
-          { label: 'YTD Deductions', value: fmtCurrency(ytdDeductions), color: 'text-destructive' },
-          { label: 'YTD LOP',        value: fmtCurrency(ytdLop),        color: ytdLop > 0 ? 'text-warning' : 'text-muted-foreground' },
-          { label: 'YTD OT Hours',   value: `${ytdOt.toFixed(1)}h`,    color: '' },
-        ].map(k => (
-          <div key={k.label} className="p-2.5 rounded-lg bg-muted/40">
-            <p className="text-muted-foreground mb-0.5">{k.label}</p>
-            <p className={cn('font-bold tabular-nums', k.color)}>{k.value}</p>
-          </div>
-        ))}
-      </div>
+      <MetricRow cols={5}>
+        <MetricCard label="YTD Gross"      value={fmtCurrency(ytdGross)}      variant="neutral" compact />
+        <MetricCard label="YTD Net"        value={fmtCurrency(ytdNet)}        variant="success" compact />
+        <MetricCard label="YTD Deductions" value={fmtCurrency(ytdDeductions)} variant="destructive" compact />
+        <MetricCard label="YTD LOP"        value={fmtCurrency(ytdLop)}        variant={ytdLop > 0 ? 'warning' : 'neutral'} compact />
+        <MetricCard label="YTD OT Hours"   value={`${ytdOt.toFixed(1)}h`}     variant="neutral" compact />
+      </MetricRow>
     </div>
   )
 }
@@ -534,35 +528,6 @@ function RevisionTimeline({ revisions }: { revisions: CompRevision[] }) {
             </div>
           </div>
         ))}
-      </div>
-    </div>
-  )
-}
-
-// ── StatTile — icon + label + value + hint (Overview / Salary headers) ──────────
-
-function StatTile({
-  icon: Icon, label, value, hint, accent = 'primary',
-}: {
-  icon: React.ElementType
-  label: string
-  value: string
-  hint?: string
-  accent?: 'primary' | 'success' | 'muted'
-}) {
-  const tone =
-    accent === 'success' ? 'bg-success/10 text-success' :
-    accent === 'muted'   ? 'bg-muted text-muted-foreground' :
-                           'bg-primary/10 text-primary'
-  return (
-    <div className="rounded-xl border border-border bg-card p-4 flex items-start gap-3">
-      <div className={cn('rounded-lg p-2.5 flex-shrink-0', tone)}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="mt-1 truncate text-lg font-bold text-foreground tabular-nums">{value}</p>
-        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
       </div>
     </div>
   )
@@ -1140,26 +1105,31 @@ export function EssCompensation() {
           <EmploymentCard profile={profileData} comp={comp} />
 
           {/* Stat tiles */}
-          <StatTile
-            icon={Wallet}
-            label="Monthly take-home"
-            value={netMonthly != null ? fmtCurrency(netMonthly) : (latest ? fmtCurrency(latest.net_pay) : '—')}
-            hint={latest ? `${fmtMonthShort(latest.month)} payslip` : 'After first payslip'}
-            accent="success"
-          />
-          <StatTile
-            icon={DollarSign}
-            label="Monthly CTC"
-            value={ctcMonthlyCalc > 0 ? fmtCurrency(ctcMonthlyCalc) : (comp?.ctc_monthly ? fmtCurrency(comp.ctc_monthly) : '—')}
-            hint="Gross + employer contributions"
-          />
-          <StatTile
-            icon={PiggyBank}
-            label="Employer contributions"
-            value={employerMonthly > 0 ? fmtCurrency(employerMonthly) : '—'}
-            hint="Added to CTC · not deducted"
-            accent="muted"
-          />
+          <div className="lg:col-span-3">
+            <MetricRow cols={3}>
+              <MetricCard
+                icon={Wallet}
+                label="Monthly take-home"
+                value={netMonthly != null ? fmtCurrency(netMonthly) : (latest ? fmtCurrency(latest.net_pay) : '—')}
+                subtitle={latest ? `${fmtMonthShort(latest.month)} payslip` : 'After first payslip'}
+                variant="success"
+              />
+              <MetricCard
+                icon={DollarSign}
+                label="Monthly CTC"
+                value={ctcMonthlyCalc > 0 ? fmtCurrency(ctcMonthlyCalc) : (comp?.ctc_monthly ? fmtCurrency(comp.ctc_monthly) : '—')}
+                subtitle="Gross + employer contributions"
+                variant="info"
+              />
+              <MetricCard
+                icon={PiggyBank}
+                label="Employer contributions"
+                value={employerMonthly > 0 ? fmtCurrency(employerMonthly) : '—'}
+                subtitle="Added to CTC · not deducted"
+                variant="neutral"
+              />
+            </MetricRow>
+          </div>
         </div>
       )}
 
