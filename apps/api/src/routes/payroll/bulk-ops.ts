@@ -82,10 +82,9 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
           .from('tax_declarations')
           .update({
             status:          'approved',
-            approved_by:     req.userId,
-            approved_at:     now,
+            reviewed_by:     req.userId,
+            reviewed_at:     now,
             approved_amount: approved_amount ?? d.declared_amount,
-            reviewer_notes:  notes ?? null,
           })
           .eq('id', d.id)
           .eq('tenant_id', req.tenantId),
@@ -141,7 +140,7 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       rejectable.map((d: any) =>
         fastify.supabase
           .from('tax_declarations')
-          .update({ status: 'rejected', reviewer_notes: `${reason}${notes ? ' — ' + notes : ''}`, approved_by: req.userId, approved_at: now })
+          .update({ status: 'rejected', rejection_reason: `${reason}${notes ? ' — ' + notes : ''}`, reviewed_by: req.userId, reviewed_at: now })
           .eq('id', d.id)
           .eq('tenant_id', req.tenantId),
       ),

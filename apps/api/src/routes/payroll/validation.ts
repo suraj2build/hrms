@@ -148,7 +148,6 @@ export default async function validationRoutes(fastify: FastifyInstance) {
         payroll_run_id: payroll_run_id ?? null,
         status: 'running',
         started_at: new Date().toISOString(),
-        created_by: req.userId,
       })
       .select('id')
       .single()
@@ -266,7 +265,6 @@ export default async function validationRoutes(fastify: FastifyInstance) {
         is_payroll_blocked: isPayrollBlocked,
         completed_at: new Date().toISOString(),
         duration_ms: durationMs,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', validationRunId)
 
@@ -352,7 +350,6 @@ export default async function validationRoutes(fastify: FastifyInstance) {
         resolution_notes: parsed.data.resolution_notes,
         resolved_by: req.userId,
         resolved_at: now,
-        updated_at: now,
       })
       .eq('id', resultId)
       .eq('validation_run_id', id)
@@ -372,7 +369,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
     if ((unresolvedErrors ?? 0) === 0) {
       await fastify.supabase
         .from('payroll_validation_runs')
-        .update({ is_payroll_blocked: false, updated_at: now })
+        .update({ is_payroll_blocked: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
     }
@@ -404,7 +401,6 @@ export default async function validationRoutes(fastify: FastifyInstance) {
         tenant_id: req.tenantId,
         status: 'running',
         started_at: now,
-        created_by: req.userId,
       })
       .select('id')
       .single()
@@ -428,10 +424,8 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .from('payroll_reconciliation_runs')
       .update({
         status: 'completed',
-        employee_count: employeeCount ?? 0,
+        total_employees: employeeCount ?? 0,
         completed_at: new Date().toISOString(),
-        duration_ms: durationMs,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', reconciliationRunId)
 
