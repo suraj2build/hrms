@@ -34,10 +34,15 @@ export function MobileEssShell() {
   const { profile } = useAuthStore()
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const [persona, setPersona] = useState<Persona>('me')
 
-  const isManager = profile?.role === 'manager' || profile?.role === 'super_admin'
-  const base = pathname.startsWith('/manager/self') ? '/manager/self' : '/ess'
+  const isManager = profile?.role === 'manager' || profile?.role === 'super_admin' || profile?.role === 'hr_admin'
+  // Manager console (/manager/*) and manager-self (/manager/self/*) both use the
+  // self base for the employee screens; plain /ess/* uses /ess.
+  const base = pathname.startsWith('/manager') ? '/manager/self' : '/ess'
+  // Default to the Team view when landing on a manager-console (non-self) route.
+  const inManagerConsole = pathname.startsWith('/manager') && !pathname.startsWith('/manager/self')
+  const [persona, setPersona] = useState<Persona>(inManagerConsole && isManager ? 'team' : 'me')
+
   const firstName = (profile?.full_name ?? 'there').split(' ')[0]
 
   const onFab = () => navigate(`${base}/attendance`)
