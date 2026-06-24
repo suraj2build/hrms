@@ -11,8 +11,8 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity, AlertTriangle, ArrowRight, Building2, CalendarCheck, ChevronRight,
-  Coins, Download, Gauge, Layers, ShieldCheck, Sparkles, TrendingDown, TrendingUp,
-  UserMinus, Users, Wallet, Lightbulb,
+  Coins, Download, Layers, ShieldCheck, Sparkles, TrendingDown, TrendingUp,
+  UserMinus, Users, Wallet,
 } from 'lucide-react'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart,

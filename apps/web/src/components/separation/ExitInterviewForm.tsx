@@ -30,6 +30,7 @@ interface EIData {
   responses: RespRow[]
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- label map colocated with its form by design
 export const EXIT_CATEGORY_LABEL: Record<string, string> = {
   job_role: 'Role & Responsibilities', manager: 'Manager', culture: 'Culture',
   compensation: 'Compensation', growth: 'Growth & Learning', work_life: 'Work–Life Balance',

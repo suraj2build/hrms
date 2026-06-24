@@ -54,4 +54,7 @@ jobs:
       - run: npm run typecheck
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+      # Lint gates merges too — the web lint also runs the design-token colour
+      # check (scripts/check-raw-colors.mjs) and enforces --max-warnings 0.
+      - run: npm run lint
       - run: npm run test --workspace=apps/api --if-present

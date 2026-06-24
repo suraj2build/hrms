@@ -521,17 +521,16 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     )
 
     // ── DEMO LIVE — auto sign-in to the seeded "Demo" tenant against the REAL
-    // API (not the resolver). Triggers when either:
-    //   • the build sets VITE_DEMO_LOGIN=true, OR
-    //   • the page is opened with `?demo-login` in the URL.
-    // The second form needs NO env changes — any deployment that already has the
-    // API + Supabase configured (e.g. the normal portal) will land a visitor on
-    // the seeded demo when sent to <portal-url>/?demo-login. (`?demo-login` does
-    // NOT match the resolver's `?demo` check, so DEMO_MODE stays false.)
-    const wantsDemoLogin =
-      import.meta.env.VITE_DEMO_LOGIN === 'true' ||
-      (typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).has('demo-login'))
+    // API (not the resolver). Gated STRICTLY behind the build flag
+    // VITE_DEMO_LOGIN=true so it is impossible to trigger on production.
+    //
+    // SECURITY: a previous version also accepted a `?demo-login` URL param on
+    // ANY deployment, which let a visitor auto-login to the seeded demo account
+    // on the real production portal — an unauthenticated login path. That URL
+    // trigger has been removed. Demo deployments must set VITE_DEMO_LOGIN=true;
+    // the optional `?demo-login` param now only acts WITHIN such a build.
+    const demoLoginEnabled = import.meta.env.VITE_DEMO_LOGIN === 'true'
+    const wantsDemoLogin = demoLoginEnabled
     if (wantsDemoLogin) {
       const demoEmail    = (import.meta.env.VITE_DEMO_EMAIL as string)    || 'demo@cognixhr.app'
       const demoPassword = (import.meta.env.VITE_DEMO_PASSWORD as string) || 'CognixDemo!1'
@@ -1044,7 +1043,7 @@ export default function App() {
               {/* ESS-specific old paths redirect to ESS shell instead          */}
               <Route path="/my-attendance"     element={<Navigate to="/ess/attendance"        replace />} />
               <Route path="/leave/apply"       element={<Navigate to="/ess/leave/apply"        replace />} />
-              <Route path="/leave/my-requests" element={<Navigate to="/ess/leave/my-requests" replace />} />
+              <Route path="/leave/my-requests" element={<Navigate to="/ess/leave" replace />} />
               <Route path="/my-profile"        element={<Navigate to="/ess/profile"           replace />} />
               {/* NOTE: do NOT add a /ess/compensation → /ess/payroll/my-slips redirect here.
                   /ess/payroll/my-slips already redirects to /ess/compensation (line ~819);

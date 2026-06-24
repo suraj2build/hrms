@@ -230,6 +230,10 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
         updated_at:     new Date().toISOString(),
       })
       .eq('id', id)
+      // Tenant isolation: queue_partitions is tenant-scoped (see the GET above).
+      // super_admin is a per-tenant role, so scope the write to the caller's
+      // tenant — otherwise a tenant-A admin could overwrite tenant-B queue state.
+      .eq('tenant_id', req.tenantId)
       .select('*')
       .single()
 
