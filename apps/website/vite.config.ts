@@ -8,13 +8,14 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       // This site (React 19) lives in a monorepo whose root pins React 18 for
-      // apps/web. Without dedupe, hoisted deps (motion, recharts) bundle root
+      // apps/web. Without dedupe, hoisted deps (framer-motion) bundle root
       // React 18 alongside the app's React 19 → two React copies → blank page
       // with "Cannot read properties of null (reading 'useContext')". dedupe
       // forces every react import to resolve to this package's single copy.
       dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        // `@` maps to the package's src dir (shadcn/Lovable `@/components/...`).
+        '@': path.resolve(__dirname, 'src'),
       },
     },
     server: {
