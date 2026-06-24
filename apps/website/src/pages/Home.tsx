@@ -42,6 +42,7 @@ export default function HomePage() {
   return (
     <SiteShell>
       <Hero />
+      <LogoStrip />
       <TrustStrip />
       <StatsRow />
       <WhyUs />
@@ -95,6 +96,28 @@ function Hero() {
           <p className="mt-4 text-xs font-medium text-white/60">
             No credit card · Full sandbox · India statutory-ready
           </p>
+
+          {/* Review-platform rating badges (placeholder ratings) */}
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            {[
+              { plat: "G2", score: "4.7" },
+              { plat: "Capterra", score: "4.6" },
+              { plat: "SoftwareSuggest", score: "4.8" },
+            ].map((b) => (
+              <div
+                key={b.plat}
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 backdrop-blur"
+              >
+                <span className="flex gap-0.5 text-[#F5A623]">
+                  {Array.from({ length: 5 }).map((_, s) => (
+                    <Star key={s} className="h-3 w-3 fill-current" />
+                  ))}
+                </span>
+                <span className="text-xs font-semibold text-white">{b.score}</span>
+                <span className="text-xs text-white/60">on {b.plat}</span>
+              </div>
+            ))}
+          </div>
         </Reveal>
 
         <Reveal delay={150} className="animate-float-slow">
@@ -107,6 +130,51 @@ function Hero() {
 }
 
 /* ---------------- STATS ROW ---------------- */
+function LogoStrip() {
+  // Placeholder customer wordmarks — swap for real logos when available.
+  const logos = ["Northwind", "Arcadia", "Vertex Labs", "Indus Mills", "Pinnacle", "Greenfield", "Lumina", "Sundara"];
+  return (
+    <section className="border-b border-border bg-card">
+      <div className="container-page py-10">
+        <Reveal className="text-center">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Trusted by fast-growing teams across India
+          </p>
+        </Reveal>
+        <Reveal delay={80}>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4 opacity-70">
+            {logos.map((name) => (
+              <span
+                key={name}
+                className="select-none text-lg font-extrabold tracking-tight text-[#1A4D8F]/70 grayscale transition hover:opacity-100 hover:grayscale-0 sm:text-xl"
+                style={{ fontFamily: "var(--font-sans)" }}
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+        </Reveal>
+        <Reveal delay={140}>
+          <p className="mt-7 text-center text-sm font-medium text-muted-foreground">
+            <span className="font-bold text-[#1A4D8F]">
+              <CountUp value={500} suffix="+" /> HR teams
+            </span>{" "}
+            managing{" "}
+            <span className="font-bold text-[#1A4D8F]">
+              <CountUp value={120000} suffix="+" /> employees
+            </span>{" "}
+            across{" "}
+            <span className="font-bold text-[#1A4D8F]">
+              <CountUp value={14} suffix="+" /> industries
+            </span>
+          </p>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- STATS ---------------- */
 function StatsRow() {
   const stats = [
     { value: 40, suffix: "+", label: "HR capabilities" },
