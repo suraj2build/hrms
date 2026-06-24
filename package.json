@@ -9,7 +9,8 @@
     "dev": "concurrently \"npm run dev --workspace=apps/web\" \"npm run dev --workspace=apps/api\"",
     "build": "npm run build --workspaces",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:check-drift": "node scripts/db/check-schema-drift.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

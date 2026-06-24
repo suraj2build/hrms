@@ -340,7 +340,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .select('id, is_active, revoked_at')
+      .select('id, is_active')
       .single()
 
     if (error) {
