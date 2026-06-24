@@ -219,7 +219,7 @@ async function isJobAlreadyRunning(
     .eq('tenant_id', tenantId)
     .eq('job_type',  jobType)
     .eq('status',    'running')
-    .gte('created_at', twoHoursAgo)
+    .gte('started_at', twoHoursAgo)
     .limit(1)
     .maybeSingle()
 

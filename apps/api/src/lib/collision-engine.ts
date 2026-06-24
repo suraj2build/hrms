@@ -84,7 +84,6 @@ export async function resolveCollisionPolicy(
     .select('sandwich_mode, collision_on_holiday, collision_on_weekly_off')
     .eq('tenant_id', tenantId)
     .eq('leave_type_id', leaveTypeId)
-    .eq('is_active', true)
     .maybeSingle()
 
   return {

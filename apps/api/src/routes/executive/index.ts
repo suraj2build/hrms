@@ -993,8 +993,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('duplicate_detection_events')
         .select('id', { count: 'exact', head: true })
-        .eq('org_id', req.tenantId)
-        .eq('status', 'open'),
+        .eq('org_id', req.tenantId),
 
       // Governance events 30d
       fastify.supabase

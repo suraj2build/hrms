@@ -964,7 +964,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .from('attendance_processing_runs')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('status', 'failed')
+        .not('error_message', 'is', null)
         .gte('started_at', last7d),
 
       // sla_breaches: leave requests pending > 3 days (no action taken)

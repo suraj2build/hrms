@@ -479,7 +479,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
         .eq('status', 'failed')
-        .gte('updated_at', oneHourAgo),
+        .gte('completed_at', oneHourAgo),
     ])
 
     const workers_active  = workersRes.data?.length ?? 0

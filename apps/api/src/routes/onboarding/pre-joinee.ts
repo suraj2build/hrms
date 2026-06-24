@@ -930,7 +930,6 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           .from('employee_identity')
           .select('employee_id')
           .eq('tenant_id', tenantId)
-          .eq('identity_type', 'pan')
           .eq('identity_number', submission.pan_number)
           .maybeSingle()
         if (idRow?.employee_id) {
@@ -949,7 +948,6 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           .from('employee_identity')
           .select('employee_id')
           .eq('tenant_id', tenantId)
-          .eq('identity_type', 'aadhaar')
           .eq('identity_number', submission.aadhaar_number)
           .maybeSingle()
         if (idRow?.employee_id) {

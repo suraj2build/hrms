@@ -1027,8 +1027,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         .delete()
         .eq('tenant_id', req.tenantId)
         .in('employee_id', employeeIds)
-        .gte('hint_date', from)
-        .lte('hint_date', to)
+        .gte('created_at', from)
+        .lte('created_at', to)
         .eq('resolved', false)
 
       for (let i = 0; i < hintsToInsert.length; i += BATCH) {
