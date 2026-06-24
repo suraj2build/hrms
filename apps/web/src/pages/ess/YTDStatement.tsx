@@ -81,7 +81,12 @@ export function YTDStatement() {
     staleTime: 5 * 60_000,
   })
 
-  const handleDownload = () => toast.info('PDF download coming soon')
+  // Browser print → "Save as PDF" is the most reliable way to export this
+  // statement without a server-side PDF pipeline.
+  const handleDownload = () => {
+    toast.info('Choose "Save as PDF" in the print dialog to download')
+    window.print()
+  }
 
   // Totals from monthly rows (use API totals if available, otherwise compute)
   const totals: MonthlyRow | null = data

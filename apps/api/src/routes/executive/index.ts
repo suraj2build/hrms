@@ -634,6 +634,73 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── GET /executive/department-trend ───────────────────────────────────────
+  // Per-department monthly joiner/exit/net + attrition for the drill-down sheet.
+  // Department is resolved by NAME (the whole exec dept feature is name-keyed:
+  // dept_distribution above emits names, the UI merges rows by name). An
+  // employee's department is their LATEST job_history row by effective_from, so
+  // separated employees still resolve to their last department.
+  // NOTE: attrition_pct is a proxy — month exits ÷ current active headcount in
+  // the department (the same simple denominator used elsewhere here) — not a
+  // start-of-month running base. Honest approximation, not fabricated.
+  fastify.get('/executive/department-trend', auth, async (req: any, reply) => {
+    if (!requireExec(req, reply)) return
+
+    const querySchema = z.object({
+      department: z.string().min(1),
+      months:     z.coerce.number().int().min(1).max(12).default(12),
+    })
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const { department, months: monthCount } = parsed.data
+
+    const [empRes, jhRes] = await Promise.all([
+      fastify.supabase
+        .from('employees')
+        .select('id, joining_date, status, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
+        .eq('tenant_id', req.tenantId)
+        .in('status', ['active', 'separated']),
+      fastify.supabase
+        .from('job_history')
+        .select('employee_id, effective_from, departments(name)')
+        .eq('tenant_id', req.tenantId),
+    ])
+
+    // Resolve each employee's department = their latest job_history row.
+    const latestJh = new Map<string, { eff: string; name: string }>()
+    for (const jh of (jhRes.data ?? []) as any[]) {
+      const name = (jh.departments as any)?.name ?? 'Unassigned'
+      const eff  = jh.effective_from ?? ''
+      const prev = latestJh.get(jh.employee_id)
+      if (!prev || eff >= prev.eff) latestJh.set(jh.employee_id, { eff, name })
+    }
+    const deptOf = (empId: string) => latestJh.get(empId)?.name ?? 'Unassigned'
+
+    const flatten = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
+    const emp = ((empRes.data ?? []) as any[]).map(flatten).filter(e => deptOf(e.id) === department)
+    const activeInDept = emp.filter(e => e.status === 'active').length
+
+    const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
+    for (let i = monthCount - 1; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(1)
+      d.setMonth(d.getMonth() - i)
+      const m = d.toISOString().slice(0, 7)
+      monthBoundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
+    }
+
+    const trend = monthBoundaries.map(({ month, from, to }) => {
+      const joiners = emp.filter(e => e.joining_date && e.joining_date >= from && e.joining_date <= to).length
+      const exits   = emp.filter(e => e.separation_date && e.separation_date >= from && e.separation_date <= to).length
+      const attrition_pct = activeInDept > 0 ? parseFloat(((exits / activeInDept) * 100).toFixed(1)) : 0
+      return { month, joiners, exits, net: joiners - exits, attrition_pct }
+    })
+
+    return reply.send({ data: { department, active_headcount: activeInDept, trend } })
+  })
+
   // ── GET /executive/financial ──────────────────────────────────────────────
   // Financial workforce: payroll cost trends, compensation revision impact.
   // Source: payroll_runs, payroll_dept_snapshots, compensation_revisions

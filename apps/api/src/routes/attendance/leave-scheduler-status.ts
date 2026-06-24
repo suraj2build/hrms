@@ -356,45 +356,65 @@ export default async function leaveSchedulerStatusRoutes(fastify: FastifyInstanc
   fastify.get('/leave/governance/session-analytics', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
+    // Default to the current year (the frontend sends no year param). Filter on
+    // from_date — the leave's actual occurrence — not created_at.
+    const year      = Number((req.query as any).year) || new Date().getUTCFullYear()
+    const yearStart = `${year}-01-01`
+    const yearEnd   = `${year}-12-31`
+
+    const emptyPayload = {
+      total_requests: 0, half_day_count: 0, cross_session_count: 0,
+      hourly_count: 0, by_type: [] as Array<Record<string, unknown>>,
+    }
+
     const { data: requests, error } = await fastify.supabase
       .from('leave_requests')
-      .select('id, status, leave_type_id, created_at')
+      .select('id, status, session, half_day, hours_requested, start_session, end_session, from_date, leave_types(name)')
       .eq('tenant_id', req.tenantId)
+      .gte('from_date', yearStart)
+      .lte('from_date', yearEnd)
 
     if (error) {
       req.log.warn({ err: error }, 'leave_requests analytics fetch failed — returning empty')
-      return reply.send({
-        data: {
-          total_requests: 0, approved: 0, rejected: 0, pending: 0,
-          cancelled: 0, by_type: [], approval_rate: 0,
-        },
-      })
+      return reply.send({ data: emptyPayload })
     }
 
-    const rows = (requests ?? []) as any[]
-    const total    = rows.length
-    const approved = rows.filter(r => r.status === 'approved').length
-    const rejected = rows.filter(r => r.status === 'rejected').length
-    const pending  = rows.filter(r => r.status === 'pending').length
-    const cancelled = rows.filter(r => r.status === 'cancelled').length
+    // Count all non-cancelled requests, broken down by session type. Status is
+    // UPPERCASE on leave_requests; this is an activity breakdown (not approvals),
+    // so only CANCELLED is excluded.
+    const rows = ((requests ?? []) as any[]).filter(r => r.status !== 'CANCELLED')
+    const isCross = (r: any) => r.start_session && r.end_session && r.start_session !== r.end_session
 
-    // Group by leave_type_id
-    const typeMap = new Map<string, number>()
+    let half_day_count = 0, hourly_count = 0, cross_session_count = 0
+    const byType = new Map<string, { full_day: number; first_half: number; second_half: number; cross_session: number }>()
+
     for (const r of rows) {
-      const key = r.leave_type_id ?? 'unknown'
-      typeMap.set(key, (typeMap.get(key) ?? 0) + 1)
+      const lt   = Array.isArray(r.leave_types) ? r.leave_types[0] : r.leave_types
+      const name = lt?.name ?? 'Unknown'
+      const bucket = byType.get(name) ?? { full_day: 0, first_half: 0, second_half: 0, cross_session: 0 }
+
+      // Test cross-session FIRST: a multi-day span can be session='full_day' yet
+      // still cross partial sessions at its ends.
+      if (isCross(r))                            { cross_session_count++; bucket.cross_session++ }
+      else if (r.session === 'first_half')       { half_day_count++;      bucket.first_half++ }
+      else if (r.session === 'second_half')      { half_day_count++;      bucket.second_half++ }
+      else if (r.session === 'hourly')           { hourly_count++ }   // summary only — no by_type column
+      else                                       { bucket.full_day++ } // 'full_day' / null default
+
+      byType.set(name, bucket)
     }
-    const by_type = Array.from(typeMap.entries()).map(([leave_type_id, count]) => ({ leave_type_id, count }))
+
+    const by_type = Array.from(byType.entries())
+      .map(([leave_type_name, b]) => ({ leave_type_name, ...b }))
+      .sort((a, b) => a.leave_type_name.localeCompare(b.leave_type_name))
 
     return reply.send({
       data: {
-        total_requests: total,
-        approved,
-        rejected,
-        pending,
-        cancelled,
+        total_requests: rows.length,
+        half_day_count,
+        cross_session_count,
+        hourly_count,
         by_type,
-        approval_rate: total > 0 ? Math.round((approved / total) * 100) : 0,
       },
     })
   })

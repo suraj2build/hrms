@@ -240,13 +240,17 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
   fastify.delete('/slabs/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data: deleted, error } = await fastify.supabase
       .from('ptax_slabs')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
 
     if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (!deleted || deleted.length === 0) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Slab not found' })
+    }
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'ptax_slabs',
