@@ -524,7 +524,7 @@ function OTReviewTab({
     queryKey: ['daily-ops-ot'],
     queryFn: () =>
       api
-        .get<{ data: unknown[] }>('/attendance/anomalies?type=ot_spike&resolved=false&limit=100')
+        .get<{ data: unknown[] }>('/attendance/anomalies?type=excessive_hours&resolved=false&limit=100')
         .then(r => r.data ?? []),
     staleTime: 60_000,
   })
