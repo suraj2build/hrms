@@ -232,7 +232,7 @@ export function WorkflowRecommendations({ compact = false }: { compact?: boolean
         api.get<TotalListResponse>('/work-session-anomalies?status=unresolved'),
         api.get<TotalListResponse>('/payroll/blockers'),
         api.get<TotalListResponse>('/roster/uncovered-shifts'),
-        api.get<TotalListResponse>('/leave/pending-approvals'),
+        api.get<TotalListResponse>('/approvals/pending'),
       ])
 
       const resolve = <T,>(

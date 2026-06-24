@@ -257,8 +257,9 @@ function InboxSkeleton() {
 
 async function fetchInboxItems(): Promise<InboxItem[]> {
   const results = await Promise.allSettled([
-    api.get<{ data: InboxItem[] }>('/attendance/approvals/pending'),
-    api.get<{ data: InboxItem[] }>('/leave/approvals/pending'),
+    // no /attendance/approvals/pending endpoint — attendance approvals surface via corrections/regularisation
+    Promise.resolve({ data: [] as InboxItem[] }),
+    api.get<{ data: InboxItem[] }>('/approvals/pending'),
     api.get<{ data: RawAnomaly[] }>('/work-session-anomalies?status=unresolved'),
     api.get<{ data: RawBlocker[] }>('/payroll/blockers?status=open'),
   ])

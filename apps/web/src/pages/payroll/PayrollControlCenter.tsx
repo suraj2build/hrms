@@ -491,7 +491,7 @@ export function PayrollControlCenter(): JSX.Element {
   // ── Step 3 — freeze ──────────────────────────────────────────────────────────
 
   const freezeMutation = useMutation({
-    mutationFn: () => api.post<void>('/attendance/periods/lock', {}),
+    mutationFn: () => api.post<void>(`/attendance/period-locks/${payrollMonth}/lock`, {}),
     onSuccess: () => {
       setIsFrozen(true)
       completeStep('freeze')

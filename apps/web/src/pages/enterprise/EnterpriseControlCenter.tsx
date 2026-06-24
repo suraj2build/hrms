@@ -480,7 +480,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
 
   const { data: regulatoryData, isLoading: regulatoryLoading } = useQuery({
     queryKey: ['enterprise-control-trust', 'regulatory'],
-    queryFn:  () => api.get<{ revisions: ComplianceRevision[] }>('/trust/regulatory/pending'),
+    queryFn:  () => api.get<{ revisions: ComplianceRevision[] }>('/trust/regulatory/revisions'),
   })
 
   const { data: verStatsData, isLoading: verStatsLoading } = useQuery({
