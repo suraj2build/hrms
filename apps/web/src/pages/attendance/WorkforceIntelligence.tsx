@@ -29,6 +29,7 @@ import { toast }          from 'sonner'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
@@ -160,29 +161,6 @@ function fmtDatetime(iso: string) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label, value, sub, icon: Icon, colorCls,
-}: {
-  label: string
-  value: string | number
-  sub?: string
-  icon: React.ElementType
-  colorCls: string
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4 flex items-start gap-3">
-      <div className={cn('p-2 rounded-lg bg-muted/60', colorCls)}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div>
-        <p className="text-xs text-muted-foreground font-medium">{label}</p>
-        <p className={cn('text-2xl font-bold leading-none mt-0.5', colorCls)}>{value}</p>
-        {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
-      </div>
-    </div>
-  )
-}
 
 function RiskScoreBar({ score }: { score: number }) {
   const cls =
@@ -333,36 +311,36 @@ export function WorkforceIntelligence() {
         </div>
       ) : summary ? (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            <KpiCard
+          <MetricRow cols={4}>
+            <MetricCard
               label="At-Risk Employees"
               value={summary.at_risk_count}
-              sub={`of ${summary.total_employees} active`}
+              subtitle={`of ${summary.total_employees} active`}
               icon={AlertTriangle}
-              colorCls="text-destructive"
+              variant="destructive"
             />
-            <KpiCard
+            <MetricCard
               label="Open Anomalies"
               value={summary.open_anomalies}
-              sub={`${summary.resolved_anomalies} resolved`}
+              subtitle={`${summary.resolved_anomalies} resolved`}
               icon={Activity}
-              colorCls="text-warning"
+              variant="warning"
             />
-            <KpiCard
+            <MetricCard
               label="Avg Risk Score"
               value={`${summary.avg_risk_score}/100`}
-              sub={riskLabel(summary.avg_risk_score)}
+              subtitle={riskLabel(summary.avg_risk_score)}
               icon={Brain}
-              colorCls={summary.avg_risk_score >= 40 ? 'text-destructive' : 'text-success'}
+              variant={summary.avg_risk_score >= 40 ? 'destructive' : 'success'}
             />
-            <KpiCard
+            <MetricCard
               label="Active Flags"
               value={flagsResp?.total ?? '…'}
-              sub="Unacknowledged"
+              subtitle="Unacknowledged"
               icon={Shield}
-              colorCls="text-warning"
+              variant="warning"
             />
-          </div>
+          </MetricRow>
 
           {/* Trend + Breakdown row */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">

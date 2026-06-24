@@ -31,6 +31,7 @@ import {
   Upload as UploadIcon, Info, Fingerprint,
 } from 'lucide-react'
 import { ContextualHint } from '@/components/operational/ContextualHint'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -344,40 +345,6 @@ function CollapsibleCard({
       )}
     </div>
   )
-}
-
-// ── KpiChip — compact stat tile for the KPI row ───────────────────────────────
-
-function KpiChip({
-  label,
-  value,
-  colorClass,
-  href,
-  loading,
-}: {
-  label:      string
-  value:      number | string
-  colorClass: string
-  href?:      string
-  loading?:   boolean
-}) {
-  const inner = (
-    <div className={cn(
-      'flex flex-col gap-0.5 p-3 rounded-xl border border-border border-t-[3px] border-t-primary bg-card hover:bg-accent/40 transition-colors',
-      href && 'cursor-pointer',
-    )}>
-      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{label}</span>
-      {loading
-        ? <span className="h-6 w-8 rounded bg-muted animate-pulse mt-0.5" />
-        : <span className={cn('text-xl font-bold tabular-nums', colorClass)}>{value}</span>
-      }
-    </div>
-  )
-
-  if (href) {
-    return <Link to={href}>{inner}</Link>
-  }
-  return inner
 }
 
 // ── Audit source badge variant ─────────────────────────────────────────────────
@@ -1276,50 +1243,52 @@ export function Attendance() {
 
       {/* ── 2. KPI ROW ─────────────────────────────────────────────────────────── */}
       {(isAdmin || isManager) && (
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          {!opsStats && !teamLoading ? (
-            Array.from({ length: 7 }).map((_, i) => (
+        !opsStats && !teamLoading ? (
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {Array.from({ length: 7 }).map((_, i) => (
               <div key={i} className="h-[62px] rounded-lg bg-muted/60 animate-pulse" />
-            ))
-          ) : todaySummary ? (
-            <>
-              {/* Period badge — always shown for admin views (month aggregate, not today) */}
-              {isAdmin && (
-                <div className="col-span-full flex items-center gap-1.5 text-[10px] text-muted-foreground pb-0.5">
-                  <CalendarDays className="h-3 w-3 flex-shrink-0" />
-                  <span>
-                    Monthly aggregate ·{' '}
-                    <span className="font-medium text-foreground">{todaySummaryLabel}</span>
-                    {opsStats?.active_period_summary?.is_historical && (
-                      <span className="ml-1 text-warning">(historical period)</span>
-                    )}
-                  </span>
-                </div>
-              )}
-              <KpiChip label="Present"    value={todaySummary.present}    colorClass="text-success" />
-              <KpiChip label="Late"       value={todaySummary.late}       colorClass="text-warning" />
-              <KpiChip label="Absent"     value={todaySummary.absent}     colorClass="text-destructive" />
-              <KpiChip label="On Leave"   value={summaryFields.leave ?? summaryFields.on_leave ?? 0} colorClass="text-info" />
+            ))}
+          </div>
+        ) : todaySummary ? (
+          <>
+            {/* Period badge — always shown for admin views (month aggregate, not today) */}
+            {isAdmin && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground pb-0.5">
+                <CalendarDays className="h-3 w-3 flex-shrink-0" />
+                <span>
+                  Monthly aggregate ·{' '}
+                  <span className="font-medium text-foreground">{todaySummaryLabel}</span>
+                  {opsStats?.active_period_summary?.is_historical && (
+                    <span className="ml-1 text-warning">(historical period)</span>
+                  )}
+                </span>
+              </div>
+            )}
+            <MetricRow cols={5}>
+              <MetricCard label="Present"    value={todaySummary.present}    variant="success" />
+              <MetricCard label="Late"       value={todaySummary.late}       variant="warning" />
+              <MetricCard label="Absent"     value={todaySummary.absent}     variant="destructive" />
+              <MetricCard label="On Leave"   value={summaryFields.leave ?? summaryFields.on_leave ?? 0} variant="info" />
               {/* Payable days always available from active_period_summary; not_marked for manager view */}
               {'payable_days' in todaySummary
-                ? <KpiChip label="Payable Days" value={summaryFields.payable_days ?? 0} colorClass="text-success" />
-                : <KpiChip label="Not Marked"   value={summaryFields.not_marked ?? 0} colorClass="text-muted-foreground" />
+                ? <MetricCard label="Payable Days" value={summaryFields.payable_days ?? 0} variant="success" />
+                : <MetricCard label="Not Marked"   value={summaryFields.not_marked ?? 0} variant="neutral" />
               }
-              <KpiChip
+              <MetricCard
                 label="Anomalies"
                 value={opsStats?.unresolved_anomalies ?? '—'}
-                colorClass={(opsStats?.unresolved_anomalies ?? 0) > 0 ? 'text-warning' : 'text-muted-foreground'}
-                href={isAdmin ? '/admin/attendance/anomalies' : undefined}
+                variant={(opsStats?.unresolved_anomalies ?? 0) > 0 ? 'warning' : 'neutral'}
+                onClick={isAdmin ? () => navigate('/admin/attendance/anomalies') : undefined}
               />
-              <KpiChip
+              <MetricCard
                 label="Corrections"
                 value={opsStats?.pending_corrections ?? '—'}
-                colorClass={(opsStats?.pending_corrections ?? 0) > 0 ? 'text-info' : 'text-muted-foreground'}
-                href={isAdmin ? '/admin/attendance/corrections' : undefined}
+                variant={(opsStats?.pending_corrections ?? 0) > 0 ? 'info' : 'neutral'}
+                onClick={isAdmin ? () => navigate('/admin/attendance/corrections') : undefined}
               />
-            </>
-          ) : null}
-        </div>
+            </MetricRow>
+          </>
+        ) : null
       )}
 
       {/* ── 3. TWO-COLUMN: Attention Queue + Today's Distribution | Health + Links */}

@@ -20,6 +20,7 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { DateInput }     from '@/components/ui/date-input'
@@ -75,6 +76,12 @@ function scoreColor(score: number): string {
   if (score >= 80) return 'text-success'
   if (score >= 60) return 'text-warning'
   return 'text-destructive'
+}
+
+function scoreVariant(score: number): 'success' | 'warning' | 'destructive' {
+  if (score >= 80) return 'success'
+  if (score >= 60) return 'warning'
+  return 'destructive'
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -228,20 +235,6 @@ function DateRangeInputs({
   )
 }
 
-function SummaryCard({
-  label, value, sub, colorCls,
-}: {
-  label: string; value: string | number; sub?: string; colorCls?: string
-}) {
-  return (
-    <div className="surface-premium lift-hover p-4">
-      <p className="text-xs text-muted-foreground font-medium">{label}</p>
-      <p className={cn('text-2xl font-bold mt-1 tabular-nums', colorCls ?? 'text-foreground')}>{value}</p>
-      {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-    </div>
-  )
-}
-
 function EmptyState({ text }: { text: string }) {
   return (
     <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
@@ -288,11 +281,13 @@ function FairnessTab() {
       ) : data ? (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <SummaryCard label="Avg OT Fairness"      value={`${(data.avg_ot_fairness ?? 0).toFixed(1)}%`}     colorCls={scoreColor(data.avg_ot_fairness ?? 0)} />
-            <SummaryCard label="Avg Weekend Fairness" value={`${(data.avg_weekend_fairness ?? 0).toFixed(1)}%`} colorCls={scoreColor(data.avg_weekend_fairness ?? 0)} />
-            <SummaryCard label="Avg Night Fairness"   value={`${(data.avg_night_fairness ?? 0).toFixed(1)}%`}   colorCls={scoreColor(data.avg_night_fairness ?? 0)} />
-            <SummaryCard label="Violations"           value={data.violations_count}                       colorCls={data.violations_count > 0 ? 'text-destructive' : 'text-success'} />
+          <div className="mb-4">
+            <MetricRow cols={4}>
+              <MetricCard label="Avg OT Fairness"      value={`${(data.avg_ot_fairness ?? 0).toFixed(1)}%`}     variant={scoreVariant(data.avg_ot_fairness ?? 0)} />
+              <MetricCard label="Avg Weekend Fairness" value={`${(data.avg_weekend_fairness ?? 0).toFixed(1)}%`} variant={scoreVariant(data.avg_weekend_fairness ?? 0)} />
+              <MetricCard label="Avg Night Fairness"   value={`${(data.avg_night_fairness ?? 0).toFixed(1)}%`}   variant={scoreVariant(data.avg_night_fairness ?? 0)} />
+              <MetricCard label="Violations"           value={data.violations_count}                       variant={data.violations_count > 0 ? 'destructive' : 'success'} />
+            </MetricRow>
           </div>
 
           {/* Employee table */}
@@ -440,10 +435,12 @@ function OtDistributionTab() {
         </div>
       ) : data ? (
         <>
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <SummaryCard label="Team Avg OT Hours"    value={`${(data.team_avg_ot_hours ?? 0).toFixed(1)}h`} />
-            <SummaryCard label="Max OT Hours"         value={`${(data.max_ot_hours ?? 0).toFixed(1)}h`}     colorCls="text-warning" />
-            <SummaryCard label="Concentration Index"  value={(data.concentration_index ?? 0).toFixed(2)}      colorCls={(data.concentration_index ?? 0) > 0.5 ? 'text-destructive' : 'text-success'} />
+          <div className="mb-4">
+            <MetricRow cols={3}>
+              <MetricCard label="Team Avg OT Hours"    value={`${(data.team_avg_ot_hours ?? 0).toFixed(1)}h`} />
+              <MetricCard label="Max OT Hours"         value={`${(data.max_ot_hours ?? 0).toFixed(1)}h`}     variant="warning" />
+              <MetricCard label="Concentration Index"  value={(data.concentration_index ?? 0).toFixed(2)}      variant={(data.concentration_index ?? 0) > 0.5 ? 'destructive' : 'success'} />
+            </MetricRow>
           </div>
 
           {data.employees.length === 0 ? (

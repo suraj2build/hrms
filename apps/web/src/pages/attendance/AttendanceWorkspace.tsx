@@ -22,6 +22,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { SubTabs }       from '@/components/ui/SubTabs'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
@@ -335,19 +336,18 @@ function EmpSearchDropdown({
 
 function KpiStrip({ stats }: { stats: AttendanceStats | undefined }) {
   const items = [
-    { label: 'Present Today',      value: stats?.present         ?? '—', color: 'text-success' },
-    { label: 'Anomalies',          value: stats?.anomalies        ?? '—', color: 'text-destructive' },
-    { label: 'Missing Punches',    value: stats?.missing_punches  ?? '—', color: 'text-warning' },
-    { label: 'Pending Approvals',  value: stats?.pending_approvals ?? '—', color: 'text-info' },
+    { label: 'Present Today',      value: stats?.present         ?? '—', variant: 'success' as const },
+    { label: 'Anomalies',          value: stats?.anomalies        ?? '—', variant: 'destructive' as const },
+    { label: 'Missing Punches',    value: stats?.missing_punches  ?? '—', variant: 'warning' as const },
+    { label: 'Pending Approvals',  value: stats?.pending_approvals ?? '—', variant: 'info' as const },
   ]
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      {items.map(item => (
-        <div key={item.label} className="rounded-xl border border-border bg-card p-3 text-center">
-          <p className={cn('text-2xl font-bold', item.color)}>{item.value}</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">{item.label}</p>
-        </div>
-      ))}
+    <div className="mb-4">
+      <MetricRow cols={4}>
+        {items.map(item => (
+          <MetricCard key={item.label} label={item.label} value={item.value} variant={item.variant} />
+        ))}
+      </MetricRow>
     </div>
   )
 }

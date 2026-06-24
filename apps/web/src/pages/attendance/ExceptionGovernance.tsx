@@ -19,6 +19,7 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
@@ -136,39 +137,6 @@ function slaLabel(sla_due_at: string | null, sla_breached: boolean): string {
   if (hrs < 1) return `< 1h`
   if (hrs < 24) return `${hrs}h`
   return `${Math.floor(hrs / 24)}d`
-}
-
-// ── Summary card ───────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  label, value, icon: Icon, variant = 'neutral',
-}: {
-  label:   string
-  value:   number | string
-  icon:    React.ComponentType<{ className?: string }>
-  variant?: 'neutral' | 'warning' | 'destructive' | 'success'
-}) {
-  const valueColor: Record<string, string> = {
-    neutral:     'text-foreground',
-    warning:     'text-warning',
-    destructive: 'text-destructive',
-    success:     'text-success',
-  }
-  const iconColor: Record<string, string> = {
-    neutral:     'text-muted-foreground',
-    warning:     'text-warning',
-    destructive: 'text-destructive',
-    success:     'text-success',
-  }
-  return (
-    <div className="rounded-lg border border-border bg-card p-4 flex items-start justify-between">
-      <div>
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
-        <p className={cn('font-display text-2xl font-bold', valueColor[variant])}>{value}</p>
-      </div>
-      <Icon className={cn('h-5 w-5 mt-0.5', iconColor[variant])} />
-    </div>
-  )
 }
 
 // ── Action dropdown ────────────────────────────────────────────────────────────
@@ -358,32 +326,32 @@ export function ExceptionGovernance() {
           Loading summary…
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <SummaryCard
+        <MetricRow cols={4}>
+          <MetricCard
             label="Total Open"
             value={summary?.total_open ?? 0}
             icon={ShieldAlert}
             variant={(summary?.total_open ?? 0) > 0 ? 'warning' : 'success'}
           />
-          <SummaryCard
+          <MetricCard
             label="SLA Breached"
             value={summary?.total_sla_breached ?? 0}
             icon={Clock}
             variant={(summary?.total_sla_breached ?? 0) > 0 ? 'destructive' : 'neutral'}
           />
-          <SummaryCard
+          <MetricCard
             label="High / Critical"
             value={highCriticalCount}
             icon={AlertTriangle}
             variant={highCriticalCount > 0 ? 'destructive' : 'neutral'}
           />
-          <SummaryCard
+          <MetricCard
             label="Requires Investigation"
             value={requiresInvestigationCount}
             icon={ShieldAlert}
             variant={requiresInvestigationCount > 0 ? 'warning' : 'neutral'}
           />
-        </div>
+        </MetricRow>
       )}
 
       {/* ── Exceptions table ── */}
