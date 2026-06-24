@@ -767,7 +767,7 @@ function OperationsTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
 
   const { data: heatmapData, isLoading: heatmapLoading } = useQuery({
     queryKey: ['enterprise-control-operations', 'heatmap'],
-    queryFn:  () => api.get<{ cells: HeatmapCell[] }>('/operations/heatmap'),
+    queryFn:  () => api.get<{ cells: HeatmapCell[] }>('/operations/heatmaps'),
   })
 
   const signals  = healthData?.signals  ?? []

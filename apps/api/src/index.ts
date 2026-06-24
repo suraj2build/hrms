@@ -530,7 +530,7 @@ async function start() {
   await fastify.register(onboardingDraftRoutes,      { prefix: '/onboarding' })  // draft review + validate + approve
   await fastify.register(onboardingDashboardRoute,   { prefix: '/onboarding' })  // dashboard stats
   await fastify.register(onboardingChecklistRoutes,       { prefix: '/onboarding' })  // onboarding checklist
-  await fastify.register(seedOnboardingTemplatesRoutes,   { prefix: '/onboarding' })  // seed default templates
+  await fastify.register(seedOnboardingTemplatesRoutes)   // routes already include full /onboarding/... path (no prefix → avoid double-prefix)
   await fastify.register(preJoineeRoutes)  // pre-joinee — routes already include full /onboarding/... paths (no prefix to avoid double-prefix)
   await fastify.register(onboardingTimelineRoutes)   // O2: /onboarding/sessions/:id/timeline + /employees/:id/onboarding-timeline
   await fastify.register(onboardingReadinessRoutes)  // O3: /onboarding/sessions/:id/readiness + /employees/:id/readiness
@@ -729,7 +729,7 @@ async function start() {
   await fastify.register(governanceEvolutionRoute)      // GET/POST /approvals/governance/*
 
   // ── ESS Operational Experience ────────────────────────────────────────────
-  await fastify.register(essOperationalRoute)           // GET /ess/*
+  await fastify.register(essOperationalRoute, { prefix: '/ess' })   // GET /ess/* (routes defined relative)
   await fastify.register(essSelfServiceRoute)           // GET/POST/PUT/DELETE /ess/me/* (P4.1 data ownership)
 
   // ── System: Event Governance + Orchestration + Incidents + Webhooks + Integrations ──

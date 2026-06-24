@@ -37,7 +37,7 @@ export function ShiftSelector({
 
   const { data: shifts = [] } = useQuery({
     queryKey: ['shifts'],
-    queryFn: () => api.get<{ data: ShiftOption[] }>('/shifts').then((r) => r.data),
+    queryFn: () => api.get<{ data: ShiftOption[] }>('/masters/shifts').then((r) => r.data),
     staleTime: 5 * 60 * 1000,
   })
 

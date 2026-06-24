@@ -160,7 +160,7 @@ export const OperationalHealthStrip = React.memo(function OperationalHealthStrip
 
   const { data, isLoading, dataUpdatedAt, refetch } = useQuery<HealthApiResponse, Error>({
     queryKey:        HEALTH_QUERY_KEY,
-    queryFn:         () => api.get<HealthApiResponse>('/operational/health'),
+    queryFn:         () => api.get<HealthApiResponse>('/system/operational-health'),
     refetchInterval: 60_000,
     staleTime:       30_000,
     retry:           false,
