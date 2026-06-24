@@ -511,12 +511,12 @@ function VarianceApprovalsTab() {
 
   const { data: variances, isLoading } = useQuery<VarianceApproval[]>({
     queryKey: ['variance-approvals', appliedMonth],
-    queryFn: () => api.get<{ data: VarianceApproval[] }>(`/payroll/governance/variances?month=${appliedMonth}`).then(r => r.data),
+    queryFn: () => api.get<{ data: VarianceApproval[] }>(`/payroll/governance/variance-approvals?month=${appliedMonth}`).then(r => r.data),
     enabled: !!appliedMonth,
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variances/${id}/approve`).then(r => r.data),
+    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variance-approvals/${id}/approve`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
@@ -530,7 +530,7 @@ function VarianceApprovalsTab() {
   })
 
   const rejectMutation = useMutation({
-    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variances/${id}/reject`).then(r => r.data),
+    mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variance-approvals/${id}/reject`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })

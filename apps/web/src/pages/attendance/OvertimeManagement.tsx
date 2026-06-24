@@ -647,7 +647,7 @@ function AssignmentsTab() {
 
   const { data: assignments, isLoading: loadingAss } = useQuery<{ data: Array<{ id: string; employee_id: string; policy_id: string; created_at: string }> }>({
     queryKey: ['ot-assignments', applied],
-    queryFn:  () => api.get(`/overtime/employee-assignments?employee_id=${applied}`),
+    queryFn:  () => api.get(`/overtime/assignments?employee_id=${applied}`),
     enabled:  !!applied,
     staleTime: 30_000,
   })
@@ -661,7 +661,7 @@ function AssignmentsTab() {
 
   const assignMutation = useMutation({
     mutationFn: (body: { employee_id: string; policy_id: string }) =>
-      api.post('/overtime/employee-assignments', body),
+      api.post('/overtime/assignments', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ot-assignments'] })
       setMsg('Policy assigned successfully.')
@@ -674,7 +674,7 @@ function AssignmentsTab() {
   })
 
   const removeMutation = useMutation({
-    mutationFn: (employeeId: string) => api.delete(`/overtime/employee-assignments/${employeeId}`),
+    mutationFn: (assignmentId: string) => api.delete(`/overtime/assignments/${assignmentId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ot-assignments'] })
       setMsg('Assignment removed.')
@@ -715,7 +715,7 @@ function AssignmentsTab() {
                 </div>
                 <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive"
                   disabled={removeMutation.isPending}
-                  onClick={() => removeMutation.mutate(applied)}>
+                  onClick={() => removeMutation.mutate(assignments?.data?.[0]?.id ?? '')}>
                   Remove
                 </Button>
               </div>

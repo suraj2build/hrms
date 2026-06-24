@@ -190,7 +190,7 @@ export function PayrollReadiness() {
   // Lock/unlock mutation
   const lockMutation = useMutation({
     mutationFn: (action: 'lock' | 'unlock') =>
-      api.post(`/attendance/period-locks/${action}`, { month }),
+      api.post(`/attendance/period-locks/${month}/${action}`, { month }),
     onSuccess: (_data, action) => {
       // Exact key with month prevents invalidating period-lock entries for other months
       qc.invalidateQueries({ queryKey: ['period-lock', month], exact: true })
