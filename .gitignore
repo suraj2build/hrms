@@ -9,8 +9,13 @@ coverage/
 .idea/ 
 .DS_Store 
 
+# Source/dist archives must never be committed — they can smuggle in .env
+# files and node_modules past the rules above. Ignore all zips/archives.
+*.zip
+*.rar
 apps/website.rar
 apps/website.zip
+apps/apps.zip
 
 # Claude Code internal worktrees
 .claude/worktrees/
