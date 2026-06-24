@@ -19,6 +19,7 @@ import {
 import { PageContainer }                                       from '@/components/layout/PageContainer'
 import { PageHeader }                                          from '@/components/layout/PageHeader'
 import { SectionCard }                                         from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow }                               from '@/components/dashboard/MetricCard'
 import { Badge }                                               from '@/components/ui/badge'
 import { Button }                                              from '@/components/ui/button'
 import { Input }                                               from '@/components/ui/input'
@@ -300,14 +301,18 @@ export default function FabricWorkspace() {
       {/* Health strip */}
       {health && (
         <div className="mb-6 rounded-xl border bg-card p-4">
-          <div className="flex flex-wrap gap-3 mb-3">
+          <MetricRow cols={5}>
             {healthScores.map(s => (
-              <div key={s.label} className="flex items-center gap-2 rounded-lg border px-3 py-1.5 bg-background">
-                <span className="text-xs text-muted-foreground">{s.label}</span>
-                <span className={cn('text-sm font-semibold tabular-nums', scoreColor(s.value ?? 0))}>{(s.value ?? 0).toFixed(0)}</span>
-              </div>
+              <MetricCard
+                key={s.label}
+                compact
+                label={s.label}
+                value={(s.value ?? 0).toFixed(0)}
+                variant={(s.value ?? 0) >= 75 ? 'success' : (s.value ?? 0) >= 50 ? 'warning' : 'destructive'}
+              />
             ))}
-          </div>
+          </MetricRow>
+          <div className="mb-3" />
           <div className="flex gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1"><Workflow className="size-3" />{health.active_orchestrations} active orchestrations</span>
             <span className="flex items-center gap-1"><Clock className="size-3" />{health.pending_slas} pending SLAs</span>

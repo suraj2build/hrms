@@ -21,6 +21,7 @@ import { format } from 'date-fns'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -131,6 +132,13 @@ const SEV: Record<string, { label: string; color: string }> = {
   medium:   { label: 'Medium',   color: 'bg-warning/10  text-warning  border-warning/30'  },
   low:      { label: 'Low',      color: 'bg-info/10   text-info   border-info/30'   },
   info:     { label: 'Info',     color: 'bg-muted  text-muted-foreground   border-border'   },
+}
+
+const SEV_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'destructive' | 'info'> = {
+  critical: 'destructive',
+  high:     'warning',
+  medium:   'warning',
+  low:      'info',
 }
 
 const ALERT_STATUS: Record<string, { label: string; color: string }> = {
@@ -288,19 +296,12 @@ export function SecurityOpsWorkspace() {
           ) : health ? (
             <div className="grid gap-4">
               <SectionCard title="Alerts (Last 30 Days)">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Open Alerts',    value: health.alerts_30d.open,          color: health.alerts_30d.open > 0          ? 'text-warning' : 'text-foreground' },
-                    { label: 'Critical Open',  value: health.alerts_30d.critical_open, color: health.alerts_30d.critical_open > 0 ? 'text-destructive'   : 'text-foreground' },
-                    { label: 'High Open',      value: health.alerts_30d.high_open,     color: health.alerts_30d.high_open > 0     ? 'text-accent-coral': 'text-foreground' },
-                    { label: 'Resolved',       value: health.alerts_30d.resolved,      color: 'text-success' },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-lg border p-3">
-                      <p className={cn('text-2xl font-bold', k.color)}>{k.value}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{k.label}</p>
-                    </div>
-                  ))}
-                </div>
+                <MetricRow cols={4}>
+                  <MetricCard label="Open Alerts"   value={health.alerts_30d.open}          variant={health.alerts_30d.open > 0          ? 'warning'     : 'neutral'} />
+                  <MetricCard label="Critical Open" value={health.alerts_30d.critical_open} variant={health.alerts_30d.critical_open > 0 ? 'destructive' : 'neutral'} />
+                  <MetricCard label="High Open"     value={health.alerts_30d.high_open}     variant={health.alerts_30d.high_open > 0     ? 'warning'     : 'neutral'} />
+                  <MetricCard label="Resolved"      value={health.alerts_30d.resolved}      variant="success" />
+                </MetricRow>
                 {health.alerts_30d.critical_open > 0 && (
                   <div className="mt-3 rounded-lg bg-destructive/10 border border-destructive/30 p-3 flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
@@ -322,33 +323,25 @@ export function SecurityOpsWorkspace() {
               </SectionCard>
 
               <SectionCard title="Events (Last 7 Days)">
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-                  <div className="rounded-lg border p-3">
-                    <p className="text-2xl font-bold">{health.events_7d.total}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Total Events</p>
-                  </div>
-                  {['critical','high','medium','low'].map(sev => (
-                    <div key={sev} className="rounded-lg border p-3">
-                      <p className={cn('text-2xl font-bold capitalize', SEV[sev]?.color.split(' ')[1]?.replace('text-', 'text-') ?? '')}>
-                        {health.events_7d.by_severity[sev] ?? 0}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5 capitalize">{sev}</p>
-                    </div>
+                <MetricRow cols={5}>
+                  <MetricCard label="Total Events" value={health.events_7d.total} />
+                  {(['critical','high','medium','low'] as const).map(sev => (
+                    <MetricCard
+                      key={sev}
+                      label={sev}
+                      value={health.events_7d.by_severity[sev] ?? 0}
+                      variant={SEV_VARIANT[sev]}
+                      className="capitalize"
+                    />
                   ))}
-                </div>
+                </MetricRow>
               </SectionCard>
 
               <SectionCard title="Detection Rules">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg border p-3">
-                    <p className="text-2xl font-bold text-success">{health.detection_rules.enabled}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Active Rules</p>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <p className="text-2xl font-bold">{health.detection_rules.total}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Total Rules</p>
-                  </div>
-                </div>
+                <MetricRow cols={2}>
+                  <MetricCard label="Active Rules" value={health.detection_rules.enabled} variant="success" />
+                  <MetricCard label="Total Rules"  value={health.detection_rules.total} />
+                </MetricRow>
               </SectionCard>
             </div>
           ) : null}

@@ -35,6 +35,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { api }           from '@/lib/api/client'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { RequisitionApprovalDialog } from '@/components/recruitment/RequisitionApprovalDialog'
 import { JobBoardPostingsDialog } from '@/components/recruitment/JobBoardPostingsDialog'
 import { useAuthStore }  from '@/stores/authStore'
@@ -94,6 +95,14 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
   on_hold:   { label: 'On Hold',   className: 'text-warning  border-warning/30  bg-warning/10'  },
   filled:    { label: 'Filled',    className: 'text-info   border-info/30   bg-info/10'   },
   cancelled: { label: 'Cancelled', className: 'text-destructive    border-destructive/30    bg-destructive/10'    },
+}
+
+const STATUS_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'info' | 'destructive'> = {
+  draft:     'neutral',
+  open:      'success',
+  on_hold:   'warning',
+  filled:    'info',
+  cancelled: 'destructive',
 }
 
 const EMP_TYPE_LABELS: Record<string, string> = {
@@ -279,20 +288,19 @@ export function AdminRecruitment() {
       />
 
       {/* Stats strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
-        {(['open', 'draft', 'on_hold', 'filled', 'cancelled'] as const).map(s => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(statusFilter === s ? 'all' : s)}
-            className={cn(
-              'rounded-lg border p-3 text-left transition-colors hover:bg-muted/50',
-              statusFilter === s ? 'ring-2 ring-primary' : 'border-border bg-card',
-            )}
-          >
-            <p className="text-xs text-muted-foreground capitalize">{STATUS_META[s].label}</p>
-            <p className="text-2xl font-bold mt-0.5">{stats[s] ?? 0}</p>
-          </button>
-        ))}
+      <div className="mb-4">
+        <MetricRow cols={5}>
+          {(['open', 'draft', 'on_hold', 'filled', 'cancelled'] as const).map(s => (
+            <MetricCard
+              key={s}
+              label={STATUS_META[s].label}
+              value={stats[s] ?? 0}
+              variant={STATUS_VARIANT[s]}
+              onClick={() => setStatusFilter(statusFilter === s ? 'all' : s)}
+              className={cn(statusFilter === s && 'ring-2 ring-primary')}
+            />
+          ))}
+        </MetricRow>
       </div>
 
       {/* Filters */}

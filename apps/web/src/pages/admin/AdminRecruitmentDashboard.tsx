@@ -1,4 +1,3 @@
-import type React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import {
@@ -11,6 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,36 +55,6 @@ const FUNNEL_STEPS: Array<{ key: keyof AnalyticsData['funnel']; label: string; c
 ]
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-function KpiCard({ icon: Icon, label, value, sub, color = 'blue' }: {
-  icon: React.ElementType
-  label: string
-  value: string | number
-  sub?: string
-  color?: 'blue' | 'teal' | 'amber' | 'violet'
-}) {
-  const ring = {
-    blue:   'bg-info/10 text-info',
-    teal:   'bg-accent-teal/10 text-accent-teal',
-    amber:  'bg-warning/10 text-warning',
-    violet: 'bg-accent-violet/10 text-accent-violet',
-  }[color]
-
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-4 p-5">
-        <div className={`rounded-xl p-3 ${ring}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground truncate">{label}</p>
-          <p className="text-2xl font-bold leading-tight">{value}</p>
-          {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
 
 function FunnelStep({ label, count, total, color, isLast }: {
   label: string; count: number; total: number; color: string; isLast: boolean
@@ -189,42 +159,42 @@ export function AdminRecruitmentDashboard() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
-        ) : (
-          <>
-            <KpiCard
-              icon={Users}
-              label="Total Applications"
-              value={d?.total_applications ?? 0}
-              sub={`${totalActive} active in pipeline`}
-              color="blue"
-            />
-            <KpiCard
-              icon={Briefcase}
-              label="Open Roles"
-              value={d?.requisitions.open ?? 0}
-              sub={`${d?.total_requisitions ?? 0} total requisitions`}
-              color="violet"
-            />
-            <KpiCard
-              icon={Clock}
-              label="Avg Time to Hire"
-              value={d?.avg_time_to_hire != null ? `${d.avg_time_to_hire}d` : '—'}
-              sub={d?.avg_time_to_offer != null ? `${d.avg_time_to_offer}d to offer` : 'No hires yet'}
-              color="amber"
-            />
-            <KpiCard
-              icon={CheckCircle2}
-              label="Interview Pass Rate"
-              value={d?.pass_rate != null ? `${d.pass_rate}%` : '—'}
-              sub={`${(d?.interviews.completed ?? 0)} interviews completed`}
-              color="teal"
-            />
-          </>
-        )}
-      </div>
+      {isLoading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+        </div>
+      ) : (
+        <MetricRow cols={4}>
+          <MetricCard
+            icon={Users}
+            label="Total Applications"
+            value={d?.total_applications ?? 0}
+            subtitle={`${totalActive} active in pipeline`}
+            variant="info"
+          />
+          <MetricCard
+            icon={Briefcase}
+            label="Open Roles"
+            value={d?.requisitions.open ?? 0}
+            subtitle={`${d?.total_requisitions ?? 0} total requisitions`}
+            variant="info"
+          />
+          <MetricCard
+            icon={Clock}
+            label="Avg Time to Hire"
+            value={d?.avg_time_to_hire != null ? `${d.avg_time_to_hire}d` : '—'}
+            subtitle={d?.avg_time_to_offer != null ? `${d.avg_time_to_offer}d to offer` : 'No hires yet'}
+            variant="warning"
+          />
+          <MetricCard
+            icon={CheckCircle2}
+            label="Interview Pass Rate"
+            value={d?.pass_rate != null ? `${d.pass_rate}%` : '—'}
+            subtitle={`${(d?.interviews.completed ?? 0)} interviews completed`}
+            variant="success"
+          />
+        </MetricRow>
+      )}
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">

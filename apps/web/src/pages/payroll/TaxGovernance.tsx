@@ -23,6 +23,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -132,23 +133,6 @@ function ToggleField({
           </button>
         ))}
       </div>
-    </div>
-  )
-}
-
-function StatChip({
-  label,
-  value,
-  color,
-}: {
-  label: string
-  value: number
-  color?: string
-}) {
-  return (
-    <div className={cn('rounded-lg border bg-card p-4', color)}>
-      <p className="text-2xl font-bold tabular-nums">{value.toLocaleString('en-IN')}</p>
-      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
     </div>
   )
 }
@@ -423,29 +407,32 @@ export function TaxGovernance() {
             ) : complianceData ? (
               <div className="space-y-5">
                 {/* Summary chips */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                  <StatChip label="Total Employees" value={complianceData.stats.total_employees} />
-                  <StatChip
+                <MetricRow cols={5}>
+                  <MetricCard
+                    label="Total Employees"
+                    value={complianceData.stats.total_employees.toLocaleString('en-IN')}
+                  />
+                  <MetricCard
                     label="Submitted"
-                    value={complianceData.stats.submitted}
-                    color="border-success/40 dark:border-success"
+                    value={complianceData.stats.submitted.toLocaleString('en-IN')}
+                    variant="success"
                   />
-                  <StatChip
+                  <MetricCard
                     label="Pending"
-                    value={complianceData.stats.pending}
-                    color="border-warning/40 dark:border-warning"
+                    value={complianceData.stats.pending.toLocaleString('en-IN')}
+                    variant="warning"
                   />
-                  <StatChip
+                  <MetricCard
                     label="Proofs Under Review"
-                    value={complianceData.stats.proofs_under_review}
-                    color="border-info/40 dark:border-info"
+                    value={complianceData.stats.proofs_under_review.toLocaleString('en-IN')}
+                    variant="info"
                   />
-                  <StatChip
+                  <MetricCard
                     label="Rejected"
-                    value={complianceData.stats.rejected}
-                    color="border-destructive/30"
+                    value={complianceData.stats.rejected.toLocaleString('en-IN')}
+                    variant="destructive"
                   />
-                </div>
+                </MetricRow>
 
                 {/* Risk table */}
                 <SectionCard title="High-Risk Declarations">

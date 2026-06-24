@@ -21,6 +21,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
+import { MetricCard }     from '@/components/dashboard/MetricCard'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
@@ -99,10 +100,7 @@ function SummaryPanel({ entries }: { entries: LedgerEntry[] }) {
 
   return (
     <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-        <p className="text-xs text-muted-foreground mb-1">Total Entries</p>
-        <p className="text-2xl font-bold text-foreground">{totalEntries}</p>
-      </div>
+      <MetricCard label="Total Entries" value={totalEntries} />
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 sm:col-span-2 lg:col-span-3">
         <p className="text-xs text-muted-foreground mb-2">Net Delta per Component</p>
         {groups.length === 0 ? (

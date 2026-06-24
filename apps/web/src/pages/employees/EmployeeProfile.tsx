@@ -46,6 +46,7 @@ import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
 import { SignedImage } from '@/components/SignedImage'
 import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import { TooltipProvider } from '@/components/payroll/StatutoryBadges'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -2088,17 +2089,12 @@ export function EmployeeProfile() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-3 text-center mb-4">
-                  {[
-                    { label: 'Uploaded',  value: onboardingStatus.documents.total,     cls: 'text-foreground'  },
-                    { label: 'Extracted', value: onboardingStatus.documents.extracted, cls: 'text-success'     },
-                    { label: 'Failed',    value: onboardingStatus.documents.failed,    cls: 'text-destructive' },
-                  ].map(({ label, value, cls }) => (
-                    <div key={label} className="p-2 rounded-md bg-muted/40">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
-                      <p className={`text-lg font-bold ${cls}`}>{value}</p>
-                    </div>
-                  ))}
+                <div className="mb-4">
+                  <MetricRow cols={3}>
+                    <MetricCard label="Uploaded"  value={onboardingStatus.documents.total}     variant="neutral" />
+                    <MetricCard label="Extracted" value={onboardingStatus.documents.extracted} variant="success" />
+                    <MetricCard label="Failed"    value={onboardingStatus.documents.failed}    variant="destructive" />
+                  </MetricRow>
                 </div>
                 {onboardingStatus.documents.items.length > 0 && (
                   <div className="overflow-x-auto">
