@@ -221,6 +221,11 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
         .from('rotation_policy_rules')
         .update({ effective_to: yesterday })
         .eq('rotation_policy_id', req.params.id)
+        // Tenant isolation: when the body carries only `rules` (no metadata),
+        // the tenant-scoped metadata UPDATE above is skipped, so this is the
+        // only write touching a foreign policy id. Scope it to the caller's
+        // tenant so it can't close another tenant's open rule versions.
+        .eq('tenant_id', req.tenantId)
         .is('effective_to', null)
       if (closeErr) return reply.code(500).send({ error: 'DB_ERROR', message: closeErr.message })
 

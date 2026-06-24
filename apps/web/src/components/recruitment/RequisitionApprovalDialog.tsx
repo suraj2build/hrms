@@ -35,7 +35,7 @@ export function RequisitionApprovalDialog({ requisitionId, title, status, open, 
   })
   const decideMut = useMutation({
     mutationFn: (p: { id: string; decision: 'approved' | 'rejected' }) => api.patch(`/recruitment/requisitions/approvals/${p.id}/decide`, { decision: p.decision }),
-    onSuccess: (res: any) => { invalidate(); toast.success(res?.opened ? 'Requisition opened' : 'Step updated') },
+    onSuccess: (res) => { invalidate(); toast.success((res as { opened?: boolean } | undefined)?.opened ? 'Requisition opened' : 'Step updated') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 

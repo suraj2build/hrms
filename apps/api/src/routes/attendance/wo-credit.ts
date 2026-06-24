@@ -121,6 +121,19 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     const { ladder, ...fields } = parsed.data
 
+    // Tenant isolation: wo_credit_ladder is a child table keyed by structure_id
+    // with no tenant_id column, so replaceLadder() can't self-scope. Verify the
+    // parent structure belongs to the caller's tenant before any mutation —
+    // otherwise a body carrying only `ladder` would skip the tenant-scoped
+    // metadata update and let replaceLadder() wipe another tenant's ladder.
+    const { data: owned } = await fastify.supabase
+      .from('wo_credit_structure')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!owned) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Structure not found' })
+
     if (Object.keys(fields).length) {
       const { error } = await fastify.supabase
         .from('wo_credit_structure')

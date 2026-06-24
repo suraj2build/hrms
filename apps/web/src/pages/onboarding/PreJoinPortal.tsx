@@ -1239,6 +1239,7 @@ export function PreJoinPortal() {
               uan_number:             s.uan ?? "",
             }));
             if (Array.isArray(s.previous_employment)) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- shape comes from free-form saved draft JSON
               setPrevEmployers(s.previous_employment.map((e: any) => ({
                 company_name:       e.company_name ?? "",
                 designation:        e.designation ?? "",
@@ -1249,6 +1250,7 @@ export function PreJoinPortal() {
               })));
             }
             if (Array.isArray(s.education)) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- shape comes from free-form saved draft JSON
               setEduEntries(s.education.map((e: any) => ({
                 qualification:      e.qualification ?? "",
                 institution:        e.institution ?? "",

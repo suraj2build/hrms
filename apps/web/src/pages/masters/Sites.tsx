@@ -22,7 +22,7 @@ import {
   Plus, Pencil, Trash2, Globe, MapPin,
   ChevronRight, ChevronDown, ExternalLink, Loader2,
   CalendarDays, CalendarClock, ShieldCheck,
-  Layers, AlertTriangle, CheckCircle2, Users,
+  Layers, AlertTriangle, Users,
 } from 'lucide-react'
 import { PageContainer }    from '@/components/layout/PageContainer'
 import { PageHeader }       from '@/components/layout/PageHeader'
@@ -440,7 +440,9 @@ export function Sites() {
     staleTime: 120_000,
   })
   const statesList   = statesData?.data   ?? []
-  const clustersList = clustersData?.data ?? []
+  // useMemo so the reference is stable across renders — it feeds a useMemo dep
+  // below (clustered sites), which would otherwise recompute every render.
+  const clustersList = useMemo(() => clustersData?.data ?? [], [clustersData])
 
   const sites            = useMemo(() => sitesData?.data   ?? [], [sitesData])
   const rosters          = rostersData?.data       ?? []
@@ -526,7 +528,6 @@ export function Sites() {
   }, [filteredSites, clustersList])
 
   const hasActiveFilter = !!search || clusterFilter !== 'all'
-  const unassignedCount = workLocs.filter(l => !l.site_id).length
 
   function openCreate() {
     setEditSite(null)

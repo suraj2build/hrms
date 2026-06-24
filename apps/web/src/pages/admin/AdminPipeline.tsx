@@ -12,7 +12,7 @@ import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Kanban, RefreshCw, Star, GripVertical, UserCircle2,
-  Building2, Briefcase, Plus, ArrowRight, Mail, CalendarDays,
+  Building2, Briefcase, Plus, ArrowRight, Mail,
   Clock, GitBranch, MessagesSquare, Phone, FileText, Linkedin,
   StickyNote, Award, Hourglass, CheckCircle2, Circle, ThumbsUp, ThumbsDown,
 } from 'lucide-react'

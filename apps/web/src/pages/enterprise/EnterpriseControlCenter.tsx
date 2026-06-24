@@ -67,9 +67,6 @@ function fmtTime(iso: string): string {
   try { return new Date(iso).toLocaleTimeString() } catch { return iso }
 }
 
-function truncateId(id: string): string {
-  return id.length > 13 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
-}
 
 /** Humanize an entity_type token, e.g. "payroll_run" → "Payroll Run". */
 function humanizeType(t?: string | null): string {

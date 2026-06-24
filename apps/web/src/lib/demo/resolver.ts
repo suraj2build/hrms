@@ -363,7 +363,7 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   mm = path.match(/^\/compensation\/revisions\/([^/]+)$/)
   if (mm) {
     const all = fx.demoCompensationRevisions().data
-    return { data: all.find((r: any) => r.id === mm![1]) ?? all[0] }
+    return { data: all.find((r: { id: string }) => r.id === mm![1]) ?? all[0] }
   }
   if (path.startsWith('/compensation/revisions/')) return { data: [] }
 

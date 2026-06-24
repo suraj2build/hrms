@@ -42,6 +42,7 @@ const STATUS_CLS: Record<string, string> = {
   not_started: 'bg-muted text-muted-foreground', cancelled: 'bg-muted text-muted-foreground',
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- small status helper colocated with its dialog by design
 export function bgvStatusClass(status: string) { return STATUS_CLS[status] ?? 'bg-muted text-muted-foreground' }
 
 export function BgvDialog({ appId, candidateName, open, onOpenChange }: {

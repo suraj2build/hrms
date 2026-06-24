@@ -147,10 +147,18 @@ export default async function securityRoutes(fastify: FastifyInstance) {
       update.resolved_at = now
     }
 
-    const { error } = await fastify.supabase
+    // Tenant isolation: mirror the GET scope — a non-super-admin may only
+    // mutate alerts belonging to their own tenant (or platform/null alerts
+    // they can already see). Without this, any authed user could resolve
+    // another tenant's alert by id.
+    let upd = fastify.supabase
       .from('security_alerts')
       .update(update)
       .eq('id', id)
+    if (req.userRole !== 'super_admin') {
+      upd = upd.or(`tenant_id.eq.${req.tenantId},tenant_id.is.null`)
+    }
+    const { error } = await upd
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     return reply.send({ message: `Alert ${parsed.data.status}` })
