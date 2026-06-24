@@ -25,6 +25,7 @@ import { Badge }           from '@/components/ui/badge'
 import { Button }          from '@/components/ui/button'
 import { Input }           from '@/components/ui/input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from '@/components/ui/tabs'
@@ -376,18 +377,11 @@ function RequestsTab() {
   return (
     <div className="space-y-4">
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'Pending Approval', value: pendingCount, cls: 'text-warning' },
-          { label: 'Approved (hours)', value: fmtMin(approvedToday), cls: 'text-success' },
-          { label: 'Total Requests',   value: data?.total ?? 0, cls: 'text-info' },
-        ].map(({ label, value, cls }) => (
-          <SectionCard key={label}>
-            <p className="text-[10px] text-muted-foreground">{label}</p>
-            <p className={cn('text-2xl font-bold', cls)}>{value}</p>
-          </SectionCard>
-        ))}
-      </div>
+      <MetricRow cols={3}>
+        <MetricCard label="Pending Approval" value={pendingCount} variant="warning" />
+        <MetricCard label="Approved (hours)" value={fmtMin(approvedToday)} variant="success" />
+        <MetricCard label="Total Requests" value={data?.total ?? 0} variant="info" />
+      </MetricRow>
 
       <SectionCard
         title="Overtime Requests"

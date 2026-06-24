@@ -28,6 +28,7 @@ import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
 import { DateInput }      from '@/components/ui/date-input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
@@ -442,47 +443,12 @@ export function PolicySimulation() {
       {result && impact && (
         <>
           {/* Summary metrics */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              {
-                label: 'Scenarios Applied',
-                value: result.scenarios_applied,
-                icon: Zap,
-                cls:  'text-foreground',
-              },
-              {
-                label: 'Employees Analyzed',
-                value: result.employees_analyzed,
-                icon: Users,
-                cls:  'text-foreground',
-              },
-              {
-                label: 'Date From',
-                value: fmtDate(result.date_range.from),
-                icon: Calendar,
-                cls:  'text-muted-foreground',
-              },
-              {
-                label: 'Date To',
-                value: fmtDate(result.date_range.to),
-                icon: Calendar,
-                cls:  'text-muted-foreground',
-              },
-            ].map(({ label, value, icon: Icon, cls }) => (
-              <div
-                key={label}
-                className="rounded-lg border border-border bg-card p-4 flex items-center gap-3"
-              >
-                <div className="p-2 rounded-lg bg-muted/50 flex-shrink-0">
-                  <Icon className={cn('h-4 w-4', cls)} />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-lg font-bold text-foreground">{value}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <MetricRow cols={4}>
+            <MetricCard compact label="Scenarios Applied"  value={result.scenarios_applied}      icon={Zap} />
+            <MetricCard compact label="Employees Analyzed" value={result.employees_analyzed}     icon={Users} />
+            <MetricCard compact label="Date From"          value={fmtDate(result.date_range.from)} icon={Calendar} />
+            <MetricCard compact label="Date To"            value={fmtDate(result.date_range.to)}   icon={Calendar} />
+          </MetricRow>
 
           {/* Impact metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

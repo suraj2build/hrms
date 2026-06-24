@@ -33,6 +33,7 @@ import { Button }                 from '@/components/ui/button'
 import { Badge }                  from '@/components/ui/badge'
 import { AsyncStatusBadge }       from '@/components/async'
 import { OperationalErrorBanner } from '@/components/async'
+import { MetricCard, MetricRow }  from '@/components/dashboard/MetricCard'
 import { api }                    from '@/lib/api/client'
 import { useAuthStore }           from '@/stores/authStore'
 import { cn }                     from '@/lib/utils'
@@ -1087,14 +1088,14 @@ function HealthStatusCard({ healthData }: HealthStatusCardProps) {
         </div>
 
         {/* Metric chips */}
-        <div className="flex flex-wrap gap-3 text-xs">
-          <MetricChip label="Total (30d)"  value={healthData.summary.total_last_30d}    variant="neutral" />
-          <MetricChip label="Completed"    value={healthData.summary.completed}          variant={healthData.summary.completed > 0 ? 'success' : 'neutral'} />
-          <MetricChip label="Failed"       value={healthData.summary.failed}             variant={healthData.summary.failed > 0 ? 'danger' : 'neutral'} />
-          <MetricChip label="Partial"      value={healthData.summary.partial_failures}   variant={healthData.summary.partial_failures > 0 ? 'warning' : 'neutral'} />
-          <MetricChip label="Orphaned"     value={healthData.summary.orphaned}           variant={healthData.summary.orphaned > 0 ? 'warning' : 'neutral'} />
-          <MetricChip label="Replays"      value={healthData.summary.replay_uploads}     variant="neutral" />
-        </div>
+        <MetricRow cols={3}>
+          <MetricCard compact label="Total (30d)"  value={healthData.summary.total_last_30d}    variant="neutral" />
+          <MetricCard compact label="Completed"    value={healthData.summary.completed}          variant={healthData.summary.completed > 0 ? 'success' : 'neutral'} />
+          <MetricCard compact label="Failed"       value={healthData.summary.failed}             variant={healthData.summary.failed > 0 ? 'destructive' : 'neutral'} />
+          <MetricCard compact label="Partial"      value={healthData.summary.partial_failures}   variant={healthData.summary.partial_failures > 0 ? 'warning' : 'neutral'} />
+          <MetricCard compact label="Orphaned"     value={healthData.summary.orphaned}           variant={healthData.summary.orphaned > 0 ? 'warning' : 'neutral'} />
+          <MetricCard compact label="Replays"      value={healthData.summary.replay_uploads}     variant="neutral" />
+        </MetricRow>
       </div>
 
       {/* Recent failures */}
@@ -1114,28 +1115,6 @@ function HealthStatusCard({ healthData }: HealthStatusCardProps) {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-interface MetricChipProps {
-  label:   string
-  value:   number
-  variant: 'neutral' | 'success' | 'warning' | 'danger'
-}
-
-function MetricChip({ label, value, variant }: MetricChipProps) {
-  const color = {
-    neutral: 'text-muted-foreground',
-    success: 'text-success',
-    warning: 'text-warning',
-    danger:  'text-destructive',
-  }[variant]
-
-  return (
-    <div className="flex flex-col items-center min-w-[52px]">
-      <span className={cn('text-base font-bold tabular-nums leading-none', color)}>{value}</span>
-      <span className="text-[10px] text-muted-foreground mt-0.5 text-center">{label}</span>
     </div>
   )
 }

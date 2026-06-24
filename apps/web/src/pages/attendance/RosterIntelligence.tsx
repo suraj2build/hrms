@@ -28,6 +28,7 @@ import {
   TrendingDown, Clock, Zap, Search, Loader2,
 } from 'lucide-react'
 
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
@@ -276,47 +277,36 @@ export function RosterIntelligence() {
       </div>
 
       {/* ── Summary stat cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          {
-            label: 'Roster Coverage',
-            value: summary ? `${summary.roster.covered_employees}` : '—',
-            sub:   'employees with shift',
-            icon:  Users,
-            cls:   'text-foreground',
-          },
-          {
-            label: 'Total OT Hours',
-            value: summary ? `${summary.roster.total_ot_hours}h` : '—',
-            sub:   'this month',
-            icon:  Clock,
-            cls:   (summary?.roster.total_ot_hours ?? 0) > 100 ? 'text-destructive' : 'text-warning',
-          },
-          {
-            label: 'WO Days Worked',
-            value: summary ? summary.roster.weekly_off_worked : '—',
-            sub:   'rest days sacrificed',
-            icon:  Flame,
-            cls:   (summary?.roster.weekly_off_worked ?? 0) > 10 ? 'text-destructive' : 'text-warning',
-          },
-          {
-            label: 'Coverage Gaps',
-            value: gapsData ? gapsData.total_gaps : '—',
-            sub:   gapsData ? `${gapsData.high_severity} high severity` : '',
-            icon:  AlertTriangle,
-            cls:   (gapsData?.high_severity ?? 0) > 0 ? 'text-destructive' : 'text-success',
-          },
-        ].map(({ label, value, sub, icon: Icon, cls }) => (
-          <SectionCard key={label}>
-            <div className="flex items-center gap-2 mb-1">
-              <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-              <p className="text-[10px] text-muted-foreground">{label}</p>
-            </div>
-            <p className={cn('text-2xl font-bold', cls)}>{value}</p>
-            {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-          </SectionCard>
-        ))}
-      </div>
+      <MetricRow cols={4}>
+        <MetricCard
+          label="Roster Coverage"
+          value={summary ? `${summary.roster.covered_employees}` : '—'}
+          subtitle="employees with shift"
+          icon={Users}
+          variant="neutral"
+        />
+        <MetricCard
+          label="Total OT Hours"
+          value={summary ? `${summary.roster.total_ot_hours}h` : '—'}
+          subtitle="this month"
+          icon={Clock}
+          variant={(summary?.roster.total_ot_hours ?? 0) > 100 ? 'destructive' : 'warning'}
+        />
+        <MetricCard
+          label="WO Days Worked"
+          value={summary ? summary.roster.weekly_off_worked : '—'}
+          subtitle="rest days sacrificed"
+          icon={Flame}
+          variant={(summary?.roster.weekly_off_worked ?? 0) > 10 ? 'destructive' : 'warning'}
+        />
+        <MetricCard
+          label="Coverage Gaps"
+          value={gapsData ? gapsData.total_gaps : '—'}
+          subtitle={gapsData ? `${gapsData.high_severity} high severity` : ''}
+          icon={AlertTriangle}
+          variant={(gapsData?.high_severity ?? 0) > 0 ? 'destructive' : 'success'}
+        />
+      </MetricRow>
 
       {/* ── Coverage trend line chart ──────────────────────────────────────── */}
       <SectionCard

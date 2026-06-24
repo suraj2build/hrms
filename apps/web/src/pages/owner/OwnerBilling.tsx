@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery }      from '@tanstack/react-query'
 import { ownerApi }      from '@/lib/api/ownerApi'
 import { CreditCard } from 'lucide-react'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 
 interface Snapshot {
   id: string; tenant_id: string; snapshot_month: string
@@ -51,21 +52,22 @@ export function OwnerBilling() {
       </div>
 
       {/* Summary strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] p-3 col-span-2 lg:col-span-1 flex items-center gap-3">
-          <CreditCard className="h-8 w-8 text-success flex-shrink-0" />
-          <div>
-            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total (filtered)</p>
-            <p className="text-xl font-bold text-foreground">{fmtCurrency(totalAmount)}</p>
-          </div>
-        </div>
+      <MetricRow cols={4}>
+        <MetricCard
+          label="Total (filtered)"
+          value={fmtCurrency(totalAmount)}
+          icon={CreditCard}
+          variant="success"
+        />
         {monthSummary.map(([month, amount]) => (
-          <div key={month} className="rounded-2xl border border-border bg-card backdrop-blur-2xl shadow-[0_8px_30px_rgba(15,23,42,0.06)] ring-1 ring-ring/[0.04] p-3">
-            <p className="text-[11px] text-muted-foreground font-mono">{month}</p>
-            <p className="text-base font-semibold text-success mt-0.5">{fmtCurrency(amount)}</p>
-          </div>
+          <MetricCard
+            key={month}
+            label={month}
+            value={fmtCurrency(amount)}
+            variant="success"
+          />
         ))}
-      </div>
+      </MetricRow>
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">

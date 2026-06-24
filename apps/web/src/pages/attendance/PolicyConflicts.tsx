@@ -26,7 +26,7 @@ import { Input }          from '@/components/ui/input'
 import { DateInput }      from '@/components/ui/date-input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { MetricCard }     from '@/components/dashboard/MetricCard'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -218,27 +218,20 @@ export function PolicyConflicts() {
       {summary && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {/* Total */}
-          <SectionCard>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Total Conflicts</p>
-            <p className="text-3xl font-bold text-foreground tabular-nums">{summary.total}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">in selected date range</p>
-          </SectionCard>
+          <MetricCard
+            label="Total Conflicts"
+            value={summary.total}
+            subtitle="in selected date range"
+          />
 
           {/* Payroll impacting */}
-          <SectionCard>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Payroll Impacting</p>
-            <div className="flex items-center gap-2 mt-1">
-              {summary.payroll_impacting > 0 && <AlertTriangle className="h-5 w-5 text-destructive" />}
-              <p className={cn('text-3xl font-bold tabular-nums',
-                summary.payroll_impacting > 0 ? 'text-destructive' : 'text-success',
-              )}>
-                {summary.payroll_impacting}
-              </p>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              {summary.payroll_impacting > 0 ? 'Affect payroll' : 'None affect payroll'}
-            </p>
-          </SectionCard>
+          <MetricCard
+            label="Payroll Impacting"
+            value={summary.payroll_impacting}
+            icon={summary.payroll_impacting > 0 ? AlertTriangle : undefined}
+            variant={summary.payroll_impacting > 0 ? 'destructive' : 'success'}
+            subtitle={summary.payroll_impacting > 0 ? 'Affect payroll' : 'None affect payroll'}
+          />
 
           {/* Top types */}
           <SectionCard>

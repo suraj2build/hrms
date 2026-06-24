@@ -33,6 +33,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SubTabs }       from '@/components/ui/SubTabs'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
@@ -174,25 +175,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'health',  label: 'Health' },
 ]
 
-// ── Stat card ──────────────────────────────────────────────────────────────────
-
-function StatCard({
-  label,
-  value,
-  valueClass = 'text-foreground',
-}: {
-  label:       string
-  value:       number | string
-  valueClass?: string
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide">{label}</p>
-      <p className={`text-2xl font-bold tabular-nums ${valueClass}`}>{value}</p>
-    </div>
-  )
-}
-
 // ── Tab: Workers ───────────────────────────────────────────────────────────────
 
 function WorkersTab() {
@@ -221,11 +203,11 @@ function WorkersTab() {
   return (
     <div className="space-y-4">
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Active"  value={isLoading ? '—' : (data?.active_count  ?? 0)} valueClass="text-success" />
-        <StatCard label="Idle"    value={isLoading ? '—' : (data?.idle_count    ?? 0)} valueClass="text-muted-foreground" />
-        <StatCard label="Crashed" value={isLoading ? '—' : (data?.crashed_count ?? 0)} valueClass="text-destructive" />
-      </div>
+      <MetricRow cols={3}>
+        <MetricCard label="Active"  value={isLoading ? '—' : (data?.active_count  ?? 0)} variant="success" />
+        <MetricCard label="Idle"    value={isLoading ? '—' : (data?.idle_count    ?? 0)} variant="neutral" />
+        <MetricCard label="Crashed" value={isLoading ? '—' : (data?.crashed_count ?? 0)} variant="destructive" />
+      </MetricRow>
 
       <SectionCard noPadding>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -349,11 +331,11 @@ function QueuePartitionsTab() {
   return (
     <div className="space-y-4">
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Total Depth"    value={isLoading ? '—' : (data?.total_depth    ?? 0)} />
-        <StatCard label="Critical Queues" value={isLoading ? '—' : (data?.critical_count ?? 0)} valueClass="text-destructive" />
-        <StatCard label="Elevated Queues" value={isLoading ? '—' : (data?.elevated_count ?? 0)} valueClass="text-warning" />
-      </div>
+      <MetricRow cols={3}>
+        <MetricCard label="Total Depth"    value={isLoading ? '—' : (data?.total_depth    ?? 0)} />
+        <MetricCard label="Critical Queues" value={isLoading ? '—' : (data?.critical_count ?? 0)} variant="destructive" />
+        <MetricCard label="Elevated Queues" value={isLoading ? '—' : (data?.elevated_count ?? 0)} variant="warning" />
+      </MetricRow>
 
       <SectionCard noPadding>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -741,28 +723,28 @@ function HealthTab() {
           </div>
 
           {/* Metric cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard
+          <MetricRow cols={4}>
+            <MetricCard
               label="Workers Active"
               value={data.workers_active}
-              valueClass="text-success"
+              variant="success"
             />
-            <StatCard
+            <MetricCard
               label="Max Queue Depth"
               value={data.max_queue_depth}
-              valueClass={data.max_queue_depth > 100 ? 'text-destructive' : data.max_queue_depth > 50 ? 'text-warning' : 'text-foreground'}
+              variant={data.max_queue_depth > 100 ? 'destructive' : data.max_queue_depth > 50 ? 'warning' : 'neutral'}
             />
-            <StatCard
+            <MetricCard
               label="Stuck Jobs"
               value={data.stuck_jobs}
-              valueClass={data.stuck_jobs > 0 ? 'text-destructive' : 'text-foreground'}
+              variant={data.stuck_jobs > 0 ? 'destructive' : 'neutral'}
             />
-            <StatCard
+            <MetricCard
               label="Failed (Last Hour)"
               value={data.failed_last_hour}
-              valueClass={data.failed_last_hour > 0 ? 'text-destructive' : 'text-foreground'}
+              variant={data.failed_last_hour > 0 ? 'destructive' : 'neutral'}
             />
-          </div>
+          </MetricRow>
         </>
       )}
     </div>

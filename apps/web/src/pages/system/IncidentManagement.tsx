@@ -18,6 +18,7 @@ import {
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import {
@@ -165,41 +166,6 @@ function fmtCurrency(n: number) {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency', currency: 'INR', maximumFractionDigits: 0,
   }).format(n)
-}
-
-// ── Summary card ───────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  label, value, icon: Icon, variant = 'neutral',
-}: {
-  label:    string
-  value:    number | string
-  icon:     React.ComponentType<{ className?: string }>
-  variant?: 'neutral' | 'warning' | 'destructive' | 'success'
-}) {
-  const valueColor: Record<string, string> = {
-    neutral:     'text-foreground',
-    warning:     'text-warning',
-    destructive: 'text-destructive',
-    success:     'text-success',
-  }
-  const iconColor: Record<string, string> = {
-    neutral:     'text-muted-foreground',
-    warning:     'text-warning',
-    destructive: 'text-destructive',
-    success:     'text-success',
-  }
-  return (
-    <div className="rounded-lg border border-border bg-card p-4 flex items-start justify-between">
-      <div>
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
-          {label}
-        </p>
-        <p className={cn('text-2xl font-bold', valueColor[variant])}>{value}</p>
-      </div>
-      <Icon className={cn('h-5 w-5 mt-0.5', iconColor[variant])} />
-    </div>
-  )
 }
 
 // ── Create Incident Dialog ─────────────────────────────────────────────────────
@@ -864,26 +830,26 @@ export function IncidentManagement() {
           Loading summary…
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <SummaryCard
+        <MetricRow cols={4}>
+          <MetricCard
             label="Open"
             value={summary?.open_count ?? 0}
             icon={ShieldAlert}
             variant={(summary?.open_count ?? 0) > 0 ? 'destructive' : 'neutral'}
           />
-          <SummaryCard
+          <MetricCard
             label="SLA Breached"
             value={summary?.sla_breached_count ?? 0}
             icon={Clock}
             variant={(summary?.sla_breached_count ?? 0) > 0 ? 'destructive' : 'neutral'}
           />
-          <SummaryCard
+          <MetricCard
             label="This Week"
             value={summary?.total_this_week ?? 0}
             icon={AlertTriangle}
             variant="neutral"
           />
-          <SummaryCard
+          <MetricCard
             label="Avg Resolution (hrs)"
             value={summary?.avg_resolution_hours != null
               ? summary.avg_resolution_hours.toFixed(1)
@@ -892,7 +858,7 @@ export function IncidentManagement() {
             icon={CheckCircle2}
             variant="neutral"
           />
-        </div>
+        </MetricRow>
       )}
 
       {/* ── Two-column layout ── */}

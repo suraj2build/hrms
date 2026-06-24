@@ -22,6 +22,7 @@ import { format } from 'date-fns'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
@@ -299,19 +300,12 @@ export function GovernancePrivacyWorkspace() {
             <div className="grid gap-4">
               {/* Erasure KPIs */}
               <SectionCard title="Data Erasure (GDPR / DPDPA)">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Open Requests',   value: health.erasure_requests.open,         color: health.erasure_requests.open > 0 ? 'text-warning' : 'text-foreground' },
-                    { label: 'SLA Breached',    value: health.erasure_requests.breached_sla, color: health.erasure_requests.breached_sla > 0 ? 'text-destructive' : 'text-foreground' },
-                    { label: 'Completed (All)', value: health.erasure_requests.completed,    color: 'text-success' },
-                    { label: 'Total Requests',  value: health.erasure_requests.total,        color: 'text-foreground' },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-lg border p-3">
-                      <p className={cn('text-2xl font-bold', k.color)}>{k.value}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{k.label}</p>
-                    </div>
-                  ))}
-                </div>
+                <MetricRow cols={4}>
+                  <MetricCard label="Open Requests"   value={health.erasure_requests.open}         variant={health.erasure_requests.open > 0 ? 'warning' : 'neutral'} />
+                  <MetricCard label="SLA Breached"    value={health.erasure_requests.breached_sla} variant={health.erasure_requests.breached_sla > 0 ? 'destructive' : 'neutral'} />
+                  <MetricCard label="Completed (All)" value={health.erasure_requests.completed}    variant="success" />
+                  <MetricCard label="Total Requests"  value={health.erasure_requests.total}        variant="neutral" />
+                </MetricRow>
                 {health.erasure_requests.breached_sla > 0 && (
                   <div className="mt-3 rounded-lg bg-destructive/10 border border-destructive/30 p-3 flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
@@ -344,21 +338,14 @@ export function GovernancePrivacyWorkspace() {
 
               {/* Control Health */}
               <SectionCard title="Compliance Controls">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {[
-                    { label: 'Total Controls', value: health.control_health.total, color: 'text-foreground' },
-                    { label: 'Verified',        value: health.control_health.verified,    color: 'text-success' },
-                    { label: 'Implemented',     value: health.control_health.implemented, color: 'text-info'    },
-                    { label: 'In Progress',     value: health.control_health.in_progress, color: 'text-warning'   },
-                    { label: 'Not Started',     value: health.control_health.not_started, color: health.control_health.not_started > 0 ? 'text-destructive' : 'text-foreground' },
-                    { label: 'Waived',          value: health.control_health.waived,      color: 'text-primary'  },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-lg border p-3">
-                      <p className={cn('text-2xl font-bold', k.color)}>{k.value}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{k.label}</p>
-                    </div>
-                  ))}
-                </div>
+                <MetricRow cols={3}>
+                  <MetricCard label="Total Controls" value={health.control_health.total}       variant="neutral" />
+                  <MetricCard label="Verified"        value={health.control_health.verified}    variant="success" />
+                  <MetricCard label="Implemented"     value={health.control_health.implemented} variant="info" />
+                  <MetricCard label="In Progress"     value={health.control_health.in_progress} variant="warning" />
+                  <MetricCard label="Not Started"     value={health.control_health.not_started} variant={health.control_health.not_started > 0 ? 'destructive' : 'neutral'} />
+                  <MetricCard label="Waived"          value={health.control_health.waived}      variant="neutral" />
+                </MetricRow>
               </SectionCard>
             </div>
           ) : null}

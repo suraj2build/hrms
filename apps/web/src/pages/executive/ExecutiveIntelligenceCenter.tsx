@@ -23,7 +23,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { KpiCard } from '@/components/exec/KpiCard'
+import { MetricCard } from '@/components/dashboard/MetricCard'
 import { DrillDownSheet, type DeptRow } from '@/components/exec/DrillDownSheet'
 import { ExecLayout } from '@/components/exec/ExecShell'
 import { api } from '@/lib/api/client'
@@ -222,12 +222,12 @@ export default function ExecutiveIntelligenceCenter() {
 
   const netFlow = (ceo?.joiners_30d ?? 0) - (ceo?.exits_30d ?? 0)
   const kpis = [
-    { label: 'Active Headcount', value: fmtNum(ceo?.employee_count), delta: ceo ? +(ceo.net_headcount_change / Math.max(1, ceo.employee_count) * 100).toFixed(1) : undefined, deltaLabel: '30D', icon: Users, tone: 'primary' as const, hint: ceo ? `+${ceo.joiners_30d} / -${ceo.exits_30d}` : undefined },
-    { label: 'Net Flow · 30D', value: `${netFlow >= 0 ? '+' : ''}${netFlow}`, icon: netFlow >= 0 ? TrendingUp : TrendingDown, tone: (netFlow >= 0 ? 'success' : 'destructive') as 'success' | 'destructive', deltaLabel: 'Joiners − exits', hint: ceo ? `${ceo.joiners_30d} in · ${ceo.exits_30d} out` : undefined },
-    { label: 'Attrition · TTM', value: attritionTTM == null ? '—' : `${attritionTTM.toFixed(1)}%`, icon: UserMinus, tone: 'destructive' as const, deltaLabel: 'Annualised' },
-    { label: 'Monthly Payroll', value: cr(fin?.payroll_current_gross ?? 0), delta: fin?.payroll_mom_change, deltaLabel: 'MoM', icon: Wallet, tone: 'info' as const },
-    { label: 'Cost / Head', value: cr(ceo?.avg_cost_per_employee ?? 0), icon: Coins, tone: 'primary' as const, deltaLabel: 'Monthly avg' },
-    { label: 'Attendance', value: ceo ? `${ceo.attendance_rate.toFixed(1)}%` : '—', icon: CalendarCheck, tone: 'success' as const, hint: ceo ? `${ceo.absence_rate.toFixed(1)}% absent` : undefined },
+    { label: 'Active Headcount', value: fmtNum(ceo?.employee_count), trend: ceo ? +(ceo.net_headcount_change / Math.max(1, ceo.employee_count) * 100).toFixed(1) : undefined, trendLabel: '30D', icon: Users, variant: 'neutral' as const, subtitle: ceo ? `+${ceo.joiners_30d} / -${ceo.exits_30d}` : undefined },
+    { label: 'Net Flow · 30D', value: `${netFlow >= 0 ? '+' : ''}${netFlow}`, icon: netFlow >= 0 ? TrendingUp : TrendingDown, variant: (netFlow >= 0 ? 'success' : 'destructive') as 'success' | 'destructive', subtitle: ceo ? `Joiners − exits · ${ceo.joiners_30d} in · ${ceo.exits_30d} out` : 'Joiners − exits' },
+    { label: 'Attrition · TTM', value: attritionTTM == null ? '—' : `${attritionTTM.toFixed(1)}%`, icon: UserMinus, variant: 'destructive' as const, subtitle: 'Annualised' },
+    { label: 'Monthly Payroll', value: cr(fin?.payroll_current_gross ?? 0), trend: fin?.payroll_mom_change, trendLabel: 'MoM', icon: Wallet, variant: 'info' as const },
+    { label: 'Cost / Head', value: cr(ceo?.avg_cost_per_employee ?? 0), icon: Coins, variant: 'neutral' as const, subtitle: 'Monthly avg' },
+    { label: 'Attendance', value: ceo ? `${ceo.attendance_rate.toFixed(1)}%` : '—', icon: CalendarCheck, variant: 'success' as const, subtitle: ceo ? `${ceo.absence_rate.toFixed(1)}% absent` : undefined },
   ]
 
   return (
@@ -270,7 +270,7 @@ export default function ExecutiveIntelligenceCenter() {
 
       {/* KPI ribbon */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
+        {kpis.map((k) => <MetricCard key={k.label} {...k} />)}
       </section>
 
       {/* Visual grid */}
