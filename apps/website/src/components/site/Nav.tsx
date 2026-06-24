@@ -3,32 +3,61 @@ import { useEffect, useRef, useState } from "react";
 import {
   Menu, X, ExternalLink, ChevronDown,
   Users2, CalendarClock, Banknote, Briefcase, BarChart3, Settings2,
+  Building2, Brain, LineChart, BookOpen, ShieldCheck, Info, Mail,
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { useDemoModal } from "./DemoModal";
 
-const moduleLinks = [
-  { href: "/modules/people",      label: "People & Lifecycle",    icon: Users2,       desc: "Hire-to-retire in one place" },
-  { href: "/modules/attendance",  label: "Attendance & Leave",    icon: CalendarClock, desc: "Real-time, no manual work" },
-  { href: "/modules/payroll",     label: "Payroll & Compliance",  icon: Banknote,     desc: "Accurate, on time, every time" },
-  { href: "/modules/recruitment", label: "Recruitment & ATS",     icon: Briefcase,    desc: "Hire faster, hire better" },
-  { href: "/modules/analytics",   label: "Analytics & AI",        icon: BarChart3,    desc: "Live intelligence, not reports" },
-  { href: "/modules/ess",         label: "Employee Self-Service", icon: Settings2,    desc: "Employees do it themselves" },
+type MenuItem = { href: string; label: string; desc: string; icon: typeof Users2 };
+type Menu = { key: string; label: string; cols: 1 | 2; footer?: { href: string; label: string }; items: MenuItem[] };
+
+const menus: Menu[] = [
+  {
+    key: "modules",
+    label: "Modules",
+    cols: 2,
+    footer: { href: "/#modules", label: "See all modules overview →" },
+    items: [
+      { href: "/modules/people",      label: "People & Lifecycle",    icon: Users2,        desc: "Hire-to-retire in one place" },
+      { href: "/modules/attendance",  label: "Attendance & Leave",    icon: CalendarClock, desc: "Real-time, no manual work" },
+      { href: "/modules/payroll",     label: "Payroll & Compliance",  icon: Banknote,      desc: "Accurate, on time, every time" },
+      { href: "/modules/recruitment", label: "Recruitment & ATS",     icon: Briefcase,     desc: "Hire faster, hire better" },
+      { href: "/modules/analytics",   label: "Analytics & AI",        icon: BarChart3,     desc: "Live intelligence, not reports" },
+      { href: "/modules/ess",         label: "Employee Self-Service", icon: Settings2,     desc: "Employees do it themselves" },
+    ],
+  },
+  {
+    key: "solutions",
+    label: "Solutions",
+    cols: 1,
+    items: [
+      { href: "/industries", label: "By Industry",     icon: Building2, desc: "IT, Manufacturing, Retail & more" },
+      { href: "/#ai",        label: "AI & Automation", icon: Brain,     desc: "Practical AI across every module" },
+      { href: "/#analytics", label: "Analytics",       icon: LineChart, desc: "Live workforce intelligence" },
+    ],
+  },
+  {
+    key: "resources",
+    label: "Resources",
+    cols: 1,
+    items: [
+      { href: "/resources", label: "Resource Hub",      icon: BookOpen,    desc: "Guides, templates, walkthroughs" },
+      { href: "/resources", label: "Compliance Guides", icon: ShieldCheck, desc: "PF, ESI, PT, TDS, LWF explained" },
+      { href: "/about",     label: "About CognixHR",    icon: Info,        desc: "Our mission & the Saar story" },
+      { href: "/contact",   label: "Contact Us",        icon: Mail,        desc: "Book a demo or ask a question" },
+    ],
+  },
 ];
 
-const topLinks = [
-  { href: "/#analytics", label: "Analytics" },
-  { href: "/#ai",        label: "AI" },
-  { href: "/pricing",    label: "Pricing" },
-];
+const topLinks = [{ href: "/pricing", label: "Pricing" }];
 
 export function Nav() {
   const [scrolled, setScrolled]       = useState(false);
   const [mobileOpen, setMobileOpen]   = useState(false);
-  const [dropOpen, setDropOpen]       = useState(false);
-  const [mobileModules, setMobileModules] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
+  const [openMenu, setOpenMenu]       = useState<string | null>(null);
+  const [mobileMenu, setMobileMenu]   = useState<string | null>(null);
+  const navRef = useRef<HTMLElement>(null);
   const { open: openDemo } = useDemoModal();
 
   useEffect(() => {
@@ -38,66 +67,70 @@ export function Nav() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Close dropdown on outside click
+  // Close any open dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) {
-        setDropOpen(false);
-      }
+      if (navRef.current && !navRef.current.contains(e.target as Node)) setOpenMenu(null);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   return (
-    <header className={`fixed inset-x-0 top-0 z-50 glass-nav transition-shadow ${scrolled ? "shadow-soft" : ""}`}>
+    <header ref={navRef} className={`fixed inset-x-0 top-0 z-50 glass-nav transition-shadow ${scrolled ? "shadow-soft" : ""}`}>
       <div className="container-page flex h-16 items-center justify-between gap-6">
         <Logo />
 
         {/* Desktop nav */}
-        <nav className="hidden items-center gap-7 lg:flex">
-          {/* Modules dropdown */}
-          <div ref={dropRef} className="relative">
-            <button
-              onClick={() => setDropOpen((v) => !v)}
-              className="flex items-center gap-1 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors"
-            >
-              Modules
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${dropOpen ? "rotate-180" : ""}`} />
-            </button>
+        <nav className="hidden items-center gap-6 lg:flex">
+          {menus.map((menu) => {
+            const isOpen = openMenu === menu.key;
+            return (
+              <div key={menu.key} className="relative">
+                <button
+                  onClick={() => setOpenMenu(isOpen ? null : menu.key)}
+                  className="flex items-center gap-1 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors"
+                >
+                  {menu.label}
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+                </button>
 
-            {dropOpen && (
-              <div className="absolute left-1/2 top-full mt-3 w-[480px] -translate-x-1/2 rounded-2xl border border-border bg-card shadow-elevated">
-                <div className="p-3 grid grid-cols-2 gap-1">
-                  {moduleLinks.map((m) => (
-                    <Link
-                      key={m.href}
-                      to={m.href}
-                      onClick={() => setDropOpen(false)}
-                      className="flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-muted"
-                    >
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#2E6FE6]/10 text-[#2E6FE6] mt-0.5">
-                        <m.icon className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">{m.label}</p>
-                        <p className="text-xs text-muted-foreground">{m.desc}</p>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-                <div className="border-t border-border px-4 py-2.5">
-                  <Link
-                    to="/#modules"
-                    onClick={() => setDropOpen(false)}
-                    className="text-xs font-semibold text-[#2E6FE6] hover:underline"
+                {isOpen && (
+                  <div
+                    className={`absolute left-1/2 top-full mt-3 -translate-x-1/2 rounded-2xl border border-border bg-card shadow-elevated ${
+                      menu.cols === 2 ? "w-[480px]" : "w-[340px]"
+                    }`}
                   >
-                    See all modules overview →
-                  </Link>
-                </div>
+                    <div className={`p-3 grid gap-1 ${menu.cols === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+                      {menu.items.map((m) => (
+                        <Link
+                          key={m.label}
+                          to={m.href}
+                          onClick={() => setOpenMenu(null)}
+                          className="flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-muted"
+                        >
+                          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#2E6FE6]/10 text-[#2E6FE6]">
+                            <m.icon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{m.label}</p>
+                            <p className="text-xs text-muted-foreground">{m.desc}</p>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                    {menu.footer && (
+                      <div className="border-t border-border px-4 py-2.5">
+                        <Link to={menu.footer.href} onClick={() => setOpenMenu(null)} className="text-xs font-semibold text-[#2E6FE6] hover:underline">
+                          {menu.footer.label}
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })}
 
           {topLinks.map((l) => (
             <Link key={l.href} to={l.href} className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
@@ -134,30 +167,36 @@ export function Nav() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="border-t border-border bg-card lg:hidden">
-          <div className="container-page flex flex-col gap-1 py-3">
-            {/* Modules accordion */}
-            <button
-              onClick={() => setMobileModules((v) => !v)}
-              className="flex items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted"
-            >
-              <span>Modules</span>
-              <ChevronDown className={`h-4 w-4 transition-transform ${mobileModules ? "rotate-180" : ""}`} />
-            </button>
-            {mobileModules && (
-              <div className="ml-4 flex flex-col gap-0.5">
-                {moduleLinks.map((m) => (
-                  <Link
-                    key={m.href}
-                    to={m.href}
-                    onClick={() => setMobileOpen(false)}
-                    className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-foreground/80 hover:bg-muted"
+          <div className="container-page flex max-h-[80vh] flex-col gap-1 overflow-y-auto py-3">
+            {menus.map((menu) => {
+              const isOpen = mobileMenu === menu.key;
+              return (
+                <div key={menu.key}>
+                  <button
+                    onClick={() => setMobileMenu(isOpen ? null : menu.key)}
+                    className="flex w-full items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted"
                   >
-                    <m.icon className="h-4 w-4 shrink-0 text-[#2E6FE6]" />
-                    {m.label}
-                  </Link>
-                ))}
-              </div>
-            )}
+                    <span>{menu.label}</span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {isOpen && (
+                    <div className="ml-4 flex flex-col gap-0.5">
+                      {menu.items.map((m) => (
+                        <Link
+                          key={m.label}
+                          to={m.href}
+                          onClick={() => setMobileOpen(false)}
+                          className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-foreground/80 hover:bg-muted"
+                        >
+                          <m.icon className="h-4 w-4 shrink-0 text-[#2E6FE6]" />
+                          {m.label}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {topLinks.map((l) => (
               <Link

@@ -7,8 +7,8 @@ export function Footer() {
       title: "Product",
       links: [
         { label: "Modules", href: "/#modules", route: true },
+        { label: "Industries", href: "/industries", route: true },
         { label: "Analytics", href: "/#analytics", route: true },
-        { label: "AI", href: "/#ai", route: true },
         { label: "Live Demo", href: "https://hrms-web-alpha.vercel.app", external: true },
       ],
     },
@@ -16,8 +16,9 @@ export function Footer() {
       title: "Company",
       links: [
         { label: "Pricing", href: "/pricing", route: true },
-        { label: "About", href: "#" },
-        { label: "Contact", href: "#" },
+        { label: "Resources", href: "/resources", route: true },
+        { label: "About", href: "/about", route: true },
+        { label: "Contact", href: "/contact", route: true },
       ],
     },
     {
