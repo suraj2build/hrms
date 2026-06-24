@@ -66,7 +66,7 @@ export function AttendanceOperationsCenter() {
 
   const { data: periodData } = useQuery<{ data: AttendancePeriod[] }>({
     queryKey:  ['attendance-periods-current'],
-    queryFn:   () => api.get('/attendance/periods?limit=3'),
+    queryFn:   () => api.get('/attendance/period-locks'),
     staleTime: 60_000,
     retry:     false,
   })
