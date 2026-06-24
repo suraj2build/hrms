@@ -21,6 +21,13 @@ import {
   Wand2,
   ArrowRight,
   ChevronDown,
+  Lock,
+  KeyRound,
+  FileCheck2,
+  Server,
+  Eye,
+  ScrollText,
+  Star,
 } from "lucide-react";
 import { SiteShell } from "@/components/site/SiteShell";
 import { DemoButtons } from "@/components/site/DemoButtons";
@@ -43,6 +50,7 @@ export default function HomePage() {
       <Analytics />
       <AI />
       <Integrations />
+      <Security />
       <HowItWorks />
       <PricingPreview />
       <LiveDemoBand />
@@ -473,12 +481,15 @@ function AI() {
       <div className="container-page relative">
         <Reveal className="mx-auto max-w-2xl text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider">
-            <Brain className="h-3.5 w-3.5 text-[#2DD4BF]" />
-            AI
+            <Sparkles className="h-3.5 w-3.5 text-[#2DD4BF]" />
+            Meet Cogni · Your AI HR Assistant
           </span>
-          <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">AI that removes the busywork</h2>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">
+            Cogni does the busywork, so your team doesn't
+          </h2>
           <p className="mt-3 text-white/75">
-            Practical AI woven through every module — measurable hours and rupees saved, every month.
+            Cogni is the AI woven through every CognixHR module — reading documents, catching
+            anomalies and answering questions in plain English. Measurable hours and rupees saved, every month.
           </p>
         </Reveal>
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -574,6 +585,66 @@ function Integrations() {
         <p className="mt-6 text-center text-xs text-muted-foreground">
           More integrations via REST API / webhooks · Custom connectors available on Enterprise
         </p>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- SECURITY & COMPLIANCE ---------------- */
+function Security() {
+  const controls = [
+    { icon: Server, t: "Multi-tenant isolation", d: "Every tenant's data is logically isolated. No cross-tenant access, ever." },
+    { icon: KeyRound, t: "Role-based access control", d: "Granular, role-scoped permissions down to the field and action level." },
+    { icon: ScrollText, t: "Full audit logging", d: "Every create, edit and delete is logged with who, what and when — immutable." },
+    { icon: Lock, t: "Encryption in transit & at rest", d: "TLS 1.2+ on the wire, encrypted storage for data at rest." },
+    { icon: Eye, t: "DPDP-aware by design", d: "Built around India's Digital Personal Data Protection Act from day one." },
+    { icon: FileCheck2, t: "SSO & access governance", d: "Google, Microsoft 365 and Okta SSO with enforced access reviews on Enterprise." },
+  ];
+  return (
+    <section id="security" className="py-20 sm:py-28">
+      <div className="container-page">
+        <Reveal className="mx-auto max-w-2xl text-center">
+          <span className="chip">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Security &amp; trust
+          </span>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">
+            Enterprise-grade security, India-first privacy
+          </h2>
+          <p className="mt-3 text-base text-muted-foreground">
+            Your people data is the most sensitive data you hold. CognixHR is engineered to protect
+            it — with controls your IT and security teams can verify.
+          </p>
+        </Reveal>
+
+        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {controls.map((c, i) => (
+            <Reveal key={c.t} delay={i * 60}>
+              <div className="group flex h-full gap-4 rounded-2xl border border-border bg-card p-6 shadow-card transition-all duration-300 hover:-translate-y-1 hover:shadow-elevated">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#1A4D8F]/10 text-[#1A4D8F] transition-transform group-hover:scale-110">
+                  <c.icon className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold">{c.t}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{c.d}</p>
+                </div>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+
+        <Reveal>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 rounded-2xl border border-border bg-card/60 px-6 py-5 text-sm font-medium text-muted-foreground">
+            <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-[#15B8A6]" /> Multi-tenant</span>
+            <span className="flex items-center gap-2"><Lock className="h-4 w-4 text-[#15B8A6]" /> Encrypted</span>
+            <span className="flex items-center gap-2"><ScrollText className="h-4 w-4 text-[#15B8A6]" /> Audit-logged</span>
+            <span className="flex items-center gap-2"><Eye className="h-4 w-4 text-[#15B8A6]" /> DPDP-aware</span>
+            <span className="flex items-center gap-2"><FileCheck2 className="h-4 w-4 text-[#15B8A6]" /> SSO-ready</span>
+          </div>
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            SOC-2-style controls and a Data Protection Addendum (DPA) available on Enterprise plans.
+          </p>
+        </Reveal>
       </div>
     </section>
   );
@@ -772,15 +843,15 @@ function Testimonials() {
   const t = [
     {
       q: "We replaced four vendors with CognixHR and closed our first month-end three days early.",
-      n: "Priya M.", r: "Head of People · 1,200-person IT services firm",
+      n: "Priya M.", r: "Head of People", co: "IT services · 1,200 employees",
     },
     {
       q: "The AI payroll forensics caught variances we used to find weeks later. Audit prep is now boring — which is great.",
-      n: "Rohit A.", r: "Director of Finance · Manufacturing",
+      n: "Rohit A.", r: "Director of Finance", co: "Manufacturing · 800 employees",
     },
     {
-      q: "ESS adoption is 94% in week one. Our HR ticket volume dropped by half.",
-      n: "Anita V.", r: "VP HR · D2C brand",
+      q: "ESS adoption hit 94% in week one. Our HR ticket volume dropped by half almost overnight.",
+      n: "Anita V.", r: "VP HR", co: "D2C brand · 450 employees",
     },
   ];
   return (
@@ -789,20 +860,28 @@ function Testimonials() {
         <Reveal className="mx-auto max-w-2xl text-center">
           <span className="chip">Loved by HR teams</span>
           <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">What customers say</h2>
+          <p className="mt-3 text-base text-muted-foreground">
+            Early CognixHR teams across IT, manufacturing and D2C — in their own words.
+          </p>
         </Reveal>
         <div className="mt-12 grid gap-5 md:grid-cols-3">
           {t.map((it, i) => (
             <Reveal key={it.n} delay={i * 100}>
-              <figure className="relative h-full rounded-2xl border border-border bg-card p-6 shadow-card transition-all duration-300 hover:-translate-y-1 hover:shadow-elevated gradient-border-hover">
-                <div className="text-3xl leading-none text-[#15B8A6]">"</div>
-                <blockquote className="mt-2 text-sm text-foreground/85">{it.q}</blockquote>
+              <figure className="relative flex h-full flex-col rounded-2xl border border-border bg-card p-6 shadow-card transition-all duration-300 hover:-translate-y-1 hover:shadow-elevated gradient-border-hover">
+                <div className="flex gap-0.5 text-[#F5A623]">
+                  {Array.from({ length: 5 }).map((_, s) => (
+                    <Star key={s} className="h-4 w-4 fill-current" />
+                  ))}
+                </div>
+                <blockquote className="mt-3 flex-1 text-sm text-foreground/85">"{it.q}"</blockquote>
                 <figcaption className="mt-5 flex items-center gap-3 border-t border-border pt-4">
-                  <span className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-[#1A4D8F] to-[#2E6FE6] text-sm font-bold text-white">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#1A4D8F] to-[#2E6FE6] text-sm font-bold text-white">
                     {it.n[0]}
                   </span>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold">{it.n}</p>
                     <p className="text-xs text-muted-foreground">{it.r}</p>
+                    <p className="text-xs font-medium text-[#2E6FE6]">{it.co}</p>
                   </div>
                 </figcaption>
               </figure>
