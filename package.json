@@ -10,7 +10,8 @@
     "build": "npm run build --workspaces",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "db:check-drift": "node scripts/db/check-schema-drift.mjs"
+    "db:check-drift": "node scripts/db/check-schema-drift.mjs",
+    "check:api-contract": "node scripts/check-api-contract.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
