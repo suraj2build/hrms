@@ -1,6 +1,28 @@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
-import { Info } from 'lucide-react'
+import { Info, Loader2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api/client'
+import {
+  Bar, CartesianGrid, ComposedChart, Line, LineChart,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts'
+
+const CHART = { green: '#1FA968', rose: '#E5564B', blue: '#2E6FE6', amber: '#E0A53B' }
+
+interface TrendPoint {
+  month:         string
+  joiners:       number
+  exits:         number
+  net:           number
+  attrition_pct: number
+}
+
+// 'YYYY-MM' → 'Jan' for compact axis labels.
+function fmtMonth(ym: string): string {
+  const [, mo] = ym.split('-').map(Number)
+  return ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][mo] ?? ym
+}
 
 // Per-department row — headcount + cost are real (from /executive). The rest
 // (attrition / productivity / diversity / open roles / contract) have no
@@ -53,17 +75,77 @@ export function DrillDownSheet({ open, onOpenChange, dept }: Props) {
           <Metric label="Contract"    value={dash(dept.contract)} tone="muted" />
         </div>
 
-        <div className="mt-6 rounded-xl border bg-card p-4">
-          <div className="mb-3 text-sm font-medium">Headcount trend (12 mo)</div>
-          <EmptyChart text="Per-department monthly trend isn't available yet." />
-        </div>
-
-        <div className="mt-4 rounded-xl border bg-card p-4">
-          <div className="mb-3 text-sm font-medium">Attrition trend (%)</div>
-          <EmptyChart text="Per-department attrition history isn't available yet." />
-        </div>
+        <DeptTrends department={dept.name} open={open} />
       </SheetContent>
     </Sheet>
+  )
+}
+
+// Per-department joiner/exit/net + attrition, from /executive/department-trend.
+// Queries by department NAME (consistent with the rest of the exec dept feature)
+// and only while the sheet is open.
+function DeptTrends({ department, open }: { department: string; open: boolean }) {
+  const { data, isLoading, isError } = useQuery<{ data: { trend: TrendPoint[] } }>({
+    queryKey:  ['exec-dept-trend', department],
+    queryFn:   () => api.get<{ data: { trend: TrendPoint[] } }>(`/executive/department-trend?department=${encodeURIComponent(department)}&months=12`),
+    enabled:   open && !!department,
+    staleTime: 5 * 60_000,
+  })
+
+  const trend = (data?.data?.trend ?? []).map(p => ({ ...p, label: fmtMonth(p.month) }))
+  const hasData = trend.some(p => p.joiners || p.exits)
+
+  if (isLoading) {
+    return (
+      <div className="mt-6 flex h-40 items-center justify-center rounded-xl border bg-card text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading trends…
+      </div>
+    )
+  }
+  if (isError || !trend.length || !hasData) {
+    return (
+      <div className="mt-6 rounded-xl border bg-card p-4">
+        <div className="mb-3 text-sm font-medium">Headcount trend (12 mo)</div>
+        <EmptyChart text="No joiner/exit movement recorded for this department in the last 12 months." />
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="mt-6 rounded-xl border bg-card p-4">
+        <div className="mb-3 text-sm font-medium">Headcount trend (12 mo)</div>
+        <div className="h-44">
+          <ResponsiveContainer>
+            <ComposedChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }} stackOffset="sign">
+              <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip />
+              <Bar dataKey="joiners" name="Joiners" fill={CHART.green} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="exits"   name="Exits"   fill={CHART.rose}  radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Line type="monotone" dataKey="net" name="Net" stroke={CHART.blue} strokeWidth={2.5} dot={{ r: 2 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border bg-card p-4">
+        <div className="mb-1 text-sm font-medium">Attrition trend (%)</div>
+        <p className="mb-3 text-[11px] text-muted-foreground">Monthly exits as a share of current department headcount (rate proxy).</p>
+        <div className="h-40">
+          <ResponsiveContainer>
+            <LineChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} unit="%" />
+              <Tooltip />
+              <Line type="monotone" dataKey="attrition_pct" name="Attrition %" stroke={CHART.amber} strokeWidth={2.5} dot={{ r: 2, fill: CHART.amber }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </>
   )
 }
 

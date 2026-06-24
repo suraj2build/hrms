@@ -306,6 +306,16 @@ export function PTAXManagement() {
     },
   })
 
+  // ── Delete slab mutation ──────────────────────────────────────────────────────
+  const deleteSlabMutation = useMutation({
+    mutationFn: (slabId: string) => api.delete(`/payroll/statutory/ptax/slabs/${slabId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ptax-slabs', CURRENT_FY, selectedStateCode] })
+      toast.success('P-Tax slab deleted')
+    },
+    onError: (e: unknown) => toast.error('Failed to delete slab', { description: errMessage(e) ?? undefined }),
+  })
+
   // ── Derived data ──────────────────────────────────────────────────────────────
   const filteredStates = useMemo(() => stateList.filter(s => {
     const matchSearch = (s.state_name + s.state_code).toLowerCase().includes(searchQuery.toLowerCase())
@@ -741,11 +751,17 @@ export function PTAXManagement() {
                     <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Monthly Levy</span>
                     <span className="text-sm font-black text-primary font-mono">₹{slab.monthly_ptax}</span>
                   </div>
-                  {/* Delete — disabled; deletions require API endpoint */}
+                  {/* Delete slab — tenant-scoped hard delete (config data; past
+                      filings are self-contained snapshots, so unaffected). */}
                   <button
-                    className="p-1 rounded-md text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    title="Delete slab (contact admin)"
-                    onClick={() => toast.info('Slab deletion requires backend confirmation — coming soon.')}
+                    className="p-1 rounded-md text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:opacity-40"
+                    title="Delete slab"
+                    disabled={deleteSlabMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Delete slab ${i + 1} for ${selectedStateCode}? This cannot be undone.`)) {
+                        deleteSlabMutation.mutate(slab.id)
+                      }
+                    }}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
