@@ -149,6 +149,110 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data: insertedRecords, records_inserted: recordRows.length })
   })
 
+  // ── GET /payroll/arrears/batches/:id/records ──────────────────────────────────
+  // Fetch the calculated arrear records for a batch (+ employee name/code).
+  fastify.get('/batches/:id/records', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: batch } = await fastify.supabase
+      .from('arrear_batches')
+      .select('payout_month, status')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+
+    const { data: records, error } = await fastify.supabase
+      .from('arrear_records')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .eq('batch_id', id)
+      .order('period_month', { ascending: true })
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const empIds = [...new Set((records ?? []).map((r: any) => r.employee_id))]
+    const { data: emps } = empIds.length
+      ? await fastify.supabase.from('employees').select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId).in('id', empIds)
+      : { data: [] as any[] }
+    const em = new Map((emps ?? []).map((e: any) => [e.id, e]))
+
+    const data = (records ?? []).map((r: any) => {
+      const e = em.get(r.employee_id)
+      return {
+        ...r,
+        period_months: 1,
+        payout_month:  (batch as any)?.payout_month ?? null,
+        status:        (batch as any)?.status ?? 'draft',
+        employee_name: e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() : undefined,
+        employee_code: e?.employee_code,
+      }
+    })
+    return reply.send({ data })
+  })
+
+  // ── POST /payroll/arrears/batches/:id/calculate ───────────────────────────────
+  // Auto-generate arrear records from retroactive compensation revisions whose
+  // effective_date falls in the batch's [from_period, to_period] window.
+  // NOTE: covers comp-revision-driven arrears (the common case). Confirm this
+  // matches your arrears policy before relying on it for disbursed payroll.
+  fastify.post('/batches/:id/calculate', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: batch } = await fastify.supabase
+      .from('arrear_batches')
+      .select('id, from_period, to_period, status')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!batch) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Batch not found' })
+    if ((batch as any).status === 'approved' || (batch as any).status === 'processed') {
+      return reply.code(409).send({ error: 'LOCKED', message: 'Batch already approved/processed' })
+    }
+
+    const from = `${(batch as any).from_period}-01`
+    const to   = `${(batch as any).to_period}-31`
+    const { data: revs, error: revErr } = await fastify.supabase
+      .from('compensation_revisions')
+      .select('employee_id, before_ctc_monthly, new_ctc_monthly, effective_date, retro_months')
+      .eq('tenant_id', req.tenantId)
+      .gte('effective_date', from)
+      .lte('effective_date', to)
+    if (revErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: revErr.message })
+
+    const records = (revs ?? [])
+      .filter((r: any) => (r.new_ctc_monthly ?? 0) !== (r.before_ctc_monthly ?? 0))
+      .map((r: any) => {
+        const months = Math.max(1, r.retro_months ?? 1)
+        const monthlyDelta = (r.new_ctc_monthly ?? 0) - (r.before_ctc_monthly ?? 0)
+        return {
+          batch_id:          id,
+          tenant_id:         req.tenantId,
+          employee_id:       r.employee_id,
+          period_month:      (batch as any).from_period,
+          component_code:    'CTC',
+          component_name:    'Monthly CTC',
+          old_amount:        r.before_ctc_monthly ?? 0,
+          new_amount:        r.new_ctc_monthly ?? 0,
+          arrear_amount:     Math.round(monthlyDelta * months * 100) / 100,
+          is_taxable:        true,
+          calculation_notes: `Auto: retroactive comp revision × ${months} month(s)`,
+        }
+      })
+
+    // Recompute: clear prior records for the batch, insert fresh
+    await fastify.supabase.from('arrear_records').delete().eq('tenant_id', req.tenantId).eq('batch_id', id)
+    if (records.length) {
+      const { error: insErr } = await fastify.supabase.from('arrear_records').insert(records)
+      if (insErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: insErr.message })
+    }
+
+    const total = records.reduce((s, r) => s + Math.abs(r.arrear_amount), 0)
+    await fastify.supabase.from('arrear_batches').update({
+      status:              'calculated',
+      employee_count:      new Set(records.map(r => r.employee_id)).size,
+      total_arrear_amount: Math.round(total * 100) / 100,
+      updated_at:          new Date().toISOString(),
+    }).eq('id', id).eq('tenant_id', req.tenantId)
+
+    return reply.send({ data: { batch_id: id, records_created: records.length, total_arrear_amount: Math.round(total * 100) / 100 } })
+  })
+
   // ── POST /payroll/arrears/batches/:id/approve ─────────────────────────────────
   fastify.post('/batches/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
