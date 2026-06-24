@@ -36,11 +36,13 @@ export default function HomePage() {
     <SiteShell>
       <Hero />
       <TrustStrip />
+      <StatsRow />
       <WhyUs />
       <KeyOfferings />
       <Modules />
       <Analytics />
       <AI />
+      <Integrations />
       <HowItWorks />
       <PricingPreview />
       <LiveDemoBand />
@@ -96,6 +98,30 @@ function Hero() {
   );
 }
 
+/* ---------------- STATS ROW ---------------- */
+function StatsRow() {
+  const stats = [
+    { value: 40, suffix: "+", label: "HR capabilities" },
+    { value: 6, suffix: "", label: "Core modules" },
+    { value: 5, suffix: "", label: "Indian statutes built-in" },
+    { value: 14, suffix: "-day", label: "Free sandbox" },
+  ];
+  return (
+    <section className="border-b border-border bg-card">
+      <div className="container-page grid grid-cols-2 gap-6 py-10 sm:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="text-center">
+            <p className="text-3xl font-extrabold tracking-tight text-[#1A4D8F] sm:text-4xl">
+              <CountUp value={s.value} />{s.suffix}
+            </p>
+            <p className="mt-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">{s.label}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /* ---------------- TRUST STRIP ---------------- */
 function TrustStrip() {
   const items = ["Multi-tenant", "Role-based access", "DPDP-aware", "Audit-logged", "ISO-ready"];
@@ -119,12 +145,12 @@ function TrustStrip() {
 /* ---------------- WHY US ---------------- */
 function WhyUs() {
   const pillars = [
-    { icon: Layers, title: "All-in-one", desc: "Hire-to-retire on one platform — no more 6–8 disconnected HR tools." },
-    { icon: ShieldCheck, title: "India-first compliance", desc: "PF, ESI, PT, TDS & LWF with filing packs (ECR 2.0, Form 24Q)." },
-    { icon: Brain, title: "AI that does the work", desc: "Reads documents, flags anomalies, validates payroll automatically." },
-    { icon: BarChart3, title: "Real-time intelligence", desc: "Live workforce, payroll and attendance analytics — not month-old reports." },
-    { icon: Users2, title: "Self-service everywhere", desc: "ESS + Manager Console dramatically cut HR's ticket load." },
-    { icon: Settings2, title: "Configurable & white-label", desc: "Configurable masters, roles, policies and branding. Multi-tenant." },
+    { icon: Layers, title: "All-in-one", desc: "Hire-to-retire on one platform — no more 6–8 disconnected HR tools.", color: "#2E6FE6", bg: "rgba(46,111,230,0.12)" },
+    { icon: ShieldCheck, title: "India-first compliance", desc: "PF, ESI, PT, TDS & LWF with filing packs (ECR 2.0, Form 24Q).", color: "#1A8050", bg: "rgba(26,128,80,0.12)" },
+    { icon: Brain, title: "AI that does the work", desc: "Reads documents, flags anomalies, validates payroll automatically.", color: "#7C3AED", bg: "rgba(124,58,237,0.12)" },
+    { icon: BarChart3, title: "Real-time intelligence", desc: "Live workforce, payroll and attendance analytics — not month-old reports.", color: "#B07B18", bg: "rgba(176,123,24,0.12)" },
+    { icon: Users2, title: "Self-service everywhere", desc: "ESS + Manager Console dramatically cut HR's ticket load.", color: "#15B8A6", bg: "rgba(21,184,166,0.12)" },
+    { icon: Settings2, title: "Configurable & white-label", desc: "Configurable masters, roles, policies and branding. Multi-tenant.", color: "#2260A8", bg: "rgba(34,96,168,0.12)" },
   ];
   return (
     <section id="why" className="py-20 sm:py-28">
@@ -143,7 +169,10 @@ function WhyUs() {
           {pillars.map((p, i) => (
             <Reveal key={p.title} delay={i * 70}>
               <div className="group relative h-full overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-card transition-all duration-300 hover:-translate-y-1.5 hover:shadow-elevated gradient-border-hover">
-                <div className="grid h-11 w-11 place-items-center rounded-xl text-[#2E6FE6] transition-transform group-hover:scale-110 icon-chip-radial">
+                <div
+                  className="grid h-11 w-11 place-items-center rounded-xl transition-transform group-hover:scale-110"
+                  style={{ background: p.bg, color: p.color, boxShadow: `0 0 16px -4px ${p.color}40` }}
+                >
                   <p.icon className="h-5 w-5" />
                 </div>
                 <h3 className="mt-4 text-lg font-semibold">{p.title}</h3>
@@ -468,6 +497,83 @@ function AI() {
             </Reveal>
           ))}
         </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- INTEGRATIONS ---------------- */
+function Integrations() {
+  const groups = [
+    {
+      label: "Accounting",
+      color: "#2E6FE6",
+      items: ["Tally", "Zoho Books", "QuickBooks"],
+    },
+    {
+      label: "Payroll payouts",
+      color: "#1A8050",
+      items: ["Razorpay", "Cashfree", "HDFC SmartPay"],
+    },
+    {
+      label: "Statutory portals",
+      color: "#B07B18",
+      items: ["EPFO / ESIC", "TRACES / NSDL", "GSTN"],
+    },
+    {
+      label: "Identity & docs",
+      color: "#7C3AED",
+      items: ["DigiLocker", "Aadhaar eKYC", "NSDL PAN"],
+    },
+    {
+      label: "Collaboration",
+      color: "#15B8A6",
+      items: ["Slack", "MS Teams", "WhatsApp Business"],
+    },
+    {
+      label: "SSO & productivity",
+      color: "#2260A8",
+      items: ["Google Workspace", "Microsoft 365", "Okta"],
+    },
+  ];
+  return (
+    <section className="bg-card/40 py-20 sm:py-24">
+      <div className="container-page">
+        <Reveal className="mx-auto max-w-2xl text-center">
+          <span className="chip">Integrations</span>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">Works with your existing stack</h2>
+          <p className="mt-3 text-base text-muted-foreground">
+            CognixHR connects to the tools your finance, IT and ops teams already use — no rip-and-replace required.
+          </p>
+        </Reveal>
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {groups.map((g, i) => (
+            <Reveal key={g.label} delay={i * 60}>
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+                <p
+                  className="mb-3 text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: g.color }}
+                >
+                  {g.label}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {g.items.map((name) => (
+                    <span
+                      key={name}
+                      className="rounded-full border px-3 py-1 text-sm font-medium text-foreground/80"
+                      style={{ borderColor: `${g.color}30`, background: `${g.color}08` }}
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          More integrations via REST API / webhooks · Custom connectors available on Enterprise
+        </p>
       </div>
     </section>
   );
