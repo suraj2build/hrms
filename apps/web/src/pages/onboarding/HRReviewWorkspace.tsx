@@ -1638,7 +1638,7 @@ export function HRReviewWorkspace() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full justify-start h-9 border-amber-400 text-amber-700 hover:bg-amber-50"
+                  className="w-full justify-start h-9 border-warning/40 text-warning hover:bg-warning/5"
                   onClick={() => setReuploadDialogOpen(true)}
                 >
                   <Upload className="h-3.5 w-3.5 mr-2" />

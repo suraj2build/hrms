@@ -258,7 +258,7 @@ function PipelineCandidateDialog({ app, stages, onClose }: {
 
           {/* ── Recruiter notes ─────────────────────────────────────────── */}
           {c.notes && (
-            <div className="rounded-xl border border-border bg-amber-50/40 dark:bg-amber-950/10 p-3">
+            <div className="rounded-xl border border-border bg-warning/5 dark:bg-warning/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-1.5">
                 <StickyNote className="h-3.5 w-3.5" />Notes
               </p>

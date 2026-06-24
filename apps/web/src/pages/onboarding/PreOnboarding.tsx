@@ -215,7 +215,7 @@ const STATUS_CONFIG: Record<InviteStatus, { label: string; className: string }> 
   approved:  { label: 'Approved',  className: 'bg-success/15 text-success border-success/30' },
   rejected:  { label: 'Rejected',  className: 'bg-destructive/15 text-destructive border-destructive/30' },
   expired:   { label: 'Expired',   className: 'bg-muted text-muted-foreground border-border' },
-  changes_requested: { label: 'Re-upload requested', className: 'bg-amber-100 text-amber-700 border-amber-300' },
+  changes_requested: { label: 'Re-upload requested', className: 'bg-warning/10 text-warning border-warning/30' },
 }
 
 function StatusBadge({ status }: { status: InviteStatus }) {
@@ -460,7 +460,7 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReu
                 return (
                   <Section title="Candidate-Confirmed Details">
                     {edited.size > 0 && (
-                      <div className="mb-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                      <div className="mb-2 rounded-md bg-warning/5 border border-warning/20 px-3 py-2 text-xs text-warning">
                         The candidate changed {edited.size} HR-provided field{edited.size > 1 ? 's' : ''}. Review the highlighted value{edited.size > 1 ? 's' : ''} below.
                       </div>
                     )}
@@ -470,7 +470,7 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReu
                           <span className="w-40 shrink-0 text-sm text-muted-foreground">{r.label}</span>
                           <span className="text-sm font-medium">{r.value}</span>
                           {edited.has(r.key) && (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Edited</span>
+                            <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">Edited</span>
                           )}
                         </div>
                       )
@@ -576,9 +576,9 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReu
           )}
 
           {showReupload && (
-            <div className="space-y-3 pt-2 rounded-lg border border-amber-300 bg-amber-50/60 p-4">
-              <p className="text-sm font-semibold text-amber-800">Request document re-upload</p>
-              <p className="text-xs text-amber-700 -mt-1">
+            <div className="space-y-3 pt-2 rounded-lg border border-warning/30 bg-warning/5 p-4">
+              <p className="text-sm font-semibold text-warning">Request document re-upload</p>
+              <p className="text-xs text-warning -mt-1">
                 Flag the document(s) the candidate must redo and why. Their portal re-opens pre-filled; they revise only what's flagged and resubmit.
               </p>
               {REUPLOAD_DOCS.map(d => {
@@ -638,7 +638,7 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReu
             </div>
             <Button
               variant="outline"
-              className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
+              className="w-full border-warning/40 text-warning hover:bg-warning/5"
               onClick={handleRequestReupload}
               disabled={approving || rejecting || requesting}
             >
@@ -648,9 +648,9 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReu
         )}
 
         {joinee?.status === 'changes_requested' && (
-          <div className="border-t px-6 py-4 bg-amber-50">
-            <p className="text-sm text-amber-800 font-medium">Awaiting candidate re-upload</p>
-            <p className="text-xs text-amber-700 mt-0.5">The candidate has been asked to revise their documents and resubmit.</p>
+          <div className="border-t px-6 py-4 bg-warning/5">
+            <p className="text-sm text-warning font-medium">Awaiting candidate re-upload</p>
+            <p className="text-xs text-warning mt-0.5">The candidate has been asked to revise their documents and resubmit.</p>
           </div>
         )}
       </SheetContent>
