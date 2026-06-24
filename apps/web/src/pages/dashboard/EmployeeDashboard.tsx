@@ -14,13 +14,14 @@ import { useQuery }    from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ChevronRight, ArrowRight, Check,
-  TrendingUp, TrendingDown, Calendar,
+  Calendar,
   Leaf, Wallet, RefreshCw, Scale, FolderOpen, FileText,
   Mail, CreditCard, AlertCircle, CalendarClock, ShieldCheck,
 } from 'lucide-react'
 import { useAuthStore }  from '@/stores/authStore'
 import { api }           from '@/lib/api/client'
 import { SignedImage }   from '@/components/SignedImage'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import type { Employee } from '@/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -365,41 +366,14 @@ function AttKpiCard({ data, navigate }: { data: DayData[]; navigate: (to: string
   }, [data])
 
   return (
-    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden', borderTop: '3px solid var(--primary)', borderRadius: 12 }}>
-      {/* 3px top accent bar — green for attendance */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#10b981' }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <CardLabel>Attendance</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--tint-green-bg)', display: 'grid', placeItems: 'center' }}>
-          <Check style={{ width: 12, height: 12, color: '#10b981' }} />
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.03em', lineHeight: 1 }}>
-          {stats.rate}%
-        </div>
-        <div style={{ fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 3 }}>
-          <TrendingUp style={{ width: 11, height: 11 }} />
-          This month
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 6 }}>
-        <div style={{ flex: 1, borderRadius: 7, background: 'var(--muted)', padding: '5px 8px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)', ...MONO }}>{stats.present}/{stats.total}</div>
-          <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>Days present</div>
-        </div>
-        <div style={{ flex: 1, borderRadius: 7, background: 'var(--muted)', padding: '5px 8px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: stats.late > 0 ? '#f59e0b' : 'var(--foreground)', ...MONO }}>{stats.late}</div>
-          <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>Late arrivals</div>
-        </div>
-      </div>
-
-      <LinkBtn onClick={() => navigate('/ess/attendance')}>
-        Full view <ChevronRight style={{ width: 11, height: 11 }} />
-      </LinkBtn>
-    </section>
+    <MetricCard
+      label="Attendance"
+      value={`${stats.rate}%`}
+      icon={Check}
+      variant="success"
+      subtitle={`${stats.present}/${stats.total} present · ${stats.late} late`}
+      onClick={() => navigate('/ess/attendance')}
+    />
   )
 }
 
@@ -419,47 +393,21 @@ function NetPayKpiCard({ slips, navigate }: { slips: PayslipSummary[]; navigate:
     ? MONTHS_SHORT[parseInt(latest.month.slice(5, 7)) - 1]
     : null
 
+  const subtitle = delta !== null
+    ? `${delta >= 0 ? '+' : ''}${fmtINR(Math.abs(delta))} vs prev`
+    : monthLabel
+      ? `${monthLabel} payslip`
+      : 'No payslip yet'
+
   return (
-    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden', borderTop: '3px solid var(--primary)', borderRadius: 12 }}>
-      {/* 3px top accent bar — amber for pay */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#f59e0b' }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <CardLabel>Net Pay</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--tint-amber-bg)', display: 'grid', placeItems: 'center' }}>
-          <Wallet style={{ width: 12, height: 12, color: '#f59e0b' }} />
-        </div>
-      </div>
-
-      <div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1, ...MONO }}>
-          {latest ? fmtINR(latest.net_pay) : '—'}
-        </div>
-        {delta !== null ? (
-          <div style={{ fontSize: 11, color: delta >= 0 ? '#10b981' : '#f43f5e', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-            {delta >= 0
-              ? <TrendingUp style={{ width: 11, height: 11 }} />
-              : <TrendingDown style={{ width: 11, height: 11 }} />
-            }
-            {delta >= 0 ? '+' : ''}{fmtINR(Math.abs(delta))} vs prev
-          </div>
-        ) : monthLabel ? (
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>{monthLabel} payslip</div>
-        ) : (
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>No payslip yet</div>
-        )}
-      </div>
-
-      {creditDate && (
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', background: 'var(--muted)', borderRadius: 7, padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <Calendar style={{ width: 10, height: 10 }} />
-          Credited {creditDate}
-        </div>
-      )}
-
-      <LinkBtn onClick={() => navigate('/ess/compensation')}>
-        View payslips <ChevronRight style={{ width: 11, height: 11 }} />
-      </LinkBtn>
-    </section>
+    <MetricCard
+      label="Net Pay"
+      value={latest ? fmtINR(latest.net_pay) : '—'}
+      icon={Wallet}
+      variant="info"
+      subtitle={creditDate ? `${subtitle} · Credited ${creditDate}` : subtitle}
+      onClick={() => navigate('/ess/compensation')}
+    />
   )
 }
 
@@ -478,33 +426,16 @@ function OpenActionsKpiCard({
   }, [requests, regRequests])
 
   return (
-    <section style={{ ...CARD, flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, position: 'relative', overflow: 'hidden', borderTop: '3px solid var(--primary)', borderRadius: 12 }}>
-      {/* 3px top accent bar — amber if actions pending, muted if none */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: total > 0 ? '#f59e0b' : 'var(--border)' }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <CardLabel>Open Actions</CardLabel>
-        <div style={{ width: 26, height: 26, borderRadius: 7, background: total > 0 ? 'var(--tint-amber-bg)' : 'var(--muted)', display: 'grid', placeItems: 'center' }}>
-          <AlertCircle style={{ width: 12, height: 12, color: total > 0 ? '#f59e0b' : 'var(--muted-foreground)' }} />
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <div style={{ fontSize: 32, fontWeight: 700, color: total > 0 ? '#f59e0b' : 'var(--foreground)', letterSpacing: '-.03em', lineHeight: 1, ...MONO }}>
-          {total}
-        </div>
-        <div style={{ fontSize: 11, color: total > 0 ? 'var(--tint-amber-fg)' : 'var(--muted-foreground)' }}>
-          {awaitingInput > 0 ? `${awaitingInput} awaiting input` : 'All clear'}
-        </div>
-      </div>
-
-      <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
-        {total > 0 ? 'Items need your attention' : 'No pending actions'}
-      </div>
-
-      <LinkBtn onClick={() => navigate('/ess/approvals')}>
-        View all <ChevronRight style={{ width: 11, height: 11 }} />
-      </LinkBtn>
-    </section>
+    <MetricCard
+      label="Open Actions"
+      value={total}
+      icon={AlertCircle}
+      variant={total > 0 ? 'warning' : 'neutral'}
+      subtitle={total > 0
+        ? `${awaitingInput > 0 ? `${awaitingInput} awaiting input` : 'All clear'} · Items need your attention`
+        : 'All clear · No pending actions'}
+      onClick={() => navigate('/ess/approvals')}
+    />
   )
 }
 
@@ -1157,11 +1088,11 @@ export function EmployeeDashboard() {
       <ProfileBar emp={emp} profile={fullProfile} />
 
       {/* 2. KPI row */}
-      <div style={{ display: 'flex', gap: 12 }}>
+      <MetricRow cols={3}>
         <AttKpiCard data={heatmapData} navigate={nav} />
         <NetPayKpiCard slips={slips} navigate={nav} />
         <OpenActionsKpiCard requests={requests} regRequests={regRequests} navigate={nav} />
-      </div>
+      </MetricRow>
 
       {/* 3. Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr]" style={{ gap: 12, alignItems: 'start' }}>

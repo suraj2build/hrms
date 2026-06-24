@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { api }          from '@/lib/api/client'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { ManagerInsights } from '@/pages/intelligence/ManagerInsights'
 import { ManagerLifecycleRails } from '@/pages/manager/ManagerLifecycleRails'
 import type { Employee } from '@/types'
@@ -316,56 +317,37 @@ function KPIStrip({ summary }: { summary: TodaySummary }) {
   const present = summary.present
   const pct = (n: number) => (total > 0 ? `${((n / total) * 100).toFixed(0)}% of team` : '—')
 
-  const tiles = [
-    {
-      icon: UserCheck,   label: 'Present Today',    value: present,
-      sub: pct(present), color: 'var(--tint-green-fg)', bg: 'var(--tint-green-bg)',
-    },
-    {
-      icon: Calendar,    label: 'On Leave',          value: summary.leave,
-      sub: 'Approved', color: '#0ea5e9', bg: '#e3f3fc',
-    },
-    {
-      icon: AlertCircle, label: 'Absent',            value: summary.absent,
-      sub: pct(summary.absent), color: 'var(--tint-red-fg)', bg: 'var(--tint-red-bg)',
-    },
-    {
-      icon: Clock,       label: 'Not Marked',        value: summary.not_marked,
-      sub: summary.not_marked > 0 ? 'Awaiting punch' : 'All marked',
-      color: summary.not_marked > 0 ? '#f59e0b' : T.muted,
-      bg: summary.not_marked > 0 ? 'var(--tint-amber-bg)' : 'var(--tint-neutral-bg)',
-    },
-  ]
-
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 10 }}>
-      {tiles.map(t => {
-        const Icon = t.icon
-        return (
-          <div key={t.label} style={{
-            background: T.card, border: `1px solid ${T.border}`, borderRadius: 12,
-            borderTop: '3px solid var(--primary)',
-            padding: '12px 14px', boxShadow: T.shadow,
-            display: 'flex', alignItems: 'center', gap: 12,
-            position: 'relative', overflow: 'hidden',
-          }}>
-            {/* 3px top accent bar */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: t.color, borderRadius: '12px 12px 0 0' }} />
-            <div style={{
-              width: 38, height: 38, borderRadius: 10, background: t.bg,
-              display: 'grid', placeItems: 'center', flexShrink: 0,
-            }}>
-              <Icon style={{ width: 17, height: 17, color: t.color }} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: T.muted, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{t.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: t.color, fontFamily: T.mono, letterSpacing: '-.02em', lineHeight: 1.15 }}>{t.value}</div>
-              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 1 }}>{t.sub}</div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
+    <MetricRow cols={4}>
+      <MetricCard
+        label="Present Today"
+        value={present}
+        icon={UserCheck}
+        variant="success"
+        subtitle={pct(present)}
+      />
+      <MetricCard
+        label="On Leave"
+        value={summary.leave}
+        icon={Calendar}
+        variant="info"
+        subtitle="Approved"
+      />
+      <MetricCard
+        label="Absent"
+        value={summary.absent}
+        icon={AlertCircle}
+        variant="destructive"
+        subtitle={pct(summary.absent)}
+      />
+      <MetricCard
+        label="Not Marked"
+        value={summary.not_marked}
+        icon={Clock}
+        variant={summary.not_marked > 0 ? 'warning' : 'neutral'}
+        subtitle={summary.not_marked > 0 ? 'Awaiting punch' : 'All marked'}
+      />
+    </MetricRow>
   )
 }
 

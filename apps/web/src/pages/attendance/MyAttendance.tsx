@@ -25,6 +25,7 @@ import { toast }                  from 'sonner'
 import { Badge }                  from '@/components/ui/badge'
 import { Button }                 from '@/components/ui/button'
 import { Input }                  from '@/components/ui/input'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }                    from '@/lib/api/client'
 import { useAuthStore }           from '@/stores/authStore'
 import { cn }                     from '@/lib/utils'
@@ -555,49 +556,6 @@ function DayDetailModal({
   )
 }
 
-// ── KPI Card ───────────────────────────────────────────────────────────────────
-
-interface KpiCardProps {
-  label:    string
-  value:    string | number
-  icon:     React.ComponentType<{ className?: string }>
-  iconCls:  string
-  bgCls:    string
-  valueCls: string
-  barCls:   string
-  delta?:   { value: number; suffix: string; isGood?: boolean } | null
-}
-
-function KpiCard({ label, value, icon: Icon, iconCls, bgCls, valueCls, barCls, delta }: KpiCardProps) {
-  return (
-    <div className={cn('rounded-xl border border-border/40 bg-card shadow-sm overflow-hidden', bgCls)}>
-      {/* Colored top accent bar */}
-      <div className={cn('h-0.5 w-full', barCls)} />
-      <div className="px-2.5 py-2 flex items-center gap-2">
-        {/* Icon */}
-        <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0', iconCls)}>
-          <Icon className="h-3.5 w-3.5" />
-        </div>
-        {/* Value + label */}
-        <div className="flex-1 min-w-0">
-          <p className={cn('text-base font-bold font-display tabular-nums leading-none', valueCls)}>{value}</p>
-          <p className="text-[9px] font-semibold text-muted-foreground mt-0.5 uppercase tracking-wider truncate">{label}</p>
-        </div>
-        {/* Delta badge */}
-        {delta !== undefined && delta !== null ? (
-          <span className={cn('text-[8px] font-bold px-1 py-0.5 rounded-full leading-none shrink-0',
-            delta.isGood !== false && delta.value > 0 ? 'bg-success/10 text-success' :
-            delta.value < 0 ? 'bg-destructive/10 text-destructive' :
-            'text-muted-foreground/40',
-          )}>
-            {delta.value > 0 ? `↑${delta.value}` : delta.value < 0 ? `↓${Math.abs(delta.value)}` : '–'}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 // ── Calendar legend ────────────────────────────────────────────────────────────
 
 function CalLegend() {
@@ -1063,68 +1021,48 @@ export function MyAttendance() {
       {activeTab === 'calendar' && <>
 
       {/* ── KPI strip ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-        <KpiCard
+      <MetricRow cols={5}>
+        <MetricCard
           label="Present"
           value={isLoading ? '—' : `${kpi.presentPct}%`}
           icon={CalendarCheck}
-          iconCls="bg-success/15 text-success"
-          bgCls=""
-          valueCls="text-success"
-          barCls="bg-success"
-          delta={kpi.hasPrev ? { value: kpi.presentPct - kpi.pPresentPct, suffix: '%', isGood: true } : null}
+          variant="success"
+          trend={kpi.hasPrev ? kpi.presentPct - kpi.pPresentPct : undefined}
         />
-        <KpiCard
+        <MetricCard
           label="Absent"
           value={isLoading ? '—' : kpi.absent}
           icon={CalendarDays}
-          iconCls="bg-destructive/10 text-destructive"
-          bgCls=""
-          valueCls="text-destructive"
-          barCls="bg-destructive"
-          delta={kpi.hasPrev ? { value: kpi.absent - kpi.pAbsent, suffix: '', isGood: false } : null}
+          variant="destructive"
+          trend={kpi.hasPrev ? kpi.absent - kpi.pAbsent : undefined}
         />
-        <KpiCard
+        <MetricCard
           label="Late"
           value={isLoading ? '—' : kpi.late}
           icon={Clock}
-          iconCls="bg-warning/15 text-warning"
-          bgCls=""
-          valueCls="text-warning"
-          barCls="bg-warning"
-          delta={kpi.hasPrev ? { value: kpi.late - kpi.pLate, suffix: '', isGood: false } : null}
+          variant="warning"
+          trend={kpi.hasPrev ? kpi.late - kpi.pLate : undefined}
         />
-        <KpiCard
+        <MetricCard
           label="On Leave"
           value={isLoading ? '—' : kpi.leave}
           icon={PlaneTakeoff}
-          iconCls="bg-info/15 text-info"
-          bgCls=""
-          valueCls="text-info"
-          barCls="bg-info"
-          delta={kpi.hasPrev ? { value: kpi.leave - kpi.pLeave, suffix: '' } : null}
+          variant="info"
+          trend={kpi.hasPrev ? kpi.leave - kpi.pLeave : undefined}
         />
-        <KpiCard
+        <MetricCard
           label="Weekly Off"
           value={isLoading ? '—' : kpi.weekly_off}
           icon={Coffee}
-          iconCls="bg-muted text-muted-foreground"
-          bgCls=""
-          valueCls="text-muted-foreground"
-          barCls="bg-muted-foreground/40"
-          delta={null}
+          variant="neutral"
         />
-        <KpiCard
+        <MetricCard
           label="Holiday"
           value={isLoading ? '—' : kpi.holiday}
           icon={Gift}
-          iconCls="bg-accent/30 text-accent-foreground"
-          bgCls=""
-          valueCls="text-accent-foreground"
-          barCls="bg-accent-violet"
-          delta={null}
+          variant="info"
         />
-      </div>
+      </MetricRow>
 
       {/* ── Exception banner ────────────────────────────────────────────── */}
       {!isLoading && exceptionDays.length > 0 && (
