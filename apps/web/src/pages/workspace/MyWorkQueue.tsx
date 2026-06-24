@@ -18,6 +18,7 @@ import { cn }                            from '@/lib/utils'
 import { useOperationalQueue }           from '@/lib/queue/useOperationalQueue'
 import type { OperationalQueueItem }     from '@/lib/queue/types'
 import { EmployeeResolutionWorkspace }   from '@/components/queue/EmployeeResolutionWorkspace'
+import { MetricCard, MetricRow }         from '@/components/dashboard/MetricCard'
 import {
   CheckCircle2, XCircle, AlarmClock, ChevronsUp, ArrowUpRight,
   Search, Keyboard, RefreshCw, Loader2, AlertCircle,
@@ -464,19 +465,12 @@ export function MyWorkQueue() {
         </div>
 
         {/* ── KPI strip ───────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { label: 'Payroll Blocking', value: kpis.payrollBlocking, accent: kpis.payrollBlocking > 0 ? 'text-destructive' : 'text-foreground' },
-            { label: 'Pending Approval', value: kpis.pendingApproval, accent: kpis.pendingApproval > 0 ? 'text-warning'     : 'text-foreground' },
-            { label: 'Needs Review',     value: kpis.needsReview,     accent: kpis.needsReview     > 0 ? 'text-primary'     : 'text-foreground' },
-            { label: 'Ignored Today',    value: kpis.ignoredToday,    accent: 'text-muted-foreground'                                           },
-          ].map(({ label, value, accent }) => (
-            <div key={label} className="rounded-lg border border-border bg-card px-4 py-3">
-              <p className="text-xs text-muted-foreground font-medium">{label}</p>
-              <p className={cn('text-2xl font-bold tabular-nums mt-0.5', accent)}>{value}</p>
-            </div>
-          ))}
-        </div>
+        <MetricRow cols={4}>
+          <MetricCard label="Payroll Blocking" value={kpis.payrollBlocking} variant={kpis.payrollBlocking > 0 ? 'destructive' : 'neutral'} />
+          <MetricCard label="Pending Approval" value={kpis.pendingApproval} variant={kpis.pendingApproval > 0 ? 'warning' : 'neutral'} />
+          <MetricCard label="Needs Review"     value={kpis.needsReview}     variant={kpis.needsReview > 0 ? 'info' : 'neutral'} />
+          <MetricCard label="Ignored Today"    value={kpis.ignoredToday}    variant="neutral" />
+        </MetricRow>
 
         {/* ── Filter chips ────────────────────────────────────────────────── */}
         <div className="flex items-center gap-1.5 flex-wrap">

@@ -56,6 +56,7 @@ import {
   TabsTrigger,
   TabsContent,
 } from '@/components/ui/tabs'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }           from '@/lib/api/client'
 import { EmployeeLabel }  from '@/components/employee/EmployeeLabel'
 import { useAuthStore }  from '@/stores/authStore'
@@ -227,42 +228,29 @@ function LifecycleAnalyticsTab() {
   return (
     <div className="space-y-4">
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          {
-            label: 'Active Freezes',
-            value: totalFrozen,
-            icon:  Pause,
-            cls:   totalFrozen > 0 ? 'text-warning' : 'text-success',
-            desc:  'Employees with accrual suspended',
-          },
-          {
-            label: 'Held Credit Days',
-            value: totalHeld.toFixed(1),
-            icon:  Lock,
-            cls:   'text-info',
-            desc:  'Days posted but not yet consumable',
-          },
-          {
-            label: 'Tier Policies Active',
-            value: '—',
-            icon:  TrendingUp,
-            cls:   'text-primary',
-            desc:  'Leave types with service-tier rates',
-          },
-        ].map(({ label, value, icon: Icon, cls, desc }) => (
-          <div key={label} className="rounded-lg border border-border bg-card p-4 flex items-center gap-3">
-            <div className={cn('p-2 rounded-lg bg-muted/50', cls)}>
-              <Icon className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground">{label}</p>
-              <p className={cn('font-display text-2xl font-bold tabular-nums', cls)}>{value}</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">{desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
+      <MetricRow cols={3}>
+        <MetricCard
+          label="Active Freezes"
+          value={totalFrozen}
+          icon={Pause}
+          variant={totalFrozen > 0 ? 'warning' : 'success'}
+          subtitle="Employees with accrual suspended"
+        />
+        <MetricCard
+          label="Held Credit Days"
+          value={totalHeld.toFixed(1)}
+          icon={Lock}
+          variant="info"
+          subtitle="Days posted but not yet consumable"
+        />
+        <MetricCard
+          label="Tier Policies Active"
+          value="—"
+          icon={TrendingUp}
+          variant="info"
+          subtitle="Leave types with service-tier rates"
+        />
+      </MetricRow>
 
       {/* Active freezes table */}
       <SectionCard
@@ -883,21 +871,13 @@ export default function LeaveGovernanceWorkspace() {
         {/* ── Tab 2: Event Grants ───────────────────────────────────────── */}
         <TabsContent value="event-grants">
           {/* Stats row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-            {[
-              { label: 'Total Grants',  value: grantStats.total,   icon: Gift,       color: 'text-primary' },
-              { label: 'Active',        value: grantStats.active,  icon: BadgeCheck, color: 'text-success' },
-              { label: 'Expired',       value: grantStats.expired, icon: XCircle,    color: 'text-warning' },
-              { label: 'Used',          value: grantStats.used,    icon: AlertCircle, color: 'text-muted-foreground' },
-            ].map(s => (
-              <div key={s.label} className="rounded-lg border border-border bg-card p-3 flex items-center gap-3">
-                <s.icon className={cn('h-4 w-4 shrink-0', s.color)} />
-                <div>
-                  <p className="text-xs text-muted-foreground">{s.label}</p>
-                  <p className="font-display text-lg font-semibold">{s.value}</p>
-                </div>
-              </div>
-            ))}
+          <div className="mb-4">
+            <MetricRow cols={4}>
+              <MetricCard compact label="Total Grants"  value={grantStats.total}   icon={Gift}        variant="info" />
+              <MetricCard compact label="Active"        value={grantStats.active}  icon={BadgeCheck}  variant="success" />
+              <MetricCard compact label="Expired"       value={grantStats.expired} icon={XCircle}     variant="warning" />
+              <MetricCard compact label="Used"          value={grantStats.used}    icon={AlertCircle} variant="neutral" />
+            </MetricRow>
           </div>
 
           <SectionCard
@@ -997,18 +977,13 @@ export default function LeaveGovernanceWorkspace() {
           ) : (
             <>
               {/* Summary stat cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                {[
-                  { label: 'Total Requests (this year)', value: analyticsData.total_requests,      color: 'text-primary' },
-                  { label: 'Half-Day',                   value: analyticsData.half_day_count,      color: 'text-info' },
-                  { label: 'Cross-Session',              value: analyticsData.cross_session_count, color: 'text-warning' },
-                  { label: 'Hourly',                     value: analyticsData.hourly_count,        color: 'text-primary' },
-                ].map(s => (
-                  <div key={s.label} className="rounded-lg border border-border bg-card p-3">
-                    <p className="text-xs text-muted-foreground">{s.label}</p>
-                    <p className={cn('font-display text-2xl font-semibold mt-1', s.color)}>{s.value}</p>
-                  </div>
-                ))}
+              <div className="mb-4">
+                <MetricRow cols={4}>
+                  <MetricCard label="Total Requests (this year)" value={analyticsData.total_requests}      variant="info" />
+                  <MetricCard label="Half-Day"                   value={analyticsData.half_day_count}      variant="info" />
+                  <MetricCard label="Cross-Session"              value={analyticsData.cross_session_count} variant="warning" />
+                  <MetricCard label="Hourly"                     value={analyticsData.hourly_count}        variant="info" />
+                </MetricRow>
               </div>
 
               <SectionCard

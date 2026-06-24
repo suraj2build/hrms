@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -56,17 +57,6 @@ const CAT_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   assets:     Package,
   payroll:    Clock,
   leave:      Clock,
-}
-
-function KpiTile({ label, value, urgent }: { label: string; value: number | string | null; urgent?: boolean }) {
-  return (
-    <div className={['surface-premium lift-hover p-4 flex flex-col gap-1', urgent ? 'ring-1 ring-destructive/25' : ''].join(' ')}>
-      <span className={['text-2xl font-bold tabular-nums', urgent ? 'text-destructive' : 'text-foreground'].join(' ')}>
-        {value ?? 0}
-      </span>
-      <span className="text-xs text-muted-foreground">{label}</span>
-    </div>
-  )
 }
 
 function ObservationCard({ obs }: { obs: Observation }) {
@@ -229,22 +219,22 @@ export function WorkforceCommand({ embedded = false }: { embedded?: boolean } = 
           {/* Needs Attention — actionable metrics (highlight when non-zero) */}
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Needs Attention</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiTile label="On Notice"           value={d.kpis.on_notice}           urgent={Number(d.kpis.on_notice) > 0} />
-              <KpiTile label="Stalled Onboarding"  value={d.kpis.stalled_onboarding}  urgent={Number(d.kpis.stalled_onboarding) > 0} />
-              <KpiTile label="Pending Separations" value={d.kpis.pending_separations} urgent={Number(d.kpis.pending_separations) > 0} />
-              <KpiTile label="Assets at Risk"      value={d.kpis.assets_at_risk}      urgent={Number(d.kpis.assets_at_risk) > 0} />
-              <KpiTile label="Probation Due"       value={d.kpis.probation_due}       urgent={Number(d.kpis.probation_due) > 5} />
-            </div>
+            <MetricRow cols={5}>
+              <MetricCard label="On Notice"           value={d.kpis.on_notice ?? 0}           variant={Number(d.kpis.on_notice) > 0 ? 'destructive' : 'neutral'} />
+              <MetricCard label="Stalled Onboarding"  value={d.kpis.stalled_onboarding ?? 0}  variant={Number(d.kpis.stalled_onboarding) > 0 ? 'destructive' : 'neutral'} />
+              <MetricCard label="Pending Separations" value={d.kpis.pending_separations ?? 0} variant={Number(d.kpis.pending_separations) > 0 ? 'destructive' : 'neutral'} />
+              <MetricCard label="Assets at Risk"      value={d.kpis.assets_at_risk ?? 0}      variant={Number(d.kpis.assets_at_risk) > 0 ? 'destructive' : 'neutral'} />
+              <MetricCard label="Probation Due"       value={d.kpis.probation_due ?? 0}       variant={Number(d.kpis.probation_due) > 5 ? 'destructive' : 'neutral'} />
+            </MetricRow>
           </div>
 
           {/* Workforce — context metrics (steady-state) */}
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Workforce</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiTile label="Active Employees"  value={d.kpis.active_headcount} />
-              <KpiTile label="Joined This Month" value={d.kpis.joiners_this_month} />
-            </div>
+            <MetricRow cols={2}>
+              <MetricCard label="Active Employees"  value={d.kpis.active_headcount ?? 0} />
+              <MetricCard label="Joined This Month" value={d.kpis.joiners_this_month ?? 0} />
+            </MetricRow>
           </div>
 
           {/* Observations */}
