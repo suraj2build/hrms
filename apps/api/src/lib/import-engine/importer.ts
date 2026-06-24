@@ -894,17 +894,17 @@ async function importCompensationRevisions(
       const { error } = await supabase
         .from('compensation_revisions')
         .insert({
-          tenant_id:           tenantId,
-          employee_id:         employeeId,
-          revision_type:       revisionType,
-          effective_date:      effectiveDate,
-          revised_ctc_annual:  newCtcAnnual,
-          previous_ctc_annual: previousCtc,
-          ctc_change_pct:      ctcChangePct,
-          revision_reason:     reason,            // DB column is revision_reason
-          status:              'pending_approval', // DB status enum value
-          created_by:          createdBy,
-          metadata:            notes ? { notes } : {},
+          tenant_id:         tenantId,
+          employee_id:       employeeId,
+          revision_type:     revisionType,
+          effective_date:    effectiveDate,
+          new_ctc_annual:    newCtcAnnual,
+          before_ctc_annual: previousCtc,
+          delta_pct:         ctcChangePct,
+          reason:            reason,
+          status:            'pending',           // CHECK: pending|approved|rejected|withdrawn
+          requested_by:      createdBy,
+          notes:             notes ?? null,
         })
 
       if (error) throw new Error(error.message)

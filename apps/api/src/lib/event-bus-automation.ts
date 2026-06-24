@@ -242,7 +242,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
                   : entityType === 'correction' ? 'attendance_regularisation'
                   : 'approval_workflows',
         record_id:  entityId,
-        new_values: {
+        new_data: {
           sla_hours:     slaHours,
           elapsed_hours: elapsedHours,
           escalate_to:   escalateTo ?? null,
@@ -266,7 +266,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           action:     'coverage_gap_alert',
           table_name: 'shift_roster',
           record_id:  shiftId,
-          new_values: { date, gap_type: gapType, severity },
+          new_data: { date, gap_type: gapType, severity },
         })
       } catch {
         // Non-fatal
@@ -291,7 +291,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'payroll_run_failed',
         table_name: 'payroll_runs',
         record_id:  runId,
-        new_values: { error_message: errorMessage },
+        new_data: { error_message: errorMessage },
       })
     } catch {
       // Non-fatal
@@ -308,7 +308,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'notification_failed',
         table_name: 'notifications',
         record_id:  recipientId,
-        new_values: { channel, error },
+        new_data: { channel, error },
       })
     } catch {
       // Non-fatal
@@ -327,7 +327,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'attendance_risk_detected',
         table_name: 'attendance_daily',
         record_id:  employeeId,
-        new_values: { risk_type: riskType, risk_score: riskScore, period, detail },
+        new_data: { risk_type: riskType, risk_score: riskScore, period, detail },
       })
     } catch {
       // Non-fatal
@@ -372,7 +372,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'staffing_shortage',
         table_name: 'shift_roster',
         record_id:  shiftId ?? departmentId ?? tenantId,
-        new_values: { date, required, available, severity },
+        new_data: { date, required, available, severity },
       })
     } catch {
       // Non-fatal
@@ -389,7 +389,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'payroll_variance',
         table_name: 'payroll_slips',
         record_id:  runId,
-        new_values: { employee_id: employeeId, month, net_pay_diff: netPayDiff, net_pay_pct: netPayPct, reason: varianceReason },
+        new_data: { employee_id: employeeId, month, net_pay_diff: netPayDiff, net_pay_pct: netPayPct, reason: varianceReason },
       })
     } catch {
       // Non-fatal
@@ -431,7 +431,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'burnout_risk_detected',
         table_name: 'attendance_daily',
         record_id:  employeeId,
-        new_values: { period, ot_hours: otHours, consecutive_days: consecutiveDays, risk_level: riskLevel },
+        new_data: { period, ot_hours: otHours, consecutive_days: consecutiveDays, risk_level: riskLevel },
       })
     } catch {
       // Non-fatal
@@ -472,7 +472,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'roster_imbalance',
         table_name: 'shift_roster',
         record_id:  shiftId ?? departmentId ?? tenantId,
-        new_values: { month, imbalance_type: imbalanceType, affected_count: affectedCount },
+        new_data: { month, imbalance_type: imbalanceType, affected_count: affectedCount },
       })
     } catch {
       // Non-fatal
@@ -489,7 +489,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'payroll_blocker',
         table_name: 'payroll_slips',
         record_id:  employeeId,
-        new_values: { month, blocker_type: blockerType, detail },
+        new_data: { month, blocker_type: blockerType, detail },
       })
     } catch {
       // Non-fatal
@@ -506,7 +506,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'repeated_late_pattern',
         table_name: 'attendance_daily',
         record_id:  employeeId,
-        new_values: { period, late_count: lateCount, avg_late_mins: avgLateMins, pattern },
+        new_data: { period, late_count: lateCount, avg_late_mins: avgLateMins, pattern },
       })
     } catch {
       // Non-fatal
@@ -555,7 +555,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'compensation_revised',
         table_name: 'compensation_revisions',
         record_id:  revisionId,
-        new_values: {
+        new_data: {
           revision_type:       revisionType,
           effective_date:      effectiveDate,
           before_ctc_annual:   beforeCtcAnnual,
@@ -605,7 +605,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'payroll_volatility',
         table_name: 'payroll_slips',
         record_id:  employeeId,
-        new_values: { month, prior_month: priorMonth, prior_net_pay: priorNetPay, current_net_pay: currentNetPay, volatility_pct: volatilityPct, reason },
+        new_data: { month, prior_month: priorMonth, prior_net_pay: priorNetPay, current_net_pay: currentNetPay, volatility_pct: volatilityPct, reason },
       })
     } catch {
       // Non-fatal
@@ -648,7 +648,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'compensation_risk',
         table_name: 'employee_compensations',
         record_id:  employeeId,
-        new_values: { risk_type: riskType, detail, days_until_impact: daysUntilImpact },
+        new_data: { risk_type: riskType, detail, days_until_impact: daysUntilImpact },
       })
     } catch {
       // Non-fatal
@@ -689,7 +689,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'abnormal_ot_cost',
         table_name: 'payroll_dept_snapshots',
         record_id:  departmentId ?? tenantId,
-        new_values: { month, total_gross: totalGross, ot_cost: otCost, ot_pct: otPct, severity, affected_count: affectedCount },
+        new_data: { month, total_gross: totalGross, ot_cost: otCost, ot_pct: otPct, severity, affected_count: affectedCount },
       })
     } catch {
       // Non-fatal
@@ -731,7 +731,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'payroll_forecast_changed',
         table_name: 'payroll_forecasts',
         record_id:  tenantId,
-        new_values: { target_month: targetMonth, prior_forecast: priorForecast, new_forecast: newForecast, change_pct: changePct, trigger_reason: triggerReason },
+        new_data: { target_month: targetMonth, prior_forecast: priorForecast, new_forecast: newForecast, change_pct: changePct, trigger_reason: triggerReason },
       })
     } catch {
       // Non-fatal
@@ -749,7 +749,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         action:     'excessive_payroll_variance',
         table_name: 'payroll_dept_snapshots',
         record_id:  departmentId ?? tenantId,
-        new_values: { month, department_name: departmentName, prior_gross: priorGross, current_gross: currentGross, variance_pct: variancePct, severity },
+        new_data: { month, department_name: departmentName, prior_gross: priorGross, current_gross: currentGross, variance_pct: variancePct, severity },
       })
     } catch {
       // Non-fatal
@@ -788,9 +788,9 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     const { tenantId, employeeId, date, exceptionType, severity, payrollImpacting } = event.payload
     try {
       await supabase.from('audit_logs').insert({
-        tenant_id: tenantId, actor_id: null, entity_type: 'attendance_exception',
-        entity_id: `${employeeId}:${date}:${exceptionType}`, action: 'created',
-        metadata: { employee_id: employeeId, date, exception_type: exceptionType, severity, payroll_impacting: payrollImpacting },
+        tenant_id: tenantId, performed_by: null, table_name: 'attendance_exception',
+        record_id: employeeId, action: 'created',
+        new_data: { employee_id: employeeId, date, exception_type: exceptionType, severity, payroll_impacting: payrollImpacting },
       })
     } catch {
       // Non-fatal
@@ -807,9 +807,9 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         .eq('id', exceptionId)
         .eq('tenant_id', tenantId)
       await supabase.from('audit_logs').insert({
-        tenant_id: tenantId, actor_id: null, entity_type: 'attendance_exception',
-        entity_id: exceptionId, action: 'sla_breached',
-        metadata: { exception_id: exceptionId, hours_overdue: hoursOverdue },
+        tenant_id: tenantId, performed_by: null, table_name: 'attendance_exception',
+        record_id: exceptionId, action: 'sla_breached',
+        new_data: { exception_id: exceptionId, hours_overdue: hoursOverdue },
       })
     } catch {
       // Non-fatal
@@ -822,9 +822,9 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     const { tenantId, employeeId, date, confidenceScore, confidenceLevel, topFactors } = event.payload
     try {
       await supabase.from('audit_logs').insert({
-        tenant_id: tenantId, actor_id: null, entity_type: 'attendance_daily',
-        entity_id: `${employeeId}:${date}`, action: 'confidence_critical',
-        metadata: { employee_id: employeeId, date, confidence_score: confidenceScore, confidence_level: confidenceLevel, top_factors: topFactors },
+        tenant_id: tenantId, performed_by: null, table_name: 'attendance_daily',
+        record_id: employeeId, action: 'confidence_critical',
+        new_data: { employee_id: employeeId, date, confidence_score: confidenceScore, confidence_level: confidenceLevel, top_factors: topFactors },
       })
     } catch {
       // Non-fatal
@@ -837,9 +837,9 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     const { tenantId, employeeId, date, conflictType, severity, payrollImpacting } = event.payload
     try {
       await supabase.from('audit_logs').insert({
-        tenant_id: tenantId, actor_id: null, entity_type: 'attendance_policy_conflict',
-        entity_id: `${employeeId}:${date}`, action: 'conflict_detected',
-        metadata: { employee_id: employeeId, date, conflict_type: conflictType, severity, payroll_impacting: payrollImpacting },
+        tenant_id: tenantId, performed_by: null, table_name: 'attendance_policy_conflict',
+        record_id: employeeId, action: 'conflict_detected',
+        new_data: { employee_id: employeeId, date, conflict_type: conflictType, severity, payroll_impacting: payrollImpacting },
       })
     } catch {
       // Non-fatal
@@ -852,9 +852,9 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     const { tenantId, employeeId, affectedDate, triggerSource, impactTypes } = event.payload
     try {
       await supabase.from('audit_logs').insert({
-        tenant_id: tenantId, actor_id: null, entity_type: 'attendance_daily',
-        entity_id: `${employeeId}:${affectedDate}`, action: 'retroactive_impact',
-        metadata: { employee_id: employeeId, affected_date: affectedDate, trigger_source: triggerSource, impact_types: impactTypes },
+        tenant_id: tenantId, performed_by: null, table_name: 'attendance_daily',
+        record_id: employeeId, action: 'retroactive_impact',
+        new_data: { employee_id: employeeId, affected_date: affectedDate, trigger_source: triggerSource, impact_types: impactTypes },
       })
     } catch {
       // Non-fatal
@@ -867,9 +867,9 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     const { tenantId, employeeId, riskLevel, riskScore, period } = event.payload
     try {
       await supabase.from('audit_logs').insert({
-        tenant_id: tenantId, actor_id: null, entity_type: 'attendance_risk_profile',
-        entity_id: `${employeeId}:${period}`, action: 'risk_elevated',
-        metadata: { employee_id: employeeId, period, risk_score: riskScore, risk_level: riskLevel },
+        tenant_id: tenantId, performed_by: null, table_name: 'attendance_risk_profile',
+        record_id: employeeId, action: 'risk_elevated',
+        new_data: { employee_id: employeeId, period, risk_score: riskScore, risk_level: riskLevel },
       })
     } catch {
       // Non-fatal

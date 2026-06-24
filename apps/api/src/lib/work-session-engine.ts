@@ -992,17 +992,27 @@ async function fetchPunches(
   fromIso: string,
   toIso: string,
 ): Promise<PunchRecord[]> {
+  // Source table is attendance_punch_logs; columns: punched_at, direction ('IN'/'OUT').
   const { data, error } = await supabase
-    .from('attendance_punches')
-    .select('id, employee_id, punch_time, punch_type, source, device_id, is_manual, location')
+    .from('attendance_punch_logs')
+    .select('id, employee_id, punched_at, direction, source, device_id')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
-    .gte('punch_time', fromIso)
-    .lte('punch_time', toIso)
-    .order('punch_time', { ascending: true })
+    .gte('punched_at', fromIso)
+    .lte('punched_at', toIso)
+    .order('punched_at', { ascending: true })
 
   if (error) throw new Error(`fetchPunches: ${error.message}`)
-  return (data ?? []) as PunchRecord[]
+  return (data ?? []).map((p: any): PunchRecord => ({
+    id:          p.id,
+    employee_id: p.employee_id,
+    punch_time:  p.punched_at,
+    punch_type:  p.direction === 'IN' ? 'in' : 'out',
+    source:      p.source,
+    device_id:   p.device_id ?? null,
+    is_manual:   false,
+    location:    null,
+  }))
 }
 
 /**
