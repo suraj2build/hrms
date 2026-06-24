@@ -281,6 +281,56 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     return reply.code(204).send()
   })
 
+  // GET /overtime/summary — per-employee OT totals for a month (YYYY-MM)
+  fastify.get('/overtime/summary', auth, async (req: any, reply) => {
+    const parsed = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) }).safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'month must be YYYY-MM' })
+    }
+    const { month } = parsed.data
+
+    const { data: daily, error } = await fastify.supabase
+      .from('attendance_daily')
+      .select('employee_id, overtime_minutes, ot_approved_minutes')
+      .eq('tenant_id', req.tenantId)
+      .gte('date', `${month}-01`)
+      .lte('date', `${month}-31`)
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const agg = new Map<string, { ot: number; approved: number }>()
+    for (const r of (daily ?? []) as any[]) {
+      const cur = agg.get(r.employee_id) ?? { ot: 0, approved: 0 }
+      cur.ot       += r.overtime_minutes ?? 0
+      cur.approved += r.ot_approved_minutes ?? 0
+      agg.set(r.employee_id, cur)
+    }
+    const empIds = [...agg.entries()].filter(([, v]) => v.ot > 0 || v.approved > 0).map(([id]) => id)
+    if (empIds.length === 0) return reply.send({ data: [] })
+
+    const { data: emps } = await fastify.supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('tenant_id', req.tenantId)
+      .in('id', empIds)
+    const empMap = new Map((emps ?? []).map((e: any) => [e.id, e]))
+
+    const rows = empIds.map((id) => {
+      const a = agg.get(id)!
+      const e: any = empMap.get(id)
+      const status = a.approved >= a.ot ? 'approved' : a.approved > 0 ? 'partial' : 'pending'
+      return {
+        employee_id:      id,
+        employee_name:    e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() : '—',
+        employee_code:    e?.employee_code ?? '',
+        ot_minutes:       a.ot,
+        approved_minutes: a.approved,
+        status,
+      }
+    }).sort((x, y) => y.ot_minutes - x.ot_minutes)
+
+    return reply.send({ data: rows })
+  })
+
   // ══════════════════════════════════════════════════════════════════════════════
   // OT REQUESTS
   // ══════════════════════════════════════════════════════════════════════════════

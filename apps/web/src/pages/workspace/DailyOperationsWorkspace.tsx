@@ -531,7 +531,7 @@ function OTReviewTab({
 
   const bulkMutation = useMutation({
     mutationFn: (ids: string[]) =>
-      api.post<void>('/overtime/bulk-approve', { ids }),
+      Promise.all(ids.map((id) => api.post<void>(`/overtime/requests/${id}/approve`, {}))).then(() => undefined),
     onSuccess: () => {
       toast.success('OT bulk approved')
       setSelectedIds(new Set())
@@ -541,7 +541,7 @@ function OTReviewTab({
 
   const approveSingle = useCallback(async (itemId: string) => {
     try {
-      await api.post<void>(`/overtime/${itemId}/approve`, {})
+      await api.post<void>(`/overtime/requests/${itemId}/approve`, {})
       toast.success('OT approved')
     } catch {
       toast.error('Approval failed')
