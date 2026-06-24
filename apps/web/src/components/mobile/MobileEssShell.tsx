@@ -30,7 +30,7 @@ function Loader() {
  * glossy header, an optional Employee/Team persona toggle (managers only), a
  * route-driven content area and a bottom tab bar.
  */
-export function MobileEssShell() {
+export function MobileEssShell({ previewHome = false }: { previewHome?: boolean } = {}) {
   const { profile } = useAuthStore()
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -93,7 +93,7 @@ export function MobileEssShell() {
           ? <MobileTeam />
           : (
             <Suspense fallback={<Loader />}>
-              <MobileRouter base={base} />
+              {previewHome ? <MobileHome base={base} /> : <MobileRouter base={base} />}
             </Suspense>
           )}
       </main>
