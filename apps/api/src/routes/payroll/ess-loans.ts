@@ -114,7 +114,6 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .from('loan_schedules')
       .select('*')
       .eq('loan_id', id)
-      .eq('employee_id', empId)
       .eq('tenant_id', req.tenantId)
       .order('installment_number', { ascending: true })
 
@@ -132,7 +131,6 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .from('advance_recovery_schedules')
       .select('*')
       .eq('advance_id', id)
-      .eq('employee_id', empId)
       .eq('tenant_id', req.tenantId)
       .order('recovery_month', { ascending: true })
 

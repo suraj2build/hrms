@@ -271,7 +271,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     // Resolve created_by via employee record
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
     const createdBy = emp?.id ?? null
 
     const { data: tmpl, error } = await supabase
@@ -310,7 +310,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   fastify.post('/letters/templates/seed-standard', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
     const createdBy = emp?.id ?? null
 
     const rows = STANDARD_LETTER_TEMPLATES.map(t => ({
@@ -338,7 +338,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const body                 = req.body as any
 
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const {
       name, code, category, letter_type,
@@ -445,7 +445,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     )
 
     const { data: creator } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const approval_status = tmpl.requires_approval ? 'draft' : 'approved'
     const current_level   = tmpl.requires_approval ? 1 : 0
@@ -586,7 +586,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     if (!letter) return reply.status(404).send({ error: 'Letter not found' })
 
     const { data: actor } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const maxLevel     = letter.template?.approval_levels ?? 1
     const currentLevel = letter.current_level ?? 1
@@ -628,7 +628,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { comments = '' }    = req.body as any ?? {}
 
     const { data: actor } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const { data: letter } = await supabase
       .from('generated_letters')
@@ -664,7 +664,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { letterId }         = req.params as any
 
     const { data: actor } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const { error } = await supabase
       .from('generated_letters')
@@ -741,7 +741,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { tenantId, userId } = req as any
 
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
     if (!emp) return reply.status(403).send({ error: 'Employee not found' })
 
     const { data, error } = await supabase
@@ -765,7 +765,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { letterId }         = req.params as any
 
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
     if (!emp) return reply.status(403).send({ error: 'Employee not found' })
 
     const { data, error } = await supabase
@@ -789,7 +789,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     if (!template_id) return reply.status(400).send({ error: 'template_id is required' })
 
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
     if (!emp) return reply.status(403).send({ error: 'Employee not found' })
 
     // Verify template is ess_requestable
@@ -830,7 +830,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { tenantId, userId } = req as any
 
     const { data: emp } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
     if (!emp) return reply.status(403).send({ error: 'Employee not found' })
 
     const { data, error } = await supabase
@@ -898,7 +898,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     )
 
     const { data: processor } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const { data: letter, error: letErr } = await supabase
       .from('generated_letters')
@@ -950,7 +950,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { reason = '' }      = req.body as any ?? {}
 
     const { data: processor } = await supabase
-      .from('employees').select('id').eq('user_id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
     const { error } = await supabase
       .from('letter_requests')
