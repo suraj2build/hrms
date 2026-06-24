@@ -99,9 +99,28 @@ function loadSchema() {
   return schema
 }
 
+// Foreign-key graph as unordered table pairs — PostgREST resolves an embed
+// `base.select('rel(...)')` only if an FK exists between base and rel either way.
+function loadFKPairs() {
+  const out = psql(
+    "SELECT tc.table_name||'|'||ccu.table_name FROM information_schema.table_constraints tc " +
+    "JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name=ccu.constraint_name " +
+    "WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema='public'")
+  const fk = new Set()
+  for (const line of out.trim().split('\n')) {
+    const [a, b] = line.split('|'); if (!a || !b) continue
+    fk.add(a + '|' + b); fk.add(b + '|' + a)
+  }
+  // FK constraint names — to validate `table!constraint_name(...)` embed hints
+  fk.names = new Set(
+    psql("SELECT conname FROM pg_constraint WHERE contype='f'").trim().split('\n').map(s => s.trim()).filter(Boolean))
+  return fk
+}
+
 // ── 3. audit code against schema ─────────────────────────────────────────────
 const FILTERS = ['eq','neq','gt','gte','lt','lte','like','ilike','is','in','order','match','contains','filter']
 const issues = []
+let FK = null   // FK pair set, populated in main
 
 function listFiles(dir) {
   const out = []
@@ -170,12 +189,42 @@ function checkCol(file, off, table, col, kind, src, schema) {
 
 function checkSelect(file, off, table, arg, src, schema) {
   const m = arg.match(/^\s*[`'"]([\s\S]*?)[`'"]/); if (!m) return
-  for (let tok of splitTop(m[1])) {
+  walkSelect(file, off, table, m[1], src, schema)
+}
+
+// Validate a select body against `table`: flat columns must exist; embedded
+// relations `rel(inner)` must have an FK to `table` and their inner cols must
+// exist on the embedded table (recursively).
+function walkSelect(file, off, table, body, src, schema) {
+  for (let tok of splitTop(body)) {
     tok = tok.trim(); if (!tok) continue
-    if (tok.includes('(')) continue            // embedded relation — skip (different table)
+    const em = tok.match(/^(?:[a-z_]+\s*:\s*)?([a-z_]+)\s*(?:!\s*([a-z_!]+))?\s*\(([\s\S]*)\)$/i)
+    if (em) {                                   // embedded relation
+      const embed = em[1].toLowerCase(), hint = em[2] ? em[2].toLowerCase() : null, inner = em[3]
+      const here = { file: file.replace(ROOT + '/', ''), line: lineAt(src, off), table }
+      const baseCols = schema.get(table)
+      // PostgREST lets you name the FK *column* as the embed (e.g. assigned_to(...))
+      // — valid; we just can't resolve the target table, so skip inner checks.
+      if (!schema.has(embed)) {
+        if (!(baseCols && baseCols.has(embed)))
+          issues.push({ ...here, col: `→ ${embed} (no table/relationship)`, kind: 'embed-rel' })
+        continue
+      }
+      // A hint is either a column on the base (disambiguation) or an FK constraint name.
+      if (hint && hint !== 'inner' && hint !== 'left' &&
+          !(baseCols && baseCols.has(hint)) && FK?.names && !FK.names.has(hint)) {
+        issues.push({ ...here, col: `→ ${embed}!${hint} (no such column/FK)`, kind: 'embed-rel' }); continue
+      }
+      if (FK && !FK.has(table + '|' + embed)) {
+        issues.push({ ...here, col: `→ ${embed} (no FK relationship)`, kind: 'embed-rel' }); continue
+      }
+      walkSelect(file, off, embed, inner, src, schema)   // recurse into the embed
+      continue
+    }
+    if (tok.includes('(')) continue
     if (tok === '*' || tok.startsWith('count')) continue
-    let col = tok.includes(':') ? tok.split(':').pop().trim() : tok   // alias:real → real
-    col = col.replace(/->.*/, '').replace(/::.*/, '').trim()          // json / cast
+    let col = tok.includes(':') ? tok.split(':').pop().trim() : tok
+    col = col.replace(/->.*/, '').replace(/::.*/, '').trim()
     if (/^[a-z_][a-z0-9_]*$/i.test(col)) checkCol(file, off, table, col, 'select', src, schema)
   }
 }
@@ -263,6 +312,7 @@ function auditFile(file, schema) {
 if (!SKIP_APPLY) { console.log('Applying migrations…'); applyMigrations() }
 console.log('Introspecting schema…')
 const schema = loadSchema()
+FK = loadFKPairs()
 console.log(`  ${schema.size} tables`)
 console.log('Auditing apps/api/src + seed script against schema…')
 const targets = listFiles(API_SRC)
