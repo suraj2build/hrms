@@ -264,8 +264,11 @@ if (!SKIP_APPLY) { console.log('Applying migrations…'); applyMigrations() }
 console.log('Introspecting schema…')
 const schema = loadSchema()
 console.log(`  ${schema.size} tables`)
-console.log('Auditing apps/api/src against schema…')
-for (const f of listFiles(API_SRC)) auditFile(f, schema)
+console.log('Auditing apps/api/src + seed script against schema…')
+const targets = listFiles(API_SRC)
+const seed = path.join(ROOT, 'scripts/seed-demo.ts')
+if (fs.existsSync(seed)) targets.push(seed)
+for (const f of targets) auditFile(f, schema)
 
 // dedupe
 const seen = new Set(), out = []
