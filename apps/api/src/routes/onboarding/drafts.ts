@@ -577,7 +577,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
     // Update session status
     await fastify.supabase
       .from('onboarding_sessions')
-      .update({ status: 'employee_created', linked_employee_id: employeeId })
+      .update({ status: 'employee_created' })
       .eq('id', draft.session_id)
 
     // Audit log — record exception details for traceability

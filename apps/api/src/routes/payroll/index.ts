@@ -444,7 +444,7 @@ async function fetchAdvanceLoanDeductions(
       .from('advance_recovery_schedules')
       .select('id, scheduled_amount, advance_salary_requests!inner(is_recovery_paused, status)')
       .eq('tenant_id', tenantId)
-      .eq('employee_id', employeeId)
+      .eq('advance_salary_requests.employee_id', employeeId)
       .eq('recovery_month', month)
       .eq('status', 'pending')
       .eq('advance_salary_requests.is_recovery_paused', false)
@@ -468,7 +468,7 @@ async function fetchAdvanceLoanDeductions(
       .from('loan_schedules')
       .select('id, emi_amount, installment_number, employee_loans!inner(loan_type, is_emi_paused, status)')
       .eq('tenant_id', tenantId)
-      .eq('employee_id', employeeId)
+      .eq('employee_loans.employee_id', employeeId)
       .eq('due_month', month)
       .eq('status', 'pending')
       .eq('employee_loans.is_emi_paused', false)
@@ -1276,7 +1276,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('status', 'open')
+        .eq('resolved', false)
         .gte('date', from)
         .lte('date', to),
     ])
@@ -1822,13 +1822,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             .in('id', [...recoveredAdvanceIds])
         }
         {
+          // advance_recovery_schedules has no employee_id → map employees to advance ids
+          const { data: advReqs } = await fastify.supabase
+            .from('advance_salary_requests').select('id')
+            .eq('tenant_id', req.tenantId).in('employee_id', finalizedEmpIds)
+          const advIdsForRoll = (advReqs ?? []).map((a: any) => a.id)
           let q = fastify.supabase
             .from('advance_recovery_schedules')
             .update({ recovery_month: nextMonth })
             .eq('tenant_id', req.tenantId)
             .eq('recovery_month', run.month)
             .eq('status', 'pending')
-            .in('employee_id', finalizedEmpIds)
+            .in('advance_id', advIdsForRoll)
           if (recoveredAdvanceIds.size > 0) q = q.not('id', 'in', `(${[...recoveredAdvanceIds].join(',')})`)
           await q
         }
@@ -1844,13 +1849,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             .in('id', [...recoveredLoanIds])
         }
         {
+          // loan_schedules has no employee_id → map employees to loan ids
+          const { data: loanRows2 } = await fastify.supabase
+            .from('employee_loans').select('id')
+            .eq('tenant_id', req.tenantId).in('employee_id', finalizedEmpIds)
+          const loanIdsForRoll = (loanRows2 ?? []).map((l: any) => l.id)
           let q = fastify.supabase
             .from('loan_schedules')
             .update({ due_month: nextMonth })
             .eq('tenant_id', req.tenantId)
             .eq('due_month', run.month)
             .eq('status', 'pending')
-            .in('employee_id', finalizedEmpIds)
+            .in('loan_id', loanIdsForRoll)
           if (recoveredLoanIds.size > 0) q = q.not('id', 'in', `(${[...recoveredLoanIds].join(',')})`)
           await q
         }

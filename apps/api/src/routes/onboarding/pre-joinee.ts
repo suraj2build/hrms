@@ -930,7 +930,6 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           .from('employee_identity')
           .select('employee_id')
           .eq('tenant_id', tenantId)
-          .eq('identity_type', 'pan')
           .eq('identity_number', submission.pan_number)
           .maybeSingle()
         if (idRow?.employee_id) {
@@ -949,7 +948,6 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           .from('employee_identity')
           .select('employee_id')
           .eq('tenant_id', tenantId)
-          .eq('identity_type', 'aadhaar')
           .eq('identity_number', submission.aadhaar_number)
           .maybeSingle()
         if (idRow?.employee_id) {
@@ -1060,7 +1058,6 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         effective_from:   invitation.joining_date,
         is_current:       true,
         created_at:       new Date().toISOString(),
-        updated_at:       new Date().toISOString(),
       })
 
     if (jobErr) {
@@ -1164,9 +1161,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           tenant_id:           tenantId,
           employee_id:         employeeId,
           bank_name:           submission.bank_name ?? null,
-          bank_account_number: submission.bank_account_number ?? null,
-          bank_ifsc:           submission.bank_ifsc ?? null,
-          bank_account_type:   submission.bank_account_type ?? null,
+          account_number:      submission.bank_account_number ?? null,
+          ifsc_code:           submission.bank_ifsc ?? null,
+          account_type:        submission.bank_account_type ?? null,
           uan_number:          submission.uan_number ?? null,
           created_at:          new Date().toISOString(),
           updated_at:          new Date().toISOString(),

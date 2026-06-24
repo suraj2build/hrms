@@ -95,7 +95,7 @@ async function createPreJoineeFromApp(
       joining_date:          opts.joining_date,
       source_application_id: applicationId,
       source_candidate_id:   cand?.id ?? null,
-      invited_by:            opts.invited_by ?? null,
+      created_by:            opts.invited_by ?? null,
       token,
       expires_at:            new Date(Date.now() + 30 * 86400000).toISOString(),
     })
@@ -1317,7 +1317,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .eq('candidate_id', parsed.data.candidate_id)
       const appIds = (apps ?? []).map((a: any) => a.id)
       if (appIds.length === 0) return reply.send({ data: [], total: 0 })
-      q = q.in('application_id', appIds)
+      q = q.in('id', appIds)
     }
 
     if (parsed.data.requisition_id) {
@@ -1328,7 +1328,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .eq('requisition_id', parsed.data.requisition_id)
       const appIds = (apps ?? []).map((a: any) => a.id)
       if (appIds.length === 0) return reply.send({ data: [], total: 0 })
-      q = q.in('application_id', appIds)
+      q = q.in('id', appIds)
     }
 
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)

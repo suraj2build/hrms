@@ -152,13 +152,13 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
           .from('attendance_period_locks')
           .select('id, status:state')
           .eq('tenant_id', req.tenantId)
-          .eq('month', month)
+          .eq('period_month', month)
           .limit(1),
         fastify.supabase
           .from('attendance_anomalies')
           .select('id', { count: 'exact', head: true })
           .eq('tenant_id', req.tenantId)
-          .eq('status', 'unresolved'),
+          .eq('resolved', false),
         fastify.supabase
           .from('compensation_revisions')
           .select('id', { count: 'exact', head: true })

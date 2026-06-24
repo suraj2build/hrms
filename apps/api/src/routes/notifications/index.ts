@@ -217,7 +217,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
     try {
       const { data, error } = await fastify.supabase
         .from('inbox_items')
-        .update({ escalated: true, escalated_at: new Date().toISOString() })
+        .update({ status: 'escalated' })
         .in('id', body.item_ids)
         .eq('tenant_id', req.tenantId)
         .select('id')

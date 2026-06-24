@@ -192,7 +192,6 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
         tenant_id:  req.tenantId,
         employee_id: employeeId,
         status:     'draft',
-        created_by:  req.userId,
         created_at:  now,
         updated_at:  now,
       })
@@ -391,8 +390,6 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
         .update({
           status:             parsed.data.status,
           verification_notes: parsed.data.verification_notes ?? null,
-          verified_by:        req.userId,
-          verified_at:        now,
           updated_at:         now,
         })
         .eq('id', id)

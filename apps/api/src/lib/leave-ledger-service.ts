@@ -333,15 +333,13 @@ export async function creditAccrualLedger(
       tenant_id:                 opts.tenantId,
       employee_id:               opts.employeeId,
       leave_type_id:             opts.leaveTypeId,
-      policy_rule_id:            opts.policyRuleId,
       days:                      opts.days,
-      effective_date:            opts.effectiveDate,
+      accrued_on:                opts.effectiveDate,
       cycle_key:                 opts.cycleKey,
       notes:                     opts.notes ?? null,
       consumption_eligible_from: opts.consumptionEligibleFrom ?? null,
       release_trigger:           opts.releaseTrigger ?? 'auto',
       is_expired:                false,
-      created_by:                opts.createdBy ?? null,
     })
     .select('id')
     .single()
@@ -379,14 +377,12 @@ export async function creditBalanceLedger(
     .insert({
       tenant_id:      opts.tenantId,
       employee_id:    opts.employeeId,
-      leave_type_id:  opts.leaveTypeId,
-      days:           opts.days,
-      entry_type:     opts.entryType,
-      effective_date: opts.effectiveDate,
-      reference_id:   opts.referenceId   ?? null,
-      reference_type: opts.referenceType ?? null,
-      notes:          opts.notes         ?? null,
-      created_by:     opts.createdBy     ?? null,
+      leave_type_id:     opts.leaveTypeId,
+      delta:             opts.days,
+      txn_type:          opts.entryType,
+      leave_request_ref: opts.referenceId ?? null,
+      notes:             opts.notes       ?? null,
+      created_by:        opts.createdBy   ?? null,
     })
     .select('id')
     .single()

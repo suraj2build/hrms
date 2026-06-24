@@ -84,7 +84,6 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .upsert({
         ...parsed.data,
         tenant_id:  req.tenantId,
-        updated_by: req.userId,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'tenant_id,financial_year' })
       .select()

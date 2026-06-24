@@ -620,14 +620,14 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       await supabase
         .from('workforce_trust_scores')
         .upsert({
-          tenant_id:   tenantId,
+          org_id:      tenantId,
           entity_id:   sessionId,
           score_type:  'onboarding',
           score:       result.score,
           severity:    result.severity,
           factors:     result.factors,
           computed_at: result.computed_at,
-        }, { onConflict: 'tenant_id,entity_id,score_type' })
+        }, { onConflict: 'org_id,entity_id,score_type' })
     } catch (err) {
       logWarn('trust_score_failed', sessionId, err)
     }

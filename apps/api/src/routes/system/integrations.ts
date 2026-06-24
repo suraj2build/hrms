@@ -156,14 +156,15 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     // Audit log entry
     await fastify.supabase
-      .from('integration_audit_log')
+      .from('audit_logs')
       .insert({
-        integration_id: data.id,
-        tenant_id:      req.tenantId,
-        action:         'created',
-        performed_by:   req.userId,
-        metadata:       { name, integration_type },
-        created_at:     new Date().toISOString(),
+        tenant_id:    req.tenantId,
+        table_name:   'integrations',
+        record_id:    data.id,
+        action:       'created',
+        performed_by: req.userId,
+        new_data:     { name, integration_type },
+        created_at:   new Date().toISOString(),
       })
 
     return reply.code(201).send({ data })
@@ -208,14 +209,15 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     // Audit log entry
     await fastify.supabase
-      .from('integration_audit_log')
+      .from('audit_logs')
       .insert({
-        integration_id: id,
-        tenant_id:      req.tenantId,
-        action:         'updated',
-        performed_by:   req.userId,
-        metadata:       parsed.data,
-        created_at:     new Date().toISOString(),
+        tenant_id:    req.tenantId,
+        table_name:   'integrations',
+        record_id:    id,
+        action:       'updated',
+        performed_by: req.userId,
+        new_data:     parsed.data,
+        created_at:   new Date().toISOString(),
       })
 
     return reply.send({ data })
@@ -243,14 +245,15 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     // Audit log entry
     await fastify.supabase
-      .from('integration_audit_log')
+      .from('audit_logs')
       .insert({
-        integration_id: id,
-        tenant_id:      req.tenantId,
-        action:         'deactivated',
-        performed_by:   req.userId,
-        metadata:       {},
-        created_at:     new Date().toISOString(),
+        tenant_id:    req.tenantId,
+        table_name:   'integrations',
+        record_id:    id,
+        action:       'deactivated',
+        performed_by: req.userId,
+        new_data:     {},
+        created_at:   new Date().toISOString(),
       })
 
     return reply.send({ message: 'Integration set to inactive', id })
@@ -409,14 +412,15 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     // Audit log entry
     await fastify.supabase
-      .from('integration_audit_log')
+      .from('audit_logs')
       .insert({
-        integration_id: id,
-        tenant_id:      req.tenantId,
-        action:         'health_check',
-        performed_by:   req.userId,
-        metadata:       { health_status, latency_ms },
-        created_at:     new Date().toISOString(),
+        tenant_id:    req.tenantId,
+        table_name:   'integrations',
+        record_id:    id,
+        action:       'health_check',
+        performed_by: req.userId,
+        new_data:     { health_status, latency_ms },
+        created_at:   new Date().toISOString(),
       })
 
     return reply.send({ health_status, latency_ms })

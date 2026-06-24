@@ -152,7 +152,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
           .select('roster_id')
           .eq('tenant_id', req.tenantId)
           .in('roster_id', rosterIds)
-          .eq('employment_status', 'active'),
+          .eq('status', 'active'),
       ])
 
       const siteCountMap:     Record<string, number> = {}
@@ -308,7 +308,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
         .select('id, first_name, last_name, employee_code')
         .eq('tenant_id', req.tenantId)
         .eq('roster_id', rosterId)
-        .eq('employment_status', 'active'),
+        .eq('status', 'active'),
     ])
 
     if (siteErr || empErr) {
@@ -326,7 +326,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
         .from('employees')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('employment_status', 'active')
+        .eq('status', 'active')
         .in('site_id', siteIds)
         .is('roster_id', null)  // no direct override — inherits site default
 

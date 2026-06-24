@@ -91,11 +91,11 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .eq('status', 'active'),
 
       fastify.supabase
-        .from('employees')
+        .from('employee_separation')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .gte('separation_date', range.from)
-        .lte('separation_date', range.to),
+        .gte('last_working_date', range.from)
+        .lte('last_working_date', range.to),
     ])
 
     if (dailyRes.error) {
@@ -674,11 +674,11 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .eq('status', 'active'),
 
       fastify.supabase
-        .from('employees')
+        .from('employee_separation')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .gte('separation_date', from30)
-        .lte('separation_date', to30),
+        .gte('last_working_date', from30)
+        .lte('last_working_date', to30),
 
       // Staffing sustainability
       fastify.supabase

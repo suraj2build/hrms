@@ -88,7 +88,7 @@ export async function snapshotPolicy(
     .select('*')
     .eq('tenant_id', master.tenant_id)
     .eq('policy_id', master.id)
-    .order('sequence', { ascending: true })
+    .order('created_at', { ascending: true })
   const rules = rulesResult.data
 
   const { data: version, error } = await supabase

@@ -213,7 +213,7 @@ export class WebhookService {
         tenant_id:    tenantId,
         event_type:   eventType,
         status:       'pending',
-        request_body: body,
+        payload:      body,
         created_at:   timestamp,
       })
 

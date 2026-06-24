@@ -141,7 +141,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .update({
         status: 'approved',
         approved_by: req.userId,
-        approved_at: now,
+        decided_at: now,
         updated_at: now,
       })
       .eq('id', id)

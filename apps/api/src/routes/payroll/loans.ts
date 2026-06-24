@@ -334,7 +334,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId),
       fastify.supabase
         .from('loan_schedules')
-        .update({ status: 'adjusted', updated_at: now })
+        .update({ status: 'adjusted' })
         .eq('loan_id', id)
         .eq('tenant_id', req.tenantId)
         .eq('status', 'pending'),
@@ -406,8 +406,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .insert({
         ...parsed.data,
         tenant_id: req.tenantId,
-        paid_at: now,
-        recorded_by: req.userId,
+        created_by: req.userId,
       })
       .select()
       .single()
@@ -422,7 +421,6 @@ export default async function loansRoutes(fastify: FastifyInstance) {
           status: 'paid',
           paid_amount: parsed.data.amount,
           paid_at: now,
-          updated_at: now,
         })
         .eq('id', parsed.data.schedule_id)
         .eq('tenant_id', req.tenantId)

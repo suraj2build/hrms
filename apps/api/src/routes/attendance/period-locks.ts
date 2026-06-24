@@ -124,7 +124,6 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
             .update({
               status: 'absent',
               is_payable: false,
-              remarks: 'Auto-marked absent: regularisation window closed at period lock',
             })
             .eq('tenant_id', req.tenantId)
             .eq('employee_id', employee_id)

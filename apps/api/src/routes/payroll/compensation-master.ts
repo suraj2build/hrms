@@ -331,7 +331,6 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       .update({
         is_active: false,
         effective_to: compensationData.effective_from,
-        updated_at: new Date().toISOString(),
       })
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)

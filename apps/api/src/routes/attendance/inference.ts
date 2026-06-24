@@ -183,7 +183,6 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       .update({
         approved_by: req.userId,
         approved_at: new Date().toISOString(),
-        updated_at:  new Date().toISOString(),
       })
       .eq('id', logId)
       .eq('tenant_id', req.tenantId)

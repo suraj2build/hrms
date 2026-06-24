@@ -147,7 +147,6 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .update({
         unfrozen_by: req.userId,
         unfrozen_at: now,
-        updated_at:  now,
       })
       .eq('id', (latestFreeze as any).id)
       .eq('tenant_id', req.tenantId)
@@ -250,7 +249,6 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         checker_id: req.userId,
         reviewed_at: now,
         checker_notes: parsed.data.checker_notes ?? null,
-        updated_at: now,
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
@@ -288,7 +286,6 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         checker_id: req.userId,
         reviewed_at: now,
         checker_notes: parsed.data.checker_notes,
-        updated_at: now,
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
@@ -339,7 +336,6 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         status: 'approved',
         reviewed_by: req.userId,
         reviewed_at: now,
-        updated_at: now,
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
@@ -376,7 +372,6 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         notes: parsed.data.notes ?? null,
         reviewed_by: req.userId,
         reviewed_at: now,
-        updated_at: now,
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)

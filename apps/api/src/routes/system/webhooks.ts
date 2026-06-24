@@ -339,7 +339,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
         status:         success ? 'delivered' : 'failed',
         http_status:    httpStatus || null,
         duration_ms,
-        error_message:  errorMessage ?? null,
+        last_error:     errorMessage ?? null,
         attempt_number: 1,
         delivered_at:   success ? new Date().toISOString() : null,
       })

@@ -409,7 +409,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
           tenant_id:     req.tenantId,
           separation_id: separation.id,
           status:        'draft',
-          created_by:    req.userId,
+          computed_by:   req.userId,
         })
         .select()
         .single()
@@ -486,7 +486,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     } else {
       const { data, error } = await fastify.supabase
         .from('separation_ff_summary')
-        .insert({ ...payload, employee_id: req.params.id, tenant_id: req.tenantId, separation_id: separation.id, status: 'draft', created_by: req.userId })
+        .insert({ ...payload, employee_id: req.params.id, tenant_id: req.tenantId, separation_id: separation.id, status: 'draft', computed_by: req.userId })
         .select().single()
       if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
       result = data

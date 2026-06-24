@@ -294,7 +294,6 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
         metadata: parsed.data.metadata ?? null,
         correlation_id: parsed.data.correlation_id ?? null,
         status: 'pending',
-        sent_by: req.userId,
         created_at: new Date().toISOString(),
       })
       .select('id')

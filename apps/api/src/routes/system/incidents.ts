@@ -586,12 +586,12 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
     const { data: escalation, error: escalationError } = await fastify.supabase
       .from('incident_escalations')
       .insert({
-        incident_id:  id,
-        tenant_id:    req.tenantId,
-        escalated_by: req.userId,
-        escalated_to: escalate_to,
-        reason,
-        created_at:   new Date().toISOString(),
+        incident_id:       id,
+        tenant_id:         req.tenantId,
+        escalated_from:    req.userId,
+        escalated_to:      escalate_to,
+        escalation_reason: reason,
+        escalated_at:      new Date().toISOString(),
       })
       .select()
       .single()

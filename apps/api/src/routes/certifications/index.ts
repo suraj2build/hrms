@@ -60,7 +60,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
 
     if (!isHr) {
       const { data: emp } = await fastify.supabase
-        .from('employees').select('id').eq('profile_id', req.userId).eq('tenant_id', req.tenantId).maybeSingle()
+        .from('profiles').select('id:employee_id').eq('id', req.userId).eq('tenant_id', req.tenantId).maybeSingle()
       if (!emp) return reply.code(403).send({ error: 'FORBIDDEN' })
       query = query.eq('employee_id', (emp as any).id)
     } else if (employee_id) {

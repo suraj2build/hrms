@@ -96,11 +96,8 @@ export async function dispatchTrustLifecycleEvent(opts: TrustLifecycleEventOpts)
     session_id:  opts.sessionId ?? null,
     event_type:  opts.eventType,
     title:       opts.title,
-    description: opts.description ?? null,
-    category,
+    detail:      opts.description ?? null,
     severity,
-    source:      'trust',
-    payload:     opts.payload ?? {},
     occurred_at: new Date().toISOString(),
   })
 

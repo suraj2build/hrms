@@ -334,10 +334,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
       // Trust high-risk employees
       fastify.supabase
-        .from('employee_trust_profiles')
+        .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId)
-        .eq('risk_level', 'high'),
+        .eq('org_id', req.tenantId)
+        .eq('severity', 'high'),
 
       // Trust verified employees
       fastify.supabase
@@ -964,10 +964,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
       // High-risk trust profiles
       fastify.supabase
-        .from('employee_trust_profiles')
+        .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId)
-        .eq('risk_level', 'high'),
+        .eq('org_id', req.tenantId)
+        .eq('severity', 'high'),
 
       // Medium-risk trust profiles
       fastify.supabase
@@ -993,8 +993,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('duplicate_detection_events')
         .select('id', { count: 'exact', head: true })
-        .eq('org_id', req.tenantId)
-        .eq('status', 'open'),
+        .eq('org_id', req.tenantId),
 
       // Governance events 30d
       fastify.supabase

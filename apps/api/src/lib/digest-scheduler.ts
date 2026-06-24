@@ -81,8 +81,8 @@ function writeAuditLog(
     tenant_id:  tenantId,
     action,
     table_name: 'digest_send_log',
-    record_id:  null,
-    new_values: detail,
+    record_id:  tenantId,
+    new_data:   detail,
   }).then(null, () => {})
 }
 

@@ -112,7 +112,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
 
     const { count, error: countErr } = await fastify.supabase
-      .from('employee_bank_statutory')
+      .from('employees')
       .select('id', { count: 'exact', head: true })
       .eq('statutory_group_id', id)
       .eq('tenant_id', req.tenantId)
