@@ -19,6 +19,7 @@ import { ManagerShell }  from '@/components/layout/ManagerShell'  // /manager/* 
 // ── Auth pages (always needed, keep eager) ────────────────────────────────────
 import { Login }        from '@/pages/auth/Login'
 import { Signup }       from '@/pages/auth/Signup'
+import { MobilePreview } from '@/pages/MobilePreview'
 import { AuthCallback } from '@/pages/auth/AuthCallback'
 
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
@@ -419,6 +420,13 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setProfile, setTenant, setLoading, setAccessToken, setBootstrapping } = useAuthStore()
 
   useEffect(() => {
+    // ── MOBILE PREVIEW — public, auth-free mobile ESS demo. Leave the mock
+    // profile that MobilePreview seeded untouched (don't wire supabase auth).
+    if (window.location.pathname.startsWith('/mobile-preview')) {
+      setBootstrapping(false)
+      return
+    }
+
     // ── DEMO MODE — seed a fixture identity and skip all supabase/auth wiring ──
     // The whole app then runs against the demo resolver (see lib/api/client.ts).
     if (DEMO_MODE) {
@@ -636,6 +644,7 @@ export default function App() {
               {/* Demo entry — activates demo mode (see lib/demo) then lands in the app. */}
               <Route path="/demo"          element={<Navigate to="/admin/control-center" replace />} />
               <Route path="/login"         element={<Login />} />
+              <Route path="/mobile-preview" element={<MobilePreview />} />
               <Route path="/signup"        element={<Signup />} />
               <Route path="/terms"         element={<TermsPage />} />
               <Route path="/privacy"       element={<PrivacyPage />} />
