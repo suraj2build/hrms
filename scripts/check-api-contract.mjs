@@ -43,8 +43,9 @@ function parseFile(file) {
     const pm = m[2] && m[2].match(/prefix:\s*'([^']*)'/); registers.push({ spec: m[1], prefix: pm ? pm[1] : '' })
   }
   const localRoutes = []  // {method, path}
-  // matches `fastify.get('/x')` and `(fastify as any).get('/x')`
-  for (const m of src.matchAll(/fastify(?:\s+as\s+any\))?\.(get|post|put|patch|delete)\(\s*'([^']*)'/g)) localRoutes.push({ method: m[1].toUpperCase(), path: m[2] })
+  // matches `fastify.get('/x')`, `(fastify as any).get('/x')`, and generic forms
+  // like `fastify.get<{ Params: {...} }>('/x')` (path may be on the next line)
+  for (const m of src.matchAll(/fastify(?:\s+as\s+any\))?\.(get|post|put|patch|delete)\s*(?:<[^>]*>)?\s*\(\s*'([^']*)'/g)) localRoutes.push({ method: m[1].toUpperCase(), path: m[2] })
   return { file, imports, registers, localRoutes }
 }
 

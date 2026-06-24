@@ -150,6 +150,19 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   })
 
   // ── POST /templates/:id/items ───────────────────────────────────────────────
+  // ── GET /templates/:id/items — list a template's checklist items ──────────────
+  fastify.get('/templates/:id/items', auth, async (req: any, reply) => {
+    const templateId: string = (req.params as any).id
+    const { data, error } = await fastify.supabase
+      .from('onboarding_checklist_items')
+      .select('id, title, description, is_mandatory, sort_order, category, assigned_to_role, due_day_offset, created_at')
+      .eq('tenant_id', req.tenantId)
+      .eq('template_id', templateId)
+      .order('sort_order', { ascending: true })
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
   fastify.post('/templates/:id/items', auth, async (req: any, reply) => {
     if (!HR_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })

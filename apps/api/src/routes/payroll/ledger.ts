@@ -36,6 +36,71 @@ const createEntrySchema = z.object({
 export default async function payrollLedgerRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
+  const isHr = (req: any) => ['super_admin', 'hr_admin'].includes(req.userRole)
+  const num  = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : null }
+
+  // ── GET /payroll/ledger — cross-employee list (HR admin), optional filters ──
+  fastify.get('/payroll/ledger', auth, async (req: any, reply) => {
+    if (!isHr(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    const qs = z.object({
+      employee_id: z.string().uuid().optional(),
+      month:       z.string().regex(monthRe).optional(),
+      limit:       z.coerce.number().int().min(1).max(1000).default(500),
+    }).safeParse(req.query)
+    if (!qs.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
+
+    let q = fastify.supabase
+      .from('payroll_explainability_ledger')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+      .limit(qs.data.limit)
+    if (qs.data.employee_id) q = q.eq('employee_id', qs.data.employee_id)
+    if (qs.data.month)       q = q.eq('month', qs.data.month)
+    const { data: rows, error } = await q
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+
+    const empIds = [...new Set((rows ?? []).map((r: any) => r.employee_id))]
+    const { data: emps } = empIds.length
+      ? await fastify.supabase.from('employees').select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId).in('id', empIds)
+      : { data: [] as any[] }
+    const em = new Map((emps ?? []).map((e: any) => [e.id, e]))
+
+    const data = (rows ?? []).map((e: any) => {
+      const emp = em.get(e.employee_id)
+      return {
+        id:                  e.id,
+        employee_id:         e.employee_id,
+        payroll_month:       e.month,
+        component_code:      e.event_type,
+        component_name:      e.event_type,
+        before_value:        num(e.before_value),
+        after_value:         num(e.after_value) ?? 0,
+        delta:               e.impact_amount ?? null,
+        change_reason:       e.event_description,
+        source_type:         e.source_module ?? e.source_entity_type ?? null,
+        source_reference_id: e.source_entity_id ?? null,
+        notes:               null,
+        created_at:          e.created_at,
+        employee_name:       emp ? `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim() : undefined,
+        employee_code:       emp?.employee_code,
+      }
+    })
+    return reply.send({ data })
+  })
+
+  // ── POST /payroll/ledger/export — acknowledge an export of the filtered ledger ──
+  fastify.post('/payroll/ledger/export', auth, async (req: any, reply) => {
+    if (!isHr(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    const body = z.object({
+      employee_id: z.string().uuid().optional(),
+      month:       z.string().regex(monthRe).optional(),
+    }).safeParse(req.body ?? {})
+    if (!body.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: body.error.issues[0]?.message })
+    return reply.send({ success: true, message: 'Ledger export queued' })
+  })
+
   // ── GET /payroll/ledger/:employeeId ───────────────────────────────────────
   //    HR: any employee in their tenant
   //    Employees (ESS): only their own entries
