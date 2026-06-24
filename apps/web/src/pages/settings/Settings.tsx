@@ -19,6 +19,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge }        from '@/components/ui/badge'
 import { Button }       from '@/components/ui/button'
+import { PageHeader }   from '@/components/layout/PageHeader'
 import { useAuthStore } from '@/stores/authStore'
 import { api }          from '@/lib/api/client'
 import { uploadCompanyLogo, getSignedUrl } from '@/lib/supabase-storage'
@@ -742,13 +743,11 @@ export function Settings() {
 
   return (
     <div className="space-y-4 max-w-3xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Company Settings</h1>
-          <p className="text-sm text-muted-foreground">Tenant identity, preferences and configuration</p>
-        </div>
-        <Globe className="h-5 w-5 text-muted-foreground/40" />
-      </div>
+      <PageHeader
+        title="Company Settings"
+        subtitle="Tenant identity, preferences and configuration"
+        actions={<Globe className="h-5 w-5 text-muted-foreground/40" />}
+      />
 
       {/* Company Profile */}
       <CompanyProfileCard

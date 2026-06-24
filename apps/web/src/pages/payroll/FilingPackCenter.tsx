@@ -14,12 +14,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle2, XCircle, AlertTriangle, Download, Clock,
   RefreshCw, FileText, Shield, Building2, MapPin, Landmark,
-  ChevronDown, ChevronUp, Info, PackageCheck,
+  ChevronDown, ChevronUp, Info,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -381,41 +382,35 @@ export function FilingPackCenter() {
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="px-6 pt-5 pb-4 border-b border-border/60 flex-shrink-0">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <PackageCheck className="h-5 w-5 text-primary" />
-              <h1 className="text-xl font-bold text-foreground">Compliance Filing Pack</h1>
-            </div>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Generate regulator-ready files from finalized payroll data.
-            </p>
-          </div>
-
-          {/* Month picker */}
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <div>
-              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
-                Month
-              </label>
-              <input
-                type="month"
-                value={month}
-                onChange={e => setMonth(e.target.value)}
-                className="h-8 px-2.5 text-sm border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-5 h-8"
-              onClick={() => refetchReady()}
-            >
-              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-              Refresh
-            </Button>
-          </div>
-        </div>
+        <PageHeader
+          title="Compliance Filing Pack"
+          subtitle="Generate regulator-ready files from finalized payroll data."
+          actions={
+            <>
+              {/* Month picker */}
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1">
+                  Month
+                </label>
+                <input
+                  type="month"
+                  value={month}
+                  onChange={e => setMonth(e.target.value)}
+                  className="h-8 px-2.5 text-sm border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-5 h-8"
+                onClick={() => refetchReady()}
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Refresh
+              </Button>
+            </>
+          }
+        />
 
         {/* Quarter + FY derived info */}
         <p className="text-[11.5px] text-muted-foreground mt-2">

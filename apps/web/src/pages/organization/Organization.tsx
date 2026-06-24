@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { OrgGovernancePanel }  from '@/components/org/OrgGovernancePanel'
 import { ReadinessGuidance }   from '@/components/readiness/ReadinessGuidance'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -281,14 +282,14 @@ export function Organization() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Organization</h1>
-          <p className="text-sm text-muted-foreground">Manage departments, designations, and organisation master data. Pay grades are managed under Masters → Grades &amp; Pay Bands.</p>
-        </div>
-        {/* Org hierarchy summary — links to Sites / Work Locations / Cost Centers */}
-        <OrgGovernancePanel className="shrink-0 w-56" />
-      </div>
+      <PageHeader
+        title="Organization"
+        subtitle="Manage departments, designations, and organisation master data. Pay grades are managed under Masters → Grades & Pay Bands."
+        actions={
+          /* Org hierarchy summary — links to Sites / Work Locations / Cost Centers */
+          <OrgGovernancePanel className="shrink-0 w-56" />
+        }
+      />
 
       {/* Org readiness — only shown when there are issues */}
       <ReadinessGuidance domain="organization" issueOnly />

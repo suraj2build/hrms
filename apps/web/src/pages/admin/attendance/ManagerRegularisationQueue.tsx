@@ -20,6 +20,7 @@ import {
   CheckCircle2, XCircle, Search,
 } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
+import { PageHeader }    from '@/components/layout/PageHeader'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
@@ -193,20 +194,14 @@ export default function ManagerRegularisationQueue() {
   return (
     <PageContainer>
       {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between mb-5 gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">
-            {isHrAdmin ? 'All Regularisation Requests' : 'Team Regularisation Queue'}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {isHrAdmin
-              ? 'Pending attendance corrections across the organisation'
-              : 'Pending corrections from your direct reports'}
-          </p>
-        </div>
-
-        {/* Bulk action strip — shown only when rows selected */}
-        {someSelected && (
+      <PageHeader
+        className="mb-5"
+        title={isHrAdmin ? 'All Regularisation Requests' : 'Team Regularisation Queue'}
+        subtitle={isHrAdmin
+          ? 'Pending attendance corrections across the organisation'
+          : 'Pending corrections from your direct reports'}
+        actions={someSelected ? (
+          /* Bulk action strip — shown only when rows selected */
           <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-4 py-2">
             <span className="text-sm font-semibold text-primary">{selected.size} selected</span>
             <Button
@@ -232,8 +227,8 @@ export default function ManagerRegularisationQueue() {
               Reject All
             </Button>
           </div>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* ── Regularisation policy (HR admin only) ───────────────── */}
       {isHrAdmin && (

@@ -12,7 +12,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  FileText, Plus, Search, Eye, CheckCircle2, XCircle,
+  Plus, Search, Eye, CheckCircle2, XCircle,
   Send, RefreshCw, ChevronRight,
   BookOpen, Wand2, ClipboardList, Star, Inbox,
   AlertTriangle, Clock, BadgeCheck, MoreHorizontal, Download,
@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import { SubTabs } from '@/components/ui/SubTabs'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { Button }             from '@/components/ui/button'
 import { Input }              from '@/components/ui/input'
 
@@ -826,19 +827,17 @@ export function LettersAdmin() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground tracking-tight flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" />
-            Letter Generation
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Manage templates, generate letters, and handle approvals</p>
-        </div>
-        <Button onClick={() => setShowGenerate(true)} size="sm">
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
-          Generate Letter
-        </Button>
-      </div>
+      <PageHeader
+        title="Letter Generation"
+        subtitle="Manage templates, generate letters, and handle approvals"
+        className="px-6 py-4 border-b border-border/50 flex-shrink-0"
+        actions={
+          <Button onClick={() => setShowGenerate(true)} size="sm">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Generate Letter
+          </Button>
+        }
+      />
 
       {/* Tabs */}
       <SubTabs<typeof tab>

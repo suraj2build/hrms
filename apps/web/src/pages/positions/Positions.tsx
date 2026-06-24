@@ -12,7 +12,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Pencil, Trash2, Loader2, Briefcase, Building2, TrendingUp, AlertTriangle, Clock,
+  Plus, Pencil, Trash2, Loader2, Building2, TrendingUp, AlertTriangle, Clock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NamedRef { id: string; name: string }
@@ -177,22 +178,15 @@ export function Positions() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <Briefcase className="h-6 w-6 text-primary" />
-            Positions
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Sanctioned org slots — the source of truth for headcount budget, fill rate and vacancy.
-          </p>
-        </div>
-        {isAdmin && (
+      <PageHeader
+        title="Positions"
+        subtitle="Sanctioned org slots — the source of truth for headcount budget, fill rate and vacancy."
+        actions={isAdmin && (
           <Button onClick={openCreate}>
             <Plus className="mr-1.5 h-4 w-4" /> New Position
           </Button>
         )}
-      </div>
+      />
 
       {/* KPI cockpit */}
       {s && (

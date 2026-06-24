@@ -173,7 +173,7 @@ function IdentitySection({
                   onChange={(e) => onChange(f.key, e.target.value)}
                 />
                 {edited && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
                     Edited
                   </span>
                 )}
@@ -1011,17 +1011,17 @@ function DocSlot({
   return (
     <div className={[
       "rounded-xl border p-4 flex items-center gap-4",
-      flagged ? "border-amber-300 bg-amber-50/60" : "border-border",
+      flagged ? "border-warning/30 bg-warning/5" : "border-border",
     ].join(" ")}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-foreground">{def.label}</span>
           {def.required && <span className="text-destructive">*</span>}
           {flagged && (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">Re-upload requested</span>
+            <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">Re-upload requested</span>
           )}
         </div>
-        {flagged && <p className="text-xs text-amber-700 mt-0.5">{flagged}</p>}
+        {flagged && <p className="text-xs text-warning mt-0.5">{flagged}</p>}
         {status === "done" && fileName ? (
           <p className="text-xs text-success mt-0.5 truncate flex items-center gap-1">
             <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1452,19 +1452,19 @@ export function PreJoinPortal() {
       <main className="max-w-2xl mx-auto px-4 py-8">
         {/* Changes-requested banner — shown on every step until resubmitted */}
         {requestedChanges.length > 0 && (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 mb-6 shadow-sm">
+          <div className="rounded-2xl border border-warning/30 bg-warning/5 p-5 mb-6 shadow-sm">
             <div className="flex items-start gap-3">
-              <svg className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="h-5 w-5 text-warning mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-amber-800">Action needed — please update the following</p>
-                <p className="text-xs text-amber-700 mt-0.5">Your details are saved. Revise what's flagged below and resubmit.</p>
+                <p className="text-sm font-semibold text-warning">Action needed — please update the following</p>
+                <p className="text-xs text-warning mt-0.5">Your details are saved. Revise what's flagged below and resubmit.</p>
                 <ul className="mt-3 space-y-1.5">
                   {requestedChanges.map((c, i) => (
-                    <li key={i} className="text-sm text-amber-900">
+                    <li key={i} className="text-sm text-warning">
                       <span className="font-medium capitalize">{c.document_type.replace(/_/g, " ")}</span>
-                      <span className="text-amber-700"> — {c.reason}</span>
+                      <span className="text-warning"> — {c.reason}</span>
                     </li>
                   ))}
                 </ul>
