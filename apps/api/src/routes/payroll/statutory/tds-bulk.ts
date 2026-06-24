@@ -375,8 +375,9 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       .select('employee_id, tds_deducted')
       .in('employee_id', empIds)
       .eq('tenant_id', req.tenantId)
-      .gte('pay_date', fyStart)
-      .lte('pay_date', fyEnd)
+      // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
+      .gte('month', fyStart.slice(0, 7))
+      .lte('month', fyEnd.slice(0, 7))
 
     // Build map: employee_id -> sum actual TDS
     const actualTdsMap = new Map<string, number>()
@@ -582,14 +583,14 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     )
     const potentialTaxSaving = Math.round(totalApprovedAmount * 0.3)
 
-    // Fetch deadline from tax_governance_settings
+    // Fetch deadline from tds_governance_settings (window_close_date)
     const { data: govSettings } = await fastify.supabase
-      .from('tax_governance_settings')
-      .select('declaration_deadline')
+      .from('tds_governance_settings')
+      .select('window_close_date')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    const deadline: string = (govSettings as any)?.declaration_deadline ?? '2026-01-31'
+    const deadline: string = (govSettings as any)?.window_close_date ?? '2026-01-31'
 
     return reply.send({
       financial_year:        fy,

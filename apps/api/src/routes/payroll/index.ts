@@ -1276,7 +1276,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('status', 'open')
+        .eq('resolved', false)
         .gte('date', from)
         .lte('date', to),
     ])

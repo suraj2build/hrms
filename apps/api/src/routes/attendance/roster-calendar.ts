@@ -472,7 +472,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .from('employees')
       .select('id, first_name, last_name, roster_id, site_id')
       .eq('tenant_id', tenantId)
-      .eq('is_active', true)
+      .eq('status', 'active')
 
     if (rosterIds) {
       empQ = empQ.in('roster_id', rosterIds.split(','))

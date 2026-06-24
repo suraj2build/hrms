@@ -271,7 +271,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           .from('employees')
           .select('id')
           .eq('tenant_id', req.tenantId)
-          .eq('employment_status', 'active')
+          .eq('status', 'active')
           .limit(500)
 
         if (empErr) {

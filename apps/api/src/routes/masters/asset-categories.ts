@@ -98,7 +98,7 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
       const { count } = await fastify.supabase
         .from('assets')
         .select('id', { count: 'exact', head: true })
-        .eq('asset_category_id', id)
+        .eq('category_id', id)
         .eq('tenant_id', req.tenantId)
       inUse = (count ?? 0) > 0
     } catch { /* assets table may not exist yet; fall through to deactivate */ }

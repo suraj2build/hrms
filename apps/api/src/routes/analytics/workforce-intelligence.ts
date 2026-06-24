@@ -412,7 +412,7 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('is_resolved', false),
+        .eq('resolved', false),
     ])
 
     const daily = dailyRes.data ?? []

@@ -431,7 +431,7 @@ async function fetchComparisonRows(
     .from('attendance_anomalies')
     .select('employee_id')
     .eq('tenant_id', tenantId)
-    .in('status', ['open', 'pending'])
+    .eq('resolved', false)
     .gte('date', fromDate)
     .lte('date', toDate)
 
