@@ -69,3 +69,30 @@ string↔uuid/numeric/date cases). The structural "type" problems found are the 
 inserts in §4 (e.g. audit_logs) and the wrong-table references in §2. No additional
 hard type conflicts (e.g. boolean column compared to non-bool literal) were detected in the
 static pass; confirming the rest needs integration tests against a seeded DB.
+
+---
+
+## RESOLUTION (all items fixed)
+
+Re-audited against a fresh Postgres with all 299 migrations + the 3 new ones applied,
+parsing SELECT, FILTER, and INSERT/UPDATE/UPSERT clauses (chain-walk attribution,
+comment-aware key parsing). **Final result: 0 mismatches in every category.**
+
+- **§1 Migrations** — the 6 pre-existing failures are documented; root causes identified
+  (015 invalid `CREATE POLICY IF NOT EXISTS`, 016 manager_id dependency = the drift
+  source, 017 superseded by 063, 038 env-only, 068 leave_applications.half_day,
+  114 ordering). Left as-is (prod already deployed); recommend cleaning 015/016 for
+  fresh-deploy hygiene.
+- **§2 Missing tables** — `operational_notes`, `draft_bank_statutory`,
+  `employee_event_grants` created (migrations 301–303). `tax_governance_settings`→
+  `tds_governance_settings`, `employee_trust_profiles`→`workforce_trust_scores`,
+  `attendance_punches`→`attendance_punch_logs` rerouted in code with column/value remaps.
+- **§3 Filter mismatches (read-path / "pages not loading")** — all ~51 fixed
+  (renames, reroutes via job_history/employee_separation/profiles, value mappings).
+- **§4 Insert/update payload mismatches** — all ~95 fixed (audit_logs shape across
+  ~45 sites, leave ledger, bank statutory, importer, governance/validation/payroll
+  write paths). audit_logs `record_id` uuid trap handled (composite strings → real uuids).
+- **§5 Data types** — the structural/type problems (wrong-shape inserts, uuid record_id,
+  CHECK-violating status values like 'pending_approval'→'pending') are corrected.
+
+Verification: API `tsc --noEmit` clean; `vitest` 107/107 green.
