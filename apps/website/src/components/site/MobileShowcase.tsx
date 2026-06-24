@@ -63,7 +63,9 @@ function HomeScreen() {
       <div className="relative px-4 pb-16 pt-8 text-white" style={{ background: "linear-gradient(160deg,#5C9AFF,#2E6FE6 55%,#1A4D8F)" }}>
         <div className="pointer-events-none absolute inset-0 opacity-40" style={{ background: "radial-gradient(120% 80% at 80% -10%, rgba(255,255,255,0.45), transparent 60%)" }} />
         <div className="relative flex items-center justify-between">
-          <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/20 backdrop-blur text-[10px] font-bold">FI</span>
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-white shadow-soft">
+            <img src="/brand/cognixhr-icon.png" alt="CognixHR" className="h-5 w-5" draggable={false} />
+          </span>
           <Bell className="h-4 w-4 text-white/90" />
         </div>
         <p className="relative mt-4 text-xs text-white/80">Good morning,</p>
@@ -109,6 +111,9 @@ function AttendanceScreen() {
         <div className="relative flex items-center gap-2">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-white/20 backdrop-blur"><ArrowLeft className="h-3.5 w-3.5" /></span>
           <span className="text-sm font-semibold">Attendance</span>
+          <span className="ml-auto grid h-7 w-7 place-items-center rounded-lg bg-white shadow-soft">
+            <img src="/brand/cognixhr-icon.png" alt="CognixHR" className="h-4 w-4" draggable={false} />
+          </span>
         </div>
       </div>
 
@@ -167,6 +172,9 @@ function PayslipScreen() {
         <div className="relative flex items-center gap-2">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-white/20 backdrop-blur"><ArrowLeft className="h-3.5 w-3.5" /></span>
           <span className="text-sm font-semibold">April Payslip</span>
+          <span className="ml-auto grid h-7 w-7 place-items-center rounded-lg bg-white shadow-soft">
+            <img src="/brand/cognixhr-icon.png" alt="CognixHR" className="h-4 w-4" draggable={false} />
+          </span>
         </div>
       </div>
 

@@ -36,10 +36,11 @@ export function MobileESSMock() {
             style={{ background: "radial-gradient(120% 80% at 80% -10%, rgba(255,255,255,0.45), transparent 60%)" }}
           />
           <div className="relative flex items-center justify-between">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/20 backdrop-blur">
-              <span className="grid grid-cols-2 gap-0.5">
-                {Array.from({ length: 4 }).map((_, i) => <span key={i} className="h-1 w-1 rounded-full bg-white" />)}
+            <span className="flex items-center gap-2">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-white shadow-soft">
+                <img src="/brand/cognixhr-icon.png" alt="CognixHR" className="h-5 w-5" draggable={false} />
               </span>
+              <span className="text-sm font-bold tracking-tight text-white">Cognix<span className="text-[#2DD4BF]">HR</span></span>
             </span>
             <span className="relative">
               <Bell className="h-5 w-5 text-white/90" />
