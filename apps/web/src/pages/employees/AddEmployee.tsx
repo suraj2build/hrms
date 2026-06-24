@@ -107,8 +107,13 @@ export function AddEmployee() {
     },
     onSuccess: (employee) => {
       queryClient.invalidateQueries({ queryKey: ['employees'] })
-      toast.success('Employee onboarded successfully')
-      navigate(`${basePath}/employees/${employee.id}`)
+      // full-create makes no profile/auth row, so the employee can't log into
+      // ESS yet. Land the admin directly on the "User Account" tab and prompt
+      // them to create the login, instead of silently leaving a no-login record.
+      toast.success('Employee onboarded — next, create their ESS login', {
+        description: 'Use the User Account tab to send an invite or set a temporary password.',
+      })
+      navigate(`${basePath}/employees/${employee.id}?tab=account`)
     },
     onError: (e: Error) => toast.error('Failed to add employee', { description: e.message }),
   })

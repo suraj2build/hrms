@@ -4434,7 +4434,43 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       payment_status: parsed.data.payment_status,
       updated_at:     new Date().toISOString(),
     }
-    if (parsed.data.paid_amount !== undefined) update.paid_amount = parsed.data.paid_amount
+
+    // Validate the paid amount against the obligation's expected_amount so a
+    // payout can't be marked paid for an arbitrary (or zero) sum. A full 'paid'
+    // must match the expected net within a ₹1 rounding tolerance; an intentional
+    // short payment must use 'partial' (>0 and < expected). Other statuses
+    // (pending/processing/failed/reversed/held) pass the amount through as-is.
+    const { data: oblig } = await fastify.supabase
+      .from('payroll_payout_reconciliation')
+      .select('expected_amount')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!oblig) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payout obligation not found' })
+    const expected = Number((oblig as any).expected_amount ?? 0)
+
+    if (parsed.data.payment_status === 'paid') {
+      // Default the recorded amount to the expected net if the caller omitted it.
+      const paid = parsed.data.paid_amount ?? expected
+      if (Math.abs(paid - expected) > 1) {
+        return reply.code(400).send({
+          error:   'AMOUNT_MISMATCH',
+          message: `Paid amount (${paid}) does not match the expected net (${expected}). Use 'partial' for an intentional short payment.`,
+        })
+      }
+      update.paid_amount = paid
+    } else if (parsed.data.payment_status === 'partial') {
+      const paid = parsed.data.paid_amount
+      if (paid === undefined || paid <= 0 || paid >= expected) {
+        return reply.code(400).send({
+          error:   'INVALID_PARTIAL_AMOUNT',
+          message: `Partial payment must be greater than 0 and less than the expected net (${expected}).`,
+        })
+      }
+      update.paid_amount = paid
+    } else if (parsed.data.paid_amount !== undefined) {
+      update.paid_amount = parsed.data.paid_amount
+    }
     if (parsed.data.utr_number)     update.utr_number     = parsed.data.utr_number
     if (parsed.data.bank_reference) update.bank_reference = parsed.data.bank_reference
     if (parsed.data.failure_reason) update.failure_reason = parsed.data.failure_reason
