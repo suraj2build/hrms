@@ -12,6 +12,7 @@ import {
 import { SiteShell } from "@/components/site/SiteShell";
 import { DemoButtons } from "@/components/site/DemoButtons";
 import { Reveal } from "@/components/site/Reveal";
+import { MobileESSMock } from "@/components/site/MobileESSMock";
 
 export default function ESSPage() {
   return (
@@ -37,7 +38,7 @@ function ESSHero() {
           backgroundSize: "24px 24px",
         }}
       />
-      <div className="container-page relative">
+      <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
         <Reveal>
           <div className="mb-6 flex items-center gap-2">
             <Link
@@ -66,6 +67,9 @@ function ESSHero() {
           <p className="mt-4 text-xs font-medium text-white/60">
             No credit card · Full sandbox · India statutory-ready
           </p>
+        </Reveal>
+        <Reveal delay={150}>
+          <MobileESSMock />
         </Reveal>
       </div>
     </section>
