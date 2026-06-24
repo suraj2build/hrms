@@ -11,6 +11,7 @@ export interface MobileTab {
 }
 
 /** Employee bottom-nav tabs. `base` is /ess or /manager/self. */
+// eslint-disable-next-line react-refresh/only-export-components -- tab config colocated with the nav by design
 export function employeeTabs(base: string): MobileTab[] {
   return [
     { key: 'home',       label: 'Home',       icon: Home,         path: `${base}/dashboard` },

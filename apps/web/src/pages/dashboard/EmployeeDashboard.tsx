@@ -234,6 +234,88 @@ function buildMonthData(
   return out
 }
 
+// ── 0. HomeGreeting — personal greeting + today snapshot (Experience Cloud) ────
+// The signature "experience" element: time-of-day greeting + a live read of
+// today (punch state, hours, pending actions). Warmth comes from a soft on-brand
+// gradient wash — NOT a palette change. Reuses data the dashboard already fetches.
+
+function GreetChip({
+  children, dot, tone, onClick,
+}: {
+  children: ReactNode; dot?: string; tone?: 'warning' | 'neutral'; onClick?: () => void
+}) {
+  const warn = tone === 'warning'
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: warn ? 'var(--tint-amber-bg)' : 'var(--card)',
+        border: '1px solid var(--border)', borderRadius: 999,
+        padding: '5px 11px', fontSize: 12, fontWeight: 600,
+        color: warn ? 'var(--tint-amber-fg)' : 'var(--foreground)',
+        cursor: onClick ? 'pointer' : 'default', whiteSpace: 'nowrap' as const,
+      }}
+    >
+      {dot && <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0 }} />}
+      {children}
+    </button>
+  )
+}
+
+function HomeGreeting({
+  firstName, todayLog, hoursToday, openActions, navigate, basePath,
+}: {
+  firstName: string
+  todayLog: AttendanceLog | null
+  hoursToday: number | null
+  openActions: number
+  navigate: (to: string) => void
+  basePath: string
+}) {
+  const now      = new Date()
+  const hr       = now.getHours()
+  const greeting = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening'
+  const dateStr  = now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
+
+  const checkedIn  = !!todayLog?.check_in
+  const checkedOut = !!todayLog?.check_out
+  const punch = checkedOut
+    ? { label: `Checked out ${fmtTime(todayLog!.check_out)}`, dot: 'var(--muted-foreground)' }
+    : checkedIn
+      ? { label: `Checked in ${fmtTime(todayLog!.check_in)}`, dot: 'var(--success)' }
+      : { label: 'Not checked in', dot: 'var(--warning)' }
+
+  return (
+    <section style={{
+      ...CARD,
+      background: 'linear-gradient(120deg, color-mix(in srgb, var(--primary) 10%, var(--card)) 0%, color-mix(in srgb, var(--info) 6%, var(--card)) 52%, var(--card) 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 16, padding: '16px 22px', flexWrap: 'wrap' as const,
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+        <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.02em', lineHeight: 1.15 }}>
+          {greeting}, {firstName} <span style={{ fontSize: 20 }}>👋</span>
+        </span>
+        <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)', fontWeight: 500 }}>{dateStr}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
+        <GreetChip dot={punch.dot} onClick={() => navigate(`${basePath}/attendance`)}>{punch.label}</GreetChip>
+        {hoursToday != null && hoursToday > 0 && (
+          <GreetChip>{hoursToday.toFixed(1)}h today</GreetChip>
+        )}
+        <GreetChip
+          tone={openActions > 0 ? 'warning' : 'neutral'}
+          onClick={() => navigate(`${basePath}/approvals`)}
+        >
+          {openActions > 0 ? `${openActions} pending` : 'All clear'}
+        </GreetChip>
+      </div>
+    </section>
+  )
+}
+
 // ── 1. ProfileBar ─────────────────────────────────────────────────────────────
 
 function ProfileBar({ emp, profile: fp }: { emp: Employee | null; profile?: DashFullProfile }) {
@@ -1072,18 +1154,47 @@ export function EmployeeDashboard() {
     return buildMonthData(cursor.y, cursor.m, today, records, logs)
   }, [attResp, cursor, today])
 
-  const requests    = leaveResp?.data ?? []
-  const regRequests = regResp?.data ?? []
+  const requests    = useMemo(() => leaveResp?.data ?? [], [leaveResp])
+  const regRequests = useMemo(() => regResp?.data ?? [], [regResp])
   const balances    = balanceResp?.data ?? []
   const slips       = slipsResp?.data ?? (Array.isArray(slipsResp) ? slipsResp : [])
   const comp        = compResp?.data ?? null
   const holidays    = (holidaysResp as { data?: Holiday[] } | undefined)?.data ?? (Array.isArray(holidaysResp) ? holidaysResp : [])
   const expiryItems = expiryResp?.data ?? []
 
+  // Greeting / today-snapshot inputs (reuse already-fetched attendance + requests)
+  const todayStr = isoDate(today)
+  const todayLog = useMemo<AttendanceLog | null>(
+    () => (attResp?.logs ?? []).find(l => l.check_in?.slice(0, 10) === todayStr) ?? null,
+    [attResp, todayStr],
+  )
+  const hoursToday = useMemo<number | null>(
+    () => (attResp?.daily ?? []).find(d => d.date === todayStr)?.work_hours ?? null,
+    [attResp, todayStr],
+  )
+  const openActionsCount = useMemo(() => {
+    let n = 0
+    for (const r of [...requests, ...regRequests]) {
+      if ((r as { status?: string }).status?.toLowerCase() === 'pending') n++
+    }
+    return n
+  }, [requests, regRequests])
+  const firstName = fullProfile?.employee?.first_name ?? profile?.full_name?.split(' ')[0] ?? 'there'
+
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-5" style={{ background: 'var(--muted)', minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 0. Greeting + today snapshot (Experience Cloud — Pillar 1) */}
+      <HomeGreeting
+        firstName={firstName}
+        todayLog={todayLog}
+        hoursToday={hoursToday}
+        openActions={openActionsCount}
+        navigate={nav}
+        basePath={selfBase}
+      />
+
       {/* 1. Profile bar */}
       <ProfileBar emp={emp} profile={fullProfile} />
 
