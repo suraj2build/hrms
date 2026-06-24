@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { api }          from '@/lib/api/client'
 import { toast }        from 'sonner'
 import { cn }           from '@/lib/utils'
+import { PageHeader }   from '@/components/layout/PageHeader'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -163,10 +164,7 @@ export function UsersManagement() {
 
   return (
     <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="text-xl font-semibold">Users</h1>
-        <p className="text-sm text-muted-foreground">Manage user accounts and role assignments</p>
-      </div>
+      <PageHeader title="Users" subtitle="Manage user accounts and role assignments" />
 
       {!isAdmin ? (
         <Card>

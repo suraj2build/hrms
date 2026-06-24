@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { toast }                 from 'sonner'
 import { PageContainer }         from '@/components/layout/PageContainer'
+import { PageHeader }            from '@/components/layout/PageHeader'
 import { Button }                from '@/components/ui/button'
 import { cn }                    from '@/lib/utils'
 import { api }                   from '@/lib/api/client'
@@ -172,43 +173,41 @@ export default function AttendanceAnomalies() {
   return (
     <PageContainer>
       {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Anomaly Monitor</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Department-level attendance anomaly rates — read-only oversight view
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Reconcile — clears anomalies contradicted by current attendance */}
-          <Button
-            variant="outline" size="sm" className="h-9 gap-1.5"
-            onClick={() => reconcileMut.mutate()}
-            disabled={reconcileMut.isPending}
-            title="Auto-resolve stale anomalies (e.g. 'no punch' on days now marked present/leave)"
-          >
-            {reconcileMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Reconcile
-          </Button>
-
-          {/* Month navigation */}
-          <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-1 py-1 shadow-card">
-            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
-              onClick={() => setMonth(prevMonth)}>
-              <ChevronLeft className="h-4 w-4" />
+      <PageHeader
+        className="mb-5 flex-wrap"
+        title="Anomaly Monitor"
+        subtitle="Department-level attendance anomaly rates — read-only oversight view"
+        actions={
+          <>
+            {/* Reconcile — clears anomalies contradicted by current attendance */}
+            <Button
+              variant="outline" size="sm" className="h-9 gap-1.5"
+              onClick={() => reconcileMut.mutate()}
+              disabled={reconcileMut.isPending}
+              title="Auto-resolve stale anomalies (e.g. 'no punch' on days now marked present/leave)"
+            >
+              {reconcileMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Reconcile
             </Button>
-            <span className="text-sm font-semibold text-foreground px-2 min-w-[130px] text-center">
-              {fmtMonth(month)}
-            </span>
-            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
-              disabled={isCurrentMonth}
-              onClick={() => setMonth(nextMonth)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
+
+            {/* Month navigation */}
+            <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-1 py-1 shadow-card">
+              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
+                onClick={() => setMonth(prevMonth)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm font-semibold text-foreground px-2 min-w-[130px] text-center">
+                {fmtMonth(month)}
+              </span>
+              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg"
+                disabled={isCurrentMonth}
+                onClick={() => setMonth(nextMonth)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </>
+        }
+      />
 
       {/* ── Loading ──────────────────────────────────────────────── */}
       {isLoading && (

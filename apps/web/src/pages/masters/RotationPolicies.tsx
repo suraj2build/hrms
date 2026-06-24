@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -254,27 +255,25 @@ export default function RotationPolicies() {
   return (
     <div className="flex flex-col gap-6 p-6 max-w-7xl mx-auto">
       {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Rotation Policies</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Map working conditions to shifts — applied after Roster Policy resolves the day type.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowInactive((v) => !v)}
-          >
-            {showInactive ? 'Hide Inactive' : 'Show Inactive'}
-          </Button>
-          <Button size="sm" onClick={() => navigate('/admin/masters/rotation-policies/new')}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            New Policy
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Rotation Policies"
+        subtitle="Map working conditions to shifts — applied after Roster Policy resolves the day type."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowInactive((v) => !v)}
+            >
+              {showInactive ? 'Hide Inactive' : 'Show Inactive'}
+            </Button>
+            <Button size="sm" onClick={() => navigate('/admin/masters/rotation-policies/new')}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              New Policy
+            </Button>
+          </>
+        }
+      />
 
       {/* Content */}
       {isLoading ? (

@@ -13,6 +13,7 @@
 import { useState, useMemo, memo } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { SignedImage } from '@/components/SignedImage'
+import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { useQuery }          from '@tanstack/react-query'
 import {
@@ -394,45 +395,41 @@ export function EmployeeList() {
       <div style={{ maxWidth: 1600, margin: '0 auto' }}>
 
         {/* ── Page header ──────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--foreground)', letterSpacing: '-.02em', margin: 0 }}>
-                People Operations
-              </h1>
-              <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase',
-                background: '#1f2937', color: '#fff', padding: '3px 9px', borderRadius: 999,
-              }}>
-                WORKFORCE SURFACE
-              </span>
-            </div>
-            <p style={{ fontSize: 12.5, color: 'var(--muted-foreground)', margin: 0, fontWeight: 500 }}>
-              Live workforce operational stream — {allEmployees.length} people across {sites.length} site{sites.length !== 1 ? 's' : ''}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">
-              <Bookmark className="h-3.5 w-3.5" />
-              Saved Views
-            </Button>
-            {isAdmin && (
+        <div style={{ marginBottom: 20 }}>
+          <PageHeader
+            title="People Operations"
+            subtitle={`Live workforce operational stream — ${allEmployees.length} people across ${sites.length} site${sites.length !== 1 ? 's' : ''}`}
+            actions={
               <>
-                <Button variant="outline" size="sm" onClick={() => navigate(`${basePath}/employees/org-chart`)}>
-                  <Network className="h-3.5 w-3.5" />
-                  Org Chart
-                </Button>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase',
+                  background: '#1f2937', color: '#fff', padding: '3px 9px', borderRadius: 999,
+                }}>
+                  WORKFORCE SURFACE
+                </span>
                 <Button variant="outline" size="sm">
-                  <Download className="h-3.5 w-3.5" />
-                  Export
+                  <Bookmark className="h-3.5 w-3.5" />
+                  Saved Views
                 </Button>
-                <Button size="sm" onClick={() => navigate(`${basePath}/employees/new`)}>
-                  <UserPlus className="h-3.5 w-3.5" />
-                  Add Employee
-                </Button>
+                {isAdmin && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`${basePath}/employees/org-chart`)}>
+                      <Network className="h-3.5 w-3.5" />
+                      Org Chart
+                    </Button>
+                    <Button variant="outline" size="sm">
+                      <Download className="h-3.5 w-3.5" />
+                      Export
+                    </Button>
+                    <Button size="sm" onClick={() => navigate(`${basePath}/employees/new`)}>
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Add Employee
+                    </Button>
+                  </>
+                )}
               </>
-            )}
-          </div>
+            }
+          />
         </div>
 
         {/* ── Stats strip ──────────────────────────────────────────────────── */}
