@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { useDemoModal } from "./DemoModal";
 
 const navLinks = [
-  { href: "#modules", label: "Modules" },
-  { href: "#analytics", label: "Analytics" },
-  { href: "#ai", label: "AI" },
-  { href: "/pricing", label: "Pricing", route: true },
+  { href: "/#modules", label: "Modules" },
+  { href: "/#analytics", label: "Analytics" },
+  { href: "/#ai", label: "AI" },
+  { href: "/pricing", label: "Pricing" },
 ];
 
 export function Nav() {
@@ -34,17 +34,11 @@ export function Nav() {
       <div className="container-page flex h-16 items-center justify-between gap-6">
         <Logo />
         <nav className="hidden items-center gap-7 lg:flex">
-          {navLinks.map((l) =>
-            l.route ? (
-              <Link key={l.href} to={l.href} className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-                {l.label}
-              </Link>
-            ) : (
-              <a key={l.href} href={l.href} className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-                {l.label}
-              </a>
-            ),
-          )}
+          {navLinks.map((l) => (
+            <Link key={l.href} to={l.href} className="text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
+              {l.label}
+            </Link>
+          ))}
         </nav>
         <div className="hidden items-center gap-2 lg:flex">
           <a
@@ -74,17 +68,11 @@ export function Nav() {
       {open && (
         <div className="border-t border-border bg-card lg:hidden">
           <div className="container-page flex flex-col gap-1 py-3">
-            {navLinks.map((l) =>
-              l.route ? (
-                <Link key={l.href} to={l.href} onClick={() => setOpen(false)} className="rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted">
-                  {l.label}
-                </Link>
-              ) : (
-                <a key={l.href} href={l.href} onClick={() => setOpen(false)} className="rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted">
-                  {l.label}
-                </a>
-              ),
-            )}
+            {navLinks.map((l) => (
+              <Link key={l.href} to={l.href} onClick={() => setOpen(false)} className="rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted">
+                {l.label}
+              </Link>
+            ))}
             <a
               href="https://hrms-web-alpha.vercel.app"
               target="_blank"

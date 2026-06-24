@@ -6,9 +6,9 @@ export function Footer() {
     {
       title: "Product",
       links: [
-        { label: "Modules", href: "/#modules" },
-        { label: "Analytics", href: "/#analytics" },
-        { label: "AI", href: "/#ai" },
+        { label: "Modules", href: "/#modules", route: true },
+        { label: "Analytics", href: "/#analytics", route: true },
+        { label: "AI", href: "/#ai", route: true },
         { label: "Live Demo", href: "https://hrms-web-alpha.vercel.app", external: true },
       ],
     },
