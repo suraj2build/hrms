@@ -93,16 +93,6 @@ export function AttendanceOperationsCenter() {
     retry:     false,
   })
 
-<<<<<<< Updated upstream
-=======
-  const { data: periodData } = useQuery<{ data: AttendancePeriod[] }>({
-    queryKey:  ['attendance-periods-current'],
-    queryFn:   () => api.get('/attendance/period-locks'),
-    staleTime: 60_000,
-    retry:     false,
-  })
-
->>>>>>> Stashed changes
   const { data: events, isLoading: eventsLoading } = useQuery<{
     data: Array<{
       id: string; event_type: string; employee_name: string
