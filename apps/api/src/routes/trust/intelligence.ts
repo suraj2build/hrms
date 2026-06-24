@@ -250,14 +250,13 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
     const { data: emp, error: empErr } = await fastify.supabase
       .from('employees')
-      .select('id, personal_info:employee_personal_info(pan_number), bank:employee_bank_statutory(account_number, ifsc_code)')
+      .select('id, bank:employee_bank_statutory(account_number, ifsc_code, pan_number)')
       .eq('id', employeeId)
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
     if (empErr || !emp) return reply.status(404).send({ error: 'Employee not found' })
 
-    const pi  = Array.isArray((emp as any).personal_info) ? (emp as any).personal_info[0] : (emp as any).personal_info
     const bs  = Array.isArray((emp as any).bank) ? (emp as any).bank[0] : (emp as any).bank
 
     // Fire-and-forget — do NOT await
@@ -265,7 +264,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       supabase:        fastify.supabase,
       employee_id:     employeeId,
       tenant_id:       tenantId,
-      pan:             pi?.pan_number    ?? undefined,
+      pan:             bs?.pan_number    ?? undefined,
       account_number:  bs?.account_number ?? undefined,
       ifsc_code:       bs?.ifsc_code     ?? undefined,
     }).catch(() => { /* intentional fire-and-forget */ })
