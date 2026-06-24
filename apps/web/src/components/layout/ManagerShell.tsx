@@ -18,6 +18,8 @@ import { ManagerSidebar }   from './ManagerSidebar'
 import { Topbar }           from './Topbar'
 import { useAuthStore }     from '@/stores/authStore'
 import { EventToast }       from '@/components/notifications'
+import { useIsMobile }      from '@/hooks/useIsMobile'
+import { MobileEssShell }   from '@/components/mobile/MobileEssShell'
 
 function ShellPageLoader() {
   return (
@@ -40,6 +42,7 @@ function LoadingScreen() {
 
 export function ManagerShell() {
   const { profile, isBootstrapping } = useAuthStore()
+  const isMobile = useIsMobile()
 
   if (isBootstrapping) return <LoadingScreen />
 
@@ -48,6 +51,9 @@ export function ManagerShell() {
 
   // Employee-only users can't access manager console
   if (profile.role === 'employee') return <Navigate to="/ess/dashboard" replace />
+
+  // Mobile-only: dedicated phone experience. Desktop is untouched below.
+  if (isMobile) return <MobileEssShell />
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
