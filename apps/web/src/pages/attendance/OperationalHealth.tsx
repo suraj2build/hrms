@@ -13,13 +13,14 @@
  * Designed for daily ops review by a senior HR administrator.
  */
 import { useState }          from 'react'
-import { Link }              from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery }          from '@tanstack/react-query'
 import {
   Zap, AlertTriangle, ClipboardCheck, ShieldCheck, Target,
-  CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus,
+  CheckCircle2, XCircle, Clock, TrendingUp,
   RefreshCw, ExternalLink, ChevronRight, Brain, Flame, Loader2,
 } from 'lucide-react'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
@@ -92,58 +93,6 @@ function fmtTime(iso: string | null): string {
   return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-// ── Stat tile ─────────────────────────────────────────────────────────────────
-
-function StatTile({
-  label, value, sub, trend, variant = 'neutral', href, icon: Icon,
-}: {
-  label:    string
-  value:    string | number
-  sub?:     string
-  trend?:   'up' | 'down' | 'flat'
-  variant?: 'success' | 'warning' | 'destructive' | 'neutral'
-  href?:    string
-  icon:     React.ComponentType<{ className?: string }>
-}) {
-  const colorMap = {
-    success:     'text-success',
-    warning:     'text-warning',
-    destructive: 'text-destructive',
-    neutral:     'text-foreground',
-  }
-  const iconColorMap = {
-    success:     'text-success',
-    warning:     'text-warning/70',
-    destructive: 'text-destructive/70',
-    neutral:     'text-muted-foreground/50',
-  }
-
-  const inner = (
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
-        <p className={cn('text-2xl font-bold', colorMap[variant])}>{value}</p>
-        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-      </div>
-      <div className="flex flex-col items-end gap-1">
-        <Icon className={cn('h-5 w-5', iconColorMap[variant])} />
-        {trend === 'up'   && <TrendingUp   className="h-3.5 w-3.5 text-success" />}
-        {trend === 'down' && <TrendingDown  className="h-3.5 w-3.5 text-destructive" />}
-        {trend === 'flat' && <Minus         className="h-3.5 w-3.5 text-muted-foreground/40" />}
-      </div>
-    </div>
-  )
-
-  if (href) {
-    return (
-      <Link to={href} className="block rounded-lg border border-border bg-card p-4 hover:bg-muted/40 transition-colors">
-        {inner}
-      </Link>
-    )
-  }
-  return <div className="rounded-lg border border-border bg-card p-4">{inner}</div>
-}
-
 // ── Run list ──────────────────────────────────────────────────────────────────
 
 function RunRow({ run }: { run: ProcessingRun }) {
@@ -187,6 +136,7 @@ function RunRow({ run }: { run: ProcessingRun }) {
 function OperationalHealthInner() {
   const { profile }   = useAuthStore()
   const basePath      = useBasePath()
+  const navigate      = useNavigate()
   const isAdmin       = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const [refetchKey, setRefetchKey] = useState(0)
 
@@ -301,45 +251,45 @@ function OperationalHealthInner() {
       )}
 
       {/* ── Summary tiles ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatTile
+      <MetricRow cols={5}>
+        <MetricCard
           label="Processing"
           value={status?.is_running ? 'Running' : 'Idle'}
-          sub={status?.started_at ? `Since ${fmtRelative(status.started_at)}` : lastRun ? `Last: ${fmtRelative(lastRun.started_at)}` : undefined}
+          subtitle={status?.started_at ? `Since ${fmtRelative(status.started_at)}` : lastRun ? `Last: ${fmtRelative(lastRun.started_at)}` : undefined}
           icon={Zap}
           variant={status?.is_running ? 'warning' : 'neutral'}
-          href={`${basePath}/attendance`}
+          onClick={() => navigate(`${basePath}/attendance`)}
         />
-        <StatTile
+        <MetricCard
           label="Open Anomalies"
           value={anomalySummary?.open_count ?? '—'}
-          sub={anomalySummary?.resolved_today != null ? `${anomalySummary.resolved_today} resolved today` : undefined}
+          subtitle={anomalySummary?.resolved_today != null ? `${anomalySummary.resolved_today} resolved today` : undefined}
           icon={AlertTriangle}
           variant={(anomalySummary?.open_count ?? 0) >= 10 ? 'warning' : (anomalySummary?.open_count ?? 0) > 0 ? 'neutral' : 'success'}
-          href={`${basePath}/attendance/anomalies`}
+          onClick={() => navigate(`${basePath}/attendance/anomalies`)}
         />
-        <StatTile
+        <MetricCard
           label="Pending Corrections"
           value={correctionSummary?.pending_count ?? '—'}
-          sub={correctionSummary?.oldest_pending_days != null
+          subtitle={correctionSummary?.oldest_pending_days != null
             ? `Oldest: ${correctionSummary.oldest_pending_days}d`
             : undefined}
           icon={ClipboardCheck}
           variant={(correctionSummary?.pending_count ?? 0) > 0 ? 'warning' : 'success'}
-          href={`${basePath}/attendance/corrections`}
+          onClick={() => navigate(`${basePath}/attendance/corrections`)}
         />
-        <StatTile
+        <MetricCard
           label="Failed Runs (24h)"
           value={failedRuns24h}
-          sub={lastRun ? `Avg: ${fmtDuration(lastRun.duration_ms)}` : undefined}
+          subtitle={lastRun ? `Avg: ${fmtDuration(lastRun.duration_ms)}` : undefined}
           icon={XCircle}
           variant={failedRuns24h > 0 ? 'destructive' : 'success'}
         />
         {/* Phase 10: AI intelligence tile — only shown when endpoint responds */}
-        <StatTile
+        <MetricCard
           label="At-Risk Employees"
           value={intelSummary?.at_risk_count ?? '—'}
-          sub={intelSummary?.avg_risk_score != null
+          subtitle={intelSummary?.avg_risk_score != null
             ? `Avg risk score: ${intelSummary.avg_risk_score.toFixed(0)}`
             : undefined}
           icon={Brain}
@@ -349,9 +299,9 @@ function OperationalHealthInner() {
             : intelSummary.at_risk_count  > 0 ? 'neutral'
             : 'success'
           }
-          href={`${basePath}/intelligence`}
+          onClick={() => navigate(`${basePath}/intelligence`)}
         />
-      </div>
+      </MetricRow>
 
       {/* ── Phase 10: AI Insights — At-Risk snapshot (only when data available) ── */}
       {topAtRisk.length > 0 && (

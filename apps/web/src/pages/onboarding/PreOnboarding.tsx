@@ -23,6 +23,7 @@ import { api } from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -351,24 +352,6 @@ function RehireCheckDialog({ data, onClose, onRehire, onNewEmployee, isPending }
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
-function StatCard({
-  label, value, icon: Icon, accent,
-}: { label: string; value: number; icon: React.ElementType; accent: string }) {
-  return (
-    <div className="surface-premium lift-hover flex flex-col gap-2 p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
-        <div className={`gloss-sheen flex h-9 w-9 items-center justify-center rounded-xl ring-1 ring-black/5 shadow-sm ${accent}`}>
-          <Icon className="h-4 w-4" />
-        </div>
-      </div>
-      <p className="text-3xl font-bold tracking-tight tabular-nums">{value}</p>
-    </div>
   )
 }
 
@@ -974,12 +957,12 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
       )}
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Invitations" value={stats.total}     icon={Users}          accent="bg-info/15 text-info" />
-        <StatCard label="Pending"           value={stats.pending}   icon={Clock}          accent="bg-warning/15 text-warning" />
-        <StatCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  accent="bg-info/15 text-info" />
-        <StatCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   accent="bg-success/15 text-success" />
-      </div>
+      <MetricRow cols={4}>
+        <MetricCard label="Total Invitations" value={stats.total}     icon={Users}          variant="info" />
+        <MetricCard label="Pending"           value={stats.pending}   icon={Clock}          variant="warning" />
+        <MetricCard label="Submitted"         value={stats.submitted} icon={ClipboardList}  variant="info" />
+        <MetricCard label="Approved"          value={stats.approved}  icon={CheckCircle2}   variant="success" />
+      </MetricRow>
 
       {/* Table */}
       <SectionCard title="Invitations" description="All pre-joinee invitations and their current status">

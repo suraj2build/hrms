@@ -25,6 +25,7 @@ import { PageHeader }            from '@/components/layout/PageHeader'
 import { SectionCard }           from '@/components/layout/SectionCard'
 import { Button }                from '@/components/ui/button'
 import { OperationalErrorBanner } from '@/components/async'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }                   from '@/lib/api/client'
 import { useAuthStore }          from '@/stores/authStore'
 import { cn }                    from '@/lib/utils'
@@ -524,27 +525,16 @@ export function AttendanceUpload() {
               }
             >
               {/* Summary chips */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="p-3 rounded-md bg-muted/40 text-center">
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Total Rows</p>
-                  <p className="text-2xl font-bold text-foreground">{result.total_rows}</p>
-                </div>
-                <div className="p-3 rounded-md bg-success/10 text-center">
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Succeeded</p>
-                  <p className="text-2xl font-bold text-success">{result.success_rows}</p>
-                </div>
-                <div className={cn(
-                  'p-3 rounded-md text-center',
-                  result.failed_rows.length > 0 ? 'bg-destructive/10' : 'bg-muted/40',
-                )}>
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Failed</p>
-                  <p className={cn(
-                    'text-2xl font-bold',
-                    result.failed_rows.length > 0 ? 'text-destructive' : 'text-muted-foreground',
-                  )}>
-                    {result.failed_rows.length}
-                  </p>
-                </div>
+              <div className="mb-4">
+                <MetricRow cols={3}>
+                  <MetricCard label="Total Rows" value={result.total_rows} variant="neutral" />
+                  <MetricCard label="Succeeded" value={result.success_rows} variant="success" />
+                  <MetricCard
+                    label="Failed"
+                    value={result.failed_rows.length}
+                    variant={result.failed_rows.length > 0 ? 'destructive' : 'neutral'}
+                  />
+                </MetricRow>
               </div>
 
               {/* Success banner */}

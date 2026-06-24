@@ -20,6 +20,7 @@ import {
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
@@ -99,25 +100,6 @@ function RiskScoreBar({ score, level }: { score: number; level: RiskLevel }) {
       </div>
       <span className="text-xs tabular-nums font-medium text-foreground">{score}</span>
     </div>
-  )
-}
-
-function SummaryTile({ label, value, sub, icon: Icon, cls }: {
-  label: string
-  value: string | number
-  sub?: string
-  icon: React.ComponentType<{ className?: string }>
-  cls?: string
-}) {
-  return (
-    <SectionCard>
-      <div className="flex items-start justify-between mb-1">
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-        <Icon className="h-4 w-4 text-muted-foreground/50" />
-      </div>
-      <p className={cn('text-2xl font-bold', cls ?? 'text-foreground')}>{value}</p>
-      {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-    </SectionCard>
   )
 }
 
@@ -216,43 +198,43 @@ export function AttendanceRisk() {
 
       {/* Summary cards */}
       {summary && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <SummaryTile
+        <MetricRow cols={4}>
+          <MetricCard
             label="Avg Risk Score"
             value={(summary.avg_risk_score ?? 0).toFixed(1)}
-            sub="across all employees"
+            subtitle="across all employees"
             icon={Activity}
-            cls={
-              summary.avg_risk_score >= 70 ? 'text-destructive'
-              : summary.avg_risk_score >= 40 ? 'text-warning'
-              : 'text-success'
+            variant={
+              summary.avg_risk_score >= 70 ? 'destructive'
+              : summary.avg_risk_score >= 40 ? 'warning'
+              : 'success'
             }
           />
-          <SummaryTile
+          <MetricCard
             label="High-Risk Employees"
             value={summary.high_risk_count}
-            sub="high + critical level"
+            subtitle="high + critical level"
             icon={AlertTriangle}
-            cls={summary.high_risk_count > 0 ? 'text-destructive' : 'text-success'}
+            variant={summary.high_risk_count > 0 ? 'destructive' : 'success'}
           />
           {levelOrder.slice(0, 2).map(lvl => {
             const entry = summary.employees_by_level.find(e => e.level === lvl)
             return (
-              <SummaryTile
+              <MetricCard
                 key={lvl}
                 label={`${lvl.charAt(0).toUpperCase() + lvl.slice(1)} Risk`}
                 value={entry?.count ?? 0}
-                sub="employees"
+                subtitle="employees"
                 icon={Users}
-                cls={
-                  lvl === 'critical' || lvl === 'high' ? 'text-destructive'
-                  : lvl === 'medium' ? 'text-warning'
-                  : 'text-success'
+                variant={
+                  lvl === 'critical' || lvl === 'high' ? 'destructive'
+                  : lvl === 'medium' ? 'warning'
+                  : 'success'
                 }
               />
             )
           })}
-        </div>
+        </MetricRow>
       )}
 
       {/* Distribution mini-bar */}

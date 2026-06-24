@@ -2,6 +2,7 @@ import { useQuery }      from '@tanstack/react-query'
 import { ownerApi }      from '@/lib/api/ownerApi'
 import { useOwnerStore } from '@/stores/ownerStore'
 import { Link }          from 'react-router-dom'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import {
   Building2, CheckCircle2, Clock, Ban, AlertTriangle,
   Key, CreditCard, TrendingUp, Users2, ChevronRight,
@@ -38,34 +39,6 @@ function timeAgo(iso: string): string {
   const diffDays = Math.floor(diffHrs / 24)
   if (diffDays < 30)   return `${diffDays}d ago`
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-}
-
-function StatCard({
-  icon: Icon, label, value, sub, color = 'indigo',
-}: {
-  icon: React.ElementType; label: string; value: number | string; sub?: string
-  color?: 'indigo' | 'green' | 'amber' | 'red' | 'slate'
-}) {
-  const colorMap = {
-    indigo: { ring: 'ring-accent-teal/15',  icon: 'bg-gradient-to-br from-accent-teal to-primary text-white',  glow: 'before:bg-accent-teal/10' },
-    green:  { ring: 'ring-success/15', icon: 'bg-gradient-to-br from-success to-accent-teal text-white', glow: 'before:bg-success/10' },
-    amber:  { ring: 'ring-warning/20',  icon: 'bg-gradient-to-br from-warning to-accent-coral text-white', glow: 'before:bg-warning/10' },
-    red:    { ring: 'ring-destructive/15',    icon: 'bg-gradient-to-br from-destructive to-destructive text-white',     glow: 'before:bg-destructive/10' },
-    slate:  { ring: 'ring-ring/40',  icon: 'bg-gradient-to-br from-muted to-muted text-white',  glow: 'before:bg-muted/10' },
-  }
-  const c = colorMap[color]
-  return (
-    <div className={`group relative overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-xl p-4 flex items-start gap-3.5 shadow-sm ring-1 ${c.ring} transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 before:absolute before:-right-6 before:-top-6 before:h-20 before:w-20 before:rounded-full before:blur-2xl ${c.glow}`}>
-      <div className={`relative h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${c.icon}`}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div className="relative min-w-0">
-        <p className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-[0.12em]">{label}</p>
-        <p className="text-[26px] leading-tight font-bold text-foreground mt-0.5 tabular-nums">{value}</p>
-        {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
-      </div>
-    </div>
-  )
 }
 
 function fmtCurrency(n: number) {
@@ -135,29 +108,29 @@ export function OwnerDashboard() {
           {/* Tenant stats */}
           <section>
             <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.16em] mb-3">Tenants</h2>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard icon={Building2}    label="Total"     value={d.tenants.total}     color="slate" />
-              <StatCard icon={CheckCircle2} label="Active"    value={d.tenants.active}    color="green" />
-              <StatCard icon={Clock}        label="On Trial"  value={d.tenants.trial}     color="amber" />
-              <StatCard icon={Ban}          label="Suspended" value={d.tenants.suspended + d.tenants.expired} color="red" />
-            </div>
+            <MetricRow cols={4}>
+              <MetricCard icon={Building2}    label="Total"     value={d.tenants.total}     variant="neutral" />
+              <MetricCard icon={CheckCircle2} label="Active"    value={d.tenants.active}    variant="success" />
+              <MetricCard icon={Clock}        label="On Trial"  value={d.tenants.trial}     variant="warning" />
+              <MetricCard icon={Ban}          label="Suspended" value={d.tenants.suspended + d.tenants.expired} variant="destructive" />
+            </MetricRow>
           </section>
 
           {/* Platform stats */}
           <section>
             <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.16em] mb-3">Platform</h2>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard
+            <MetricRow cols={4}>
+              <MetricCard
                 icon={AlertTriangle}
                 label="Pending Requests"
                 value={d.requests.pending}
-                sub={`${d.requests.total} total`}
-                color={d.requests.pending > 0 ? 'amber' : 'slate'}
+                subtitle={`${d.requests.total} total`}
+                variant={d.requests.pending > 0 ? 'warning' : 'neutral'}
               />
-              <StatCard icon={Key}         label="Active API Keys"    value={d.active_api_keys}                   color="indigo" />
-              <StatCard icon={CreditCard}  label="Billing (30 days)"  value={fmtCurrency(d.billing_30d_total)}    color="green" />
-              <StatCard icon={TrendingUp}  label="Total Tenants"      value={d.tenants.total}                     color="slate" />
-            </div>
+              <MetricCard icon={Key}         label="Active API Keys"    value={d.active_api_keys}                   variant="info" />
+              <MetricCard icon={CreditCard}  label="Billing (30 days)"  value={fmtCurrency(d.billing_30d_total)}    variant="success" />
+              <MetricCard icon={TrendingUp}  label="Total Tenants"      value={d.tenants.total}                     variant="neutral" />
+            </MetricRow>
           </section>
 
           {/* Quick actions */}

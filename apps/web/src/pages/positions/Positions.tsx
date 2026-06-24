@@ -24,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NamedRef { id: string; name: string }
@@ -195,15 +196,15 @@ export function Positions() {
 
       {/* KPI cockpit */}
       {s && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <KpiCard icon={Building2} label="Sanctioned Strength" value={s.sanctioned_strength} sub={`${s.position_count} positions`} />
-          <KpiCard icon={TrendingUp} label="Fill Rate" value={`${s.fill_rate_pct}%`} sub={`${s.filled} filled`}
-                   tone={s.fill_rate_pct >= 90 ? 'success' : s.fill_rate_pct >= 75 ? 'warning' : 'danger'} />
-          <KpiCard icon={AlertTriangle} label="Vacancies" value={s.vacancies} sub={`${s.open_positions} open positions`}
-                   tone={s.vacancies > 0 ? 'warning' : 'success'} />
-          <KpiCard icon={Clock} label="Avg Vacancy Age" value={`${s.avg_vacancy_age_days}d`} sub="since sanctioned"
-                   tone={s.avg_vacancy_age_days > 90 ? 'danger' : s.avg_vacancy_age_days > 45 ? 'warning' : 'success'} />
-        </div>
+        <MetricRow cols={4}>
+          <MetricCard icon={Building2} label="Sanctioned Strength" value={s.sanctioned_strength} subtitle={`${s.position_count} positions`} />
+          <MetricCard icon={TrendingUp} label="Fill Rate" value={`${s.fill_rate_pct}%`} subtitle={`${s.filled} filled`}
+                   variant={s.fill_rate_pct >= 90 ? 'success' : s.fill_rate_pct >= 75 ? 'warning' : 'destructive'} />
+          <MetricCard icon={AlertTriangle} label="Vacancies" value={s.vacancies} subtitle={`${s.open_positions} open positions`}
+                   variant={s.vacancies > 0 ? 'warning' : 'success'} />
+          <MetricCard icon={Clock} label="Avg Vacancy Age" value={`${s.avg_vacancy_age_days}d`} subtitle="since sanctioned"
+                   variant={s.avg_vacancy_age_days > 90 ? 'destructive' : s.avg_vacancy_age_days > 45 ? 'warning' : 'success'} />
+        </MetricRow>
       )}
 
       {/* By-department vacancy */}
@@ -338,22 +339,6 @@ export function Positions() {
         </DialogContent>
       </Dialog>
     </div>
-  )
-}
-
-function KpiCard({ icon: Icon, label, value, sub, tone }: {
-  icon: React.ElementType; label: string; value: string | number; sub?: string
-  tone?: 'success' | 'warning' | 'danger'
-}) {
-  const toneClass = tone === 'success' ? 'text-success' : tone === 'warning' ? 'text-warning' : tone === 'danger' ? 'text-destructive' : 'text-foreground'
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="h-3.5 w-3.5" /> {label}</div>
-        <div className={`mt-1.5 text-2xl font-bold tabular-nums ${toneClass}`}>{value}</div>
-        {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
   )
 }
 

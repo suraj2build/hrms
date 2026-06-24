@@ -28,6 +28,7 @@ import { Button }                from '@/components/ui/button'
 import { Input }                 from '@/components/ui/input'
 import { DateInput }             from '@/components/ui/date-input'
 import { EmployeeSelector }      from '@/components/filters/EmployeeSelector'
+import { MetricCard, MetricRow }  from '@/components/dashboard/MetricCard'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -171,33 +172,6 @@ function PayrollBadge({ active }: { active: boolean }) {
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
       <TrendingDown className="h-2.5 w-2.5" /> Auto
     </span>
-  )
-}
-
-// ── KPI Card ───────────────────────────────────────────────────────────────────
-
-function KpiCard({
-  icon: Icon, label, value, sub, accent,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: string
-  sub?: string
-  accent: string
-}) {
-  return (
-    <div className="surface-premium lift-hover p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-          <p className="text-2xl font-bold text-foreground mt-1 leading-none tabular-nums">{value}</p>
-          {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
-        </div>
-        <span className={cn('gloss-sheen flex h-9 w-9 items-center justify-center rounded-xl ring-1 ring-black/5 shadow-sm flex-shrink-0', accent)}>
-          <Icon className="h-4 w-4" />
-        </span>
-      </div>
-    </div>
   )
 }
 
@@ -896,20 +870,11 @@ function AdvancesTab({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="space-y-4">
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Pending Approval</p>
-          <p className="text-xl font-bold text-foreground">{pending}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Active Recovery</p>
-          <p className="text-xl font-bold text-foreground">{active}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Total Outstanding</p>
-          <p className="text-xl font-bold text-foreground">{fmtINR(totalOutstanding)}</p>
-        </div>
-      </div>
+      <MetricRow cols={3}>
+        <MetricCard label="Pending Approval" value={String(pending)} />
+        <MetricCard label="Active Recovery" value={String(active)} />
+        <MetricCard label="Total Outstanding" value={fmtINR(totalOutstanding)} />
+      </MetricRow>
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -1172,20 +1137,11 @@ function LoansTab({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="space-y-4">
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Pending Approval</p>
-          <p className="text-xl font-bold text-foreground">{pending}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Active Loans</p>
-          <p className="text-xl font-bold text-foreground">{active}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Total Outstanding</p>
-          <p className="text-xl font-bold text-foreground">{fmtINR(totalOutstanding)}</p>
-        </div>
-      </div>
+      <MetricRow cols={3}>
+        <MetricCard label="Pending Approval" value={String(pending)} />
+        <MetricCard label="Active Loans" value={String(active)} />
+        <MetricCard label="Total Outstanding" value={fmtINR(totalOutstanding)} />
+      </MetricRow>
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -1555,19 +1511,21 @@ export function LoansAndAdvances() {
       />
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <KpiCard icon={AlertTriangle} label="Pending Approvals" value={String(pendingApprovals)}
-          sub="requires action"
-          accent={pendingApprovals > 0 ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground'} />
-        <KpiCard icon={Users} label="Active (Adv + Loans)" value={String(activeAdvances + activeLoans)}
-          sub={`${activeAdvances} advances · ${activeLoans} loans`}
-          accent="bg-info/15 text-info" />
-        <KpiCard icon={CreditCard} label="This Month EMI" value={fmtINR(thisMonthEmi)}
-          sub="auto-deducted via payroll"
-          accent="bg-primary/10 text-primary" />
-        <KpiCard icon={Banknote} label="Total Outstanding" value={fmtINR(totalOutstanding)}
-          sub="across advances + loans"
-          accent="bg-accent-violet/15 text-accent-violet" />
+      <div className="mb-6">
+        <MetricRow cols={4}>
+          <MetricCard icon={AlertTriangle} label="Pending Approvals" value={String(pendingApprovals)}
+            subtitle="requires action"
+            variant={pendingApprovals > 0 ? 'warning' : 'neutral'} />
+          <MetricCard icon={Users} label="Active (Adv + Loans)" value={String(activeAdvances + activeLoans)}
+            subtitle={`${activeAdvances} advances · ${activeLoans} loans`}
+            variant="info" />
+          <MetricCard icon={CreditCard} label="This Month EMI" value={fmtINR(thisMonthEmi)}
+            subtitle="auto-deducted via payroll"
+            variant="neutral" />
+          <MetricCard icon={Banknote} label="Total Outstanding" value={fmtINR(totalOutstanding)}
+            subtitle="across advances + loans"
+            variant="neutral" />
+        </MetricRow>
       </div>
 
       {/* Tab nav */}

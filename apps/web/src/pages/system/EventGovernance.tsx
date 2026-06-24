@@ -32,6 +32,7 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { SubTabs }       from '@/components/ui/SubTabs'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
@@ -844,11 +845,11 @@ function StatsTab() {
   const sortedByType = [...byType].sort((a, b) => b.count - a.count)
 
   const statusOrder: string[] = ['delivered', 'failed', 'replayed', 'dead_lettered']
-  const STATUS_CARD_COLORS: Record<string, string> = {
-    delivered:    'text-success',
-    failed:       'text-destructive',
-    replayed:     'text-info',
-    dead_lettered: 'text-destructive',
+  const STATUS_CARD_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'destructive' | 'info'> = {
+    delivered:    'success',
+    failed:       'destructive',
+    replayed:     'info',
+    dead_lettered: 'destructive',
   }
 
   return (
@@ -888,18 +889,16 @@ function StatsTab() {
       {!isLoading && !isError && (
         <>
           {/* By status cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <MetricRow cols={4}>
             {statusOrder.map(key => (
-              <div key={key} className="rounded-lg border border-border bg-card px-4 py-3">
-                <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide">
-                  {key.replace(/_/g, ' ')}
-                </p>
-                <p className={`text-2xl font-bold tabular-nums ${STATUS_CARD_COLORS[key] ?? 'text-foreground'}`}>
-                  {(byStatus[key] ?? 0).toLocaleString()}
-                </p>
-              </div>
+              <MetricCard
+                key={key}
+                label={key.replace(/_/g, ' ')}
+                value={(byStatus[key] ?? 0).toLocaleString()}
+                variant={STATUS_CARD_VARIANT[key] ?? 'neutral'}
+              />
             ))}
-          </div>
+          </MetricRow>
 
           {/* By type */}
           <SectionCard title="Events by Type" noPadding>

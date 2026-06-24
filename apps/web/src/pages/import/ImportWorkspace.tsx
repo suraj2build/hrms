@@ -50,6 +50,7 @@ import {
   TrendingUp,
   BarChart3,
 } from 'lucide-react'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
@@ -728,35 +729,6 @@ function StepIndicator({ current }: { current: Step }) {
           </React.Fragment>
         )
       })}
-    </div>
-  )
-}
-
-// ─── Stat Card ─────────────────────────────────────────────────────────────────
-
-interface StatCardProps {
-  label: string
-  value: number
-  variant: 'neutral' | 'success' | 'destructive' | 'warning'
-}
-
-function StatCard({ label, value, variant }: StatCardProps) {
-  const colorMap = {
-    neutral: 'text-foreground',
-    success: 'text-success',
-    destructive: 'text-destructive',
-    warning: 'text-warning',
-  }
-  const bgMap = {
-    neutral: 'bg-muted/50',
-    success: 'bg-success/10',
-    destructive: 'bg-destructive/10',
-    warning: 'bg-warning/10',
-  }
-  return (
-    <div className={cn('rounded-lg p-4 flex flex-col gap-1', bgMap[variant])}>
-      <span className={cn('text-2xl font-bold', colorMap[variant])}>{value}</span>
-      <span className="text-xs text-muted-foreground">{label}</span>
     </div>
   )
 }
@@ -1650,12 +1622,12 @@ export function ImportWorkspace() {
                   {validationResult && (
                     <div className="space-y-4">
                       {/* Summary Cards */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        <StatCard label="Total Rows" value={validationResult.totalRows} variant="neutral" />
-                        <StatCard label="Valid Rows" value={validationResult.validRows} variant="success" />
-                        <StatCard label="Invalid Rows" value={validationResult.invalidRows} variant="destructive" />
-                        <StatCard label="Duplicates" value={validationResult.duplicateRows ?? 0} variant="warning" />
-                      </div>
+                      <MetricRow cols={4}>
+                        <MetricCard label="Total Rows" value={validationResult.totalRows} variant="neutral" />
+                        <MetricCard label="Valid Rows" value={validationResult.validRows} variant="success" />
+                        <MetricCard label="Invalid Rows" value={validationResult.invalidRows} variant="destructive" />
+                        <MetricCard label="Duplicates" value={validationResult.duplicateRows ?? 0} variant="warning" />
+                      </MetricRow>
 
                       {/* Success state */}
                       {validationResult.invalidRows === 0 && (
@@ -1894,12 +1866,12 @@ export function ImportWorkspace() {
                   )}
 
                   {/* Result cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <StatCard label="Created" value={importResult.created} variant="success" />
-                    <StatCard label="Updated" value={importResult.updated} variant="neutral" />
-                    <StatCard label="Failed" value={importResult.failed} variant="destructive" />
-                    <StatCard label="Skipped" value={importResult.skipped} variant="warning" />
-                  </div>
+                  <MetricRow cols={4}>
+                    <MetricCard label="Created" value={importResult.created} variant="success" />
+                    <MetricCard label="Updated" value={importResult.updated} variant="neutral" />
+                    <MetricCard label="Failed" value={importResult.failed} variant="destructive" />
+                    <MetricCard label="Skipped" value={importResult.skipped} variant="warning" />
+                  </MetricRow>
 
                   {/* Failed row loading indicator */}
                   {importResult.failed > 0 && failedRowsLoading && (

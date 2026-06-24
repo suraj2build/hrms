@@ -29,6 +29,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 
@@ -218,18 +219,13 @@ export function CertificationWorkspace() {
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-          {[
-            { label: 'Total',         value: stats.total,        color: 'text-foreground'   },
-            { label: 'Active',        value: stats.by_status?.active  ?? 0, color: 'text-success' },
-            { label: 'Expiring (30d)',value: stats.expiring_30d,  color: 'text-warning'    },
-            { label: 'Expired',       value: stats.by_status?.expired ?? 0, color: 'text-destructive'     },
-          ].map(s => (
-            <div key={s.label} className="rounded-xl border bg-card p-4">
-              <p className={cn('text-2xl font-bold', s.color)}>{s.value}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-            </div>
-          ))}
+        <div className="mb-4">
+          <MetricRow cols={4}>
+            <MetricCard label="Total"          value={stats.total}                  variant="neutral" />
+            <MetricCard label="Active"         value={stats.by_status?.active  ?? 0} variant="success" />
+            <MetricCard label="Expiring (30d)" value={stats.expiring_30d}           variant="warning" />
+            <MetricCard label="Expired"        value={stats.by_status?.expired ?? 0} variant="destructive" />
+          </MetricRow>
         </div>
       )}
 
