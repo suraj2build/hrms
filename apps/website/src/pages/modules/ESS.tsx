@@ -13,15 +13,40 @@ import { SiteShell } from "@/components/site/SiteShell";
 import { DemoButtons } from "@/components/site/DemoButtons";
 import { Reveal } from "@/components/site/Reveal";
 import { MobileESSMock } from "@/components/site/MobileESSMock";
+import { MobileShowcase } from "@/components/site/MobileShowcase";
 
 export default function ESSPage() {
   return (
     <SiteShell>
       <ESSHero />
       <PainPoints />
+      <MobileShowcaseSection />
       <FeatureDeepDive />
       <BottomCTA />
     </SiteShell>
+  );
+}
+
+/* ---------------- MOBILE SHOWCASE ---------------- */
+function MobileShowcaseSection() {
+  return (
+    <section className="relative overflow-hidden bg-gradient-to-b from-[#EEF3FF] to-card py-20 sm:py-28">
+      <div className="container-page">
+        <Reveal className="mx-auto max-w-2xl text-center">
+          <span className="chip">CognixHR mobile</span>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">
+            Everything employees need, in one app
+          </h2>
+          <p className="mt-3 text-base text-muted-foreground">
+            Punch attendance with GPS &amp; selfie, view payslips, apply for leave and clear
+            approvals — from anywhere, in seconds.
+          </p>
+        </Reveal>
+        <Reveal delay={120} className="mt-14">
+          <MobileShowcase />
+        </Reveal>
+      </div>
+    </section>
   );
 }
 
