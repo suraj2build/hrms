@@ -131,10 +131,10 @@ async function run() {
   // ── 3. Grades ───────────────────────────────────────────────────────────────
   console.log('3/10  Grades…')
   await sb.from('grades').upsert([
-    { id: GRADE.A, tenant_id: TENANT_ID, name: 'Band A', code: 'A', min_salary: 200000,  max_salary: 400000  },
-    { id: GRADE.B, tenant_id: TENANT_ID, name: 'Band B', code: 'B', min_salary: 400000,  max_salary: 700000  },
-    { id: GRADE.C, tenant_id: TENANT_ID, name: 'Band C', code: 'C', min_salary: 700000,  max_salary: 1200000 },
-    { id: GRADE.D, tenant_id: TENANT_ID, name: 'Band D', code: 'D', min_salary: 1200000, max_salary: 2000000 },
+    { id: GRADE.A, tenant_id: TENANT_ID, name: 'Band A', code: 'A', ctc_min_annual: 200000,  ctc_max_annual: 400000  },
+    { id: GRADE.B, tenant_id: TENANT_ID, name: 'Band B', code: 'B', ctc_min_annual: 400000,  ctc_max_annual: 700000  },
+    { id: GRADE.C, tenant_id: TENANT_ID, name: 'Band C', code: 'C', ctc_min_annual: 700000,  ctc_max_annual: 1200000 },
+    { id: GRADE.D, tenant_id: TENANT_ID, name: 'Band D', code: 'D', ctc_min_annual: 1200000, ctc_max_annual: 2000000 },
   ], { onConflict: 'id' })
 
   // ── 4. Shifts ───────────────────────────────────────────────────────────────
