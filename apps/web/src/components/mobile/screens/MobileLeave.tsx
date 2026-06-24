@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
+import { UpcomingHolidays } from './parts'
 
 interface BalanceRow { leave_type_id: string; balance: number; leave_types: { name: string } }
 interface LeaveApp {
@@ -94,6 +95,8 @@ export function MobileLeave({ base }: { base: string }) {
           ))}
         </div>
       </div>
+
+      <UpcomingHolidays limit={3} />
     </div>
   )
 }

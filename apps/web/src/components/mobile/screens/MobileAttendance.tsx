@@ -14,11 +14,21 @@ const todayStr = () => new Date().toLocaleDateString('en-CA') // YYYY-MM-DD, loc
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'
 
+function weekRange() {
+  const now = new Date()
+  const day = (now.getDay() + 6) % 7 // Mon=0
+  const mon = new Date(now); mon.setDate(now.getDate() - day)
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
+  const f = (d: Date) => d.toLocaleDateString('en-CA')
+  return { from: f(mon), to: f(sun) }
+}
+
 export function MobileAttendance({ base: _base }: { base: string }) {
   const { profile } = useAuthStore()
   const employeeId = profile?.employee_id ?? ''
   const qc = useQueryClient()
   const today = todayStr()
+  const wk = weekRange()
 
   const { data } = useQuery<AttendanceResponse>({
     queryKey: ['mobile-attendance', employeeId, today],
@@ -26,6 +36,21 @@ export function MobileAttendance({ base: _base }: { base: string }) {
     enabled: !!employeeId,
     staleTime: 30_000,
   })
+
+  const { data: weekData } = useQuery<AttendanceResponse>({
+    queryKey: ['mobile-attendance-week', employeeId, wk.from],
+    queryFn: () => api.get<AttendanceResponse>(`/attendance/${employeeId}?from=${wk.from}&to=${wk.to}`),
+    enabled: !!employeeId,
+    staleTime: 60_000,
+  })
+
+  const week = useMemo(() => {
+    const daily = weekData?.daily ?? []
+    const present = daily.filter((d) => d.status === 'present' || d.status === 'late').length
+    const late = daily.filter((d) => d.status === 'late').length
+    const absent = daily.filter((d) => d.status === 'absent' || d.status === 'lop').length
+    return { present, late, absent }
+  }, [weekData])
 
   const logs = useMemo(() => data?.logs ?? [], [data])
   const todayLog = logs.find((l) => (l.check_in ?? l.check_out)?.slice(0, 10) === today)
@@ -69,6 +94,23 @@ export function MobileAttendance({ base: _base }: { base: string }) {
           {!checkedIn && <Camera className="h-4 w-4 opacity-80" />}
         </button>
       </div>
+
+      {/* This week summary */}
+      <div className="grid grid-cols-3 gap-2.5">
+        {[
+          { v: week.present, l: 'Present', tint: '#1A8050' },
+          { v: week.late, l: 'Late', tint: '#B07B18' },
+          { v: week.absent, l: 'Absent', tint: '#C93535' },
+        ].map((s) => (
+          <div key={s.l} className="rounded-2xl bg-white p-3 text-center shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+            <p className="text-xl font-extrabold text-[#0F172A]">{s.v}</p>
+            <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.tint }} />{s.l}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="-mb-1 px-1 text-[10px] text-muted-foreground">This week</p>
 
       {/* Recent */}
       <p className="px-1 pt-1 text-xs font-bold text-[#0F172A]">Today's punches</p>

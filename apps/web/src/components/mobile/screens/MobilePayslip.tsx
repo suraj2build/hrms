@@ -22,6 +22,8 @@ export function MobilePayslip({ base }: { base: string }) {
 
   const slips = data?.data ?? []
   const latest = slips[0]
+  const ytdNet = slips.reduce((s, x) => s + (x.net_pay ?? 0), 0)
+  const ytdGross = slips.reduce((s, x) => s + (x.gross_pay ?? 0), 0)
 
   return (
     <div className="space-y-3">
@@ -42,6 +44,22 @@ export function MobilePayslip({ base }: { base: string }) {
           <FileText className="h-4 w-4" /> View full breakdown
         </button>
       </div>
+
+      {/* YTD summary */}
+      {slips.length > 0 && (
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="rounded-2xl bg-white p-3.5 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+            <span className="block h-1.5 w-6 rounded-full bg-[#1A8050]" />
+            <p className="mt-2 text-base font-extrabold tracking-tight text-[#0F172A]">{inr(ytdNet)}</p>
+            <p className="text-[10px] text-muted-foreground">Net paid (FY)</p>
+          </div>
+          <div className="rounded-2xl bg-white p-3.5 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+            <span className="block h-1.5 w-6 rounded-full bg-[#2E6FE6]" />
+            <p className="mt-2 text-base font-extrabold tracking-tight text-[#0F172A]">{inr(ytdGross)}</p>
+            <p className="text-[10px] text-muted-foreground">Gross (FY)</p>
+          </div>
+        </div>
+      )}
 
       {/* Payslip history */}
       <p className="px-1 pt-1 text-xs font-bold text-[#0F172A]">Payslip history</p>
