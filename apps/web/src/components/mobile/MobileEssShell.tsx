@@ -110,9 +110,9 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
 /** Route → mobile screen. Unhandled ESS routes fall back to the existing page. */
 function MobileRouter({ base }: { base: string }) {
   const { pathname } = useLocation()
-  const sub = pathname.replace(base, '') || '/dashboard'
+  const sub = pathname.replace(base, '') || '/home'
 
-  if (sub === '' || sub === '/' || sub.startsWith('/dashboard')) return <MobileHome base={base} />
+  if (sub === '' || sub === '/' || sub.startsWith('/home') || sub.startsWith('/dashboard')) return <MobileHome base={base} />
   if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />

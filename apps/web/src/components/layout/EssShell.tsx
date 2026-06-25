@@ -10,6 +10,7 @@ import { Suspense, useState } from 'react'
 import { Loader2, AlertTriangle, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { EmployeeSidebar } from './EmployeeSidebar'
+import { EssContextPanel } from './EssContextPanel'
 import { Topbar } from './Topbar'
 import { useAuthStore } from '@/stores/authStore'
 import { EventToast }    from '@/components/notifications'
@@ -127,12 +128,16 @@ export function EssShell() {
         {/* Inner Suspense — catches lazy-route chunk loading so the ESS shell
             chrome (Topbar, EmployeeSidebar) stays mounted while pages load. */}
         <AnomalyLoginAlert />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <EventToast />
-          <Suspense fallback={<ShellPageLoader />}>
-            <Outlet />
-          </Suspense>
-        </main>
+        <div className="flex flex-1 overflow-hidden">
+          <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <EventToast />
+            <Suspense fallback={<ShellPageLoader />}>
+              <Outlet />
+            </Suspense>
+          </main>
+          {/* Right context panel — birthdays, anniversaries, holidays, kudos */}
+          <EssContextPanel />
+        </div>
       </div>
     </div>
   )

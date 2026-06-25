@@ -16,7 +16,7 @@ export interface MobileTab {
 // eslint-disable-next-line react-refresh/only-export-components -- tab config colocated with the nav by design
 export function employeeTabs(base: string): MobileTab[] {
   return [
-    { key: 'home',      label: 'Home',      icon: Home,       path: `${base}/dashboard` },
+    { key: 'home',      label: 'Home',      icon: Home,       path: `${base}/home` },
     { key: 'flowdesk',  label: 'FlowDesk',  icon: Inbox,      path: `${base}/flowdesk` },
     { key: 'community', label: 'Community', icon: Users,      path: `${base}/community` },
     { key: 'more',      label: 'More',      icon: LayoutGrid, path: `${base}/more` },

@@ -606,7 +606,7 @@ function RoleRedirect() {
 
   // Managers get their own dedicated console; hr_admin/super_admin get the admin portal.
   if (profile.role === 'manager')     return <Navigate to="/manager/dashboard" replace />
-  if (profile.role === 'employee')    return <Navigate to="/ess/dashboard"      replace />
+  if (profile.role === 'employee')    return <Navigate to="/ess/home"           replace />
   return <Navigate to="/admin/dashboard" replace />
 }
 
@@ -953,7 +953,8 @@ export default function App() {
 
                 {/* Employee self-service — /manager/self/* stays inside ManagerShell */}
                 {/* Prevents shell/sidebar switch when manager clicks Employee section items */}
-                <Route path="/manager/self/dashboard"                    element={<EmployeeDashboard />} />
+                <Route path="/manager/self/home"                         element={<EmployeeDashboard />} />
+                <Route path="/manager/self/dashboard"                    element={<Navigate to="/manager/self/home" replace />} />
                 <Route path="/manager/self/attendance"                   element={<MyAttendance />} />
                 <Route path="/manager/self/attendance/regularization"    element={<Navigate to="/manager/self/attendance" replace />} />
                 <Route path="/manager/self/leave/balance"                element={<EssLeaveBalance />} />
@@ -992,7 +993,8 @@ export default function App() {
               {/* ── ESS portal: /ess/* ─────────────────────────────────────── */}
               <Route element={<EssShell />}>
 
-                <Route path="/ess/dashboard"              element={<EmployeeDashboard />} />
+                <Route path="/ess/home"                   element={<EmployeeDashboard />} />
+                <Route path="/ess/dashboard"              element={<Navigate to="/ess/home" replace />} />
                 <Route path="/ess/recognition"            element={<EssRecognition />} />
                 <Route path="/ess/community"              element={<EssCommunity />} />
                 <Route path="/ess/flowdesk"               element={<EssFlowDesk />} />
