@@ -147,7 +147,7 @@ export function MobileHome({ base }: { base: string }) {
           <span className="grid h-4 w-4 place-items-center rounded-full bg-[#15B8A6]"><span className="h-1.5 w-1.5 animate-ping rounded-full bg-white" /></span>
           Happening now
         </p>
-        <button onClick={() => navigate(`${base}/community`)} className="text-[11px] font-semibold text-[#2E6FE6]">Open Community</button>
+        <button onClick={() => navigate(`${base}/community`)} className="text-[11px] font-semibold text-[#1A4D8F]">Open Community</button>
       </div>
 
       {feed.length === 0 ? (
@@ -156,7 +156,7 @@ export function MobileHome({ base }: { base: string }) {
           <p className="mt-3 text-sm font-semibold text-foreground">It's quiet in here</p>
           <p className="mt-1 text-xs text-muted-foreground">Share an update or recognize a colleague to get things going.</p>
           <div className="mt-4 flex justify-center gap-2">
-            <button onClick={() => navigate(`${base}/community`)} className="rounded-xl px-4 py-2 text-xs font-bold text-white" style={glossy('#2E6FE6', '#15B8A6')}>Post update</button>
+            <button onClick={() => navigate(`${base}/community`)} className="rounded-xl px-4 py-2 text-xs font-bold text-white" style={glossy('#1A4D8F', '#15B8A6')}>Post update</button>
             <button onClick={() => navigate(`${base}/recognition`)} className="rounded-xl border border-[#7C3AED]/30 bg-[#7C3AED]/5 px-4 py-2 text-xs font-bold text-[#7C3AED]">Give kudos</button>
           </div>
         </div>

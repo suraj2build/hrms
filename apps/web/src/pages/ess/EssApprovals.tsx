@@ -167,7 +167,7 @@ function NoPending({ msg }: { msg: string }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function EssApprovals() {
+export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) {
   const { profile }  = useAuthStore()
   const employeeId   = profile?.employee_id ?? null
 
@@ -215,27 +215,26 @@ export function EssApprovals() {
   // ── Profile guard ──────────────────────────────────────────────────────────
 
   if (!employeeId) {
+    const guard = (
+      <SectionCard>
+        <div className="flex flex-col items-center gap-2 py-12">
+          <AlertTriangle className="h-7 w-7 text-warning opacity-60" />
+          <p className="text-sm font-medium text-foreground">Profile not linked</p>
+          <p className="text-xs text-muted-foreground">Contact HR to link your account to an employee record.</p>
+        </div>
+      </SectionCard>
+    )
+    if (embedded) return guard
     return (
       <PageContainer>
         <PageHeader title="My Approvals" subtitle="Track all pending workflow requests" />
-        <SectionCard>
-          <div className="flex flex-col items-center gap-2 py-12">
-            <AlertTriangle className="h-7 w-7 text-warning opacity-60" />
-            <p className="text-sm font-medium text-foreground">Profile not linked</p>
-            <p className="text-xs text-muted-foreground">Contact HR to link your account to an employee record.</p>
-          </div>
-        </SectionCard>
+        {guard}
       </PageContainer>
     )
   }
 
-  return (
-    <PageContainer>
-      <PageHeader
-        title="My Approvals"
-        subtitle="All pending workflow requests across leave, corrections, reimbursements, and comp-off"
-      />
-
+  const body = (
+    <>
       {/* ── Overview banner ────────────────────────────────────────────────── */}
       {totalPending > 0 ? (
         <div className="flex items-start gap-2.5 rounded-lg border border-warning/25 bg-warning/5 px-4 py-3 text-xs text-warning">
@@ -385,6 +384,18 @@ export function EssApprovals() {
           payroll processing date each month.
         </span>
       </div>
+    </>
+  )
+
+  if (embedded) return body
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="My Approvals"
+        subtitle="All pending workflow requests across leave, corrections, reimbursements, and comp-off"
+      />
+      {body}
     </PageContainer>
   )
 }

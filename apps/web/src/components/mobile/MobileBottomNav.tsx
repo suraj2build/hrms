@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Home, Users, Award, LayoutGrid, Plus } from 'lucide-react'
+import { Home, Inbox, Users, LayoutGrid, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { glossy } from './glossy'
 
@@ -11,15 +11,15 @@ export interface MobileTab {
 }
 
 /** Employee bottom-nav tabs. `base` is /ess or /manager/self.
- *  ESS 2.0: Community + Recognition are primary; Attendance/Leave/Payslip live
- *  on Home (quick actions) and in More. */
+ *  ESS 2.0: Home · FlowDesk · ＋Punch · Community · More. FlowDesk is the unified
+ *  tasks/approvals/requests pillar; Recognition (Kudos) lives on Home + in More. */
 // eslint-disable-next-line react-refresh/only-export-components -- tab config colocated with the nav by design
 export function employeeTabs(base: string): MobileTab[] {
   return [
-    { key: 'home',        label: 'Home',        icon: Home,      path: `${base}/dashboard` },
-    { key: 'community',   label: 'Community',   icon: Users,     path: `${base}/community` },
-    { key: 'recognition', label: 'Kudos',       icon: Award,     path: `${base}/recognition` },
-    { key: 'more',        label: 'More',        icon: LayoutGrid, path: `${base}/more` },
+    { key: 'home',      label: 'Home',      icon: Home,       path: `${base}/dashboard` },
+    { key: 'flowdesk',  label: 'FlowDesk',  icon: Inbox,      path: `${base}/flowdesk` },
+    { key: 'community', label: 'Community', icon: Users,      path: `${base}/community` },
+    { key: 'more',      label: 'More',      icon: LayoutGrid, path: `${base}/more` },
   ]
 }
 
@@ -46,7 +46,7 @@ export function MobileBottomNav({
           aria-label="Quick punch"
           onClick={onFab}
           className="absolute left-1/2 top-0 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-2xl text-white"
-          style={glossy('#2E6FE6', '#15B8A6')}
+          style={glossy('#1A4D8F', '#15B8A6')}
         >
           <Plus className="h-6 w-6" />
         </button>
@@ -58,7 +58,7 @@ export function MobileBottomNav({
 function NavBtn({ tab, active, onClick }: { tab: MobileTab; active: boolean; onClick: () => void }) {
   const Icon = tab.icon
   return (
-    <button onClick={onClick} className={cn('flex flex-col items-center gap-0.5', active ? 'text-[#2E6FE6]' : 'text-muted-foreground')}>
+    <button onClick={onClick} className={cn('flex flex-col items-center gap-0.5', active ? 'text-[#1A4D8F]' : 'text-muted-foreground')}>
       <Icon className="h-[18px] w-[18px]" />
       <span className="text-[9px] font-medium">{tab.label}</span>
     </button>

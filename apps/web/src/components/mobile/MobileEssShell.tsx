@@ -15,6 +15,7 @@ import { MobileMore } from './screens/MobileMore'
 import { MobileTeam } from './screens/MobileTeam'
 import { MobileRecognition } from './screens/MobileRecognition'
 import { MobileCommunity } from './screens/MobileCommunity'
+import { MobileFlowDesk } from './screens/MobileFlowDesk'
 
 type Persona = 'me' | 'team'
 
@@ -67,7 +68,7 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
           </span>
           <button aria-label="Notifications" onClick={() => navigate(`${base}/approvals`)} className="relative">
             <Bell className="h-5 w-5 text-white/90" />
-            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#2E6FE6]" />
+            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#1A4D8F]" />
           </button>
         </div>
 
@@ -116,6 +117,7 @@ function MobileRouter({ base }: { base: string }) {
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />
   if (sub.startsWith('/approvals')) return <MobileApprovals base={base} />
+  if (sub.startsWith('/flowdesk')) return <MobileFlowDesk base={base} />
   if (sub.startsWith('/recognition')) return <MobileRecognition base={base} />
   if (sub.startsWith('/community')) return <MobileCommunity base={base} />
   if (sub.startsWith('/more')) return <MobileMore base={base} />

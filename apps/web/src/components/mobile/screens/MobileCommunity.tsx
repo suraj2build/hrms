@@ -79,7 +79,7 @@ export function MobileCommunity({ base: _base }: { base: string }) {
           ) : <span />}
           <button disabled={!body.trim() || post.isPending} onClick={() => post.mutate()}
             className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
-            style={glossy('#2E6FE6', '#15B8A6')}>
+            style={glossy('#1A4D8F', '#15B8A6')}>
             <Send className="h-3.5 w-3.5" /> {post.isPending ? 'Posting…' : 'Post'}
           </button>
         </div>
@@ -184,7 +184,7 @@ function Comments({ postId }: { postId: string }) {
           onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) add.mutate() }}
           className="flex-1 rounded-full border border-border bg-white px-3.5 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-[#2E6FE6] focus:outline-none" />
         <button disabled={!text.trim() || add.isPending} onClick={() => add.mutate()}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white disabled:opacity-50" style={glossy('#2E6FE6', '#15B8A6')}>
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white disabled:opacity-50" style={glossy('#1A4D8F', '#15B8A6')}>
           <Send className="h-4 w-4" />
         </button>
       </div>

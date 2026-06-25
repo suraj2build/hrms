@@ -70,7 +70,7 @@ export function MobileLeave({ base }: { base: string }) {
       <button
         onClick={() => navigate(`${base}/leave/balance`)}
         className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white"
-        style={glossy('#2E6FE6', '#15B8A6')}
+        style={glossy('#1A4D8F', '#15B8A6')}
       >
         <Plus className="h-4 w-4" /> Apply for leave
       </button>
