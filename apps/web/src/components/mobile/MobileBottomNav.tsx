@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Home, Clock3, CalendarDays, Wallet, LayoutGrid, Plus } from 'lucide-react'
+import { Home, Users, Award, LayoutGrid, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { glossy } from './glossy'
 
@@ -10,15 +10,16 @@ export interface MobileTab {
   path: string
 }
 
-/** Employee bottom-nav tabs. `base` is /ess or /manager/self. */
+/** Employee bottom-nav tabs. `base` is /ess or /manager/self.
+ *  ESS 2.0: Community + Recognition are primary; Attendance/Leave/Payslip live
+ *  on Home (quick actions) and in More. */
 // eslint-disable-next-line react-refresh/only-export-components -- tab config colocated with the nav by design
 export function employeeTabs(base: string): MobileTab[] {
   return [
-    { key: 'home',       label: 'Home',       icon: Home,         path: `${base}/dashboard` },
-    { key: 'attendance', label: 'Attendance', icon: Clock3,       path: `${base}/attendance` },
-    { key: 'leave',      label: 'Leave',      icon: CalendarDays, path: `${base}/leave/balance` },
-    { key: 'payslip',    label: 'Payslip',    icon: Wallet,       path: `${base}/compensation` },
-    { key: 'more',       label: 'More',       icon: LayoutGrid,   path: `${base}/more` },
+    { key: 'home',        label: 'Home',        icon: Home,      path: `${base}/dashboard` },
+    { key: 'community',   label: 'Community',   icon: Users,     path: `${base}/community` },
+    { key: 'recognition', label: 'Kudos',       icon: Award,     path: `${base}/recognition` },
+    { key: 'more',        label: 'More',        icon: LayoutGrid, path: `${base}/more` },
   ]
 }
 
@@ -29,9 +30,7 @@ export function MobileBottomNav({
   const { pathname } = useLocation()
 
   const isActive = (t: MobileTab) =>
-    pathname === t.path || pathname.startsWith(t.path + '/') ||
-    (t.key === 'leave' && pathname.includes('/leave')) ||
-    (t.key === 'payslip' && pathname.includes('/compensation'))
+    pathname === t.path || pathname.startsWith(t.path + '/')
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white bg-white/95 backdrop-blur"

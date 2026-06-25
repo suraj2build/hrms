@@ -13,6 +13,8 @@ import { MobilePayslip } from './screens/MobilePayslip'
 import { MobileApprovals } from './screens/MobileApprovals'
 import { MobileMore } from './screens/MobileMore'
 import { MobileTeam } from './screens/MobileTeam'
+import { MobileRecognition } from './screens/MobileRecognition'
+import { MobileCommunity } from './screens/MobileCommunity'
 
 type Persona = 'me' | 'team'
 
@@ -114,6 +116,8 @@ function MobileRouter({ base }: { base: string }) {
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />
   if (sub.startsWith('/approvals')) return <MobileApprovals base={base} />
+  if (sub.startsWith('/recognition')) return <MobileRecognition base={base} />
+  if (sub.startsWith('/community')) return <MobileCommunity base={base} />
   if (sub.startsWith('/more')) return <MobileMore base={base} />
 
   // Any other ESS route → render the existing (desktop) page in the mobile container.
