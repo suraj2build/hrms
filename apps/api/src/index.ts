@@ -93,6 +93,7 @@ import attendanceRunDetailsRoute      from './routes/attendance/run-details.js'
 import attendanceRegularisationRoute  from './routes/attendance/regularisation.js'
 import wfhRoutes                       from './routes/attendance/wfh.js'
 import recognitionRoutes               from './routes/recognition/index.js'
+import communityRoutes                  from './routes/community/index.js'
 import attendanceLeaveRoute           from './routes/attendance/leave.js'
 import attendanceMusterRoute          from './routes/attendance/muster.js'
 import attendanceMusterUploadRoute    from './routes/attendance/muster-upload.js'
@@ -591,6 +592,7 @@ async function start() {
   await fastify.register(regularisationPolicyRoutes)      // /attendance/regularisation/policy + /sla-report
   await fastify.register(wfhRoutes)                       // /attendance/wfh/* — proactive WFH requests
   await fastify.register(recognitionRoutes)               // /recognition/* — ESS 2.0 Rewards pillar
+  await fastify.register(communityRoutes)                 // /community/* — ESS 2.0 Community feed
   await fastify.register(attendanceRegularisationRoute)  // /attendance/regularisation/*
   await fastify.register(attendanceLeaveRoute)           // /attendance/leave/*
   await fastify.register(attendanceRecomputeRoute)       // POST /attendance/recompute
