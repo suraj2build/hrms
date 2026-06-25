@@ -112,6 +112,36 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── GET /recognition/leaderboard ────────────────────────────────────────────
+  fastify.get('/recognition/leaderboard', auth, async (req: any, reply) => {
+    const { data: rows, error } = await fastify.supabase
+      .from('recognition').select('to_employee, points')
+      .eq('tenant_id', req.tenantId)
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load leaderboard' })
+
+    const agg = new Map<string, { points: number; count: number }>()
+    for (const r of (rows ?? []) as any[]) {
+      const cur = agg.get(r.to_employee) ?? { points: 0, count: 0 }
+      cur.points += r.points ?? 0
+      cur.count  += 1
+      agg.set(r.to_employee, cur)
+    }
+    const top = [...agg.entries()]
+      .sort((a, b) => b[1].points - a[1].points || b[1].count - a[1].count)
+      .slice(0, 10)
+
+    const { data: emps } = top.length
+      ? await fastify.supabase.from('employees').select('id, first_name, last_name')
+          .eq('tenant_id', req.tenantId).in('id', top.map(([id]) => id))
+      : { data: [] as any[] }
+    const nameMap = new Map((emps ?? []).map((e: any) => [e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim()]))
+
+    const data = top.map(([id, v], i) => ({
+      rank: i + 1, employee_id: id, name: nameMap.get(id) ?? 'Unknown', points: v.points, count: v.count,
+    }))
+    return reply.send({ data })
+  })
+
   // ── POST /recognition ───────────────────────────────────────────────────────
   fastify.post('/recognition', auth, async (req: any, reply) => {
     const schema = z.object({
@@ -129,17 +159,19 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
     // Recipient must belong to the same tenant.
     const { data: recipient } = await fastify.supabase
-      .from('employees').select('id')
+      .from('employees').select('id, first_name, last_name')
       .eq('id', parsed.data.to_employee).eq('tenant_id', req.tenantId).maybeSingle()
     if (!recipient) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Recipient not found' })
 
-    // Points come from the chosen badge (server-resolved, never trusted from client).
+    // Points + label come from the chosen badge (server-resolved, never trusted from client).
     let points = 0
+    let badgeLabel: string | null = null
     if (parsed.data.badge_code) {
       const { data: badge } = await fastify.supabase
-        .from('recognition_badges').select('points')
+        .from('recognition_badges').select('points, label')
         .eq('tenant_id', req.tenantId).eq('code', parsed.data.badge_code).maybeSingle()
-      points = (badge as { points?: number } | null)?.points ?? 0
+      points     = (badge as { points?: number } | null)?.points ?? 0
+      badgeLabel = (badge as { label?: string } | null)?.label ?? null
     }
 
     const { data, error } = await fastify.supabase
@@ -156,6 +188,20 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record recognition' })
+
+    // Public recognition also flows into the Community feed (blueprint intent).
+    // Best-effort: a feed failure must not fail the recognition itself.
+    if (parsed.data.visibility === 'public') {
+      const toName = `${(recipient as any).first_name ?? ''} ${(recipient as any).last_name ?? ''}`.trim() || 'a colleague'
+      await fastify.supabase.from('feed_posts').insert({
+        tenant_id:       req.tenantId,
+        author_employee: fromEmployee,
+        type:            'recognition',
+        title:           badgeLabel,
+        body:            `👏 Recognized ${toName}${parsed.data.message ? ` — ${parsed.data.message}` : ''}`,
+      }).then(undefined, () => { /* feed best-effort */ })
+    }
+
     return reply.code(201).send({ data })
   })
 }
