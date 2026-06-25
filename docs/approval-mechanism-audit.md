@@ -44,6 +44,7 @@ entity-specific approve endpoints. **Configuring a chain has no effect.**
 | **Comp-off** | `/attendance/comp-off` | manager/HR | 1 | ❌ **empty `{}`** | partial | ✅ |
 | **Reimbursement** | `/payroll/reimbursements/*` | manager→HR | ~2 | varies | partial | ✅ |
 | **Loans / advances** | `/payroll/ess/manager/*` | manager (L1) → HR (L2) | 2 | required | yes | ✅ |
+| **Compensation revision** (salary correction / increment) | `/compensation/revisions` → `…/:id/approve` | **manager or employee raises** (self or direct report only) → **HR admin approves** | 1 (manager-initiated submission + HR approval) | ✅ **required** | yes | ✅ + withdraw/preview |
 | **Bulk leave-approve** | `/payroll/bulk/leave-approve` | **raw UPDATE — no guard** | 1 | n/a | weak | ⚠️ **bypass** |
 | **Requisition** | `/requisitions/:id/approve` or `/approvals/:step/decide` | **HR admin** (chain labels cosmetic) | 1 or 3 | optional | yes | ✅ |
 | **Job offer** | candidate accept/decline (public) | **no internal sign-off**; candidate only | — | hardcoded | partial | ✅ |
@@ -67,7 +68,8 @@ entity-specific approve endpoints. **Configuring a chain has no effect.**
 - **Per-level audit trail dead.** `approval_actions` table exists but is never populated (engine orphaned). Live paths log to `audit_logs` only.
 
 ### B. Approver model
-- **HR-admin-centric.** `HR_ADMIN_ROLES = ['super_admin','hr_admin']` is the only approver tier across most of the system. A reporting manager can only act on: leave, regularisation, overtime, comp-off, loan-L1, and the **separation manager-clearance** step. Everything else (assets, requisitions, offers, letters, FnF, onboarding) is HR-only.
+- **HR-admin-centric.** `HR_ADMIN_ROLES = ['super_admin','hr_admin']` is the only *approver* tier across most of the system. A reporting manager can only **approve**: leave, regularisation, overtime, comp-off, loan-L1, and the **separation manager-clearance** step. A manager can also **initiate** (but not approve) a **compensation revision / salary correction** for a direct report — it lands `pending` for HR approval (`routes/compensation/revisions.ts`). Everything else (assets, requisitions, offers, letters, FnF, onboarding) is HR-only.
+- **Compensation revision is one of the best-designed flows** (and was missed in the first pass): proper requester≠approver separation (manager raises, HR approves), direct-report scoping (`403` otherwise), required rejection reason, status guards (`409` if not `pending`), plus `withdraw` and `preview`. It is the closest thing in the codebase to a correct maker-checker.
 - **Cosmetic chains.** Requisition ("Reporting Manager / HR Head / Finance Head") and Letters (`approver_role`) display chain labels but only check `hrAdminAuth` — the named role/identity is never verified.
 - **No finance tier** anywhere (FnF, offers/salary, reimbursement, payroll) — no maker-checker separation between HR and Finance.
 
@@ -77,6 +79,8 @@ entity-specific approve endpoints. **Configuring a chain has no effect.**
 | 🔴 **Critical** | Pre-joinee approve/reject has **no role guard** (only `authenticate`) | `routes/onboarding/pre-joinee.ts` (approve ~:863, reject ~:1254) | **Any authenticated tenant user can approve a pre-joinee → create/reactivate an employee record.** Sibling `drafts.ts` does an inline HR check; this file has zero `userRole` checks. |
 | 🟠 **High** | Bulk leave-approve does raw `UPDATE status='APPROVED'`, skipping `approveLeaveRequest` | `routes/payroll/bulk-ops.ts` ~:225 | No `validateApprover`, **no self-approval guard**, no atomic balance deduction — a weaker, divergent path that can approve leave the normal path would reject. |
 | 🟡 **Medium** | Recognition has no points-budget cap | `routes/recognition/index.ts` :146 | Any user can mint unlimited recognition points; no per-giver monthly allowance. |
+| 🟡 **Medium** | Compensation revision **approve has no maker-checker within HR** | `routes/compensation/revisions.ts` (approve ~:260) | Approve only checks `isAdmin`, not `requested_by !== userId` — an HR admin who *raises* a salary revision can *self-approve* it. (Manager→HR separation does hold; HR-self does not.) |
+| 🟡 **Medium** | HR can **bypass the revision-approval workflow** via direct comp write | `routes/employees/compensation.ts:410` (`POST /employees/:id/compensation`, HR-only) | Two ways to change pay exist: the audited revision workflow *and* a direct HR write with no approval — same bypass pattern as bulk leave-approve. |
 | ⚪ **Low** | `counts.ts` filters `approval_instances` on a **non-existent `status` column** | `routes/operations/counts.ts:38` | Latent bug; count is meaningless (table also empty). |
 
 ### D. Consistency
@@ -124,6 +128,7 @@ entity-specific approve endpoints. **Configuring a chain has no effect.**
 3. **Require a rejection reason consistently** — add `reason: z.string().min(1)` to overtime, comp-off, leave, regularisation, requisition, letters, separation, assets reject handlers.
 4. **Fix `counts.ts`** non-existent-column query (or drop the dead count).
 5. **Add a recognition monthly points budget** per giver.
+6. **Block self-approval on compensation revisions** — reject when `requested_by === userId` (an HR admin shouldn't approve their own salary revision); decide whether the direct HR comp-write (`POST /employees/:id/compensation`) should be retained as an intentional override or routed through the revision workflow.
 
 ### P1 — Make ONE engine the source of truth (the core fix)
 6. **Pick one engine** (recommend the `053` config + `workflow-service` instances, since it's simpler and already half-built) and **delete or merge** the governance-evolution duplicate to avoid two models.
