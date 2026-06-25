@@ -81,7 +81,7 @@ export async function fetchFullProfile(
     timed(
       sb.from('job_history')
         .select(
-          'id, employment_type, effective_from, effective_to, reason_for_change, manager_id,' +
+          'id, employment_type, confirmation_date, effective_from, effective_to, reason_for_change, manager_id,' +
           ' departments(id, name, code),' +
           ' designations(id, name),' +
           ' grades(id, name, code),' +
@@ -298,6 +298,7 @@ export async function fetchFullProfile(
     ? {
         id:                jobRow.id,
         employment_type:   jobRow.employment_type,
+        confirmation_date: jobRow.confirmation_date ?? null,
         effective_from:    jobRow.effective_from,
         effective_to:      jobRow.effective_to      ?? null,
         reason_for_change: jobRow.reason_for_change ?? null,

@@ -47,6 +47,8 @@ interface DashFullProfile {
     grades:         { name: string } | null
     work_locations: { name: string; city: string } | null
     manager:        { first_name: string; last_name: string } | null
+    employment_type?:   string | null
+    confirmation_date?: string | null
   } | null
 }
 
@@ -171,6 +173,35 @@ function calcTenure(joining: string | null | undefined): string {
     if (mos === 0) return `${yrs}y`
     return `${yrs}y ${mos}m`
   } catch { return '—' }
+}
+
+// Next service anniversary: years reached + days until + a short date label.
+function anniversaryInfo(joining: string | null | undefined): { years: number; daysUntil: number; label: string } | null {
+  if (!joining) return null
+  try {
+    const j = new Date(joining.length === 10 ? joining + 'T12:00:00Z' : joining)
+    if (isNaN(j.getTime())) return null
+    const now      = new Date()
+    const todayUTC = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 12))
+    let next = new Date(Date.UTC(now.getFullYear(), j.getUTCMonth(), j.getUTCDate(), 12))
+    if (next < todayUTC) next = new Date(Date.UTC(now.getFullYear() + 1, j.getUTCMonth(), j.getUTCDate(), 12))
+    const years     = next.getUTCFullYear() - j.getUTCFullYear()
+    const daysUntil = Math.round((next.getTime() - todayUTC.getTime()) / 86400000)
+    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const label = `${String(next.getUTCDate()).padStart(2, '0')}-${M[next.getUTCMonth()]}`
+    return { years, daysUntil, label }
+  } catch { return null }
+}
+
+// Whole days from today until a date (negative = past). Null if unparseable.
+function daysUntilDate(ds: string | null | undefined): number | null {
+  if (!ds) return null
+  try {
+    const today  = new Date(); today.setHours(0, 0, 0, 0)
+    const target = new Date(ds.length === 10 ? ds + 'T00:00:00' : ds); target.setHours(0, 0, 0, 0)
+    if (isNaN(target.getTime())) return null
+    return Math.round((target.getTime() - today.getTime()) / 86400000)
+  } catch { return null }
 }
 
 function timeAgo(dateStr: string | undefined): string {
@@ -337,6 +368,12 @@ function ProfileBar({ emp, profile: fp }: { emp: Employee | null; profile?: Dash
   const empCode  = pEmp?.employee_code ?? emp?.employee_code ?? '—'
   const joiningDate = pEmp?.joining_date ?? emp?.joining_date
   const tenure   = calcTenure(joiningDate)
+
+  // Probation + service-anniversary status (real data, no fabrication)
+  const onProbation  = job?.employment_type === 'probation'
+  const confirmDays  = daysUntilDate(job?.confirmation_date)
+  const anniversary  = anniversaryInfo(joiningDate)
+  const anniversaryNear = anniversary != null && anniversary.daysUntil <= 30 && anniversary.years >= 1
   const joinedStr   = (() => {
     if (!joiningDate) return null
     const d = new Date(joiningDate.length === 10 ? joiningDate + 'T12:00:00Z' : joiningDate)
@@ -391,6 +428,18 @@ function ProfileBar({ emp, profile: fp }: { emp: Employee | null; profile?: Dash
               {grade}
             </span>
           )}
+          {onProbation && (
+            <span style={{
+              fontSize: 9.5, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' as const,
+              background: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)',
+              border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)',
+              padding: '2px 8px', borderRadius: 999,
+            }}>
+              {confirmDays != null && confirmDays >= 0
+                ? `Probation · confirms in ${confirmDays}d`
+                : 'On probation'}
+            </span>
+          )}
         </div>
         {designation && (
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', letterSpacing: '-.005em' }}>
@@ -426,6 +475,16 @@ function ProfileBar({ emp, profile: fp }: { emp: Employee | null; profile?: Dash
         </span>
         {joinedStr && (
           <span style={{ fontSize: 10.5, color: 'var(--muted-foreground)', marginTop: 2 }}>Joined {joinedStr}</span>
+        )}
+        {anniversaryNear && anniversary && (
+          <span style={{
+            marginTop: 6, fontSize: 10.5, fontWeight: 700,
+            background: 'color-mix(in srgb, var(--primary) 10%, var(--card))', color: 'var(--primary)',
+            border: '1px solid color-mix(in srgb, var(--primary) 25%, transparent)',
+            padding: '3px 9px', borderRadius: 999, whiteSpace: 'nowrap' as const,
+          }}>
+            🎉 {anniversary.years}-yr {anniversary.daysUntil === 0 ? 'anniversary today' : `anniversary in ${anniversary.daysUntil}d`}
+          </span>
         )}
       </div>
     </section>
