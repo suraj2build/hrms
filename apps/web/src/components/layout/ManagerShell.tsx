@@ -11,10 +11,11 @@
  * Employees (role = 'employee') → /ess/dashboard
  */
 
-import { Outlet, Navigate } from 'react-router-dom'
+import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { Suspense }         from 'react'
 import { Loader2 }          from 'lucide-react'
 import { ManagerSidebar }   from './ManagerSidebar'
+import { EssContextPanel }  from './EssContextPanel'
 import { Topbar }           from './Topbar'
 import { useAuthStore }     from '@/stores/authStore'
 import { EventToast }       from '@/components/notifications'
@@ -42,7 +43,9 @@ function LoadingScreen() {
 
 export function ManagerShell() {
   const { profile, isBootstrapping } = useAuthStore()
-  const isMobile = useIsMobile()
+  const isMobile  = useIsMobile()
+  const { pathname } = useLocation()
+  const showPanel = pathname.startsWith('/manager/self')
 
   if (isBootstrapping) return <LoadingScreen />
 
@@ -60,12 +63,15 @@ export function ManagerShell() {
       <ManagerSidebar />
       <div className="flex flex-col flex-1 overflow-hidden">
         <Topbar />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <EventToast />
-          <Suspense fallback={<ShellPageLoader />}>
-            <Outlet />
-          </Suspense>
-        </main>
+        <div className="flex flex-1 overflow-hidden">
+          <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <EventToast />
+            <Suspense fallback={<ShellPageLoader />}>
+              <Outlet />
+            </Suspense>
+          </main>
+          {showPanel && <EssContextPanel />}
+        </div>
       </div>
     </div>
   )
