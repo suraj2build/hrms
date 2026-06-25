@@ -1,7 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import {
-  Inbox, ArrowRight, Clock, CheckCircle2,
+  Inbox, ArrowRight, Clock, CheckCircle2, Check, X, Loader2,
   CalendarCheck, ClipboardEdit, CreditCard, Wallet, Home, CalendarPlus, LifeBuoy,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
@@ -10,9 +12,16 @@ import { glossy } from '../glossy'
 
 interface LeaveApp { id: string; status: string; from_date?: string; leave_types?: { name: string } | null }
 interface CorrectionReq { id: string; status: string; date?: string }
-interface PendingPayload { leave_requests?: { id: string }[]; regularisations?: { id: string }[] }
+interface PendingEmployee { first_name?: string; last_name?: string }
+interface PendingLeaveItem { id: string; from_date?: string; to_date?: string; reason?: string; leave_types?: { name?: string } | null; employees?: PendingEmployee }
+interface PendingRegItem { id: string; date?: string; reason?: string; employees?: PendingEmployee }
+interface PendingPayload { leave_requests?: PendingLeaveItem[]; regularisations?: PendingRegItem[] }
 
 const isPending = (s: string) => s === 'pending'
+const who = (e?: PendingEmployee) => (e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || 'Employee' : 'Employee')
+
+type Decision = 'approve' | 'reject'
+type ActKind = 'leave' | 'regularisation'
 
 const REQUESTS = (base: string) => [
   { label: 'Apply Leave',     icon: CalendarCheck, to: `${base}/leave/balance`, from: '#1A4D8F', c: '#15B8A6' },
@@ -26,6 +35,7 @@ const REQUESTS = (base: string) => [
 
 export function MobileFlowDesk({ base }: { base: string }) {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const { profile } = useAuthStore()
   const isManager = ['manager', 'hr_admin', 'super_admin'].includes(profile?.role ?? '')
 
@@ -34,7 +44,25 @@ export function MobileFlowDesk({ base }: { base: string }) {
     queryFn: () => api.get('/approvals/pending?limit=20'),
     enabled: isManager,
   })
-  const awaiting = (pending?.leave_requests?.length ?? 0) + (pending?.regularisations?.length ?? 0)
+  const leaves = pending?.leave_requests ?? []
+  const regs = pending?.regularisations ?? []
+  const awaiting = leaves.length + regs.length
+
+  const act = useMutation({
+    mutationFn: ({ kind, id, decision, reason }: { kind: ActKind; id: string; decision: Decision; reason?: string }) => {
+      const path = kind === 'leave' ? `/leave-requests/${id}` : `/attendance/regularisation/${id}`
+      return decision === 'approve'
+        ? api.post(`${path}/approve`, {})
+        : api.post(`${path}/reject`, { rejection_reason: reason || undefined })
+    },
+    onSuccess: (_r, v) => {
+      toast.success(v.decision === 'approve' ? 'Approved' : 'Rejected')
+      qc.invalidateQueries({ queryKey: ['mobile-flowdesk-pending'] })
+    },
+    onError: (e: Error) => toast.error('Action failed', { description: e.message }),
+  })
+  const busyId = act.isPending ? (act.variables?.id ?? null) : null
+  const onAct = (kind: ActKind, id: string, decision: Decision, reason?: string) => act.mutate({ kind, id, decision, reason })
 
   const { data: leaveData } = useQuery<{ data: LeaveApp[] }>({
     queryKey: ['mobile-flowdesk-leave'], queryFn: () => api.get('/attendance/leave/my'),
@@ -50,19 +78,35 @@ export function MobileFlowDesk({ base }: { base: string }) {
     <div className="space-y-4">
       <p className="px-1 text-lg font-extrabold tracking-tight text-[#0F172A]">FlowDesk</p>
 
-      {/* Awaiting you — managers only */}
+      {/* Awaiting you — managers only, with inline approve/reject */}
       {isManager && (
-        <button onClick={() => navigate(`${base}/approvals`)}
-          className="flex w-full items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-lg font-extrabold text-white" style={glossy('#1A4D8F', '#15B8A6')}>
-            {awaiting}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-bold text-[#0F172A]">Awaiting your approval</span>
-            <span className="block text-[11px] text-muted-foreground">Leave & attendance from your team</span>
-          </span>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        </button>
+        <div>
+          <div className="mb-2 flex items-center justify-between px-1">
+            <span className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
+              <Inbox className="h-3.5 w-3.5 text-[#1A4D8F]" /> Awaiting your approval{awaiting > 0 ? ` (${awaiting})` : ''}
+            </span>
+            <button onClick={() => navigate(`${base}/approvals`)} className="flex items-center gap-0.5 text-[10px] font-semibold text-[#1A4D8F]">
+              Full inbox <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+          {awaiting === 0 ? (
+            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-xs text-muted-foreground shadow-sm">
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#1A8050]" /> Nothing waiting on your approval.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {leaves.map((r) => (
+                <ApprovalRow key={r.id} kind="leave" id={r.id} busyId={busyId} onAct={onAct}
+                  title={`${who(r.employees)} · ${r.leave_types?.name ?? 'Leave'}`}
+                  sub={`${r.from_date?.slice(0, 10) ?? ''}${r.to_date && r.to_date !== r.from_date ? ` → ${r.to_date.slice(0, 10)}` : ''}`} />
+              ))}
+              {regs.map((r) => (
+                <ApprovalRow key={r.id} kind="regularisation" id={r.id} busyId={busyId} onAct={onAct}
+                  title={`${who(r.employees)} · Regularisation`} sub={r.date?.slice(0, 10) ?? ''} />
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Raise a request */}
@@ -94,6 +138,48 @@ export function MobileFlowDesk({ base }: { base: string }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Pending team item with inline approve / reject (same endpoints as desktop). */
+function ApprovalRow({ title, sub, kind, id, busyId, onAct }: {
+  title: string; sub: string; kind: ActKind; id: string
+  busyId: string | null; onAct: (kind: ActKind, id: string, decision: Decision, reason?: string) => void
+}) {
+  const [rejecting, setRejecting] = useState(false)
+  const [reason, setReason] = useState('')
+  const busy = busyId === id
+
+  return (
+    <div className="rounded-xl bg-white px-3 py-2.5 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold text-foreground">{title}</p>
+          {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+        </div>
+        {!rejecting && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button aria-label="Approve" disabled={busy} onClick={() => onAct(kind, id, 'approve')}
+              className="grid h-8 w-8 place-items-center rounded-lg text-white disabled:opacity-50" style={glossy('#1A8050', '#34B27B')}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            </button>
+            <button aria-label="Reject" disabled={busy} onClick={() => setRejecting(true)}
+              className="grid h-8 w-8 place-items-center rounded-lg bg-[#C93535]/10 text-[#C93535] disabled:opacity-50">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
+      {rejecting && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (optional)"
+            className="h-8 flex-1 rounded-lg border border-[#E2E8F0] bg-white px-2 text-xs outline-none focus:border-[#1A4D8F]/50" />
+          <button disabled={busy} onClick={() => { onAct(kind, id, 'reject', reason.trim()); setRejecting(false); setReason('') }}
+            className="rounded-lg bg-[#C93535] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Reject</button>
+          <button onClick={() => { setRejecting(false); setReason('') }} className="px-1.5 text-xs text-muted-foreground">Cancel</button>
+        </div>
+      )}
     </div>
   )
 }

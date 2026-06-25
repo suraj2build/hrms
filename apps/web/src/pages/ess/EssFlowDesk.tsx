@@ -10,17 +10,19 @@
  * Tokens only — no raw hex / bg-gray-*.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import {
   Inbox, ClipboardList, PlusCircle, ArrowRight, CheckCircle2, Loader2,
   CalendarCheck, ClipboardEdit, CreditCard, Wallet, Home, CalendarPlus, LifeBuoy,
+  Check, X,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { api } from '@/lib/api/client'
@@ -57,12 +59,80 @@ const REQUESTS: { label: string; desc: string; href: string; icon: React.Compone
 
 // ── Awaiting Me tab ───────────────────────────────────────────────────────────
 
+type Decision = 'approve' | 'reject'
+type ActKind = 'leave' | 'regularisation'
+
+/** A pending row with inline approve / reject — same endpoints the manager
+ *  inbox uses. Reject reveals an optional-reason input. */
+function PendingRow({ title, meta, kind, id, busyId, onAct }: {
+  title: string; meta: string; kind: ActKind; id: string
+  busyId: string | null; onAct: (kind: ActKind, id: string, decision: Decision, reason?: string) => void
+}) {
+  const [rejecting, setRejecting] = useState(false)
+  const [reason, setReason] = useState('')
+  const busy = busyId === id
+
+  return (
+    <div className="border-b border-border/40 py-2.5 last:border-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium text-foreground">{title}</p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">{meta}</p>
+        </div>
+        {!rejecting && (
+          <div className="flex flex-shrink-0 items-center gap-1.5">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => onAct(kind, id, 'approve')}
+              className="h-7 gap-1 text-xs text-success hover:text-success">
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}Approve
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setRejecting(true)}
+              className="h-7 gap-1 text-xs text-destructive hover:text-destructive">
+              <X className="h-3 w-3" />Reject
+            </Button>
+          </div>
+        )}
+      </div>
+      {rejecting && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <input
+            autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason (optional)"
+            className="h-7 flex-1 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary/50"
+          />
+          <Button size="sm" variant="destructive" disabled={busy}
+            onClick={() => { onAct(kind, id, 'reject', reason.trim()); setRejecting(false); setReason('') }}
+            className="h-7 text-xs">Confirm reject</Button>
+          <Button size="sm" variant="ghost" disabled={busy}
+            onClick={() => { setRejecting(false); setReason('') }} className="h-7 text-xs">Cancel</Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AwaitingMe() {
+  const qc = useQueryClient()
   const { data, isLoading } = useQuery<PendingPayload>({
     queryKey: ['flowdesk-pending'],
     queryFn:  () => api.get('/approvals/pending?limit=20'),
     staleTime: 30_000,
   })
+
+  const act = useMutation({
+    mutationFn: ({ kind, id, decision, reason }: { kind: ActKind; id: string; decision: Decision; reason?: string }) => {
+      const path = kind === 'leave' ? `/leave-requests/${id}` : `/attendance/regularisation/${id}`
+      return decision === 'approve'
+        ? api.post(`${path}/approve`, {})
+        : api.post(`${path}/reject`, { rejection_reason: reason || undefined })
+    },
+    onSuccess: (_r, v) => {
+      toast.success(v.decision === 'approve' ? 'Approved' : 'Rejected')
+      qc.invalidateQueries({ queryKey: ['flowdesk-pending'] })
+    },
+    onError: (e: Error) => toast.error('Action failed', { description: e.message }),
+  })
+  const busyId = act.isPending ? (act.variables?.id ?? null) : null
+  const onAct = (kind: ActKind, id: string, decision: Decision, reason?: string) => act.mutate({ kind, id, decision, reason })
 
   const leaves = data?.leave_requests ?? []
   const regs   = data?.regularisations ?? []
@@ -87,7 +157,7 @@ function AwaitingMe() {
           <strong className="text-foreground">{total}</strong> item{total !== 1 ? 's' : ''} awaiting your action
         </p>
         <Link to="/manager/approvals">
-          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">Open approval inbox <ArrowRight className="h-3 w-3" /></Button>
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">Full inbox <ArrowRight className="h-3 w-3" /></Button>
         </Link>
       </div>
 
@@ -95,15 +165,10 @@ function AwaitingMe() {
         {leaves.length === 0 ? <p className="py-3 text-xs text-muted-foreground">No pending leave to approve.</p> : (
           <div className="space-y-0">
             {leaves.map((r) => (
-              <div key={r.id} className="flex items-center justify-between border-b border-border/40 py-2 last:border-0">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-foreground">
-                    {who(r.employees)} · {r.leave_types?.name ?? 'Leave'} — {fmtDate(r.from_date)}{r.from_date !== r.to_date ? ` → ${fmtDate(r.to_date)}` : ''}
-                  </p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">{r.reason ? `"${r.reason}" · ` : ''}requested {fmtDate(r.created_at)}</p>
-                </div>
-                <Badge variant="warning" className="rounded-full text-[10px]">pending</Badge>
-              </div>
+              <PendingRow key={r.id} kind="leave" id={r.id} busyId={busyId} onAct={onAct}
+                title={`${who(r.employees)} · ${r.leave_types?.name ?? 'Leave'} — ${fmtDate(r.from_date)}${r.from_date !== r.to_date ? ` → ${fmtDate(r.to_date)}` : ''}`}
+                meta={`${r.reason ? `"${r.reason}" · ` : ''}requested ${fmtDate(r.created_at)}`}
+              />
             ))}
           </div>
         )}
@@ -113,13 +178,10 @@ function AwaitingMe() {
         {regs.length === 0 ? <p className="py-3 text-xs text-muted-foreground">No pending corrections to approve.</p> : (
           <div className="space-y-0">
             {regs.map((r) => (
-              <div key={r.id} className="flex items-center justify-between border-b border-border/40 py-2 last:border-0">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-foreground">{who(r.employees)} · {fmtDate(r.date)}</p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">{r.reason ? `${r.reason.slice(0, 60)} · ` : ''}requested {fmtDate(r.created_at)}</p>
-                </div>
-                <Badge variant="warning" className="rounded-full text-[10px]">pending</Badge>
-              </div>
+              <PendingRow key={r.id} kind="regularisation" id={r.id} busyId={busyId} onAct={onAct}
+                title={`${who(r.employees)} · ${fmtDate(r.date)}`}
+                meta={`${r.reason ? `${r.reason.slice(0, 60)} · ` : ''}requested ${fmtDate(r.created_at)}`}
+              />
             ))}
           </div>
         )}
