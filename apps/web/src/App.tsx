@@ -23,7 +23,6 @@ import { MobilePreview } from '@/pages/MobilePreview'
 import { AuthCallback } from '@/pages/auth/AuthCallback'
 
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
-import { EmployeeDashboard } from '@/pages/dashboard/EmployeeDashboard'
 import { EssHome }           from '@/pages/ess/EssHome'
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))

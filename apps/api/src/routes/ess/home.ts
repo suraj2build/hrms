@@ -100,7 +100,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         ? fastify.supabase.from('job_history')
             .select('designations(name), departments(name), grades(name), employees!job_history_manager_id_fkey(first_name, last_name)')
             .eq('employee_id', employeeId).eq('tenant_id', tenantId)
-            .is('end_date', null).maybeSingle()
+            .eq('is_current', true).maybeSingle()
         : Promise.resolve({ data: null }),
 
       // 3. Today's attendance record
@@ -113,8 +113,8 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
 
       // 4. Leave balances
       employeeId
-        ? fastify.supabase.from('leave_balances')
-            .select('balance, used, leave_types(name)')
+        ? fastify.supabase.from('employee_leave_balance')
+            .select('balance, leave_types(name)')
             .eq('employee_id', employeeId).eq('tenant_id', tenantId)
             .order('balance', { ascending: false }).limit(6)
         : Promise.resolve({ data: [] }),

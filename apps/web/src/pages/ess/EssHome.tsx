@@ -20,7 +20,6 @@ import {
 } from 'lucide-react'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
-import { SignedImage }  from '@/components/SignedImage'
 import { cn }           from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
