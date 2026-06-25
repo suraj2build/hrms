@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Home, Users, Award, LayoutGrid, Plus } from 'lucide-react'
+import { Home, Inbox, Users, LayoutGrid, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { glossy } from './glossy'
 
@@ -11,15 +11,15 @@ export interface MobileTab {
 }
 
 /** Employee bottom-nav tabs. `base` is /ess or /manager/self.
- *  ESS 2.0: Community + Recognition are primary; Attendance/Leave/Payslip live
- *  on Home (quick actions) and in More. */
+ *  ESS 2.0: Home · FlowDesk · ＋Punch · Community · More. FlowDesk is the unified
+ *  tasks/approvals/requests pillar; Recognition (Kudos) lives on Home + in More. */
 // eslint-disable-next-line react-refresh/only-export-components -- tab config colocated with the nav by design
 export function employeeTabs(base: string): MobileTab[] {
   return [
-    { key: 'home',        label: 'Home',        icon: Home,      path: `${base}/dashboard` },
-    { key: 'community',   label: 'Community',   icon: Users,     path: `${base}/community` },
-    { key: 'recognition', label: 'Kudos',       icon: Award,     path: `${base}/recognition` },
-    { key: 'more',        label: 'More',        icon: LayoutGrid, path: `${base}/more` },
+    { key: 'home',      label: 'Home',      icon: Home,       path: `${base}/dashboard` },
+    { key: 'flowdesk',  label: 'FlowDesk',  icon: Inbox,      path: `${base}/flowdesk` },
+    { key: 'community', label: 'Community', icon: Users,      path: `${base}/community` },
+    { key: 'more',      label: 'More',      icon: LayoutGrid, path: `${base}/more` },
   ]
 }
 

@@ -156,6 +156,7 @@ const EssMyProfile             = lazy(() => import('@/pages/ess/EssMyProfile').t
 
 // ESS — new employee-facing pages
 const EssApprovals             = lazy(() => import('@/pages/ess/EssApprovals').then(m => ({ default: m.EssApprovals })))
+const EssFlowDesk              = lazy(() => import('@/pages/ess/EssFlowDesk').then(m => ({ default: m.EssFlowDesk })))
 const EssLeaveBalance          = lazy(() => import('@/pages/ess/EssLeaveBalance').then(m => ({ default: m.EssLeaveBalance })))
 const EssDocuments             = lazy(() => import('@/pages/ess/EssDocuments').then(m => ({ default: m.EssDocuments })))
 const EssSeparation            = lazy(() => import('@/pages/ess/EssSeparation').then(m => ({ default: m.EssSeparation })))
@@ -994,6 +995,7 @@ export default function App() {
                 <Route path="/ess/dashboard"              element={<EmployeeDashboard />} />
                 <Route path="/ess/recognition"            element={<EssRecognition />} />
                 <Route path="/ess/community"              element={<EssCommunity />} />
+                <Route path="/ess/flowdesk"               element={<EssFlowDesk />} />
                 <Route path="/ess/onboarding"             element={<EssOnboarding />} />
                 <Route path="/ess/attendance"             element={<MyAttendance />} />
                 {/* Regularization merged into MyAttendance — redirect old deep-link */}
