@@ -1,0 +1,219 @@
+/**
+ * Community feed routes — ESS 2.0 "Community" pillar (first slice).
+ *
+ *   GET   /community/feed                  — ranked feed (pinned first)
+ *   POST  /community/posts                 — create a post
+ *   PATCH /community/posts/:id             — pin/hide/remove (HR only)
+ *   POST  /community/posts/:id/react       — toggle a reaction
+ *   GET   /community/posts/:id/comments    — list a post's comments
+ *   POST  /community/posts/:id/comments    — add a comment
+ *
+ * Tenant scoping enforced in code on every query (service-role bypasses RLS).
+ */
+
+import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+
+const HR_ROLES = ['super_admin', 'hr_admin']
+const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
+
+async function resolveEmployeeId(fastify: FastifyInstance, userId: string, tenantId: string): Promise<string | null> {
+  const { data } = await fastify.supabase
+    .from('profiles').select('employee_id')
+    .eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
+  return (data as { employee_id: string | null } | null)?.employee_id ?? null
+}
+
+async function namesFor(fastify: FastifyInstance, tenantId: string, ids: string[]): Promise<Map<string, string>> {
+  const uniq = [...new Set(ids.filter(Boolean))]
+  if (!uniq.length) return new Map()
+  const { data } = await fastify.supabase
+    .from('employees').select('id, first_name, last_name')
+    .eq('tenant_id', tenantId).in('id', uniq)
+  return new Map((data ?? []).map((e: any) => [e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim()]))
+}
+
+export default async function communityRoutes(fastify: FastifyInstance) {
+  const auth = { preHandler: [fastify.authenticate] }
+
+  // ── GET /community/feed ──────────────────────────────────────────────────────
+  fastify.get('/community/feed', auth, async (req: any, reply) => {
+    const limit = Math.min(50, Math.max(1, Number((req.query as any).limit) || 25))
+    const me    = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+
+    const { data: posts, error } = await fastify.supabase
+      .from('feed_posts')
+      .select('id, author_employee, type, title, body, pinned, created_at')
+      .eq('tenant_id', req.tenantId).eq('status', 'active')
+      .order('pinned', { ascending: false }).order('created_at', { ascending: false })
+      .limit(limit)
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load feed' })
+
+    const rows = posts ?? []
+    const postIds = rows.map((p: any) => p.id)
+
+    // Reactions + comment counts in two batched reads, aggregated in JS.
+    const [reactRes, commentRes] = await Promise.all([
+      postIds.length
+        ? fastify.supabase.from('feed_reactions').select('post_id, employee_id, reaction').eq('tenant_id', req.tenantId).in('post_id', postIds)
+        : Promise.resolve({ data: [] as any[] }),
+      postIds.length
+        ? fastify.supabase.from('feed_comments').select('post_id').eq('tenant_id', req.tenantId).in('post_id', postIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ])
+
+    const reactCount = new Map<string, number>()
+    const myReaction = new Map<string, string>()
+    for (const r of (reactRes.data ?? []) as any[]) {
+      reactCount.set(r.post_id, (reactCount.get(r.post_id) ?? 0) + 1)
+      if (me && r.employee_id === me) myReaction.set(r.post_id, r.reaction)
+    }
+    const commentCount = new Map<string, number>()
+    for (const c of (commentRes.data ?? []) as any[]) {
+      commentCount.set(c.post_id, (commentCount.get(c.post_id) ?? 0) + 1)
+    }
+
+    const names = await namesFor(fastify, req.tenantId, rows.map((p: any) => p.author_employee))
+    const data = rows.map((p: any) => ({
+      ...p,
+      author_name:   p.author_employee ? names.get(p.author_employee) : null,
+      reaction_count: reactCount.get(p.id) ?? 0,
+      comment_count:  commentCount.get(p.id) ?? 0,
+      my_reaction:    myReaction.get(p.id) ?? null,
+    }))
+    return reply.send({ data })
+  })
+
+  // ── POST /community/posts ────────────────────────────────────────────────────
+  fastify.post('/community/posts', auth, async (req: any, reply) => {
+    const schema = z.object({
+      body:           z.string().min(1).max(2000),
+      title:          z.string().max(200).optional(),
+      type:           z.enum(['update', 'announcement']).default('update'),
+      audience_scope: z.enum(['company', 'department', 'site']).default('company'),
+      pinned:         z.boolean().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const isHr = HR_ROLES.includes(req.userRole)
+    // Announcements + pinning are HR-only; everyone else posts plain updates.
+    if ((parsed.data.type === 'announcement' || parsed.data.pinned) && !isHr) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only HR can post announcements or pin posts' })
+    }
+
+    const authorEmployee = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    const { data, error } = await fastify.supabase
+      .from('feed_posts')
+      .insert({
+        tenant_id:       req.tenantId,
+        author_employee: authorEmployee,
+        type:            parsed.data.type,
+        title:           parsed.data.title ?? null,
+        body:            parsed.data.body,
+        audience_scope:  parsed.data.audience_scope,
+        pinned:          parsed.data.pinned ?? false,
+      })
+      .select('id')
+      .single()
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create post' })
+    return reply.code(201).send({ data })
+  })
+
+  // ── PATCH /community/posts/:id (moderation — HR only) ────────────────────────
+  fastify.patch('/community/posts/:id', auth, async (req: any, reply) => {
+    if (!HR_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR access required' })
+    }
+    const { id } = req.params as { id: string }
+    const schema = z.object({
+      pinned: z.boolean().optional(),
+      status: z.enum(['active', 'hidden', 'removed']).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (parsed.data.pinned !== undefined) update.pinned = parsed.data.pinned
+    if (parsed.data.status !== undefined) update.status = parsed.data.status
+
+    const { data, error } = await fastify.supabase
+      .from('feed_posts').update(update)
+      .eq('id', id).eq('tenant_id', req.tenantId).select('id')
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!data || data.length === 0) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Post not found' })
+    return reply.send({ message: 'Post updated' })
+  })
+
+  // ── POST /community/posts/:id/react (toggle) ─────────────────────────────────
+  fastify.post('/community/posts/:id/react', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({ reaction: z.enum(REACTIONS).default('like') })
+    const parsed = schema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const me = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    if (!me) return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Your account is not linked to an employee record' })
+
+    // Post must exist within the tenant.
+    const { data: post } = await fastify.supabase
+      .from('feed_posts').select('id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!post) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Post not found' })
+
+    const { data: existing } = await fastify.supabase
+      .from('feed_reactions').select('id, reaction')
+      .eq('tenant_id', req.tenantId).eq('post_id', id).eq('employee_id', me).maybeSingle()
+
+    if (existing) {
+      if ((existing as any).reaction === parsed.data.reaction) {
+        // Same reaction → toggle off.
+        await fastify.supabase.from('feed_reactions').delete().eq('id', (existing as any).id)
+        return reply.send({ data: { reaction: null } })
+      }
+      await fastify.supabase.from('feed_reactions').update({ reaction: parsed.data.reaction }).eq('id', (existing as any).id)
+      return reply.send({ data: { reaction: parsed.data.reaction } })
+    }
+
+    const { error } = await fastify.supabase
+      .from('feed_reactions')
+      .insert({ tenant_id: req.tenantId, post_id: id, employee_id: me, reaction: parsed.data.reaction })
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to react' })
+    return reply.send({ data: { reaction: parsed.data.reaction } })
+  })
+
+  // ── GET /community/posts/:id/comments ────────────────────────────────────────
+  fastify.get('/community/posts/:id/comments', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { data: rows, error } = await fastify.supabase
+      .from('feed_comments')
+      .select('id, employee_id, body, created_at')
+      .eq('tenant_id', req.tenantId).eq('post_id', id)
+      .order('created_at', { ascending: true }).limit(200)
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load comments' })
+
+    const names = await namesFor(fastify, req.tenantId, (rows ?? []).map((c: any) => c.employee_id))
+    const data = (rows ?? []).map((c: any) => ({ ...c, author_name: c.employee_id ? names.get(c.employee_id) : null }))
+    return reply.send({ data })
+  })
+
+  // ── POST /community/posts/:id/comments ───────────────────────────────────────
+  fastify.post('/community/posts/:id/comments', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({ body: z.string().min(1).max(1000) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const me = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    const { data: post } = await fastify.supabase
+      .from('feed_posts').select('id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!post) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Post not found' })
+
+    const { data, error } = await fastify.supabase
+      .from('feed_comments')
+      .insert({ tenant_id: req.tenantId, post_id: id, employee_id: me, body: parsed.data.body })
+      .select('id')
+      .single()
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to add comment' })
+    return reply.code(201).send({ data })
+  })
+}
