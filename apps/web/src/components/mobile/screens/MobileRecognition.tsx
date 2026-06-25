@@ -71,7 +71,7 @@ export function MobileRecognition({ base: _base }: { base: string }) {
       <button
         onClick={() => setSheetOpen(true)}
         className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white active:scale-[0.99] transition-transform"
-        style={glossy('#2E6FE6', '#15B8A6')}
+        style={glossy('#1A4D8F', '#15B8A6')}
       >
         <Gift className="h-4 w-4" /> Give recognition
       </button>
@@ -106,7 +106,7 @@ export function MobileRecognition({ base: _base }: { base: string }) {
             <span className="grid h-12 w-12 mx-auto place-items-center rounded-2xl text-white" style={glossy('#2E6FE6', '#15B8A6')}><Gift className="h-5 w-5" /></span>
             <p className="mt-2 text-sm font-semibold text-foreground">No recognition yet</p>
             <p className="text-[11px] text-muted-foreground">Be the first to appreciate a colleague.</p>
-            <button onClick={() => setSheetOpen(true)} className="mt-3 rounded-lg px-4 py-2 text-xs font-bold text-white" style={glossy('#2E6FE6', '#15B8A6')}>Give the first one</button>
+            <button onClick={() => setSheetOpen(true)} className="mt-3 rounded-lg px-4 py-2 text-xs font-bold text-white" style={glossy('#1A4D8F', '#15B8A6')}>Give the first one</button>
           </div>
         )}
         <div className="space-y-2">
@@ -207,7 +207,7 @@ function GiveSheet({ onClose, onDone }: { onClose: () => void; onDone: () => voi
 
           <button disabled={!canSubmit} onClick={() => give.mutate()}
             className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white disabled:opacity-50"
-            style={glossy('#2E6FE6', '#15B8A6')}>
+            style={glossy('#1A4D8F', '#15B8A6')}>
             <Send className="h-4 w-4" /> {give.isPending ? 'Sending…' : 'Send recognition'}
           </button>
         </div>
