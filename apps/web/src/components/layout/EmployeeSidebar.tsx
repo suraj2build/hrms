@@ -35,6 +35,7 @@ import {
   Package,
   Home,
   PartyPopper,
+  Megaphone,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -66,6 +67,7 @@ const BASE_GROUPS: NavGroup[] = [
     label: 'Main',
     items: [
       { label: 'Dashboard',     icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
+      { label: 'Community',     icon: Megaphone,       href: '/ess/community'              },
       { label: 'Recognition',   icon: PartyPopper,     href: '/ess/recognition'            },
       { label: 'My Onboarding', icon: Rocket,          href: '/ess/onboarding'             }, // shown only during/after onboarding journey
       // "My Insights" (operational center) removed from employee nav — the

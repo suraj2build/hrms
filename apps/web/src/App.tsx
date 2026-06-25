@@ -45,6 +45,7 @@ import { LeaveApply }      from '@/pages/attendance/LeaveApply'
 import { EssHelpdesk }         from '@/pages/ess/EssHelpdesk'
 import { EssRunbooks }         from '@/pages/ess/EssRunbooks'
 import { EssRecognition }      from '@/pages/ess/EssRecognition'
+import { EssCommunity }        from '@/pages/ess/EssCommunity'
 // EssCorrections retired — replaced by EssRegularization (/ess/attendance/regularization)
 import { EssSchedule }         from '@/pages/ess/EssSchedule'
 // EssCompOff merged into EssLeaveBalance (/ess/leave/balance → Comp-Off tab)
@@ -992,6 +993,7 @@ export default function App() {
 
                 <Route path="/ess/dashboard"              element={<EmployeeDashboard />} />
                 <Route path="/ess/recognition"            element={<EssRecognition />} />
+                <Route path="/ess/community"              element={<EssCommunity />} />
                 <Route path="/ess/onboarding"             element={<EssOnboarding />} />
                 <Route path="/ess/attendance"             element={<MyAttendance />} />
                 {/* Regularization merged into MyAttendance — redirect old deep-link */}
