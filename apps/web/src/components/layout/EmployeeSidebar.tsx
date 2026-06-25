@@ -34,6 +34,7 @@ import {
   LogOut,
   Package,
   Home,
+  PartyPopper,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -65,6 +66,7 @@ const BASE_GROUPS: NavGroup[] = [
     label: 'Main',
     items: [
       { label: 'Dashboard',     icon: LayoutDashboard, href: '/ess/dashboard', exact: true },
+      { label: 'Recognition',   icon: PartyPopper,     href: '/ess/recognition'            },
       { label: 'My Onboarding', icon: Rocket,          href: '/ess/onboarding'             }, // shown only during/after onboarding journey
       // "My Insights" (operational center) removed from employee nav — the
       // attendance-operations style command center is not relevant for ESS.
