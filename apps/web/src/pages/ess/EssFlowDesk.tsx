@@ -35,7 +35,8 @@ interface PendingReg { id: string; date: string; reason?: string; created_at: st
 interface PendingPayload { leave_requests?: PendingLeave[]; regularisations?: PendingReg[] }
 
 const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-function fmtDate(s: string) {
+function fmtDate(s?: string) {
+  if (!s) return '—'
   const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
   return isNaN(d.getTime()) ? '—' : `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }

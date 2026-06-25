@@ -51,6 +51,7 @@ interface CompOffReq {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(s: string) {
+  if (!s) return '—'
   const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   if (isNaN(d.getTime())) return '—'
@@ -310,7 +311,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
                   )}
                 </span>
               }
-              meta={`${r.reason.slice(0, 60)}${r.reason.length > 60 ? '…' : ''} · ${fmtDatetime(r.created_at)}`}
+              meta={`${(r.reason ?? '').slice(0, 60)}${(r.reason ?? '').length > 60 ? '…' : ''} · ${fmtDatetime(r.created_at)}`}
             />
           ))}
         </div>
@@ -336,7 +337,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
                   {r.category_name ?? 'Claim'} — ₹{r.claimed_amount.toLocaleString('en-IN')}
                 </span>
               }
-              meta={`${(() => { const d=new Date(r.claim_month.slice(0,7)+'-01T12:00:00Z'); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()} · ${fmtDatetime(r.created_at)}`}
+              meta={`${(() => { if (!r.claim_month) return '—'; const d=new Date(r.claim_month.slice(0,7)+'-01T12:00:00Z'); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()} · ${fmtDatetime(r.created_at)}`}
               right={
                 r.status === 'draft' ? (
                   <Link to="/ess/reimbursements">
