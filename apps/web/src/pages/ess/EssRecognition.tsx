@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper,
+  Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper, Trophy,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -29,6 +29,7 @@ interface RecognitionRow {
   badge_code: string | null; message: string; points: number; created_at: string
 }
 interface MeSummary { received: number; given: number; points: number; recent: RecognitionRow[] }
+interface LeaderRow { rank: number; employee_id: string; name: string; points: number; count: number }
 
 // ── Icon map (badge.icon stores a lucide name) ─────────────────────────────────
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -190,10 +191,16 @@ export function EssRecognition() {
     queryFn:  () => api.get('/recognition/me'),
     staleTime: 30_000,
   })
+  const { data: leaderResp } = useQuery<{ data: LeaderRow[] }>({
+    queryKey: ['recognition-leaderboard'],
+    queryFn:  () => api.get('/recognition/leaderboard'),
+    staleTime: 60_000,
+  })
 
-  const badges = badgesResp?.data ?? []
-  const feed   = feedResp?.data ?? []
-  const me     = meResp?.data
+  const badges  = badgesResp?.data ?? []
+  const feed    = feedResp?.data ?? []
+  const me      = meResp?.data
+  const leaders = leaderResp?.data ?? []
 
   return (
     <PageContainer>
@@ -213,6 +220,25 @@ export function EssRecognition() {
         <MetricCard label="Given"    value={me?.given ?? 0}    icon={Gift}   variant="info" />
         <MetricCard label="Points"   value={me?.points ?? 0}   icon={Star}   variant="warning" />
       </MetricRow>
+
+      {leaders.length > 0 && (
+        <SectionCard title="Top recognized" description="Most-appreciated colleagues by points">
+          <div className="space-y-1">
+            {leaders.slice(0, 5).map(l => (
+              <div key={l.employee_id} className="flex items-center gap-3 rounded-lg px-1.5 py-1.5">
+                <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                  l.rank === 1 ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground'
+                }`}>
+                  {l.rank === 1 ? <Trophy className="h-3.5 w-3.5" /> : l.rank}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{l.name}</span>
+                <span className="text-xs text-muted-foreground">{l.count} kudos</span>
+                <span className="w-10 text-right text-sm font-bold tabular-nums text-primary">{l.points}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Company feed" description="Recent recognition across the organization">
         {feedLoading ? (

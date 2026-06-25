@@ -1098,6 +1098,42 @@ function RecognitionCard({ data, navigate }: { data: DashRecognition | null; nav
   )
 }
 
+// ── Community teaser (Experience Cloud — Community on Home) ────────────────────
+
+interface DashFeedPost {
+  id: string; author_name: string | null; type: string; body: string; created_at: string
+}
+
+function CommunityCard({ posts, navigate }: { posts: DashFeedPost[]; navigate: (to: string) => void }) {
+  return (
+    <section style={CARD}>
+      <div style={CARD_HEAD}>
+        <CardLabel>Community</CardLabel>
+        <LinkBtn onClick={() => navigate('/ess/community')}>
+          View all <ChevronRight style={{ width: 12, height: 12 }} />
+        </LinkBtn>
+      </div>
+      <div style={{ padding: '8px 16px 12px' }}>
+        {posts.length > 0 ? posts.slice(0, 3).map((p, i) => (
+          <div key={p.id} style={{ padding: '7px 0', borderTop: i > 0 ? '1px solid var(--border)' : undefined }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>
+              {p.author_name ?? (p.type === 'announcement' ? 'Announcement' : 'Someone')}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+              {p.body}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>{timeAgo(p.created_at)}</div>
+          </div>
+        )) : (
+          <div style={{ textAlign: 'center' as const, padding: '10px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
+            No posts yet
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 // ── 5. Quick Actions Bar ──────────────────────────────────────────────────────
 
 type QaItem = { icon: React.ComponentType<{ style?: CSSProperties }>; label: string; tone: string; to: string }
@@ -1279,6 +1315,14 @@ export function EmployeeDashboard() {
     staleTime: 60_000,
   })
 
+  // Community feed teaser — latest posts on Home.
+  const { data: communityResp } = useQuery<{ data: DashFeedPost[] }>({
+    queryKey:  ['community-home'],
+    queryFn:   () => api.get('/community/feed?limit=4'),
+    enabled:   !!employeeId,
+    staleTime: 60_000,
+  })
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const emp = empResp?.data ?? (empResp as Employee | undefined) ?? null
@@ -1297,6 +1341,7 @@ export function EmployeeDashboard() {
   const holidays    = (holidaysResp as { data?: Holiday[] } | undefined)?.data ?? (Array.isArray(holidaysResp) ? holidaysResp : [])
   const expiryItems = expiryResp?.data ?? []
   const recognition = recognitionResp?.data ?? null
+  const communityPosts = communityResp?.data ?? []
 
   // Greeting / today-snapshot inputs (reuse already-fetched attendance + requests)
   const todayStr = isoDate(today)
@@ -1348,9 +1393,10 @@ export function EmployeeDashboard() {
           <CompStructure comp={comp} latestSlip={slips[0] ?? null} navigate={nav} />
           <MyRequests requests={requests} regRequests={regRequests} navigate={nav} />
         </div>
-        {/* Right: Recognition + Leave usage + Expiry alerts + Upcoming */}
+        {/* Right: Recognition + Community + Leave usage + Expiry alerts + Upcoming */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <RecognitionCard data={recognition} navigate={nav} />
+          <CommunityCard posts={communityPosts} navigate={nav} />
           <LeaveUsage balances={balances} navigate={nav} />
           <ExpiryAlerts items={expiryItems} navigate={nav} />
           <Upcoming holidays={holidays} navigate={nav} />
