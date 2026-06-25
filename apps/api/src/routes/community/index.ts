@@ -43,7 +43,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
 
     const { data: posts, error } = await fastify.supabase
       .from('feed_posts')
-      .select('id, author_employee, type, title, body, pinned, created_at')
+      .select('id, author_employee, subject_employee, type, title, body, pinned, created_at')
       .eq('tenant_id', req.tenantId).eq('status', 'active')
       .order('pinned', { ascending: false }).order('created_at', { ascending: false })
       .limit(limit)
@@ -73,15 +73,55 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       commentCount.set(c.post_id, (commentCount.get(c.post_id) ?? 0) + 1)
     }
 
-    const names = await namesFor(fastify, req.tenantId, rows.map((p: any) => p.author_employee))
+    const names = await namesFor(fastify, req.tenantId, [
+      ...rows.map((p: any) => p.author_employee),
+      ...rows.map((p: any) => p.subject_employee),
+    ])
     const data = rows.map((p: any) => ({
       ...p,
-      author_name:   p.author_employee ? names.get(p.author_employee) : null,
+      author_name:    p.author_employee  ? names.get(p.author_employee)  : null,
+      subject_name:   p.subject_employee ? names.get(p.subject_employee) : null,
       reaction_count: reactCount.get(p.id) ?? 0,
       comment_count:  commentCount.get(p.id) ?? 0,
       my_reaction:    myReaction.get(p.id) ?? null,
     }))
     return reply.send({ data })
+  })
+
+  // ── POST /community/wish ─────────────────────────────────────────────────────
+  // One-tap peer celebration: wish a colleague a happy birthday / work
+  // anniversary. Any employee may post a wish (unlike announcements). Creates a
+  // typed celebration post that records both author and subject.
+  fastify.post('/community/wish', auth, async (req: any, reply) => {
+    const schema = z.object({
+      subject_employee_id: z.string().uuid('subject_employee_id must be a valid UUID'),
+      kind:                z.enum(['birthday', 'anniversary']),
+      message:             z.string().min(1, 'message is required').max(2000),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Subject must be a real employee in the caller's tenant.
+    const { data: subject } = await fastify.supabase
+      .from('employees').select('id')
+      .eq('id', parsed.data.subject_employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!subject) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Colleague not found' })
+
+    const author = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    const { data, error } = await fastify.supabase
+      .from('feed_posts')
+      .insert({
+        tenant_id:        req.tenantId,
+        author_employee:  author,
+        subject_employee: parsed.data.subject_employee_id,
+        type:             parsed.data.kind,           // 'birthday' | 'anniversary'
+        body:             parsed.data.message,
+        audience_scope:   'company',
+      })
+      .select('id')
+      .single()
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to post wish' })
+    return reply.code(201).send({ data })
   })
 
   // ── POST /community/posts ────────────────────────────────────────────────────

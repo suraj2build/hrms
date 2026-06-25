@@ -143,9 +143,11 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         : Promise.resolve({ data: [] }),
 
       // 8. Community feed teaser
+      // Disambiguate the author embed: feed_posts has TWO FKs to employees
+      // (author_employee + subject_employee), so name the constraint explicitly.
       fastify.supabase.from('feed_posts')
-        .select('id, type, body, created_at, employees(first_name, last_name)')
-        .eq('tenant_id', tenantId).eq('status', 'published')
+        .select('id, type, body, created_at, employees!feed_posts_author_employee_fkey(first_name, last_name)')
+        .eq('tenant_id', tenantId).eq('status', 'active')
         .order('pinned', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(3),
@@ -271,7 +273,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
 
     const birthdays = colleagues
       .filter((c: any) => !!c.dob)
-      .map((c: any) => ({ name: fullName(c), days_until: daysUntilAnniversary(c.dob as string) }))
+      .map((c: any) => ({ employee_id: c.id, name: fullName(c), days_until: daysUntilAnniversary(c.dob as string) }))
       .filter((c: any) => c.days_until <= 7)
       .sort((a: any, b: any) => a.days_until - b.days_until)
 
@@ -280,7 +282,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
       .map((c: any) => {
         const joiningYear = Number((c.joining_date as string).slice(0, 4))
         const years = new Date().getFullYear() - joiningYear
-        return { name: fullName(c), years, days_until: daysUntilAnniversary(c.joining_date as string) }
+        return { employee_id: c.id, name: fullName(c), years, days_until: daysUntilAnniversary(c.joining_date as string) }
       })
       .filter((c: any) => c.days_until <= 7 && c.years > 0)
       .sort((a: any, b: any) => a.days_until - b.days_until)

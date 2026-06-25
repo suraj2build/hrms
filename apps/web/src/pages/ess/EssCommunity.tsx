@@ -16,9 +16,16 @@ import { Button } from '@/components/ui/button'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FeedPost {
-  id: string; author_name: string | null; type: string; title: string | null
+  id: string; author_name: string | null; subject_name: string | null
+  type: string; title: string | null
   body: string; pinned: boolean; created_at: string
   reaction_count: number; comment_count: number; my_reaction: string | null
+}
+
+// Celebration post types (birthday / work anniversary) render with festive chrome.
+const CELEBRATION: Record<string, { emoji: string; label: string }> = {
+  birthday:    { emoji: '🎂', label: 'Birthday' },
+  anniversary: { emoji: '🎉', label: 'Work Anniversary' },
 }
 interface Comment { id: string; author_name: string | null; body: string; created_at: string }
 
@@ -108,19 +115,25 @@ function PostCard({ p }: { p: FeedPost }) {
     onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
   const isAnnouncement = p.type === 'announcement'
+  const celebration    = CELEBRATION[p.type]
 
   return (
-    <div className={`rounded-xl border bg-card p-4 ${p.pinned ? 'border-primary/40' : 'border-border'}`}>
+    <div className={`rounded-xl border bg-card p-4 ${p.pinned ? 'border-primary/40' : celebration ? 'border-[#15B8A6]/30' : 'border-border'}`}>
       <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-          {isAnnouncement ? <Megaphone className="h-4 w-4" /> : initials(p.author_name)}
+        <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${celebration ? 'bg-[#15B8A6]/10 text-base' : 'bg-primary/10 text-primary'}`}>
+          {celebration ? celebration.emoji : isAnnouncement ? <Megaphone className="h-4 w-4" /> : initials(p.author_name)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground">{p.author_name ?? (isAnnouncement ? 'Announcement' : 'Someone')}</p>
+          <p className="text-sm font-semibold text-foreground">
+            {celebration && p.subject_name
+              ? <><span>{p.author_name ?? 'Someone'}</span> <span className="font-normal text-muted-foreground">wished</span> <span>{p.subject_name}</span></>
+              : (p.author_name ?? (isAnnouncement ? 'Announcement' : 'Someone'))}
+          </p>
           <p className="text-[11px] text-muted-foreground">{timeAgo(p.created_at)}</p>
         </div>
         {p.pinned && <Pin className="h-3.5 w-3.5 text-primary" />}
         {isAnnouncement && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Announcement</span>}
+        {celebration && <span className="rounded-full bg-[#15B8A6]/10 px-2 py-0.5 text-[10px] font-semibold text-[#15B8A6]">{celebration.label}</span>}
       </div>
 
       {p.title && <p className="mt-2.5 text-sm font-semibold text-foreground">{p.title}</p>}

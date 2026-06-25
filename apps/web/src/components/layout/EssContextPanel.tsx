@@ -20,11 +20,16 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Cake, PartyPopper, Star, CalendarDays, Award, CheckSquare, Gift,
-  ChevronRight, Loader2, Check,
+  ChevronRight, Loader2, Check, Send,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Button } from '@/components/ui/button'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,8 +37,8 @@ interface EssHomePayload {
   kpis:              { pending_approvals: number }
   upcoming_holidays: { id: string; name: string; date: string; days_until: number }[]
   recognition:       { total_received: number; recent: { id: string; from_name: string; badge_code: string; message?: string; points?: number; created_at: string }[] }
-  birthdays:         { name: string; days_until: number }[]
-  anniversaries:     { name: string; years: number; days_until: number }[]
+  birthdays:         { employee_id: string; name: string; days_until: number }[]
+  anniversaries:     { employee_id: string; name: string; years: number; days_until: number }[]
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -98,53 +103,98 @@ function EmptyState({ text }: { text: string }) {
 
 type WishKind = 'birthday' | 'anniversary'
 
-function WishButton({ name, kind, years }: { name: string; kind: WishKind; years?: number }) {
+function defaultWish(name: string, kind: WishKind, years?: number) {
+  const who = firstNameOf(name)
+  return kind === 'birthday'
+    ? `🎂 Happy birthday, ${who}! Wishing you a fantastic year ahead. 🎉`
+    : `🎉 Congratulations ${who} on ${years} year${years === 1 ? '' : 's'} with the team! Thank you for everything you do. 🙌`
+}
+
+function WishButton({ employeeId, name, kind, years }: { employeeId: string; name: string; kind: WishKind; years?: number }) {
   const qc = useQueryClient()
   const [done, setDone] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [message, setMessage] = useState('')
+
+  // Open the composer with a pre-filled, editable message.
+  function openComposer() {
+    setMessage(defaultWish(name, kind, years))
+    setOpen(true)
+  }
 
   const mutation = useMutation({
-    mutationFn: () => {
-      const who = firstNameOf(name)
-      const body =
-        kind === 'birthday'
-          ? `🎂 Happy birthday, ${who}! Wishing you a fantastic year ahead. 🎉`
-          : `🎉 Congratulations ${who} on ${years} year${years === 1 ? '' : 's'} with the team! Thank you for everything you do. 🙌`
-      return api.post('/community/posts', { body, type: 'update', audience_scope: 'company' })
-    },
+    mutationFn: () =>
+      api.post('/community/wish', { subject_employee_id: employeeId, kind, message: message.trim() }),
     onSuccess: () => {
       setDone(true)
-      toast.success(`Wish posted to Community`, { description: `${firstNameOf(name)} will see it in the feed.` })
+      setOpen(false)
+      toast.success('Wish posted to Community', { description: `${firstNameOf(name)} will see it in the feed.` })
       qc.invalidateQueries({ queryKey: ['community-feed'] })
     },
     onError: () => toast.error('Could not post your wish', { description: 'Please try again in a moment.' }),
   })
 
-  if (done) {
-    return (
-      <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#15B8A6]/12 px-2 py-1 text-[10px] font-semibold text-[#15B8A6]">
-        <Check className="h-3 w-3" />Wished
-      </span>
-    )
-  }
-
   return (
-    <button
-      onClick={() => mutation.mutate()}
-      disabled={mutation.isPending}
-      className="flex shrink-0 items-center gap-1 rounded-full border border-[#15B8A6]/30 bg-[#15B8A6]/5 px-2.5 py-1 text-[10px] font-semibold text-[#15B8A6] hover:bg-[#15B8A6]/12 disabled:opacity-60 transition-colors"
-    >
-      {mutation.isPending
-        ? <Loader2 className="h-3 w-3 animate-spin" />
-        : <PartyPopper className="h-3 w-3" />}
-      Wish
-    </button>
+    <>
+      {done ? (
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#15B8A6]/12 px-2 py-1 text-[10px] font-semibold text-[#15B8A6]">
+          <Check className="h-3 w-3" />Wished
+        </span>
+      ) : (
+        <button
+          onClick={openComposer}
+          className="flex shrink-0 items-center gap-1 rounded-full border border-[#15B8A6]/30 bg-[#15B8A6]/5 px-2.5 py-1 text-[10px] font-semibold text-[#15B8A6] hover:bg-[#15B8A6]/12 transition-colors"
+        >
+          <PartyPopper className="h-3 w-3" />Wish
+        </button>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="text-lg">{kind === 'birthday' ? '🎂' : '🎉'}</span>
+              Wish {firstNameOf(name)}
+            </DialogTitle>
+            <DialogDescription>
+              Edit your message if you like — it'll post to the Community feed for everyone to see.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={4}
+            maxLength={2000}
+            placeholder="Write a warm message…"
+            className="resize-none text-sm"
+          />
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={mutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => mutation.mutate()}
+              disabled={mutation.isPending || message.trim().length === 0}
+              className="gap-1.5"
+            >
+              {mutation.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Send className="h-4 w-4" />}
+              Post wish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
 // ── Celebration row (birthday / anniversary) ────────────────────────────────────
 
-function CelebrationRow({ emoji, tint, name, sub, kind, years }: {
-  emoji: string; tint: string; name: string; sub: string; kind: WishKind; years?: number
+function CelebrationRow({ employeeId, emoji, tint, name, sub, kind, years }: {
+  employeeId: string; emoji: string; tint: string; name: string; sub: string; kind: WishKind; years?: number
 }) {
   return (
     <div className="flex items-center gap-2.5">
@@ -155,7 +205,7 @@ function CelebrationRow({ emoji, tint, name, sub, kind, years }: {
         <p className="truncate text-xs font-semibold text-foreground">{name}</p>
         <p className="truncate text-[10px] text-muted-foreground">{sub}</p>
       </div>
-      <WishButton name={name} kind={kind} years={years} />
+      <WishButton employeeId={employeeId} name={name} kind={kind} years={years} />
     </div>
   )
 }
@@ -222,11 +272,11 @@ export function EssContextPanel() {
             <Widget title="Birthdays & Milestones" icon={Cake} iconCls="text-[#B07B18]">
               <div className="space-y-2.5">
                 {birthdays.map((b, i) => (
-                  <CelebrationRow key={`b-${i}`} emoji="🎂" tint="rgba(176,123,24,0.10)"
+                  <CelebrationRow key={`b-${i}`} employeeId={b.employee_id} emoji="🎂" tint="rgba(176,123,24,0.10)"
                     name={b.name} sub={`Birthday · ${dayLabel(b.days_until)}`} kind="birthday" />
                 ))}
                 {anniversaries.map((a, i) => (
-                  <CelebrationRow key={`a-${i}`} emoji="🎉" tint="rgba(21,184,166,0.10)"
+                  <CelebrationRow key={`a-${i}`} employeeId={a.employee_id} emoji="🎉" tint="rgba(21,184,166,0.10)"
                     name={a.name} sub={`${a.years}-yr anniversary · ${dayLabel(a.days_until)}`}
                     kind="anniversary" years={a.years} />
                 ))}
