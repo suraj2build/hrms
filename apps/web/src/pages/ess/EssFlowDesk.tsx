@@ -3,9 +3,10 @@
  *
  * One place to see what's waiting on you and to start any request. A thin shell
  * over existing approval/request APIs — NO new business logic, NO new tables:
- *   · Awaiting Me   → GET /approvals/pending (items I must action as manager/HR)
+ *   · Awaiting Me   → inline approve/reject for leave, attendance corrections,
+ *                     comp-off (HR) and reimbursement claims (HR)
  *   · My Requests   → reuses <EssApprovals embedded /> (my submitted requests)
- *   · Raise a Request → deep-links into the existing request forms
+ *   · Raise a Request → deep-links to dedicated create-forms (no duplication here)
  *
  * Tokens only — no raw hex / bg-gray-*.
  */
@@ -29,12 +30,14 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { EssApprovals } from './EssApprovals'
 
-// ── Types (subset of the /approvals/pending payload we render) ────────────────
+// ── Types (subset of the payloads we render) ──────────────────────────────────
 
 interface PendingEmployee { first_name?: string; last_name?: string; employee_code?: string }
 interface PendingLeave { id: string; from_date: string; to_date: string; reason?: string; created_at: string; leave_types?: { name?: string }; employees?: PendingEmployee }
 interface PendingReg { id: string; date: string; reason?: string; created_at: string; employees?: PendingEmployee }
 interface PendingPayload { leave_requests?: PendingLeave[]; regularisations?: PendingReg[] }
+interface CompOffItem { id: string; worked_date?: string; days_to_credit?: number; leave_types?: { name?: string } | null; employees?: PendingEmployee }
+interface ReimbItem { id: string; amount?: number; claim_month?: string; employees?: PendingEmployee; reimbursement_categories?: { name?: string } | null }
 
 const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 function fmtDate(s?: string) {
@@ -44,26 +47,22 @@ function fmtDate(s?: string) {
 }
 const who = (e?: PendingEmployee) =>
   e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.employee_code || 'Employee' : 'Employee'
+const money = (n?: number) => (typeof n === 'number' ? `₹${n.toLocaleString('en-IN')}` : '—')
 
-// ── "Raise a Request" catalogue (all existing forms) ──────────────────────────
-
-const REQUESTS: { label: string; desc: string; href: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { label: 'Apply for Leave',     desc: 'Casual, sick, earned & comp-off', href: '/ess/leave/balance', icon: CalendarCheck },
-  { label: 'Regularize Attendance', desc: 'Fix a missed or wrong punch',    href: '/ess/attendance',    icon: ClipboardEdit },
-  { label: 'Reimbursement Claim', desc: 'Submit an expense claim',          href: '/ess/reimbursements', icon: CreditCard },
-  { label: 'Loan or Advance',     desc: 'Request a salary advance / loan',  href: '/ess/loans',         icon: Wallet },
-  { label: 'Work From Home',      desc: 'Request a remote-work day',        href: '/ess/wfh',           icon: Home },
-  { label: 'Comp-Off',            desc: 'Claim credit for working off-day', href: '/ess/leave/balance', icon: CalendarPlus },
-  { label: 'Raise a Helpdesk Ticket', desc: 'IT / HR / payroll support',    href: '/ess/issues',        icon: LifeBuoy },
-]
-
-// ── Awaiting Me tab ───────────────────────────────────────────────────────────
+// ── Action engine: one mutation for all four approvable kinds ─────────────────
 
 type Decision = 'approve' | 'reject'
-type ActKind = 'leave' | 'regularisation'
+type ActKind = 'leave' | 'regularisation' | 'compoff' | 'reimbursement'
 
-/** A pending row with inline approve / reject — same endpoints the manager
- *  inbox uses. Reject reveals an optional-reason input. */
+const KIND_CFG: Record<ActKind, { path: (id: string) => string; rejectBody: (r: string) => object; requireReason?: boolean }> = {
+  leave:          { path: (id) => `/leave-requests/${id}`,                rejectBody: (r) => ({ rejection_reason: r || undefined }) },
+  regularisation: { path: (id) => `/attendance/regularisation/${id}`,     rejectBody: (r) => ({ rejection_reason: r || undefined }) },
+  compoff:        { path: (id) => `/attendance/comp-off/${id}`,           rejectBody: (r) => ({ notes: r || undefined }) },
+  reimbursement:  { path: (id) => `/payroll/reimbursements/claims/${id}`, rejectBody: (r) => ({ rejection_reason: r }), requireReason: true },
+}
+
+// ── A pending row with inline approve / reject ────────────────────────────────
+
 function PendingRow({ title, meta, kind, id, busyId, onAct }: {
   title: string; meta: string; kind: ActKind; id: string
   busyId: string | null; onAct: (kind: ActKind, id: string, decision: Decision, reason?: string) => void
@@ -71,6 +70,7 @@ function PendingRow({ title, meta, kind, id, busyId, onAct }: {
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
   const busy = busyId === id
+  const requireReason = !!KIND_CFG[kind].requireReason
 
   return (
     <div className="border-b border-border/40 py-2.5 last:border-0">
@@ -96,10 +96,10 @@ function PendingRow({ title, meta, kind, id, busyId, onAct }: {
         <div className="mt-2 flex items-center gap-1.5">
           <input
             autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
-            placeholder="Reason (optional)"
+            placeholder={requireReason ? 'Reason (required)' : 'Reason (optional)'}
             className="h-7 flex-1 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary/50"
           />
-          <Button size="sm" variant="destructive" disabled={busy}
+          <Button size="sm" variant="destructive" disabled={busy || (requireReason && !reason.trim())}
             onClick={() => { onAct(kind, id, 'reject', reason.trim()); setRejecting(false); setReason('') }}
             className="h-7 text-xs">Confirm reject</Button>
           <Button size="sm" variant="ghost" disabled={busy}
@@ -110,24 +110,39 @@ function PendingRow({ title, meta, kind, id, busyId, onAct }: {
   )
 }
 
-function AwaitingMe() {
+// ── Awaiting Me tab ───────────────────────────────────────────────────────────
+
+function AwaitingMe({ isHrAdmin }: { isHrAdmin: boolean }) {
   const qc = useQueryClient()
+
   const { data, isLoading } = useQuery<PendingPayload>({
     queryKey: ['flowdesk-pending'],
     queryFn:  () => api.get('/approvals/pending?limit=20'),
     staleTime: 30_000,
   })
+  const { data: compoffData } = useQuery<{ data: CompOffItem[] }>({
+    queryKey: ['flowdesk-compoff'],
+    queryFn:  () => api.get('/attendance/comp-off?status=pending'),
+    enabled: isHrAdmin, staleTime: 30_000,
+  })
+  const { data: reimbData } = useQuery<{ data: ReimbItem[] }>({
+    queryKey: ['flowdesk-reimb'],
+    queryFn:  () => api.get('/payroll/reimbursements/claims?status=pending'),
+    enabled: isHrAdmin, staleTime: 30_000,
+  })
 
   const act = useMutation({
     mutationFn: ({ kind, id, decision, reason }: { kind: ActKind; id: string; decision: Decision; reason?: string }) => {
-      const path = kind === 'leave' ? `/leave-requests/${id}` : `/attendance/regularisation/${id}`
+      const cfg = KIND_CFG[kind]
       return decision === 'approve'
-        ? api.post(`${path}/approve`, {})
-        : api.post(`${path}/reject`, { rejection_reason: reason || undefined })
+        ? api.post(`${cfg.path(id)}/approve`, {})
+        : api.post(`${cfg.path(id)}/reject`, cfg.rejectBody(reason ?? ''))
     },
     onSuccess: (_r, v) => {
       toast.success(v.decision === 'approve' ? 'Approved' : 'Rejected')
       qc.invalidateQueries({ queryKey: ['flowdesk-pending'] })
+      qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
+      qc.invalidateQueries({ queryKey: ['flowdesk-reimb'] })
     },
     onError: (e: Error) => toast.error('Action failed', { description: e.message }),
   })
@@ -136,7 +151,9 @@ function AwaitingMe() {
 
   const leaves = data?.leave_requests ?? []
   const regs   = data?.regularisations ?? []
-  const total  = leaves.length + regs.length
+  const compoffs = compoffData?.data ?? []
+  const reimbs   = reimbData?.data ?? []
+  const total = leaves.length + regs.length + compoffs.length + reimbs.length
 
   if (isLoading) {
     return <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading approvals…</div>
@@ -186,11 +203,47 @@ function AwaitingMe() {
           </div>
         )}
       </SectionCard>
+
+      {isHrAdmin && compoffs.length > 0 && (
+        <SectionCard title={`Comp-off (${compoffs.length})`} icon={<CalendarPlus className="h-4 w-4 text-muted-foreground" />}>
+          <div className="space-y-0">
+            {compoffs.map((r) => (
+              <PendingRow key={r.id} kind="compoff" id={r.id} busyId={busyId} onAct={onAct}
+                title={`${who(r.employees)} · ${r.leave_types?.name ?? 'Comp-off'}`}
+                meta={`worked ${fmtDate(r.worked_date)}${r.days_to_credit ? ` · +${r.days_to_credit}d credit` : ''}`}
+              />
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {isHrAdmin && reimbs.length > 0 && (
+        <SectionCard title={`Reimbursement claims (${reimbs.length})`} icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}>
+          <div className="space-y-0">
+            {reimbs.map((r) => (
+              <PendingRow key={r.id} kind="reimbursement" id={r.id} busyId={busyId} onAct={onAct}
+                title={`${who(r.employees)} · ${r.reimbursement_categories?.name ?? 'Reimbursement'}`}
+                meta={`${money(r.amount)}${r.claim_month ? ` · ${r.claim_month.slice(0, 7)}` : ''}`}
+              />
+            ))}
+          </div>
+        </SectionCard>
+      )}
     </div>
   )
 }
 
-// ── Raise a Request tab ───────────────────────────────────────────────────────
+// ── Raise a Request tab — inline leave form + deep-links ──────────────────────
+
+const REQUESTS: { label: string; desc: string; href: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { label: 'Apply for Leave',       desc: 'Casual, sick, earned & comp-off', href: '/ess/leave/balance',  icon: CalendarCheck },
+  { label: 'Regularize Attendance', desc: 'Fix a missed or wrong punch',      href: '/ess/attendance',     icon: ClipboardEdit },
+  { label: 'Reimbursement Claim',   desc: 'Submit an expense claim',          href: '/ess/reimbursements', icon: CreditCard },
+  { label: 'Loan or Advance',       desc: 'Request a salary advance / loan',  href: '/ess/loans',          icon: Wallet },
+  { label: 'Work From Home',        desc: 'Request a remote-work day',        href: '/ess/wfh',            icon: Home },
+  { label: 'Comp-Off',              desc: 'Claim credit for working off-day', href: '/ess/leave/balance',  icon: CalendarPlus },
+  { label: 'Raise a Helpdesk Ticket', desc: 'IT / HR / payroll support',      href: '/ess/issues',         icon: LifeBuoy },
+]
 
 function RaiseRequest() {
   return (
@@ -216,7 +269,8 @@ function RaiseRequest() {
 
 export function EssFlowDesk() {
   const { profile } = useAuthStore()
-  const isManager = ['manager', 'hr_admin', 'super_admin'].includes(profile?.role ?? '')
+  const isHrAdmin = ['hr_admin', 'super_admin'].includes(profile?.role ?? '')
+  const isManager = isHrAdmin || profile?.role === 'manager'
 
   return (
     <PageContainer>
@@ -229,7 +283,7 @@ export function EssFlowDesk() {
           <TabsTrigger value="raise" className="gap-1.5"><PlusCircle className="h-3.5 w-3.5" />Raise a Request</TabsTrigger>
         </TabsList>
 
-        {isManager && <TabsContent value="awaiting" className="mt-4"><AwaitingMe /></TabsContent>}
+        {isManager && <TabsContent value="awaiting" className="mt-4"><AwaitingMe isHrAdmin={isHrAdmin} /></TabsContent>}
         <TabsContent value="requests" className="mt-4"><EssApprovals embedded /></TabsContent>
         <TabsContent value="raise" className="mt-4"><RaiseRequest /></TabsContent>
       </Tabs>
