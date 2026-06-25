@@ -27,7 +27,7 @@ export function MobilePreview() {
     const year = new Date().getFullYear()
 
     const store = useAuthStore.getState()
-    store.setProfile({ id: 'preview-user', role: 'manager', employee_id: EMP, full_name: 'Aarav Sharma' } as never)
+    store.setProfile({ id: 'preview-user', role: 'hr_admin', employee_id: EMP, full_name: 'Priya Sharma' } as never)
     store.setBootstrapping(false)
 
     // Keep seeded mock data — never refetch against the (absent) API in preview.
@@ -80,15 +80,15 @@ export function MobilePreview() {
     const recognitionMe = { data: { received: 7, given: 4, points: 85, recent: [{ message: 'Brilliant client save on the Q2 rollout!', from_name: 'Neha Gupta' }] } }
     const recognitionFeed = {
       data: [
-        { id: 'r1', from_name: 'Neha Gupta', to_name: 'Aarav Sharma', badge_code: 'customer_hero', message: 'Brilliant client save on the Q2 rollout!', points: 15, created_at: new Date(Date.now() - 3600e3).toISOString() },
+        { id: 'r1', from_name: 'Neha Gupta', to_name: 'Priya Sharma', badge_code: 'customer_hero', message: 'Brilliant client save on the Q2 rollout!', points: 15, created_at: new Date(Date.now() - 3600e3).toISOString() },
         { id: 'r2', from_name: 'Rahul Verma', to_name: 'Sara Khan', badge_code: 'team_player', message: 'Always first to help the team. Legend.', points: 10, created_at: new Date(Date.now() - 8 * 3600e3).toISOString() },
-        { id: 'r3', from_name: 'Aarav Sharma', to_name: 'Vikram Rao', badge_code: 'innovator', message: 'That automation saved us hours every week.', points: 15, created_at: new Date(Date.now() - 26 * 3600e3).toISOString() },
+        { id: 'r3', from_name: 'Priya Sharma', to_name: 'Vikram Rao', badge_code: 'innovator', message: 'That automation saved us hours every week.', points: 15, created_at: new Date(Date.now() - 26 * 3600e3).toISOString() },
       ],
     }
     const recognitionLeaders = {
       data: [
         { rank: 1, employee_id: 'e1', name: 'Sara Khan', points: 120, count: 9 },
-        { rank: 2, employee_id: 'e2', name: 'Aarav Sharma', points: 85, count: 7 },
+        { rank: 2, employee_id: 'e2', name: 'Priya Sharma', points: 85, count: 7 },
         { rank: 3, employee_id: 'e3', name: 'Vikram Rao', points: 70, count: 5 },
         { rank: 4, employee_id: 'e4', name: 'Neha Gupta', points: 55, count: 4 },
         { rank: 5, employee_id: 'e5', name: 'Rahul Verma', points: 40, count: 3 },
@@ -130,6 +130,8 @@ export function MobilePreview() {
     qc.setQueryData(['mobile-community-feed'], communityFeed)
     qc.setQueryData(['mobile-home-recognition'], recognitionMe)
     qc.setQueryData(['mobile-home-community'], communityFeed)
+    qc.setQueryData(['mobile-home-leaderboard'], recognitionLeaders)
+    qc.setQueryData(['mobile-home-kudos'], recognitionFeed)
 
     setReady(true)
   }, [qc])

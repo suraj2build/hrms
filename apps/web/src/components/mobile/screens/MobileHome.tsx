@@ -1,42 +1,57 @@
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
-  Fingerprint, CalendarDays, Wallet, RefreshCw, ChevronRight,
-  FileText, Receipt, Home as HomeIcon, BookOpen, Award, MessageCircle, Megaphone,
+  Fingerprint, CalendarDays, Wallet, RefreshCw, Receipt,
+  Megaphone, MessageCircle, Plus, Award, Heart, Users, Lightbulb, Wrench, Sparkles, Trophy,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 import { UpcomingHolidays } from './parts'
+import { timeAgo, initials } from '../format'
 
-interface LeaveApp { id: string; status: string }
-interface SlipSummary { slip_id: string; month: string; net_pay: number }
-interface BalanceRow { leave_type_id: string; balance: number }
-interface RecognitionMe { received: number; given: number; points: number; recent: { message: string; from_name?: string }[] }
-interface CommunityPost { id: string; author_name?: string | null; type: string; title?: string | null; body: string; created_at: string }
+type Reaction = 'like' | 'celebrate' | 'appreciate' | 'support'
+interface CommunityPost {
+  id: string; author_name?: string | null; type: string; title?: string | null
+  body: string; pinned?: boolean; created_at: string
+  reaction_count: number; comment_count: number; my_reaction?: Reaction | null
+}
+interface Kudos { id: string; from_name?: string; to_name?: string; badge_code?: string; message: string; points: number; created_at: string }
+interface LeaderRow { rank: number; employee_id: string; name: string; points: number }
 
-const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : null
 
+const REACTIONS: { key: Reaction; emoji: string }[] = [
+  { key: 'like', emoji: '👍' }, { key: 'celebrate', emoji: '🎉' },
+  { key: 'appreciate', emoji: '👏' }, { key: 'support', emoji: '💪' },
+]
+
+const BADGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  Award, Heart, Users, Lightbulb, Wrench, Sparkles,
+}
+const ICON_BY_BADGE: Record<string, string> = {
+  ownership_champion: 'Award', customer_hero: 'Heart', team_player: 'Users',
+  innovator: 'Lightbulb', problem_solver: 'Wrench', culture_ambassador: 'Sparkles',
+}
+const kudosIcon = (code?: string) => BADGE_ICONS[(code && ICON_BY_BADGE[code]) || 'Award'] ?? Award
+
 export function MobileHome({ base }: { base: string }) {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const { profile } = useAuthStore()
   const employeeId = profile?.employee_id ?? ''
   const today = todayStr()
 
-  const quick = [
-    { label: 'Attendance', icon: Fingerprint, from: '#2E6FE6', to: '#5C9AFF', to_path: `${base}/attendance` },
+  const chips = [
+    { label: 'Punch', icon: Fingerprint, from: '#2E6FE6', to: '#5C9AFF', to_path: `${base}/attendance` },
     { label: 'Leave', icon: CalendarDays, from: '#15B8A6', to: '#2DD4BF', to_path: `${base}/leave/balance` },
     { label: 'Payslip', icon: Wallet, from: '#7C3AED', to: '#A78BFA', to_path: `${base}/compensation` },
     { label: 'Regularize', icon: RefreshCw, from: '#B07B18', to: '#D9A441', to_path: `${base}/attendance` },
-  ]
-  const shortcuts = [
-    { label: 'Documents', icon: FileText, to: `${base}/documents` },
-    { label: 'Claims', icon: Receipt, to: `${base}/reimbursements` },
-    { label: 'WFH', icon: HomeIcon, to: `${base}/wfh` },
-    { label: 'Policies', icon: BookOpen, to: `${base}/policies` },
+    { label: 'Claims', icon: Receipt, from: '#1A8050', to: '#34B27B', to_path: `${base}/reimbursements` },
   ]
 
   const { data: att } = useQuery<{ logs: { check_in: string | null; check_out: string | null; date: string }[] }>({
@@ -44,136 +59,179 @@ export function MobileHome({ base }: { base: string }) {
     queryFn: () => api.get(`/attendance/${employeeId}?from=${today}&to=${today}`),
     enabled: !!employeeId, staleTime: 30_000,
   })
-  const { data: leaveData } = useQuery<{ data: LeaveApp[] }>({
-    queryKey: ['mobile-home-leave'], queryFn: () => api.get('/attendance/leave/my'),
+  const { data: leaderData } = useQuery<{ data: LeaderRow[] }>({
+    queryKey: ['mobile-home-leaderboard'], queryFn: () => api.get('/recognition/leaderboard'),
   })
-  const { data: slipData } = useQuery<{ data: SlipSummary[] }>({
-    queryKey: ['mobile-home-slips'], queryFn: () => api.get('/payroll/my-slips'),
-  })
-  const { data: balData } = useQuery<{ data: BalanceRow[] }>({
-    queryKey: ['mobile-home-balance', employeeId],
-    queryFn: () => api.get(`/attendance/leave/balance/${employeeId}`),
-    enabled: !!employeeId,
-  })
-  const { data: recogData } = useQuery<{ data: RecognitionMe }>({
-    queryKey: ['mobile-home-recognition'], queryFn: () => api.get('/recognition/me'),
+  const { data: kudosData } = useQuery<{ data: Kudos[] }>({
+    queryKey: ['mobile-home-kudos'], queryFn: () => api.get('/recognition/feed?limit=15'),
   })
   const { data: communityData } = useQuery<{ data: CommunityPost[] }>({
-    queryKey: ['mobile-home-community'], queryFn: () => api.get('/community/feed?limit=4'),
+    queryKey: ['mobile-home-community'], queryFn: () => api.get('/community/feed?limit=15'),
+  })
+
+  const react = useMutation({
+    mutationFn: ({ id, reaction }: { id: string; reaction: Reaction }) => api.post(`/community/posts/${id}/react`, { reaction }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mobile-home-community'] }),
+    onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
 
   const todayLog = (att?.logs ?? []).find((l) => (l.check_in ?? l.check_out)?.slice(0, 10) === today)
   const inTime = fmtTime(todayLog?.check_in ?? null)
-  const pendingLeave = (leaveData?.data ?? []).filter((l) => l.status === 'pending').length
-  const latestSlip = slipData?.data?.[0]
-  const leaveTotal = (balData?.data ?? []).reduce((s, r) => s + (r.balance ?? 0), 0)
-  const recog = recogData?.data
-  const communityPosts = (communityData?.data ?? []).slice(0, 3)
+  const leaders = (leaderData?.data ?? []).slice(0, 8)
+
+  // Interleave community posts + recognition kudos into one feed, newest first.
+  const feed = useMemo(() => {
+    const posts = (communityData?.data ?? []).map((p) => ({ kind: 'post' as const, at: p.created_at, post: p }))
+    const kudos = (kudosData?.data ?? []).map((k) => ({ kind: 'kudos' as const, at: k.created_at, kudos: k }))
+    return [...posts, ...kudos].sort((a, b) => (a.at < b.at ? 1 : -1))
+  }, [communityData, kudosData])
 
   return (
     <div className="space-y-4">
-      {/* Quick-access glossy tiles */}
-      <div className="grid grid-cols-4 gap-2.5">
-        {quick.map((q) => (
-          <button key={q.label} onClick={() => navigate(q.to_path)} className="flex flex-col items-center gap-1.5 rounded-2xl bg-white p-2.5 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] active:scale-95 transition-transform">
-            <span className="grid h-10 w-10 place-items-center rounded-2xl text-white" style={glossy(q.from, q.to)}>
-              <q.icon className="h-4 w-4" />
+      {/* Today punch — compact */}
+      <button onClick={() => navigate(`${base}/attendance`)} className="flex w-full items-center justify-between rounded-2xl bg-white p-3.5 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] active:scale-[0.99] transition-transform">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-xl text-white" style={glossy(inTime ? '#1A8050' : '#2E6FE6', inTime ? '#34B27B' : '#5C9AFF')}>
+            <Fingerprint className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-[11px] text-muted-foreground">Today · In Time</p>
+            <p className="text-lg font-extrabold leading-tight text-[#0F172A]">{inTime ?? '--:--'}</p>
+          </div>
+        </div>
+        <span className="rounded-lg px-3 py-1.5 text-[11px] font-bold text-white" style={glossy('#2E6FE6', '#15B8A6')}>
+          {inTime ? 'Open' : 'Punch in'}
+        </span>
+      </button>
+
+      {/* Quick action chips — horizontal scroll */}
+      <div className="-mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {chips.map((c) => (
+          <button key={c.label} onClick={() => navigate(c.to_path)} className="flex shrink-0 flex-col items-center gap-1.5 active:scale-95 transition-transform">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl text-white" style={glossy(c.from, c.to)}>
+              <c.icon className="h-5 w-5" />
             </span>
-            <span className="text-[9px] font-semibold text-foreground/80">{q.label}</span>
+            <span className="text-[9px] font-semibold text-foreground/70">{c.label}</span>
           </button>
         ))}
       </div>
 
-      {/* Today card */}
-      <button onClick={() => navigate(`${base}/attendance`)} className="flex w-full items-center justify-between rounded-2xl bg-white p-4 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] active:scale-[0.99] transition-transform">
-        <div>
-          <p className="text-[11px] text-muted-foreground">Today · In Time</p>
-          <p className="text-2xl font-extrabold tracking-tight text-[#0F172A]">{inTime ?? '--:--'}</p>
-          <p className="text-[10px] font-semibold text-[#1A8050]">{inTime ? 'Checked in ✓' : 'Tap to punch in'}</p>
-        </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground" />
-      </button>
-
-      {/* Stat strip */}
-      <div className="grid grid-cols-3 gap-2.5">
-        <Stat value={String(leaveTotal)} label="Leave bal." tint="#15B8A6" onClick={() => navigate(`${base}/leave/balance`)} />
-        <Stat value={String(pendingLeave)} label="Pending" tint="#1A8050" onClick={() => navigate(`${base}/approvals`)} />
-        <Stat value={latestSlip ? inr(latestSlip.net_pay) : '—'} label="Net pay" tint="#7C3AED" small onClick={() => navigate(`${base}/compensation`)} />
-      </div>
-
-      {/* Shortcuts */}
+      {/* Spotlight — stories-style row */}
       <div>
-        <p className="mb-2 px-1 text-xs font-bold text-[#0F172A]">Shortcuts</p>
-        <div className="grid grid-cols-4 gap-2.5">
-          {shortcuts.map((s) => (
-            <button key={s.label} onClick={() => navigate(s.to)} className="flex flex-col items-center gap-1.5 rounded-2xl bg-white p-2.5 shadow-sm active:scale-95 transition-transform">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2E6FE6]/10 text-[#2E6FE6]">
-                <s.icon className="h-4 w-4" />
+        <p className="mb-2 flex items-center gap-1.5 px-1 text-xs font-bold text-[#0F172A]">
+          <Trophy className="h-3.5 w-3.5 text-[#B07B18]" /> Spotlight
+        </p>
+        <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* Give recognition — first bubble */}
+          <button onClick={() => navigate(`${base}/recognition`)} className="flex w-14 shrink-0 flex-col items-center gap-1 active:scale-95 transition-transform">
+            <span className="grid h-14 w-14 place-items-center rounded-full text-white ring-2 ring-white" style={glossy('#7C3AED', '#A78BFA')}>
+              <Plus className="h-6 w-6" />
+            </span>
+            <span className="truncate text-[9px] font-semibold text-foreground/70">Give 👏</span>
+          </button>
+          {leaders.map((l) => (
+            <button key={l.employee_id} onClick={() => navigate(`${base}/recognition`)} className="flex w-14 shrink-0 flex-col items-center gap-1 active:scale-95 transition-transform">
+              <span className="relative grid h-14 w-14 place-items-center rounded-full text-sm font-extrabold text-white ring-2 ring-[#2DD4BF]" style={glossy('#2E6FE6', '#1A4D8F')}>
+                {initials(l.name)}
+                {l.rank === 1 && <span className="absolute -bottom-0.5 -right-0.5 grid h-5 w-5 place-items-center rounded-full bg-white"><Trophy className="h-3 w-3 text-[#B07B18]" /></span>}
               </span>
-              <span className="text-[9px] font-medium text-foreground/70">{s.label}</span>
+              <span className="w-full truncate text-center text-[9px] font-medium text-foreground/70">{(l.name ?? '').split(' ')[0]}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Recognition teaser */}
-      <button onClick={() => navigate(`${base}/recognition`)} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3.5 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] active:scale-[0.99] transition-transform">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white" style={glossy('#7C3AED', '#A78BFA')}><Award className="h-5 w-5" /></span>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold text-foreground">
-            {recog && recog.received > 0 ? `You were recognized ${recog.received}×` : 'Recognition'}
-          </p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {recog?.recent?.[0]?.message ?? 'Appreciate a colleague today'}
-          </p>
-        </div>
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-      </button>
-
-      {/* Community teaser */}
-      <div>
-        <button onClick={() => navigate(`${base}/community`)} className="mb-2 flex w-full items-center justify-between px-1">
-          <span className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]"><MessageCircle className="h-3.5 w-3.5 text-[#2E6FE6]" /> Community</span>
-          <span className="text-[11px] font-semibold text-[#2E6FE6]">View all</span>
-        </button>
-        {communityPosts.length === 0 ? (
-          <button onClick={() => navigate(`${base}/community`)} className="w-full rounded-2xl bg-white px-3 py-4 text-center text-[11px] text-muted-foreground shadow-sm">
-            No posts yet — share an update.
-          </button>
-        ) : (
-          <div className="space-y-2">
-            {communityPosts.map((p) => {
-              const isAnn = p.type === 'announcement'
-              const initials = (p.author_name ?? '?').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()
-              return (
-                <button key={p.id} onClick={() => navigate(`${base}/community`)} className="flex w-full items-start gap-2.5 rounded-2xl bg-white p-3 text-left shadow-sm active:scale-[0.99] transition-transform">
-                  {isAnn ? (
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white" style={glossy('#7C3AED', '#A78BFA')}><Megaphone className="h-4 w-4" /></span>
-                  ) : (
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white" style={glossy('#1A4D8F', '#2E6FE6')}>{initials}</span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[11px] font-bold text-foreground">{p.author_name ?? 'Someone'}</p>
-                    <p className="line-clamp-2 text-[11px] text-foreground/75">{p.title ?? p.body}</p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )}
+      {/* Live feed */}
+      <div className="flex items-center justify-between px-1">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
+          <span className="grid h-4 w-4 place-items-center rounded-full bg-[#15B8A6]"><span className="h-1.5 w-1.5 animate-ping rounded-full bg-white" /></span>
+          Happening now
+        </p>
+        <button onClick={() => navigate(`${base}/community`)} className="text-[11px] font-semibold text-[#2E6FE6]">Open Community</button>
       </div>
 
-      <UpcomingHolidays limit={3} />
+      {feed.length === 0 ? (
+        <div className="rounded-2xl bg-white px-4 py-8 text-center shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+          <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl text-white" style={glossy('#2E6FE6', '#15B8A6')}><MessageCircle className="h-6 w-6" /></span>
+          <p className="mt-3 text-sm font-semibold text-foreground">It's quiet in here</p>
+          <p className="mt-1 text-xs text-muted-foreground">Share an update or recognize a colleague to get things going.</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <button onClick={() => navigate(`${base}/community`)} className="rounded-xl px-4 py-2 text-xs font-bold text-white" style={glossy('#2E6FE6', '#15B8A6')}>Post update</button>
+            <button onClick={() => navigate(`${base}/recognition`)} className="rounded-xl border border-[#7C3AED]/30 bg-[#7C3AED]/5 px-4 py-2 text-xs font-bold text-[#7C3AED]">Give kudos</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {feed.map((item) =>
+            item.kind === 'post'
+              ? <PostCard key={`p-${item.post.id}`} post={item.post} onReact={(r) => react.mutate({ id: item.post.id, reaction: r })} onOpen={() => navigate(`${base}/community`)} />
+              : <KudosCard key={`k-${item.kudos.id}`} kudos={item.kudos} />,
+          )}
+        </div>
+      )}
+
+      <UpcomingHolidays limit={2} />
     </div>
   )
 }
 
-function Stat({ value, label, tint, small, onClick }: { value: string; label: string; tint: string; small?: boolean; onClick: () => void }) {
+function PostCard({ post, onReact, onOpen }: { post: CommunityPost; onReact: (r: Reaction) => void; onOpen: () => void }) {
+  const announce = post.type === 'announcement' || post.pinned
   return (
-    <button onClick={onClick} className="rounded-2xl bg-white p-3 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] active:scale-95 transition-transform">
-      <span className="block h-1.5 w-6 rounded-full" style={{ background: tint }} />
-      <p className={`mt-2 font-extrabold tracking-tight text-[#0F172A] ${small ? 'text-sm' : 'text-xl'}`}>{value}</p>
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-    </button>
+    <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+      {announce && <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg,#2E6FE6,#15B8A6)' }} />}
+      <div className="p-3.5">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold text-white" style={glossy(announce ? '#2E6FE6' : '#1A4D8F', announce ? '#15B8A6' : '#2E6FE6')}>
+            {announce ? <Megaphone className="h-4 w-4" /> : initials(post.author_name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-bold text-foreground">{post.author_name ?? 'Someone'}</p>
+            <p className="text-[10px] text-muted-foreground">{announce ? 'Announcement · ' : ''}{timeAgo(post.created_at)}</p>
+          </div>
+        </div>
+        {post.title && <p className="mt-2 text-sm font-bold text-[#0F172A]">{post.title}</p>}
+        <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/85">{post.body}</p>
+
+        <div className="mt-3 flex items-center gap-1">
+          {REACTIONS.map((r) => {
+            const active = post.my_reaction === r.key
+            return (
+              <button key={r.key} onClick={() => onReact(r.key)}
+                className={`grid h-8 w-8 place-items-center rounded-full text-sm transition-transform active:scale-90 ${active ? 'bg-[#2E6FE6]/12 ring-1 ring-[#2E6FE6]/30' : 'bg-muted/60'}`}>
+                {r.emoji}
+              </button>
+            )
+          })}
+          {post.reaction_count > 0 && <span className="ml-1 text-[11px] font-semibold text-muted-foreground">{post.reaction_count}</span>}
+          <button onClick={onOpen} className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+            <MessageCircle className="h-3.5 w-3.5" />{post.comment_count > 0 ? post.comment_count : ''}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function KudosCard({ kudos }: { kudos: Kudos }) {
+  const Icon = kudosIcon(kudos.badge_code)
+  return (
+    <div className="rounded-2xl bg-white p-3.5 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+      <div className="flex gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white" style={glossy('#7C3AED', '#A78BFA')}>
+          <Icon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] text-foreground/85">
+            <span className="font-bold text-foreground">{kudos.from_name ?? 'Someone'}</span> recognized{' '}
+            <span className="font-bold text-foreground">{kudos.to_name ?? 'a colleague'}</span>
+          </p>
+          {kudos.message && <p className="mt-0.5 text-[12px] text-foreground/80">"{kudos.message}"</p>}
+          <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+            {timeAgo(kudos.created_at)}{kudos.points ? <span className="rounded-full bg-[#7C3AED]/10 px-1.5 py-0.5 font-semibold text-[#7C3AED]">+{kudos.points} pts</span> : null}
+          </p>
+        </div>
+      </div>
+    </div>
   )
 }
