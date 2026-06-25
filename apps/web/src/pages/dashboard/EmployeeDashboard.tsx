@@ -16,7 +16,7 @@ import {
   ChevronRight, ArrowRight, Check,
   Calendar,
   Leaf, Wallet, RefreshCw, Scale, FolderOpen, FileText,
-  Mail, CreditCard, AlertCircle, CalendarClock, ShieldCheck,
+  Mail, CreditCard, AlertCircle, CalendarClock, ShieldCheck, PartyPopper,
 } from 'lucide-react'
 import { useAuthStore }  from '@/stores/authStore'
 import { api }           from '@/lib/api/client'
@@ -1030,6 +1030,74 @@ function ExpiryAlerts({ items, navigate }: { items: DashExpiryItem[]; navigate: 
   )
 }
 
+// ── Recognition teaser (Experience Cloud — Rewards on Home) ────────────────────
+
+interface DashRecognition {
+  received: number; given: number; points: number
+  recent: Array<{ id: string; from_name?: string; message: string; created_at: string }>
+}
+
+function RecognitionCard({ data, navigate }: { data: DashRecognition | null; navigate: (to: string) => void }) {
+  const recent = data?.recent ?? []
+  const has    = recent.length > 0
+  return (
+    <section style={CARD}>
+      <div style={CARD_HEAD}>
+        <CardLabel>Recognition</CardLabel>
+        <LinkBtn onClick={() => navigate('/ess/recognition')}>
+          {has ? 'View all' : 'Give one'} <ChevronRight style={{ width: 12, height: 12 }} />
+        </LinkBtn>
+      </div>
+      <div style={{ padding: '10px 16px 14px' }}>
+        {has ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 10, background: 'color-mix(in srgb, var(--primary) 10%, var(--card))', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <PartyPopper style={{ width: 16, height: 16, color: 'var(--primary)' }} />
+              </span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--foreground)' }}>
+                  You were recognized {data!.received}×
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{data!.points} points earned</div>
+              </div>
+            </div>
+            {recent.slice(0, 2).map((r, i) => (
+              <div key={r.id} style={{ padding: '7px 0', borderTop: i > 0 ? '1px solid var(--border)' : undefined }}>
+                <div style={{ fontSize: 12, color: 'var(--foreground)' }}>
+                  <b>{r.from_name ?? 'A colleague'}</b> recognized you
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                  “{r.message}”
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>{timeAgo(r.created_at)}</div>
+              </div>
+            ))}
+          </>
+        ) : (
+          <div style={{ textAlign: 'center' as const, padding: '10px 0' }}>
+            <PartyPopper style={{ width: 22, height: 22, color: 'var(--muted-foreground)', opacity: 0.4, margin: '0 auto 6px' }} />
+            <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 9 }}>
+              Appreciate a colleague who made an impact
+            </div>
+            <button
+              onClick={() => navigate('/ess/recognition')}
+              style={{
+                fontSize: 12, fontWeight: 600, color: 'var(--primary)',
+                background: 'color-mix(in srgb, var(--primary) 8%, var(--card))',
+                border: '1px solid color-mix(in srgb, var(--primary) 25%, transparent)',
+                borderRadius: 8, padding: '6px 14px', cursor: 'pointer',
+              }}
+            >
+              Give recognition
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 // ── 5. Quick Actions Bar ──────────────────────────────────────────────────────
 
 type QaItem = { icon: React.ComponentType<{ style?: CSSProperties }>; label: string; tone: string; to: string }
@@ -1203,6 +1271,14 @@ export function EmployeeDashboard() {
     staleTime: 5 * 60_000,
   })
 
+  // Recognition summary (shared cache key with /ess/recognition) — Rewards on Home.
+  const { data: recognitionResp } = useQuery<{ data: DashRecognition }>({
+    queryKey:  ['recognition-me'],
+    queryFn:   () => api.get('/recognition/me'),
+    enabled:   !!employeeId,
+    staleTime: 60_000,
+  })
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const emp = empResp?.data ?? (empResp as Employee | undefined) ?? null
@@ -1220,6 +1296,7 @@ export function EmployeeDashboard() {
   const comp        = compResp?.data ?? null
   const holidays    = (holidaysResp as { data?: Holiday[] } | undefined)?.data ?? (Array.isArray(holidaysResp) ? holidaysResp : [])
   const expiryItems = expiryResp?.data ?? []
+  const recognition = recognitionResp?.data ?? null
 
   // Greeting / today-snapshot inputs (reuse already-fetched attendance + requests)
   const todayStr = isoDate(today)
@@ -1271,8 +1348,9 @@ export function EmployeeDashboard() {
           <CompStructure comp={comp} latestSlip={slips[0] ?? null} navigate={nav} />
           <MyRequests requests={requests} regRequests={regRequests} navigate={nav} />
         </div>
-        {/* Right: Leave usage + Expiry alerts + Upcoming */}
+        {/* Right: Recognition + Leave usage + Expiry alerts + Upcoming */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <RecognitionCard data={recognition} navigate={nav} />
           <LeaveUsage balances={balances} navigate={nav} />
           <ExpiryAlerts items={expiryItems} navigate={nav} />
           <Upcoming holidays={holidays} navigate={nav} />
