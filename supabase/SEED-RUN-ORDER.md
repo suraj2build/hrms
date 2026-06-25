@@ -14,6 +14,7 @@ Each file is a single idempotent transaction (safe to re-run; it clears its own 
 | 7 | `seed-demo-extra-6.sql`  | Shift roster + extra shifts, rosters, rotation groups/members, weekly-off & holiday groups |
 | 8 | `seed-demo-extra-7.sql`  | Notification templates + log, helpdesk comments, asset categories, OT policies, EPF/ESI/PT config |
 | 9 | `seed-demo-extra-8.sql`  | Analytics coverage: leave_applications, sites (+ headcount attribution), statutory registrations, intelligence digest, workforce staffing snapshots/hints, LWF contributions, operational incidents, onboarding/pre-join funnel, attendance exceptions |
+| 10 | `seed-demo-extra-9.sql` | ESS 2.0 pillars: **recognition** (peer kudos — Priya gives & receives so "me"/leaderboard populate), **feed_posts** (pinned HR announcements + updates/birthday/anniversary/new-joiner/milestone), **feed_reactions** (incl. the demo login's own), **feed_comments** |
 
 ## Notes
 - Order matters: files 2–8 reference rows created by `seed-demo.sql` (employees,
