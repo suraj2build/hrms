@@ -32,9 +32,21 @@ These were decided up front and govern every decision below.
 
 ### 0.1 Pre-req: brand unification (must land before/with Phase 1)
 Desktop ESS CSS var `--primary` is **navy `#1A4D8F`** (`apps/web/src/index.css`),
-but mobile Phase 1 + `brand-config.ts` use **royal-blue `#2E6FE6` + teal**. ESS
-2.0 standardizes on the royal-blue→teal system. This is a token change, not a
-redesign — but it's the seam that makes desktop and mobile feel like one product.
+but mobile Phase 1 + `brand-config.ts` use **royal-blue `#2E6FE6` + teal**. This
+is the seam that makes desktop and mobile feel like one product.
+
+> **Amendment (recorded change to the locked contract).** The original direction
+> was to standardize on the royal-blue→teal system (move desktop *off* navy). This
+> was **inverted by product decision**: we unify **toward the desktop navy
+> `#1A4D8F`** instead. Scope of the first pass (agreed):
+> - **Mobile header + primary CTA buttons → navy `#1A4D8F`** (`glossy.ts`
+>   `HEADER_GRADIENT`, the centre punch FAB, active-tab tint, the punch-in and
+>   apply-leave buttons). Desktop already uses navy, so it is unchanged.
+> - **Teal `#15B8A6` stays the accent** (badges, secondary glossy stop).
+> - **Mobile UI surfaces only** — the exported `BRAND_BLUE` token, the CognixHR
+>   wordmark, and the marketing site keep royal-blue (untouched).
+> - Decorative royal-blue chips/tiles on mobile are intentionally left for a later
+>   pass (not "all royal-blue → navy").
 
 ---
 

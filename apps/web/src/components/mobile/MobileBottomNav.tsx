@@ -47,7 +47,7 @@ export function MobileBottomNav({
           aria-label="Quick punch"
           onClick={onFab}
           className="absolute left-1/2 top-0 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-2xl text-white"
-          style={glossy('#2E6FE6', '#15B8A6')}
+          style={glossy('#1A4D8F', '#15B8A6')}
         >
           <Plus className="h-6 w-6" />
         </button>
@@ -59,7 +59,7 @@ export function MobileBottomNav({
 function NavBtn({ tab, active, onClick }: { tab: MobileTab; active: boolean; onClick: () => void }) {
   const Icon = tab.icon
   return (
-    <button onClick={onClick} className={cn('flex flex-col items-center gap-0.5', active ? 'text-[#2E6FE6]' : 'text-muted-foreground')}>
+    <button onClick={onClick} className={cn('flex flex-col items-center gap-0.5', active ? 'text-[#1A4D8F]' : 'text-muted-foreground')}>
       <Icon className="h-[18px] w-[18px]" />
       <span className="text-[9px] font-medium">{tab.label}</span>
     </button>

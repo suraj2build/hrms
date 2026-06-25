@@ -87,7 +87,7 @@ export function MobileAttendance({ base: _base }: { base: string }) {
           disabled={isPending}
           onClick={() => punch(checkedIn ? 'OUT' : 'IN')}
           className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white disabled:opacity-60"
-          style={glossy(checkedIn ? '#B07B18' : '#2E6FE6', checkedIn ? '#D9A441' : '#15B8A6')}
+          style={glossy(checkedIn ? '#B07B18' : '#1A4D8F', checkedIn ? '#D9A441' : '#15B8A6')}
         >
           {checkedIn ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
           {isPending ? 'Please wait…' : checkedIn ? 'Punch out' : 'Selfie punch in'}
