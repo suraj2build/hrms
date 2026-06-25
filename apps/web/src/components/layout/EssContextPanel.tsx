@@ -1,22 +1,26 @@
 /**
- * EssContextPanel — right-side context panel for the ESS 2.0 desktop shell.
+ * EssContextPanel — right-side context rail for the ESS 2.0 desktop shell.
  *
- * Shown on xl+ screens only (hidden on laptop/tablet). Pulls from GET /ess/home
- * and renders compact widgets:
- *   · Birthdays this week
- *   · Work anniversaries this week
+ * Shown on xl+ screens only. Pulls from GET /ess/home and renders a stack of
+ * uniformly-structured widget cards:
+ *   · Pending approvals (managers/HR)
+ *   · Birthdays & milestones — each row has a one-tap "Wish" that posts a
+ *     celebratory message to the Community feed
  *   · Upcoming holidays
  *   · Recent kudos received
- *   · Pending approvals badge (managers/HR)
+ *   · Recognise-a-teammate nudge
  *
- * Design: narrow (260px), scrollable, no chrome — just content cards separated
- * by a subtle divider. Uses the same design-token contract as the rest of ESS.
+ * Layout contract: every row is a 3-zone grid — [avatar] [text(min-w-0,truncate)]
+ * [action(shrink-0)] — so nothing clips at the 264px rail width.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import {
-  Cake, Star, CalendarDays, Award, CheckSquare, Gift, ChevronRight,
+  Cake, PartyPopper, Star, CalendarDays, Award, CheckSquare, Gift,
+  ChevronRight, Loader2, Check,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -32,44 +36,12 @@ interface EssHomePayload {
   anniversaries:     { name: string; years: number; days_until: number }[]
 }
 
-// ── Shared widget layout ───────────────────────────────────────────────────────
-
-function Widget({ title, icon: Icon, iconCls, children, action, onAction }: {
-  title:    string
-  icon:     React.ComponentType<{ className?: string }>
-  iconCls:  string
-  children: React.ReactNode
-  action?:  string
-  onAction?: () => void
-}) {
-  return (
-    <section>
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-          <Icon className={cn('h-3 w-3', iconCls)} />{title}
-        </h3>
-        {action && (
-          <button onClick={onAction}
-            className="flex items-center gap-0.5 text-[10px] font-semibold text-primary hover:text-primary/80 transition-colors">
-            {action}<ChevronRight className="h-3 w-3" />
-          </button>
-        )}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function EmptyState({ text }: { text: string }) {
-  return <p className="text-[11px] text-muted-foreground py-1">{text}</p>
-}
-
-// ── Day label helper ───────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────────
 
 function dayLabel(n: number) {
   if (n === 0) return 'Today'
   if (n === 1) return 'Tomorrow'
-  return `in ${n}d`
+  return `in ${n} days`
 }
 
 const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -77,8 +49,6 @@ function fmtDate(iso: string) {
   const d = new Date(iso + 'T12:00:00Z')
   return isNaN(d.getTime()) ? iso : `${d.getUTCDate()} ${M[d.getUTCMonth()]}`
 }
-
-// ── Badge code → readable label ────────────────────────────────────────────────
 
 const BADGE_LABELS: Record<string, string> = {
   ownership_champion: 'Ownership Champion',
@@ -89,6 +59,107 @@ const BADGE_LABELS: Record<string, string> = {
   culture_ambassador: 'Culture Ambassador',
 }
 
+const firstNameOf = (full: string) => full.trim().split(/\s+/)[0] || full
+
+// ── Widget shell ─────────────────────────────────────────────────────────────
+
+function Widget({ title, icon: Icon, iconCls, children, action, onAction }: {
+  title:     string
+  icon:      React.ComponentType<{ className?: string }>
+  iconCls:   string
+  children:  React.ReactNode
+  action?:   string
+  onAction?: () => void
+}) {
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          <Icon className={cn('h-3.5 w-3.5 shrink-0', iconCls)} />
+          <span className="truncate">{title}</span>
+        </h3>
+        {action && (
+          <button onClick={onAction}
+            className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold text-primary hover:text-primary/80 transition-colors">
+            {action}<ChevronRight className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <p className="py-1 text-[11px] text-muted-foreground">{text}</p>
+}
+
+// ── Wish button — posts a celebratory message to the Community feed ──────────────
+
+type WishKind = 'birthday' | 'anniversary'
+
+function WishButton({ name, kind, years }: { name: string; kind: WishKind; years?: number }) {
+  const qc = useQueryClient()
+  const [done, setDone] = useState(false)
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const who = firstNameOf(name)
+      const body =
+        kind === 'birthday'
+          ? `🎂 Happy birthday, ${who}! Wishing you a fantastic year ahead. 🎉`
+          : `🎉 Congratulations ${who} on ${years} year${years === 1 ? '' : 's'} with the team! Thank you for everything you do. 🙌`
+      return api.post('/community/posts', { body, type: 'update', audience_scope: 'company' })
+    },
+    onSuccess: () => {
+      setDone(true)
+      toast.success(`Wish posted to Community`, { description: `${firstNameOf(name)} will see it in the feed.` })
+      qc.invalidateQueries({ queryKey: ['community-feed'] })
+    },
+    onError: () => toast.error('Could not post your wish', { description: 'Please try again in a moment.' }),
+  })
+
+  if (done) {
+    return (
+      <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#15B8A6]/12 px-2 py-1 text-[10px] font-semibold text-[#15B8A6]">
+        <Check className="h-3 w-3" />Wished
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      className="flex shrink-0 items-center gap-1 rounded-full border border-[#15B8A6]/30 bg-[#15B8A6]/5 px-2.5 py-1 text-[10px] font-semibold text-[#15B8A6] hover:bg-[#15B8A6]/12 disabled:opacity-60 transition-colors"
+    >
+      {mutation.isPending
+        ? <Loader2 className="h-3 w-3 animate-spin" />
+        : <PartyPopper className="h-3 w-3" />}
+      Wish
+    </button>
+  )
+}
+
+// ── Celebration row (birthday / anniversary) ────────────────────────────────────
+
+function CelebrationRow({ emoji, tint, name, sub, kind, years }: {
+  emoji: string; tint: string; name: string; sub: string; kind: WishKind; years?: number
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm" style={{ backgroundColor: tint }}>
+        {emoji}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-semibold text-foreground">{name}</p>
+        <p className="truncate text-[10px] text-muted-foreground">{sub}</p>
+      </div>
+      <WishButton name={name} kind={kind} years={years} />
+    </div>
+  )
+}
+
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 export function EssContextPanel() {
@@ -97,141 +168,137 @@ export function EssContextPanel() {
   const isManager = ['manager', 'hr_admin', 'super_admin'].includes(profile?.role ?? '')
 
   const { data, isLoading } = useQuery<EssHomePayload>({
-    queryKey: ['ess-home-panel'],
-    queryFn:  () => api.get('/ess/home'),
+    queryKey:  ['ess-home-panel'],
+    queryFn:   () => api.get('/ess/home'),
     staleTime: 5 * 60_000,
   })
 
   if (isLoading) {
     return (
-      <aside className="hidden xl:flex w-[260px] shrink-0 flex-col border-l border-border/60 bg-background/50">
+      <aside className="hidden xl:flex w-[264px] shrink-0 flex-col border-l border-border/60 bg-muted/20">
         <div className="flex flex-col gap-3 p-4">
-          {[1,2,3].map((i) => (
-            <div key={i} className="h-16 animate-pulse rounded-lg bg-muted/40" />
-          ))}
+          {[1,2,3].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-muted/50" />)}
         </div>
       </aside>
     )
   }
 
-  const birthdays    = data?.birthdays    ?? []
-  const anniversaries = data?.anniversaries ?? []
-  const holidays     = data?.upcoming_holidays ?? []
-  const recognition  = data?.recognition?.recent ?? []
-  const approvalsCnt = data?.kpis?.pending_approvals ?? 0
+  const birthdays     = data?.birthdays          ?? []
+  const anniversaries = data?.anniversaries      ?? []
+  const holidays      = data?.upcoming_holidays  ?? []
+  const recognition   = data?.recognition?.recent ?? []
+  const approvalsCnt  = data?.kpis?.pending_approvals ?? 0
+  const hasCelebrations = birthdays.length > 0 || anniversaries.length > 0
 
   return (
-    <aside className="hidden xl:flex w-[260px] shrink-0 flex-col overflow-y-auto border-l border-border/60 bg-background/50">
-      <div className="flex flex-col gap-5 p-4 pb-8">
+    <aside className="hidden xl:flex w-[264px] shrink-0 flex-col overflow-y-auto border-l border-border/60 bg-muted/20">
+      <div className="flex flex-col gap-4 p-4 pb-8">
 
         {/* Pending approvals — managers only */}
         {isManager && (
-          <Widget title="Approvals" icon={CheckSquare} iconCls="text-primary"
-            action="View all" onAction={() => navigate('/ess/flowdesk')}>
-            {approvalsCnt === 0 ? (
-              <EmptyState text="Nothing waiting on you." />
-            ) : (
-              <button onClick={() => navigate('/ess/flowdesk')}
-                className="flex w-full items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-3 py-2.5 hover:bg-primary/10 transition-colors">
-                <span className="text-xs font-medium text-foreground">
-                  {approvalsCnt} item{approvalsCnt !== 1 ? 's' : ''} pending
-                </span>
-                <span className="grid h-5 w-5 place-items-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-                  {approvalsCnt > 99 ? '99+' : approvalsCnt}
-                </span>
-              </button>
-            )}
-          </Widget>
+          <div className="rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+            <Widget title="Approvals" icon={CheckSquare} iconCls="text-primary"
+              action="View" onAction={() => navigate('/ess/flowdesk')}>
+              {approvalsCnt === 0 ? (
+                <EmptyState text="Nothing waiting on you." />
+              ) : (
+                <button onClick={() => navigate('/ess/flowdesk')}
+                  className="flex w-full items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 hover:bg-primary/10 transition-colors">
+                  <span className="text-xs font-medium text-foreground">
+                    {approvalsCnt} item{approvalsCnt !== 1 ? 's' : ''} pending
+                  </span>
+                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+                    {approvalsCnt > 99 ? '99+' : approvalsCnt}
+                  </span>
+                </button>
+              )}
+            </Widget>
+          </div>
         )}
 
-        {/* Birthdays this week */}
-        {(birthdays.length > 0 || anniversaries.length > 0) && (
-          <Widget title="Birthdays & Milestones" icon={Cake} iconCls="text-[#B07B18]">
-            <div className="space-y-2">
-              {birthdays.map((b, i) => (
-                <div key={`b-${i}`} className="flex items-center gap-2.5">
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#B07B18]/10 text-sm">
-                    🎂
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-[11px] font-semibold text-foreground">{b.name}</p>
-                    <p className="text-[10px] text-muted-foreground">Birthday · {dayLabel(b.days_until)}</p>
-                  </div>
-                </div>
-              ))}
-              {anniversaries.map((a, i) => (
-                <div key={`a-${i}`} className="flex items-center gap-2.5">
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#1A8050]/10 text-sm">
-                    🎉
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-[11px] font-semibold text-foreground">{a.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{a.years}yr work anniversary · {dayLabel(a.days_until)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Widget>
+        {/* Birthdays & milestones — with one-tap Wish */}
+        {hasCelebrations && (
+          <div className="rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+            <Widget title="Birthdays & Milestones" icon={Cake} iconCls="text-[#B07B18]">
+              <div className="space-y-2.5">
+                {birthdays.map((b, i) => (
+                  <CelebrationRow key={`b-${i}`} emoji="🎂" tint="rgba(176,123,24,0.10)"
+                    name={b.name} sub={`Birthday · ${dayLabel(b.days_until)}`} kind="birthday" />
+                ))}
+                {anniversaries.map((a, i) => (
+                  <CelebrationRow key={`a-${i}`} emoji="🎉" tint="rgba(21,184,166,0.10)"
+                    name={a.name} sub={`${a.years}-yr anniversary · ${dayLabel(a.days_until)}`}
+                    kind="anniversary" years={a.years} />
+                ))}
+              </div>
+            </Widget>
+          </div>
         )}
 
         {/* Upcoming holidays */}
-        <Widget title="Upcoming Holidays" icon={CalendarDays} iconCls="text-[#1A4D8F]"
-          action="All holidays" onAction={() => navigate('/ess/company-holidays')}>
-          {holidays.length === 0 ? (
-            <EmptyState text="No holidays in the next 60 days." />
-          ) : (
-            <div className="space-y-1.5">
-              {holidays.slice(0, 4).map((h) => (
-                <div key={h.id} className="flex items-center justify-between gap-2">
-                  <p className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{h.name}</p>
-                  <div className="flex shrink-0 flex-col items-end">
-                    <span className="text-[10px] font-semibold text-primary">{fmtDate(h.date)}</span>
-                    <span className="text-[9px] text-muted-foreground">{dayLabel(h.days_until)}</span>
+        <div className="rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+          <Widget title="Upcoming Holidays" icon={CalendarDays} iconCls="text-[#1A4D8F]"
+            action="All" onAction={() => navigate('/ess/company-holidays')}>
+            {holidays.length === 0 ? (
+              <EmptyState text="No holidays in the next 60 days." />
+            ) : (
+              <div className="space-y-2">
+                {holidays.slice(0, 4).map((h) => (
+                  <div key={h.id} className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-foreground">{h.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{dayLabel(h.days_until)}</p>
+                    </div>
+                    <span className="shrink-0 rounded-md bg-primary/8 px-2 py-1 text-[10px] font-semibold text-primary">
+                      {fmtDate(h.date)}
+                    </span>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Widget>
+                ))}
+              </div>
+            )}
+          </Widget>
+        </div>
 
-        {/* Recent recognition received */}
-        <Widget title="Recent Kudos" icon={Award} iconCls="text-[#15B8A6]"
-          action="Recognition" onAction={() => navigate('/ess/recognition')}>
-          {recognition.length === 0 ? (
-            <div className="flex flex-col gap-1">
-              <EmptyState text="No kudos yet — you'll be the first to know!" />
-              <button onClick={() => navigate('/ess/recognition')}
-                className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-primary hover:text-primary/80">
-                <Gift className="h-3 w-3" />Give recognition
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {recognition.slice(0, 3).map((r) => (
-                <div key={r.id} className="rounded-lg bg-[#15B8A6]/5 border border-[#15B8A6]/20 px-2.5 py-2">
-                  <div className="flex items-center justify-between gap-1">
-                    <p className="text-[11px] font-semibold text-foreground">
-                      {BADGE_LABELS[r.badge_code] ?? r.badge_code ?? 'Kudos'}
-                    </p>
-                    {r.points != null && (
-                      <span className="text-[10px] font-bold text-[#15B8A6]">+{r.points}pts</span>
+        {/* Recent kudos */}
+        <div className="rounded-xl border border-border/60 bg-card p-3 shadow-sm">
+          <Widget title="Recent Kudos" icon={Award} iconCls="text-[#15B8A6]"
+            action="All" onAction={() => navigate('/ess/recognition')}>
+            {recognition.length === 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <EmptyState text="No kudos yet." />
+                <button onClick={() => navigate('/ess/recognition')}
+                  className="flex items-center gap-1 text-[10px] font-semibold text-primary hover:text-primary/80">
+                  <Gift className="h-3 w-3" />Give recognition
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {recognition.slice(0, 3).map((r) => (
+                  <div key={r.id} className="rounded-lg border border-[#15B8A6]/20 bg-[#15B8A6]/5 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="min-w-0 truncate text-[11px] font-semibold text-foreground">
+                        {BADGE_LABELS[r.badge_code] ?? r.badge_code ?? 'Kudos'}
+                      </p>
+                      {r.points != null && (
+                        <span className="shrink-0 text-[10px] font-bold text-[#15B8A6]">+{r.points}pts</span>
+                      )}
+                    </div>
+                    <p className="truncate text-[10px] text-muted-foreground">from {r.from_name}</p>
+                    {r.message && (
+                      <p className="mt-0.5 line-clamp-2 text-[10px] italic text-foreground/70">"{r.message}"</p>
                     )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground">from {r.from_name}</p>
-                  {r.message && (
-                    <p className="mt-0.5 line-clamp-2 text-[10px] italic text-foreground/70">"{r.message}"</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Widget>
+                ))}
+              </div>
+            )}
+          </Widget>
+        </div>
 
-        {/* Star recognition nudge */}
+        {/* Recognise nudge */}
         <button onClick={() => navigate('/ess/recognition')}
-          className="flex items-center gap-2 rounded-lg border border-dashed border-primary/30 bg-primary/3 px-3 py-2.5 text-left hover:border-primary/50 hover:bg-primary/5 transition-colors">
+          className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-primary/30 bg-primary/5 px-3 py-2.5 text-left hover:border-primary/50 hover:bg-primary/10 transition-colors">
           <Star className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="text-[11px] font-medium text-foreground/70">Recognise a teammate →</span>
+          <span className="text-[11px] font-semibold text-primary">Recognise a teammate</span>
         </button>
 
       </div>
