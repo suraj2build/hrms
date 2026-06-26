@@ -235,7 +235,7 @@ standalone regularisation screens — they share the wired endpoints, so correct
 ### Deep governance
 | 2026-06-26 | P2.3 | `aea88ef` | **threshold/amount routing** — migration 314 (finance enums + `min_amount`); engine is amount-aware (applicable levels by ₹, index-based resolution); **reimbursement** wired (gate-driven auth, HR-only legacy fallback); config UI adds finance tabs + "Applies above ₹" |
 | 2026-06-26 | P2.4 | `d27fdac` | **payroll preparer≠approver** (close the maker-checker gap where the run's `created_by` could still be the checker) + **offer salary sign-off** (opt-in four-eyes before an offer emails the candidate; migration 315) |
-- ◑ 2.3 loan/advance wiring — deferred (they have their own pending_hr status machines; reimbursement covers the threshold pattern)
+| 2026-06-26 | P2.3 B | `e526d24` | **loan + advance wired** into the engine (gate-driven auth, threshold by principal/requested amount, HR-only legacy fallback, ESS steppers). No new migration. |
 
 **Migrations to run:** `314_approval_engine_threshold_routing.sql`, `315_offer_signoff_maker_checker.sql`
 
