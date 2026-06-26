@@ -300,18 +300,22 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
     }
 
-    // Fire-and-forget — never await, never blocks
-    fastify.eventPublisher.publish({
-      event_type:  EventType.LEAVE_APPROVED,
-      module:      MODULE.LEAVE,
-      entity_type: 'leave_request',
-      entity_id:   id,
-      org_id:      req.tenantId,
-      actor_id:    req.userId,
-      actor_type:  'user',
-      payload:     { approved_by: req.userId },
-      correlation_id: req.correlationId ?? undefined,
-    })
+    // Only publish the "approved" event on a true finalization. With a multi-level
+    // chain an intermediate approval leaves the request PENDING (advanced a level).
+    if (result.value.status === 'APPROVED') {
+      // Fire-and-forget — never await, never blocks
+      fastify.eventPublisher.publish({
+        event_type:  EventType.LEAVE_APPROVED,
+        module:      MODULE.LEAVE,
+        entity_type: 'leave_request',
+        entity_id:   id,
+        org_id:      req.tenantId,
+        actor_id:    req.userId,
+        actor_type:  'user',
+        payload:     { approved_by: req.userId },
+        correlation_id: req.correlationId ?? undefined,
+      })
+    }
     return reply.send({ data: result.value })
   })
 

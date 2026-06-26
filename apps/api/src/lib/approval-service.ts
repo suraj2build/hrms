@@ -33,6 +33,7 @@ import { eventService }                         from './event-service.js'
 import { getLeaveRequest }                      from './leave-request-service.js'
 import { recomputeRange }                       from './attendance-engine.js'
 import { isSelfApproval }                       from './approval-guards.js'
+import { gateApprove, gateReject }              from './approval-orchestrator.js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
@@ -181,9 +182,40 @@ export async function approveLeaveRequest(
     }
   }
 
-  // ── 3. Authorise ─────────────────────────────────────────────────────────────
-  const authResult = await validateApprover(supabase, ctx, req.employee_id)
-  if (!authResult.ok) return authResult
+  // ── 3. Multi-level gate (engages only when a chain is configured) ────────────
+  // With no chain, this returns { finalize, authorized:false } and we fall through
+  // to the legacy validateApprover + atomic finalize — identical to before.
+  const gate = await gateApprove(supabase, {
+    tenantId,
+    entityType:       'leave_request',
+    entityId:         requestId,
+    actorId:          ctx.approverId,
+    actorRole:        ctx.approverRole,
+    targetEmployeeId: req.employee_id,
+  })
+  if (gate.kind === 'error') {
+    return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
+  }
+  if (gate.kind === 'advanced') {
+    // Intermediate approval recorded in approval_actions; the request stays PENDING
+    // for the next level. No balance is deducted until the final approval.
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'leave_requests',
+      recordId:    requestId,
+      action:      'UPDATE',
+      performedBy: ctx.approverId,
+      oldData:     { status: 'PENDING', approval_level: gate.level },
+      newData:     { status: 'PENDING', approval_level: gate.nextLevel, total_levels: gate.totalLevels },
+    })
+    return { ok: true, value: { id: requestId, status: 'PENDING' } }
+  }
+  // gate.kind === 'finalize' — run the legacy approver check only when the per-level
+  // gate did not already authorize this actor (i.e. the no-chain legacy path).
+  if (!gate.authorized) {
+    const authResult = await validateApprover(supabase, ctx, req.employee_id)
+    if (!authResult.ok) return authResult
+  }
 
   // ── 4. Balance validation (paid leaves only) ─────────────────────────────────
   const lt = req.leave_types as { id: string; name: string; is_paid: boolean; allow_sandwich: boolean } | null
@@ -424,8 +456,24 @@ export async function rejectLeaveRequest(
     }
   }
 
-  const authResult = await validateApprover(supabase, ctx, req.employee_id)
-  if (!authResult.ok) return authResult
+  // Multi-level gate. Reject always finalizes (any level may reject → REJECTED),
+  // but records the action + closes the instance when a chain exists.
+  const gate = await gateReject(supabase, {
+    tenantId,
+    entityType:       'leave_request',
+    entityId:         requestId,
+    actorId:          ctx.approverId,
+    actorRole:        ctx.approverRole,
+    targetEmployeeId: req.employee_id,
+    comments:         rejectionReason,
+  })
+  if (gate.kind === 'error') {
+    return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
+  }
+  if (gate.kind === 'finalize' && !gate.authorized) {
+    const authResult = await validateApprover(supabase, ctx, req.employee_id)
+    if (!authResult.ok) return authResult
+  }
 
   // 2. Atomic RPC
   const { data: rpcData, error: rpcErr } = await supabase.rpc(
