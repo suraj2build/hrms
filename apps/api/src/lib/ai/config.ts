@@ -1,14 +1,15 @@
 /**
- * config.ts — resolve the AI Assistant config for a tenant.
+ * config.ts — resolve the AI Assistant provider chain for a tenant.
  *
- * Precedence: the tenant's row in ai_assistant_config (set via the admin panel)
- * wins; if absent/keyless, fall back to env vars so an env-only deployment still
- * works. The raw API key never leaves the server — the config route returns only a
- * masked hint.
+ * The admin panel stores an ordered list (providers_json): the assistant tries
+ * each enabled entry top-to-bottom and uses the first that answers. When no
+ * tenant chain is configured it falls back to env vars so an env-only deployment
+ * still works. Raw API keys never leave the server — the config API returns only
+ * masked hints.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AssistantConfig, ProviderName } from './llm.js'
-import { PROVIDER_META } from './llm.js'
+import { PROVIDER_META, isConfigUsable } from './llm.js'
 
 function envProvider(): ProviderName {
   const raw = (process.env['ASSISTANT_PROVIDER'] ?? process.env['AI_PROVIDER'] ?? 'groq').toLowerCase()
@@ -32,25 +33,48 @@ export function envConfig(): AssistantConfig {
   return { provider, apiKey, model: envModelFor(provider), enabled: true, source: apiKey ? 'env' : 'none' }
 }
 
-export interface ResolvedConfigs {
-  primary:  AssistantConfig
-  fallback: AssistantConfig | null
+export interface ChainEntry {
+  provider: ProviderName
+  api_key:  string | null
+  model:    string | null
+  enabled:  boolean
 }
 
 type DbRow = {
   provider: string; api_key: string | null; model: string | null; enabled: boolean
-  fallback_provider: string | null; fallback_api_key: string | null; fallback_model: string | null
+  fallback_provider?: string | null; fallback_api_key?: string | null; fallback_model?: string | null
+  providers_json?: ChainEntry[] | null
+}
+
+/** Normalize a stored chain entry into an AssistantConfig. */
+function toConfig(e: ChainEntry): AssistantConfig {
+  const provider = (e.provider in PROVIDER_META ? e.provider : 'groq') as ProviderName
+  return { provider, apiKey: e.api_key ?? null, model: e.model ?? null, enabled: e.enabled !== false, source: 'tenant' }
+}
+
+/** Build the legacy primary/fallback rows into a chain (for pre-319 rows). */
+function legacyChain(row: DbRow): AssistantConfig[] {
+  const out: AssistantConfig[] = []
+  if (row.api_key) {
+    const provider = (row.provider in PROVIDER_META ? row.provider : 'groq') as ProviderName
+    out.push({ provider, apiKey: row.api_key, model: row.model, enabled: row.enabled, source: 'tenant' })
+  }
+  if (row.fallback_provider && row.fallback_api_key) {
+    const fp = (row.fallback_provider in PROVIDER_META ? row.fallback_provider : 'groq') as ProviderName
+    out.push({ provider: fp, apiKey: row.fallback_api_key, model: row.fallback_model ?? null, enabled: true, source: 'tenant' })
+  }
+  return out
 }
 
 /**
- * Resolve primary + optional fallback configs for a tenant.
- * Primary: DB row first, else env. Fallback: DB fallback columns (if set).
+ * Resolve the ordered, usable provider chain for a tenant.
+ * providers_json first, else legacy primary/fallback, else env. Only enabled
+ * entries with a key are returned, in priority order.
  */
-export async function resolveAssistantConfigs(
+export async function resolveAssistantChain(
   supabase: SupabaseClient,
   tenantId: string,
-): Promise<ResolvedConfigs> {
-  // select('*') avoids schema-cache errors when fallback columns are newly added
+): Promise<AssistantConfig[]> {
   const { data } = await supabase
     .from('ai_assistant_config')
     .select('*')
@@ -59,30 +83,41 @@ export async function resolveAssistantConfigs(
 
   const row = data as DbRow | null
 
-  // ── Primary ────────────────────────────────────────────────────────────────
-  let primary: AssistantConfig
-  if (row && row.api_key) {
-    const provider = (row.provider in PROVIDER_META ? row.provider : 'groq') as ProviderName
-    primary = { provider, apiKey: row.api_key, model: row.model, enabled: row.enabled, source: 'tenant' }
-  } else {
+  let chain: AssistantConfig[] = []
+  if (row?.providers_json && Array.isArray(row.providers_json) && row.providers_json.length > 0) {
+    chain = row.providers_json.map(toConfig)
+  } else if (row) {
+    chain = legacyChain(row)
+  }
+
+  // Keep only enabled entries that actually have a key.
+  chain = chain.filter(isConfigUsable)
+
+  // No usable tenant entries → env fallback.
+  if (chain.length === 0) {
     const env = envConfig()
-    primary = (row && row.enabled === false) ? { ...env, enabled: false } : env
+    if (env.apiKey) chain = [env]
   }
-
-  // ── Fallback ───────────────────────────────────────────────────────────────
-  let fallback: AssistantConfig | null = null
-  if (row?.fallback_provider && row?.fallback_api_key) {
-    const fp = (row.fallback_provider in PROVIDER_META ? row.fallback_provider : 'groq') as ProviderName
-    fallback = { provider: fp, apiKey: row.fallback_api_key, model: row.fallback_model ?? null, enabled: true, source: 'tenant' }
-  }
-
-  return { primary, fallback }
+  return chain
 }
 
-/**
- * Resolve the effective config for a tenant (primary only).
- * Kept for routes that only need the primary (status, admin config GET).
- */
+export interface ResolvedConfigs {
+  primary:  AssistantConfig
+  fallback: AssistantConfig | null
+  chain:    AssistantConfig[]
+}
+
+/** Back-compat shim: primary = first in chain, fallback = second. */
+export async function resolveAssistantConfigs(
+  supabase: SupabaseClient,
+  tenantId: string,
+): Promise<ResolvedConfigs> {
+  const chain = await resolveAssistantChain(supabase, tenantId)
+  const primary = chain[0] ?? envConfig()
+  return { primary, fallback: chain[1] ?? null, chain }
+}
+
+/** Primary-only resolver (status endpoint). */
 export async function resolveAssistantConfig(
   supabase: SupabaseClient,
   tenantId: string,

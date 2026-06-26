@@ -1,14 +1,19 @@
 /**
  * AiAssistantSettings — /admin/settings/ai
  *
- * Admin panel to configure the AI Assistant provider + API key + model + toggle,
- * with an optional fallback provider that kicks in automatically when the primary
- * is unavailable (rate-limited, down, bad key, etc.).
+ * One screen to configure an ordered chain of AI providers. The assistant tries
+ * each enabled provider top-to-bottom and uses the first that answers — so the
+ * ones below act as automatic fallbacks. Reorder with the up/down arrows.
+ *
+ * Keys are write-only: the server returns a masked hint, never the full key.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Sparkles, ShieldAlert, Loader2, Check, Plug, KeyRound, ArrowDownToLine } from 'lucide-react'
+import {
+  Sparkles, ShieldAlert, Loader2, Check, Plug, KeyRound,
+  ArrowUp, ArrowDown, Trash2, Plus,
+} from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -18,40 +23,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 interface ProviderOpt { id: string; label: string; default_model: string }
-interface ActiveCfg {
-  provider: string; model: string; source: string; usable: boolean; fallback_provider: string | null
-}
+interface ChainRow { provider: string; model: string | null; enabled: boolean; has_key: boolean; key_hint: string | null }
+interface ActiveCfg { provider: string; model: string; source: string; count: number }
 interface ConfigResp {
-  provider: string; model: string | null; enabled: boolean
-  has_key: boolean; key_hint: string | null; source: string; env_fallback: boolean
-  fallback_provider: string | null; fallback_model: string | null
-  has_fallback_key: boolean; fallback_key_hint: string | null
-  active?: ActiveCfg
-  providers: ProviderOpt[]; updated_at: string | null
+  chain: ChainRow[]
+  active: ActiveCfg | null
+  providers: ProviderOpt[]
+  updated_at: string | null
 }
 
-function ProviderPicker({
-  providers, value, onChange,
-}: { providers: ProviderOpt[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      {providers.map(p => (
-        <button
-          key={p.id}
-          type="button"
-          onClick={() => onChange(p.id)}
-          className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-            value === p.id
-              ? 'border-primary bg-primary/5 text-primary'
-              : 'border-border text-muted-foreground hover:bg-muted/50'
-          }`}
-        >
-          {p.label}
-        </button>
-      ))}
-    </div>
-  )
-}
+// Local editable row — newKey carries a freshly-typed key (blank = keep saved).
+interface EditRow { provider: string; model: string; enabled: boolean; has_key: boolean; key_hint: string | null; newKey: string }
 
 export function AiAssistantSettings() {
   const { profile } = useAuthStore()
@@ -64,62 +46,67 @@ export function AiAssistantSettings() {
     enabled:  isAdmin,
   })
   const cfg = data?.data
+  const providers = cfg?.providers ?? []
 
-  // ── Primary local state ──────────────────────────────────────────────────────
-  const [provider, setProvider] = useState<string | null>(null)
-  const [model,    setModel]    = useState<string | null>(null)
-  const [enabled,  setEnabled]  = useState<boolean | null>(null)
-  const [apiKey,   setApiKey]   = useState('')
+  const [rows, setRows] = useState<EditRow[] | null>(null)
 
-  // ── Fallback local state ─────────────────────────────────────────────────────
-  const [fbProvider, setFbProvider] = useState<string | null>(null)
-  const [fbModel,    setFbModel]    = useState<string | null>(null)
-  const [fbApiKey,   setFbApiKey]   = useState('')
+  // Seed local rows from the server once loaded.
+  useEffect(() => {
+    if (cfg && rows === null) {
+      setRows(cfg.chain.map(c => ({
+        provider: c.provider, model: c.model ?? '', enabled: c.enabled,
+        has_key: c.has_key, key_hint: c.key_hint, newKey: '',
+      })))
+    }
+  }, [cfg, rows])
 
-  // Effective values
-  const providers      = cfg?.providers ?? []
-  const eProvider      = provider  ?? cfg?.provider      ?? 'groq'
-  const eEnabled       = enabled   ?? cfg?.enabled       ?? true
-  const eModel         = model     ?? cfg?.model         ?? ''
-  const eFbProvider    = fbProvider ?? cfg?.fallback_provider ?? ''
-  const eFbModel       = fbModel    ?? cfg?.fallback_model    ?? ''
+  const list = rows ?? []
+  const metaFor = (id: string) => providers.find(p => p.id === id)
+  const usedProviders = new Set(list.map(r => r.provider))
+  const available = providers.filter(p => !usedProviders.has(p.id))
 
-  const curProvMeta   = providers.find(p => p.id === eProvider)
-  const curFbProvMeta = providers.find(p => p.id === eFbProvider)
-  const hasFallback   = !!eFbProvider
+  const setRow = (i: number, patch: Partial<EditRow>) =>
+    setRows(rs => (rs ?? []).map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  const move = (i: number, dir: -1 | 1) =>
+    setRows(rs => {
+      const a = [...(rs ?? [])]
+      const j = i + dir
+      if (j < 0 || j >= a.length) return a
+      ;[a[i], a[j]] = [a[j]!, a[i]!]
+      return a
+    })
+  const remove = (i: number) => setRows(rs => (rs ?? []).filter((_, idx) => idx !== i))
+  const add = (provider: string) =>
+    setRows(rs => [...(rs ?? []), { provider, model: '', enabled: true, has_key: false, key_hint: null, newKey: '' }])
 
   const save = useMutation({
     mutationFn: () => api.put('/assistant/config', {
-      provider: eProvider,
-      model:    eModel.trim() || null,
-      enabled:  eEnabled,
-      ...(apiKey ? { api_key: apiKey } : {}),
-      fallback_provider: eFbProvider || null,
-      fallback_model:    eFbModel.trim() || null,
-      ...(fbApiKey ? { fallback_api_key: fbApiKey } : {}),
+      chain: list.map(r => ({
+        provider: r.provider,
+        model:    r.model.trim() || null,
+        enabled:  r.enabled,
+        // Only send api_key when the admin typed a new one; blank keeps the saved key.
+        ...(r.newKey ? { api_key: r.newKey } : {}),
+      })),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assistant-config'] })
       qc.invalidateQueries({ queryKey: ['assistant-status'] })
-      setApiKey(''); setFbApiKey('')
+      setRows(null)  // re-seed from server (clears typed keys, refreshes hints)
       toast.success('AI settings saved')
     },
     onError: (e: Error) => toast.error('Could not save', { description: e.message }),
   })
 
   const test = useMutation({
-    mutationFn: (slot: 'primary' | 'fallback') => api.post<{ data: { ok: boolean; message: string } }>('/assistant/config/test', {
-      provider: slot === 'primary' ? eProvider : (eFbProvider || undefined),
-      model:    slot === 'primary'
-        ? (eModel.trim() || null)
-        : (eFbModel.trim() || null),
-      ...(slot === 'primary' && apiKey   ? { api_key: apiKey }   : {}),
-      ...(slot === 'fallback' && fbApiKey ? { api_key: fbApiKey } : {}),
-      slot,
+    mutationFn: (r: EditRow) => api.post<{ data: { ok: boolean; message: string } }>('/assistant/config/test', {
+      provider: r.provider,
+      model:    r.model.trim() || null,
+      ...(r.newKey ? { api_key: r.newKey } : {}),
     }),
-    onSuccess: (r) => r.data.ok
-      ? toast.success('Connection OK', { description: r.data.message })
-      : toast.error('Connection failed', { description: r.data.message }),
+    onSuccess: (res) => res.data.ok
+      ? toast.success('Connection OK', { description: res.data.message })
+      : toast.error('Connection failed', { description: res.data.message }),
     onError: (e: Error) => toast.error('Test failed', { description: e.message }),
   })
 
@@ -142,170 +129,110 @@ export function AiAssistantSettings() {
     <PageContainer>
       <PageHeader
         title="AI Assistant"
-        subtitle="Choose a provider, paste an API key, and the in-app assistant turns on for everyone"
+        subtitle="Add one or more providers — the assistant uses them top-to-bottom and falls back automatically"
       />
 
       <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-foreground">
         <Sparkles className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-[#15B8A6]" />
         <p>
-          The assistant is <span className="font-semibold">read-only</span> and answers each person only from
-          data they're already allowed to see. Configure a <span className="font-medium">fallback provider</span> below
-          — if the primary is rate-limited or unavailable, the assistant automatically switches to it.
+          The assistant is <span className="font-semibold">read-only</span> and answers each person only from data
+          they're already allowed to see. List providers in priority order: the <span className="font-medium">top</span> one
+          is used first, and if it's rate-limited or down the next is tried automatically.
         </p>
       </div>
 
-      {/* Active-config banner — what the assistant actually uses right now */}
       {cfg?.active && (
-        <div className={`flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-xs ${
-          cfg.active.usable
-            ? 'border-emerald-500/30 bg-emerald-500/5 text-foreground'
-            : 'border-amber-500/40 bg-amber-500/5 text-foreground'
-        }`}>
-          <Plug className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 ${cfg.active.usable ? 'text-emerald-500' : 'text-amber-500'}`} />
+        <div className="flex items-start gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3.5 py-2.5 text-xs text-foreground">
+          <Plug className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-emerald-500" />
           <p>
-            The assistant is currently using{' '}
-            <span className="font-semibold">{cfg.active.provider}</span>
-            {' '}<span className="text-muted-foreground">({cfg.active.model}, {cfg.active.source} key)</span>
-            {cfg.active.fallback_provider && <> with <span className="font-medium">{cfg.active.fallback_provider}</span> as fallback</>}.
-            {cfg.active.source === 'env' && (
-              <span className="block mt-0.5 text-amber-600">
-                ⚠ No saved key for this organisation — falling back to a server environment key.
-                Enter your key below and Save to use your own provider.
-              </span>
-            )}
+            Currently answering with <span className="font-semibold">{cfg.active.provider}</span>{' '}
+            <span className="text-muted-foreground">({cfg.active.model}, {cfg.active.source} key)</span>
+            {cfg.active.count > 1 && <> — {cfg.active.count - 1} fallback{cfg.active.count > 2 ? 's' : ''} ready.</>}
           </p>
         </div>
       )}
 
-      {isLoading ? (
+      {isLoading || rows === null ? (
         <SectionCard><div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading…</div></SectionCard>
       ) : (
-        <>
-          {/* ── Primary provider ─────────────────────────────────────────────── */}
-          <SectionCard title="Primary provider" icon={<Plug className="h-4 w-4 text-muted-foreground" />}>
-            <div className="space-y-4 max-w-xl">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Provider</label>
-                <ProviderPicker
-                  providers={providers}
-                  value={eProvider}
-                  onChange={v => { setProvider(v); setModel('') }}
-                />
-              </div>
+        <SectionCard title="Providers" icon={<Plug className="h-4 w-4 text-muted-foreground" />}>
+          {list.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No providers yet — add one below.</p>
+          ) : (
+            <div className="space-y-3">
+              {list.map((r, i) => {
+                const m = metaFor(r.provider)
+                return (
+                  <div key={r.provider} className="rounded-lg border border-border p-3.5">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">{i + 1}</span>
+                        <span className="text-sm font-medium">{m?.label ?? r.provider}</span>
+                        {i === 0 && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">Primary</span>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button type="button" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
+                        <button type="button" title="Move down" disabled={i === list.length - 1} onClick={() => move(i, 1)}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
+                        <button type="button" title="Remove" onClick={() => remove(i)}
+                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Model <span className="text-muted-foreground/60">(blank = {curProvMeta?.default_model})</span>
-                </label>
-                <Input value={eModel} onChange={e => setModel(e.target.value)} placeholder={curProvMeta?.default_model} className="h-9 text-sm" />
-              </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">Model <span className="text-muted-foreground/60">(blank = {m?.default_model})</span></label>
+                        <Input value={r.model} onChange={e => setRow(i, { model: e.target.value })} placeholder={m?.default_model} className="h-9 text-sm" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><KeyRound className="h-3 w-3" />API key</label>
+                        <Input
+                          type="password"
+                          value={r.newKey}
+                          onChange={e => setRow(i, { newKey: e.target.value })}
+                          placeholder={r.has_key ? `Saved: ${r.key_hint} — type to replace` : 'Paste API key'}
+                          className="h-9 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
 
-              <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><KeyRound className="h-3 w-3" />API key</label>
-                <Input
-                  type="password"
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
-                  placeholder={cfg?.has_key ? `Saved: ${cfg.key_hint} — type to replace` : 'Paste your API key'}
-                  className="h-9 text-sm font-mono"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  {cfg?.has_key
-                    ? `A key is saved (${cfg.source}). Leave blank to keep it.`
-                    : cfg?.env_fallback
-                      ? 'No saved key, but an environment key is available as fallback.'
-                      : 'No key configured yet — the assistant stays off until one is added.'}
-                </p>
-              </div>
-
-              <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer select-none">
-                <input type="checkbox" checked={eEnabled} onChange={e => setEnabled(e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
-                Assistant enabled for this organisation
-              </label>
-
-              <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate('primary')}>
-                {test.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plug className="mr-1.5 h-3.5 w-3.5" />}
-                Test primary
-              </Button>
-            </div>
-          </SectionCard>
-
-          {/* ── Fallback provider ────────────────────────────────────────────── */}
-          <SectionCard
-            title="Fallback provider"
-            icon={<ArrowDownToLine className="h-4 w-4 text-muted-foreground" />}
-          >
-            <p className="text-xs text-muted-foreground mb-4">
-              Optional. If the primary fails (rate limit, downtime, invalid key), the assistant automatically retries with this provider.
-            </p>
-            <div className="space-y-4 max-w-xl">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Provider</label>
-                <div className="grid grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setFbProvider(''); setFbModel('') }}
-                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                      !eFbProvider ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50'
-                    }`}
-                  >
-                    None
-                  </button>
-                  {providers.map(p => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => { setFbProvider(p.id); setFbModel('') }}
-                      className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                        eFbProvider === p.id ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {hasFallback && (
-                <>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Model <span className="text-muted-foreground/60">(blank = {curFbProvMeta?.default_model})</span>
-                    </label>
-                    <Input value={eFbModel} onChange={e => setFbModel(e.target.value)} placeholder={curFbProvMeta?.default_model} className="h-9 text-sm" />
+                    <div className="mt-3 flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer select-none">
+                        <input type="checkbox" checked={r.enabled} onChange={e => setRow(i, { enabled: e.target.checked })} className="h-3.5 w-3.5 accent-primary" />
+                        Enabled
+                      </label>
+                      <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate(r)}>
+                        {test.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plug className="mr-1.5 h-3.5 w-3.5" />}
+                        Test
+                      </Button>
+                    </div>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><KeyRound className="h-3 w-3" />Fallback API key</label>
-                    <Input
-                      type="password"
-                      value={fbApiKey}
-                      onChange={e => setFbApiKey(e.target.value)}
-                      placeholder={cfg?.has_fallback_key ? `Saved: ${cfg.fallback_key_hint} — type to replace` : 'Paste API key for fallback provider'}
-                      className="h-9 text-sm font-mono"
-                    />
-                    {cfg?.has_fallback_key && (
-                      <p className="text-[10px] text-muted-foreground">A fallback key is saved. Leave blank to keep it.</p>
-                    )}
-                  </div>
-
-                  <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate('fallback')}>
-                    {test.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plug className="mr-1.5 h-3.5 w-3.5" />}
-                    Test fallback
-                  </Button>
-                </>
-              )}
+                )
+              })}
             </div>
-          </SectionCard>
+          )}
 
-          {/* ── Save ─────────────────────────────────────────────────────────── */}
-          <div className="flex justify-end">
+          {/* Add provider */}
+          {available.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Add provider:</span>
+              {available.map(p => (
+                <button key={p.id} type="button" onClick={() => add(p.id)}
+                  className="flex items-center gap-1 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-primary hover:text-primary">
+                  <Plus className="h-3 w-3" />{p.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-5 flex justify-end border-t border-border pt-4">
             <Button disabled={save.isPending} onClick={() => save.mutate()}>
               {save.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Check className="mr-1.5 h-4 w-4" />}
               Save settings
             </Button>
           </div>
-        </>
+        </SectionCard>
       )}
     </PageContainer>
   )

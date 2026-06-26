@@ -3,22 +3,24 @@
  *
  *   POST /assistant/chat            — role-scoped chat (context-injection + read-tools)
  *   GET  /assistant/status          — is the assistant usable for this tenant?
- *   GET  /assistant/config          — admin: current config (key masked)
- *   PUT  /assistant/config          — admin: set provider/key/model/enabled + fallback
- *   POST /assistant/config/test     — admin: test connection (primary or fallback)
+ *   GET  /assistant/config          — admin: the provider chain (keys masked)
+ *   PUT  /assistant/config          — admin: save the ordered provider chain
+ *   POST /assistant/config/test     — admin: test one provider+key
  *
- * The LLM provider key is read server-side only (DB row or env) and never returned
- * to the browser. Chat is rate-limited per the global limiter + a tighter per-route cap.
- * If the primary provider fails, the request automatically retries with the fallback.
+ * Providers are configured as an ordered chain: the assistant tries each enabled
+ * entry top-to-bottom and uses the first that answers; the rest are automatic
+ * fallbacks. Keys are read server-side only (DB or env) and never returned to the
+ * browser — only a masked hint. Chat is rate-limited.
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
-  chatComplete, chatCompleteWithFallback, testConnection,
+  chatCompleteWithFallback, testConnection,
   AssistantNotConfiguredError, isConfigUsable, effectiveModel, PROVIDER_META,
+  sanitizeApiKey, invalidKeyChar,
   type ChatMessage, type ToolCall, type AssistantConfig,
 } from '../../lib/ai/llm.js'
-import { resolveAssistantConfig, resolveAssistantConfigs, envConfig, maskKey } from '../../lib/ai/config.js'
+import { resolveAssistantConfig, resolveAssistantChain, maskKey } from '../../lib/ai/config.js'
 import { buildAssistantContext } from '../../lib/ai/assistant-context.js'
 import { ASSISTANT_TOOLS, executeTool } from '../../lib/ai/assistant-tools.js'
 
@@ -62,8 +64,9 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { primary, fallback } = await resolveAssistantConfigs(fastify.supabase, req.tenantId)
-    if (!isConfigUsable(primary) && !fallback) {
+    // Ordered provider chain — tried top-to-bottom with automatic fallback.
+    const cfgList = await resolveAssistantChain(fastify.supabase, req.tenantId)
+    if (cfgList.length === 0) {
       return reply.code(200).send({ data: { reply: null, not_configured: true } })
     }
 
@@ -80,11 +83,8 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     const toolCtx = { supabase: fastify.supabase, caller, employeeId }
     const toolsUsed: string[] = []
 
-    // Build ordered list: primary first, then fallback (if configured)
-    const cfgList = [primary, ...(fallback ? [fallback] : [])].filter(isConfigUsable)
-
     try {
-      // Track the active config across the tool loop — may switch to fallback mid-session
+      // Track the active config across the tool loop — may switch to a fallback mid-session.
       let activeConfig = cfgList[0]!
       let usedFallback = false
 
@@ -93,7 +93,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         const { content: res, usedConfig, fellBack } = await chatCompleteWithFallback(
           hop === 0 ? cfgList : [activeConfig],
           { messages, tools, maxTokens: 700 },
-          (from, reason) => req.log.warn({ from: from.provider, reason }, 'assistant primary failed, trying fallback'),
+          (from, reason) => req.log.warn({ from: from.provider, reason }, 'assistant provider failed, trying next in chain'),
         )
         if (fellBack) { activeConfig = usedConfig; usedFallback = true }
 
@@ -134,14 +134,13 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       if (e instanceof AssistantNotConfiguredError) {
         return reply.code(200).send({ data: { reply: null, not_configured: true } })
       }
-      // Log which providers were tried so admins can see exactly what failed.
       req.log.warn({
         err: e?.message, status: e?.status,
         tried: cfgList.map(c => `${c.provider}:${effectiveModel(c)}`),
       }, 'assistant chat failed')
       const triedDesc = cfgList.map(c => c.provider).join(' → ')
       const msg = e?.status === 429 ? 'The assistant is busy (rate limited). Please try again in a moment.'
-        : e?.status === 401 ? `The assistant is misconfigured — ${triedDesc} rejected the API key. Ask an admin to re-check the key in AI settings.`
+        : e?.status === 401 ? `The assistant is misconfigured — ${triedDesc} rejected the API key. Ask an admin to re-check the keys in AI settings.`
         : 'Sorry — I could not answer that just now. Please try again.'
       return reply.code(200).send({ data: { reply: msg, error: true } })
     }
@@ -154,36 +153,35 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    const env = envConfig()
     const r = row as any
 
-    // What the CHAT path will actually use — the ground truth that matters.
-    const { primary: activePrimary, fallback: activeFallback } = await resolveAssistantConfigs(fastify.supabase, req.tenantId)
+    // Stored chain (masked). Fall back to legacy primary/fallback columns if the
+    // chain column is empty (pre-319 rows) so existing keys still show.
+    let chain: Array<{ provider: string; model: string | null; enabled: boolean; api_key: string | null }> = []
+    if (Array.isArray(r?.providers_json) && r.providers_json.length > 0) {
+      chain = r.providers_json
+    } else if (r?.api_key) {
+      chain = [{ provider: r.provider, model: r.model, enabled: r.enabled ?? true, api_key: r.api_key }]
+      if (r.fallback_provider && r.fallback_api_key) {
+        chain.push({ provider: r.fallback_provider, model: r.fallback_model, enabled: true, api_key: r.fallback_api_key })
+      }
+    }
+
+    // What the chat path actually resolves to (ground truth — shows env-shadowing).
+    const active = await resolveAssistantChain(fastify.supabase, req.tenantId)
 
     return reply.send({
       data: {
-        // Primary
-        provider:   r?.provider ?? env.provider,
-        model:      r?.model ?? null,
-        enabled:    r?.enabled ?? true,
-        has_key:    !!r?.api_key,
-        key_hint:   maskKey(r?.api_key),
-        source:     r?.api_key ? 'tenant' : (env.apiKey ? 'env' : 'none'),
-        env_fallback: !!env.apiKey,
-        // Fallback
-        fallback_provider: r?.fallback_provider ?? null,
-        fallback_model:    r?.fallback_model ?? null,
-        has_fallback_key:  !!r?.fallback_api_key,
-        fallback_key_hint: maskKey(r?.fallback_api_key),
-        // What chat actually resolves to (so admins can see env-shadowing)
-        active: {
-          provider: activePrimary.provider,
-          model:    effectiveModel(activePrimary),
-          source:   activePrimary.source,
-          usable:   isConfigUsable(activePrimary),
-          fallback_provider: activeFallback?.provider ?? null,
-        },
-        // Shared
+        chain: chain.map(e => ({
+          provider: e.provider,
+          model:    e.model ?? null,
+          enabled:  e.enabled !== false,
+          has_key:  !!e.api_key,
+          key_hint: maskKey(e.api_key),
+        })),
+        active: active.length
+          ? { provider: active[0]!.provider, model: effectiveModel(active[0]!), source: active[0]!.source, count: active.length }
+          : null,
         providers:  Object.entries(PROVIDER_META).map(([id, m]) => ({ id, label: m.label, default_model: m.defaultModel })),
         updated_at: r?.updated_at ?? null,
       },
@@ -191,38 +189,73 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   })
 
   // ── PUT /assistant/config (admin) ─────────────────────────────────────────────
+  // Saves the whole ordered chain. Within an entry, omit api_key to keep the saved
+  // one; send '' to clear it. Keys must be ASCII (HTTP-header safe).
   fastify.put('/assistant/config', hrAuth, async (req: any, reply) => {
     const schema = z.object({
-      provider: z.enum(['groq', 'openai', 'gemini']),
-      model:    z.string().max(100).nullable().optional(),
-      enabled:  z.boolean(),
-      api_key:  z.string().max(300).optional(),
-      // Fallback — all optional; omit to keep existing
-      fallback_provider: z.enum(['groq', 'openai', 'gemini']).nullable().optional(),
-      fallback_model:    z.string().max(100).nullable().optional(),
-      fallback_api_key:  z.string().max(300).optional(),
+      chain: z.array(z.object({
+        provider: z.enum(['groq', 'openai', 'gemini']),
+        model:    z.string().max(100).nullable().optional(),
+        enabled:  z.boolean().optional(),
+        api_key:  z.string().max(300).optional(),  // omit = keep existing; '' = clear
+      })).max(3),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    const { provider, model, enabled, api_key, fallback_provider, fallback_model, fallback_api_key } = parsed.data
 
-    const patch: Record<string, unknown> = {
-      tenant_id: req.tenantId, provider, model: model ?? null, enabled,
-      updated_by: req.userId, updated_at: new Date().toISOString(),
+    // Load existing keys so an omitted api_key preserves the saved value (per provider).
+    const { data: existing } = await fastify.supabase
+      .from('ai_assistant_config')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    const ex = existing as any
+    const savedKey = new Map<string, string>()
+    if (Array.isArray(ex?.providers_json)) {
+      for (const e of ex.providers_json) if (e?.provider && e?.api_key) savedKey.set(e.provider, e.api_key)
+    } else if (ex?.api_key) {
+      savedKey.set(ex.provider, ex.api_key)
+      if (ex.fallback_provider && ex.fallback_api_key) savedKey.set(ex.fallback_provider, ex.fallback_api_key)
     }
-    if (api_key !== undefined)          patch.api_key          = api_key === '' ? null : api_key
-    if (fallback_provider !== undefined) patch.fallback_provider = fallback_provider ?? null
-    if (fallback_model !== undefined)    patch.fallback_model    = fallback_model ?? null
-    if (fallback_api_key !== undefined)  patch.fallback_api_key  = fallback_api_key === '' ? null : fallback_api_key
+
+    const providers_json: Array<{ provider: string; api_key: string | null; model: string | null; enabled: boolean }> = []
+    for (const e of parsed.data.chain) {
+      let key: string | null
+      if (e.api_key === undefined) key = savedKey.get(e.provider) ?? null   // keep existing
+      else if (e.api_key === '')   key = null                               // clear
+      else                          key = sanitizeApiKey(e.api_key)         // new
+
+      if (key) {
+        const bad = invalidKeyChar(key)
+        if (bad) return reply.code(400).send({
+          error: 'INVALID_KEY',
+          message: `${e.provider} key contains an invalid character "${bad}" — re-copy the key (a hyphen "-" may have been auto-corrected to a dash "—").`,
+        })
+      }
+      providers_json.push({ provider: e.provider, api_key: key, model: e.model ?? null, enabled: e.enabled !== false })
+    }
+
+    // Keep the legacy primary columns in sync with chain[0] so older readers and
+    // the NOT NULL provider column stay valid.
+    const head = providers_json[0]
+    const patch: Record<string, unknown> = {
+      tenant_id:  req.tenantId,
+      providers_json,
+      provider:   head?.provider ?? 'groq',
+      api_key:    head?.api_key ?? null,
+      model:      head?.model ?? null,
+      enabled:    head ? head.enabled : true,
+      updated_by: req.userId,
+      updated_at: new Date().toISOString(),
+    }
 
     let { error } = await fastify.supabase
       .from('ai_assistant_config')
       .upsert(patch, { onConflict: 'tenant_id' })
 
-    // If PostgREST schema cache hasn't refreshed yet, retry without fallback columns
-    // so the primary provider/key/enabled are always saved successfully.
-    if (error && (error.message.includes('fallback_') || error.message.includes('schema cache'))) {
-      const { fallback_provider: _fp, fallback_model: _fm, fallback_api_key: _fk, ...safePatch } = patch as any
+    // If the providers_json column isn't in the PostgREST cache yet, retry without it.
+    if (error && (error.message.includes('providers_json') || error.message.includes('schema cache'))) {
+      const { providers_json: _pj, ...safePatch } = patch as any
       ;({ error } = await fastify.supabase
         .from('ai_assistant_config')
         .upsert(safePatch, { onConflict: 'tenant_id' }))
@@ -233,26 +266,33 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /assistant/config/test (admin) ───────────────────────────────────────
+  // Tests one provider+model+key. If api_key is omitted, uses the saved key for
+  // that provider (resolved from the chain).
   fastify.post('/assistant/config/test', hrAuth, async (req: any, reply) => {
     const schema = z.object({
-      provider: z.enum(['groq', 'openai', 'gemini']).optional(),
+      provider: z.enum(['groq', 'openai', 'gemini']),
       model:    z.string().max(100).nullable().optional(),
       api_key:  z.string().max(300).optional(),
-      // Pass slot: 'fallback' to test the fallback config
-      slot:     z.enum(['primary', 'fallback']).optional(),
     })
     const parsed = schema.safeParse(req.body ?? {})
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { primary, fallback } = await resolveAssistantConfigs(fastify.supabase, req.tenantId)
-    let cfg: AssistantConfig = parsed.data.slot === 'fallback' ? (fallback ?? primary) : primary
+    let apiKey = sanitizeApiKey(parsed.data.api_key)
+    if (!apiKey) {
+      // No key typed — fall back to the saved key for this provider.
+      const chain = await resolveAssistantChain(fastify.supabase, req.tenantId)
+      apiKey = chain.find(c => c.provider === parsed.data.provider)?.apiKey ?? null
+    }
+    if (!apiKey) return reply.send({ data: { ok: false, message: 'No API key to test — enter one first.' } })
 
-    if (parsed.data.provider) cfg = { ...cfg, provider: parsed.data.provider }
-    if (parsed.data.model !== undefined) cfg = { ...cfg, model: parsed.data.model }
-    if (parsed.data.api_key) cfg = { ...cfg, apiKey: parsed.data.api_key }
-
-    if (!cfg.apiKey) return reply.send({ data: { ok: false, message: 'No API key to test — enter one first.' } })
-    const result = await testConnection({ ...cfg, enabled: true })
+    const cfg: AssistantConfig = {
+      provider: parsed.data.provider,
+      apiKey,
+      model:    parsed.data.model ?? null,
+      enabled:  true,
+      source:   'tenant',
+    }
+    const result = await testConnection(cfg)
     if (!result.ok) req.log.warn({ provider: cfg.provider, model: cfg.model, message: result.message }, 'assistant connection test failed')
     return reply.send({ data: result })
   })

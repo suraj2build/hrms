@@ -40,6 +40,33 @@ export function isConfigUsable(c: AssistantConfig): boolean {
   return c.enabled && !!c.apiKey
 }
 
+/** Trim whitespace from a pasted key. Returns null for empty. */
+export function sanitizeApiKey(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const k = raw.trim()
+  return k || null
+}
+
+/**
+ * API keys must be ASCII — they're sent in an HTTP header (a ByteString).
+ * A common paste mistake is an em dash "—" (U+2014) where a hyphen "-" belongs,
+ * which throws a cryptic "character … greater than 255" error. Detect it early.
+ */
+export function invalidKeyChar(key: string): string | null {
+  for (const ch of key) {
+    const code = ch.codePointAt(0)!
+    if (code > 127) return ch
+  }
+  return null
+}
+
+export class InvalidApiKeyError extends Error {
+  constructor(badChar: string) {
+    super(`API key contains an invalid character "${badChar}" — re-copy the key (a hyphen "-" may have been auto-corrected to a dash "—", or stray formatting was included).`)
+    this.name = 'InvalidApiKeyError'
+  }
+}
+
 export function effectiveModel(c: AssistantConfig): string {
   const m = c.model?.trim()
   // Guard against stale literal 'defaultModel' stored by older code versions
@@ -188,10 +215,14 @@ export async function chatComplete(
   config: AssistantConfig,
   opts: { messages: ChatMessage[]; tools?: ToolDef[]; temperature?: number; maxTokens?: number },
 ): Promise<ChatResult> {
-  if (!config.apiKey) throw new AssistantNotConfiguredError()
-  return config.provider === 'gemini'
-    ? chatCompleteGemini(config, opts)
-    : chatCompleteOpenAI(config, opts)
+  const key = sanitizeApiKey(config.apiKey)
+  if (!key) throw new AssistantNotConfiguredError()
+  const bad = invalidKeyChar(key)
+  if (bad) throw new InvalidApiKeyError(bad)
+  const cfg = { ...config, apiKey: key }
+  return cfg.provider === 'gemini'
+    ? chatCompleteGemini(cfg, opts)
+    : chatCompleteOpenAI(cfg, opts)
 }
 
 export interface FallbackResult {
@@ -238,6 +269,7 @@ export async function testConnection(config: AssistantConfig): Promise<{ ok: boo
     })
     return { ok: true, message: `Connected — ${config.provider}:${effectiveModel(config)} replied "${(r.content ?? '').trim().slice(0, 20)}"` }
   } catch (e: any) {
+    if (e instanceof InvalidApiKeyError) return { ok: false, message: e.message }
     const status = e?.status as number | undefined
     const rawMsg: string = e?.message || e?.errorDetails?.[0]?.reason || ''
     const msg = status === 401 ? 'Invalid API key — check the key is correct and active'
