@@ -223,11 +223,18 @@ compatible (no chain = legacy single-step). Admin UI distinguishes enforced
 - ⬜ 2.3 threshold/amount routing (reimbursement/loan/requisition finance tier) — needs engine extension to those entities (migration)
 - ⬜ 2.4 payroll maker-checker + offer salary sign-off
 
-### P3 status (UX — chosen "Both, P3 first")
+### ✅ P3 COMPLETE (UX — chosen "Both, P3 first")
 | 2026-06-26 | P3.2 | `e2f9721` | `<ApprovalChainStepper>` (reads `/approvals/chain`) wired into EssApprovals (leave/regularisation/comp-off) |
 | 2026-06-26 | P3.3 | `9b028de` | `GET /approvals/pending-count` (all entity types) → sidebar badge no longer undercounts |
-- ⬜ 3.1 unified inbox (ApprovalInbox already tabbed: leave/reg/OT/comp-off/loans — add manager-side stepper)
-- ⬜ 3.4 mobile approvals (extend MobileFlowDesk beyond leave+reg)
+| 2026-06-26 | P3.1 | `5dd63b9` | chain stepper in manager ApprovalInbox expanded rows (inbox already tabbed across entities) |
+| 2026-06-26 | P3.4 | `8c978cb` | mobile approvals extended to overtime + comp-off (inline approve/reject) |
+
+Deferred (low-risk cleanup, not blocking): physically retiring the duplicate
+standalone regularisation screens — they share the wired endpoints, so correct, just redundant.
+
+### Remaining: P2.3 + P2.4 (deep governance)
+- ⬜ 2.3 threshold/amount routing (reimbursement/loan/requisition finance tier) — needs engine extension to those entities (migration)
+- ⬜ 2.4 payroll maker-checker + offer salary sign-off
 
 ### Engine is now LIVE (backward-compatible) for: leave, regularisation, overtime, comp-off.
 With **no chain configured** every path behaves exactly as before. When an admin
