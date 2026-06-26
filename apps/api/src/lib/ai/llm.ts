@@ -41,7 +41,9 @@ export function isConfigUsable(c: AssistantConfig): boolean {
 }
 
 export function effectiveModel(c: AssistantConfig): string {
-  return c.model || PROVIDER_META[c.provider].defaultModel
+  const m = c.model?.trim()
+  // Guard against stale literal 'defaultModel' stored by older code versions
+  return (m && m !== 'defaultModel') ? m : PROVIDER_META[c.provider].defaultModel
 }
 
 // ── Chat message types (OpenAI-compatible shapes used throughout) ─────────────
