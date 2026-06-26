@@ -26,6 +26,7 @@ interface ProviderOpt { id: string; label: string; default_model: string }
 interface ChainRow { provider: string; model: string | null; enabled: boolean; has_key: boolean; key_hint: string | null }
 interface ActiveCfg { provider: string; model: string; source: string; count: number }
 interface ConfigResp {
+  mode: 'self' | 'managed'
   chain: ChainRow[]
   active: ActiveCfg | null
   providers: ProviderOpt[]
@@ -157,7 +158,20 @@ export function AiAssistantSettings() {
         </div>
       )}
 
-      {isLoading || rows === null ? (
+      {cfg?.mode === 'managed' ? (
+        <SectionCard title="AI provider" icon={<Sparkles className="h-4 w-4 text-[#15B8A6]" />}>
+          <div className="flex flex-col items-center gap-2 py-10 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#15B8A6]/10">
+              <Sparkles className="h-5 w-5 text-[#15B8A6]" />
+            </span>
+            <p className="text-sm font-medium text-foreground">AI is included in your plan</p>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              Your AI assistant is provided and managed by CognixHR — no API key needed. Usage is included in your
+              subscription. To switch to your own API keys, contact your account manager.
+            </p>
+          </div>
+        </SectionCard>
+      ) : isLoading || rows === null ? (
         <SectionCard><div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading…</div></SectionCard>
       ) : (
         <SectionCard title="Providers" icon={<Plug className="h-4 w-4 text-muted-foreground" />}>

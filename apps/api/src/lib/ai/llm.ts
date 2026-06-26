@@ -32,7 +32,14 @@ export interface AssistantConfig {
   apiKey:   string | null
   model:    string | null   // null → provider default
   enabled:  boolean
-  source:   'tenant' | 'env' | 'none'
+  source:   'tenant' | 'managed' | 'env' | 'none'
+}
+
+/** Token usage for one completion (for per-tenant metering). */
+export interface TokenUsage {
+  prompt:     number
+  completion: number
+  total:      number
 }
 
 /** Usable = enabled and has a key. Gate the assistant on this. */
@@ -93,6 +100,7 @@ export interface ToolDef {
 export interface ChatResult {
   content:         string | null
   toolCalls:       ToolCall[]
+  usage?:          TokenUsage  // token counts for this call (when the provider reports them)
   _geminiRawParts?: any[]  // raw model response parts; caller stores these on the assistant message
 }
 
@@ -191,8 +199,15 @@ async function chatCompleteGemini(
     }
   }
 
+  const um: any = (result.response as any).usageMetadata
+  const usage: TokenUsage | undefined = um ? {
+    prompt:     um.promptTokenCount ?? 0,
+    completion: um.candidatesTokenCount ?? 0,
+    total:      um.totalTokenCount ?? ((um.promptTokenCount ?? 0) + (um.candidatesTokenCount ?? 0)),
+  } : undefined
+
   // Return the raw parts so the caller can store them on the assistant message.
-  return { content: textContent, toolCalls, _geminiRawParts: rawParts }
+  return { content: textContent, toolCalls, usage, _geminiRawParts: rawParts }
 }
 
 // ── OpenAI-SDK implementation (Groq + OpenAI) ─────────────────────────────────
@@ -214,9 +229,11 @@ async function chatCompleteOpenAI(
   })
 
   const choice = resp.choices?.[0]?.message
+  const u = resp.usage
   return {
     content:   choice?.content ?? null,
     toolCalls: (choice?.tool_calls as ToolCall[] | undefined)?.filter(t => t.type === 'function') ?? [],
+    usage: u ? { prompt: u.prompt_tokens ?? 0, completion: u.completion_tokens ?? 0, total: u.total_tokens ?? 0 } : undefined,
   }
 }
 

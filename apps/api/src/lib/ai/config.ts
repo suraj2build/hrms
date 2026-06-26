@@ -47,9 +47,39 @@ type DbRow = {
 }
 
 /** Normalize a stored chain entry into an AssistantConfig. */
-function toConfig(e: ChainEntry): AssistantConfig {
+function toConfig(e: ChainEntry, source: AssistantConfig['source'] = 'tenant'): AssistantConfig {
   const provider = (e.provider in PROVIDER_META ? e.provider : 'groq') as ProviderName
-  return { provider, apiKey: e.api_key ?? null, model: e.model ?? null, enabled: e.enabled !== false, source: 'tenant' }
+  return { provider, apiKey: e.api_key ?? null, model: e.model ?? null, enabled: e.enabled !== false, source }
+}
+
+/**
+ * Read a tenant's provisioning mode. 'managed' → the provider supplies keys via
+ * the owner portal; 'self' (default) → the tenant brings its own keys. Read fresh
+ * (owner portal writes this, exactly like tenants.status for licensing).
+ */
+export async function resolveAiMode(supabase: SupabaseClient, tenantId: string): Promise<'self' | 'managed'> {
+  try {
+    const { data } = await supabase.from('tenants').select('ai_mode').eq('id', tenantId).maybeSingle()
+    return (data as any)?.ai_mode === 'managed' ? 'managed' : 'self'
+  } catch {
+    return 'self'  // column not in schema cache yet / any error → safe default
+  }
+}
+
+/**
+ * The global managed (owner-provisioned) provider chain. Used when a tenant is
+ * on ai_mode='managed'. The owner portal writes ai_managed_config (singleton
+ * row id=1); HRMS only reads it.
+ */
+async function resolveManagedChain(supabase: SupabaseClient): Promise<AssistantConfig[]> {
+  try {
+    const { data } = await supabase.from('ai_managed_config').select('*').eq('id', 1).maybeSingle()
+    const row = data as { providers_json?: ChainEntry[] | null } | null
+    if (!row?.providers_json || !Array.isArray(row.providers_json)) return []
+    return row.providers_json.map(e => toConfig(e, 'managed')).filter(isConfigUsable)
+  } catch {
+    return []
+  }
 }
 
 /** Build the legacy primary/fallback rows into a chain (for pre-319 rows). */
@@ -75,6 +105,16 @@ export async function resolveAssistantChain(
   supabase: SupabaseClient,
   tenantId: string,
 ): Promise<AssistantConfig[]> {
+  // Managed tenants use the owner-provisioned master chain (BYOK is bypassed).
+  const mode = await resolveAiMode(supabase, tenantId)
+  if (mode === 'managed') {
+    const managed = await resolveManagedChain(supabase)
+    if (managed.length > 0) return managed
+    // Managed but nothing provisioned yet → fall through to env so chat still works.
+    const env = envConfig()
+    return env.apiKey ? [env] : []
+  }
+
   const { data } = await supabase
     .from('ai_assistant_config')
     .select('*')
@@ -85,7 +125,7 @@ export async function resolveAssistantChain(
 
   let chain: AssistantConfig[] = []
   if (row?.providers_json && Array.isArray(row.providers_json) && row.providers_json.length > 0) {
-    chain = row.providers_json.map(toConfig)
+    chain = row.providers_json.map(e => toConfig(e))
   } else if (row) {
     chain = legacyChain(row)
   }

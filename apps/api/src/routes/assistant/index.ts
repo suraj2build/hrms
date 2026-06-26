@@ -18,9 +18,9 @@ import {
   chatCompleteWithFallback, testConnection,
   AssistantNotConfiguredError, isConfigUsable, effectiveModel, PROVIDER_META,
   sanitizeApiKey, invalidKeyChar,
-  type ChatMessage, type ToolCall, type AssistantConfig,
+  type ChatMessage, type ToolCall, type AssistantConfig, type TokenUsage,
 } from '../../lib/ai/llm.js'
-import { resolveAssistantConfig, resolveAssistantChain, maskKey } from '../../lib/ai/config.js'
+import { resolveAssistantConfig, resolveAssistantChain, resolveAiMode, maskKey } from '../../lib/ai/config.js'
 import { buildAssistantContext } from '../../lib/ai/assistant-context.js'
 import { ASSISTANT_TOOLS, executeTool } from '../../lib/ai/assistant-tools.js'
 
@@ -90,6 +90,29 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     const toolCtx = { supabase: fastify.supabase, caller, employeeId }
     const toolsUsed: string[] = []
 
+    // Accumulate token usage across the whole tool loop and meter it once per
+    // message. Fire-and-forget insert — metering must never slow or break a reply.
+    const usageTotals: TokenUsage = { prompt: 0, completion: 0, total: 0 }
+    const addUsage = (u?: TokenUsage) => {
+      if (!u) return
+      usageTotals.prompt += u.prompt; usageTotals.completion += u.completion; usageTotals.total += u.total
+    }
+    const meter = (cfg: AssistantConfig) => {
+      if (usageTotals.total === 0) return
+      void fastify.supabase.from('ai_usage_log').insert({
+        tenant_id:         req.tenantId,
+        provider:          cfg.provider,
+        model:             effectiveModel(cfg),
+        prompt_tokens:     usageTotals.prompt,
+        completion_tokens: usageTotals.completion,
+        total_tokens:      usageTotals.total,
+        source:            cfg.source,
+        user_id:           req.userId,
+      }).then(({ error }: any) => {
+        if (error) req.log.warn({ err: error.message }, 'ai usage metering insert failed')
+      })
+    }
+
     try {
       // Track the active config across the tool loop — may switch to a fallback mid-session.
       let activeConfig = cfgList[0]!
@@ -103,8 +126,10 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
           (from, reason) => req.log.warn({ from: from.provider, reason }, 'assistant provider failed, trying next in chain'),
         )
         if (fellBack) { activeConfig = usedConfig; usedFallback = true }
+        addUsage(res.usage)
 
         if (res.toolCalls.length === 0) {
+          meter(activeConfig)
           return reply.send({
             data: {
               reply:      res.content ?? '…',
@@ -129,6 +154,8 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
 
       // Hit the hop cap — make one final no-tools call for a summary.
       const { content: final, usedConfig } = await chatCompleteWithFallback([activeConfig], { messages, maxTokens: 500 })
+      addUsage(final.usage)
+      meter(usedConfig)
       return reply.send({
         data: {
           reply:      final.content ?? '…',
@@ -180,10 +207,16 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     }
 
     // What the chat path actually resolves to (ground truth — shows env-shadowing).
-    const active = await resolveAssistantChain(fastify.supabase, req.tenantId)
+    const [active, mode] = await Promise.all([
+      resolveAssistantChain(fastify.supabase, req.tenantId),
+      resolveAiMode(fastify.supabase, req.tenantId),
+    ])
 
     return reply.send({
       data: {
+        // 'self' = tenant brings own keys (editable); 'managed' = provider supplies
+        // them via the owner portal (read-only here).
+        mode,
         chain: chain.map(e => ({
           provider: e.provider,
           model:    e.model ?? null,
@@ -196,6 +229,46 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
           : null,
         providers:  Object.entries(PROVIDER_META).map(([id, m]) => ({ id, label: m.label, default_model: m.defaultModel })),
         updated_at: r?.updated_at ?? null,
+      },
+    })
+  })
+
+  // ── GET /assistant/usage (admin) ──────────────────────────────────────────────
+  // Per-tenant AI token usage summary for the current and previous month, plus a
+  // recent-days trend. Token counts only — pricing is applied by the owner portal.
+  fastify.get('/assistant/usage', hrAuth, async (req: any, reply) => {
+    const now = new Date()
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
+
+    const { data, error } = await fastify.supabase
+      .from('ai_usage_log')
+      .select('provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
+      .eq('tenant_id', req.tenantId)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(5000)
+    if (error) return reply.code(500).send({ error: 'USAGE_FAILED', message: error.message })
+
+    const rows = (data ?? []) as Array<{ provider: string; source: string; total_tokens: number; prompt_tokens: number; completion_tokens: number; created_at: string }>
+    const monthRows = rows.filter(r => r.created_at >= monthStart)
+    const sum = (rs: typeof rows) => rs.reduce((a, r) => ({
+      calls: a.calls + 1,
+      prompt: a.prompt + (r.prompt_tokens ?? 0),
+      completion: a.completion + (r.completion_tokens ?? 0),
+      total: a.total + (r.total_tokens ?? 0),
+    }), { calls: 0, prompt: 0, completion: 0, total: 0 })
+
+    // Per-provider breakdown for the current month.
+    const byProvider: Record<string, number> = {}
+    for (const r of monthRows) byProvider[r.provider] = (byProvider[r.provider] ?? 0) + (r.total_tokens ?? 0)
+
+    return reply.send({
+      data: {
+        month_to_date: sum(monthRows),
+        last_30_days:  sum(rows),
+        by_provider:   byProvider,
+        source:        monthRows[0]?.source ?? null,
       },
     })
   })
