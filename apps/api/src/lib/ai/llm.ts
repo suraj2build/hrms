@@ -109,9 +109,15 @@ export async function testConnection(config: AssistantConfig): Promise<{ ok: boo
     })
     return { ok: true, message: `Connected — ${config.provider}:${effectiveModel(config)} replied "${(r.content ?? '').trim().slice(0, 20)}"` }
   } catch (e: any) {
-    const msg = e?.status === 401 ? 'Invalid API key'
-      : e?.status === 429 ? 'Rate limited / quota exceeded'
-      : e?.message ?? 'Connection failed'
+    const status = e?.status as number | undefined
+    // Try to extract a human-readable message from the SDK error or the raw response body.
+    // Gemini wraps errors in { error: { message } } which OpenAI SDK may not parse.
+    const rawMsg: string = e?.message || e?.error?.message || e?.error?.error?.message || ''
+    const msg = status === 401 ? 'Invalid API key — check the key is correct and active'
+      : status === 403 ? 'Forbidden — API key may not have access to this model or the API is not enabled'
+      : status === 404 ? `Model not found — '${effectiveModel(config)}' may not be available on ${config.provider}'s endpoint`
+      : status === 429 ? 'Rate limited / quota exceeded'
+      : rawMsg || `Connection failed (HTTP ${status ?? 'network error'})`
     return { ok: false, message: msg }
   }
 }

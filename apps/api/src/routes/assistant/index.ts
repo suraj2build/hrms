@@ -182,6 +182,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
 
     if (!cfg.apiKey) return reply.send({ data: { ok: false, message: 'No API key to test — enter one first.' } })
     const result = await testConnection({ ...cfg, enabled: true })
+    if (!result.ok) req.log.warn({ provider: cfg.provider, model: cfg.model, message: result.message }, 'assistant connection test failed')
     return reply.send({ data: result })
   })
 }
