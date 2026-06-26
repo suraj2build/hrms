@@ -14,11 +14,14 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, addMonths, format, isSameMonth, isToday,
 } from 'date-fns'
-import { CalendarOff, ChevronLeft, ChevronRight, Loader2, Users, PartyPopper } from 'lucide-react'
+import { CalendarOff, ChevronLeft, ChevronRight, Users, PartyPopper } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { LoadingState }  from '@/components/layout/LoadingState'
+import { ErrorState }    from '@/components/layout/ErrorState'
+import { EmptyState }    from '@/components/layout/EmptyState'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
@@ -170,14 +173,9 @@ export function EssTeamOff() {
 
       <SectionCard title="Calendar" icon={<CalendarOff className="h-4 w-4 text-muted-foreground" />}>
         {isLoading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading team calendar…
-          </div>
+          <LoadingState rows={4} />
         ) : isError ? (
-          <div className="py-12 text-center text-sm text-muted-foreground">
-            Couldn't load the team calendar.
-            <Button size="sm" variant="outline" className="ml-2" onClick={() => refetch()}>Retry</Button>
-          </div>
+          <ErrorState title="Couldn’t load the team calendar" onRetry={() => refetch()} />
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[680px]">
@@ -267,7 +265,7 @@ export function EssTeamOff() {
             .filter(l => l.from_date <= meStr && l.to_date >= ms)
             .sort((a, b) => a.from_date.localeCompare(b.from_date))
           if (monthLeave.length === 0) {
-            return <p className="py-6 text-center text-sm text-muted-foreground">No teammates on approved leave this month. 🎉</p>
+            return <EmptyState icon={PartyPopper} title="No one's off this month" description="No teammates are on approved leave this month." compact />
           }
           return (
             <div className="divide-y divide-border">
