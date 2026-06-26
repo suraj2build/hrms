@@ -24,7 +24,7 @@ interface ProviderMeta {
 export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
   groq:   { label: 'Groq (Llama)',  baseURL: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
   openai: { label: 'OpenAI',        baseURL: undefined,                         defaultModel: 'gpt-4o-mini' },
-  gemini: { label: 'Google Gemini', baseURL: undefined,                         defaultModel: 'gemini-1.5-flash' },
+  gemini: { label: 'Google Gemini', baseURL: undefined,                         defaultModel: 'gemini-3.5-flash' },
 }
 
 export interface AssistantConfig {
