@@ -24,7 +24,7 @@ interface ProviderMeta {
 export const PROVIDER_META: Record<ProviderName, ProviderMeta> = {
   groq:   { label: 'Groq (Llama)',  baseURL: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
   openai: { label: 'OpenAI',        baseURL: undefined,                         defaultModel: 'gpt-4o-mini' },
-  gemini: { label: 'Google Gemini', baseURL: undefined,                         defaultModel: 'gemini-2.0-flash' },
+  gemini: { label: 'Google Gemini', baseURL: undefined,                         defaultModel: 'gemini-1.5-flash' },
 }
 
 export interface AssistantConfig {
@@ -208,7 +208,7 @@ export async function testConnection(config: AssistantConfig): Promise<{ ok: boo
     const rawMsg: string = e?.message || e?.errorDetails?.[0]?.reason || ''
     const msg = status === 401 ? 'Invalid API key — check the key is correct and active'
       : status === 403 ? 'Forbidden — API key may not have access to this model or the Gemini API is not enabled'
-      : status === 404 ? `Model not found — '${effectiveModel(config)}' may not be available for ${config.provider}`
+      : status === 404 ? `Model not found — '${effectiveModel(config)}' is not available. Try a different model name. ${rawMsg ? `(${rawMsg.slice(0, 120)})` : ''}`
       : status === 429 ? 'Rate limited / quota exceeded'
       : rawMsg || `Connection failed (HTTP ${status ?? 'network error'})`
     return { ok: false, message: msg }
