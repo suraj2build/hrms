@@ -55,6 +55,7 @@ ALTER TABLE ai_usage_log ENABLE ROW LEVEL SECURITY;
 
 -- HR admins may read their own tenant's usage (in-app cost visibility).
 -- (API uses the service-role client which bypasses RLS; this is defence-in-depth.)
+DROP POLICY IF EXISTS "ai_usage_log_hr_read" ON ai_usage_log;
 CREATE POLICY "ai_usage_log_hr_read" ON ai_usage_log
   FOR SELECT USING (
     get_user_role() IN ('super_admin', 'hr_admin') AND tenant_id = get_user_tenant_id()
