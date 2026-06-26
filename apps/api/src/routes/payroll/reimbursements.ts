@@ -894,6 +894,24 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
     }
 
+    // Multi-level gate (same as /claims/:id/approve) so the admin screen honours a
+    // configured chain instead of single-step finalizing. No chain => HR-only legacy
+    // (already enforced by requireHrAdmin), so the gate is transparent.
+    const gate = await gateApprove(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'reimbursement_claim', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (existing as any).employee_id,
+      amount: Number((existing as any).claimed_amount),
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'advanced') {
+      await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: (existing as any).status, approval_level: gate.nextLevel, total_levels: gate.totalLevels } })
+      return reply.send({ data: { id, status: (existing as any).status, advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
+    }
+
     const now = new Date().toISOString()
     const approvedAmt = (req.body as any)?.approved_amount ?? (existing as any).claimed_amount
     const { data, error } = await fastify.supabase
@@ -918,12 +936,28 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
 
     const { data: existing } = await fastify.supabase
       .from('reimbursement_claims')
-      .select('id, status, employee_id')
+      .select('id, status, employee_id, claimed_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).single()
 
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
     if (!['submitted', 'under_review', 'approved'].includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Cannot reject claim with status: ${(existing as any).status}` })
+    }
+
+    // Gate the reject too so a configured chain records the rejection + closes the
+    // instance (no chain => transparent; HR-only already enforced by requireHrAdmin).
+    {
+      const gate = await gateReject(fastify.supabase, {
+        tenantId: req.tenantId, entityType: 'reimbursement_claim', entityId: id,
+        actorId: req.userId, actorRole: req.userRole,
+        targetEmployeeId: (existing as any).employee_id,
+        amount: Number((existing as any).claimed_amount ?? 0),
+        comments: parsed.data.rejection_reason,
+      })
+      if (gate.kind === 'error') {
+        const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+        return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+      }
     }
 
     const now = new Date().toISOString()

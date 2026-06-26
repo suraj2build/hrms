@@ -1882,10 +1882,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     // Four-eyes before an offer reaches the candidate: the first send records a
     // pending sign-off (maker) and does NOT email; a DIFFERENT authorised user
     // must call send again to approve and dispatch. Preparer≠approver enforced.
+    // The material terms that actually get sent. Under sign-off these are pinned to
+    // the maker's signed-off proposal so the checker can't approve offer X and
+    // dispatch offer Y.
+    let effAmount: any   = offered_amount
+    let effJoining: any  = joining_date
+    let effRecipient: string = recipient_email
+
     if (isOfferSignoffEnabled()) {
       const { data: pending } = await fastify.supabase
         .from('maker_checker_log')
-        .select('id, maker_id')
+        .select('id, maker_id, maker_data')
         .eq('tenant_id', req.tenantId)
         .eq('entity_type', 'offer_letter')
         .eq('entity_id', appId)
@@ -1912,13 +1919,20 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
           message: 'You proposed this offer; a different authorised user must approve it before sending.',
         })
       }
+      // Pin the dispatched terms to the maker's signed-off proposal (four-eyes: the
+      // checker approves the SAME offer, not a substituted one).
+      const md = (pending as any).maker_data ?? {}
+      if (md.offered_amount != null)  effAmount    = md.offered_amount
+      if (md.joining_date   != null)  effJoining   = md.joining_date
+      if (md.recipient_email)         effRecipient = md.recipient_email
+
       await fastify.supabase.from('maker_checker_log')
         .update({ checker_id: req.userId, status: 'approved', reviewed_at: new Date().toISOString() })
         .eq('id', (pending as any).id)
     }
 
     const result = await sendEmail({
-      to:      recipient_email,
+      to:      effRecipient,
       subject: `Offer Letter — ${job_title} at ${company_name}`,
       html:    letter_html,
     })
@@ -1929,8 +1943,8 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     // Persist the offer + move the application to 'offer' when we have the
     // structured fields the candidate needs to accept (amount + joining date).
-    const amount = offered_amount != null && offered_amount !== '' ? Number(offered_amount) : null
-    const jdate  = typeof joining_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(joining_date) ? joining_date : null
+    const amount = effAmount != null && effAmount !== '' ? Number(effAmount) : null
+    const jdate  = typeof effJoining === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(effJoining) ? effJoining : null
     if (amount != null && Number.isFinite(amount) && jdate) {
       const { data: existing } = await fastify.supabase
         .from('recruitment_offer_letters')
@@ -1957,7 +1971,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       recordId:    appId,
       action:      'UPDATE',
       performedBy: req.userId,
-      newData:     { offer_letter_sent_to: recipient_email, offer_amount: amount, joining_date: jdate },
+      newData:     { offer_letter_sent_to: effRecipient, offer_amount: amount, joining_date: jdate },
     })
 
     return reply.send({ sent: true })

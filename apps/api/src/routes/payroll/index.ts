@@ -1458,8 +1458,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           })
         }
         // Checker step — approve the pending proposal, then proceed to finalize.
+        // When the preparer themselves approved via super_admin override, record that
+        // fact distinctly so an auditor can tell it from a clean four-eyes approval.
+        const preparerOverride = (run as any).created_by === req.userId
         await fastify.supabase.from('maker_checker_log')
-          .update({ checker_id: req.userId, status: 'approved', reviewed_at: new Date().toISOString() })
+          .update({
+            checker_id:   req.userId,
+            status:       'approved',
+            reviewed_at:  new Date().toISOString(),
+            ...(preparerOverride ? { checker_notes: 'PREPARER_SELF_APPROVED_OVERRIDE (super_admin)' } : {}),
+          })
           .eq('id', (pending as any).id)
       } else {
         // Dual control off — record an auto-approved entry (real audit trail) and

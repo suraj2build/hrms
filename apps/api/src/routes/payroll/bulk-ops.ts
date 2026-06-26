@@ -217,6 +217,7 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       .eq('status', 'PENDING')
 
     const approvedIds: string[] = []
+    const advancedIds: string[] = []
     const failedIds:   Array<{ id: string; reason: string }> = []
     const skipped = application_ids.filter(id => !(apps ?? []).find((a: any) => a.id === id))
 
@@ -231,6 +232,14 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
 
       if (!result.ok) {
         failedIds.push({ id: app.id, reason: result.error.message })
+        continue
+      }
+
+      // Multi-level chain: an intermediate approval advances a level but the leave is
+      // still PENDING — do NOT count it as approved and do NOT create payroll
+      // adjustments for a not-yet-approved leave.
+      if (result.value.status !== 'APPROVED') {
+        advancedIds.push(app.id)
         continue
       }
 
@@ -274,9 +283,11 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
 
     return reply.send({
       approved_count: approvedIds.length,
+      advanced_count: advancedIds.length,   // intermediate multi-level approvals (still pending)
       failed_count:   failedIds.length,
       skipped_count:  skipped.length,
       approved_ids:   approvedIds,
+      advanced_ids:   advancedIds,
       failed:         failedIds,
       skipped_ids:    skipped,
     })

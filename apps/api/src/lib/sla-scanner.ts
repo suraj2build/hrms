@@ -106,12 +106,21 @@ async function autoAdvanceStaleInstances(
     .eq('tenant_id', tenantId)
     .is('final_approved', null)
 
+  // Amount-routed workflows (reimbursement/loan/advance) build their chain by
+  // filtering levels on min_amount, so the instance's current_level is an index into
+  // the FILTERED chain — not the raw config level. Auto-advancing those by raw level
+  // would skip/misread the finance tier, so they are excluded here (auto-approving a
+  // finance approval purely on elapsed time is undesirable anyway). Time-off
+  // workflows are unfiltered, so current_level == raw level and the lookup is exact.
+  const AMOUNT_ROUTED = new Set(['reimbursement', 'loan', 'advance'])
+
   for (const inst of (instances ?? []) as any[]) {
     // Final level is never auto-finalized — only intermediate levels auto-advance.
     if (inst.current_level >= inst.total_levels) continue
 
     const workflowType = ENTITY_WORKFLOW_MAP[inst.entity_type as EntityType]
     if (!workflowType) continue
+    if (AMOUNT_ROUTED.has(workflowType)) continue
 
     const { data: cfg } = await supabase
       .from('approval_workflow_config')
@@ -129,7 +138,20 @@ async function autoAdvanceStaleInstances(
     if (ageHrs < hrs) continue
 
     const nextLevel = inst.current_level + 1
-    const { error: actErr } = await supabase.from('approval_actions').insert({
+    // Advance FIRST, conditional on the level we read — so a concurrent scanner /
+    // a manual approval that already moved the instance makes this a no-op (0 rows)
+    // and we skip recording a duplicate auto_approved action.
+    const { data: advanced } = await supabase
+      .from('approval_instances')
+      .update({ current_level: nextLevel })
+      .eq('id', inst.id)
+      .eq('tenant_id', tenantId)
+      .eq('current_level', inst.current_level)
+      .is('final_approved', null)
+      .select('id')
+    if (!advanced || advanced.length === 0) continue   // someone else moved it — skip
+
+    await supabase.from('approval_actions').insert({
       tenant_id:   tenantId,
       instance_id: inst.id,
       level:       inst.current_level,
@@ -137,13 +159,6 @@ async function autoAdvanceStaleInstances(
       actor_id:    systemActor,
       comments:    `Auto-advanced after ${hrs}h without action (SLA auto-approve).`,
     })
-    if (actErr) continue   // don't advance if we couldn't record the action
-
-    await supabase
-      .from('approval_instances')
-      .update({ current_level: nextLevel })
-      .eq('id', inst.id)
-      .eq('tenant_id', tenantId)
 
     const dedupeKey = `auto-advance:${inst.id}:${inst.current_level}`
     if (!notifiedIds.has(dedupeKey)) {

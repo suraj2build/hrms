@@ -79,8 +79,12 @@ interface ConfigLevel {
  * a configured ₹ threshold, with no amount hardcoded in code.
  */
 function applicableLevels(config: ConfigLevel[], amount: number | undefined): ConfigLevel[] {
+  // A NaN amount (e.g. a finance entity whose amount couldn't be resolved) must not
+  // silently drop thresholded levels — treat it as "no amount" so the caller's
+  // fail-closed guard (a configured chain with zero applicable levels) can fire.
+  const amt = (amount != null && Number.isFinite(amount)) ? amount : undefined
   return config
-    .filter(c => c.min_amount == null || (amount != null && amount >= Number(c.min_amount)))
+    .filter(c => c.min_amount == null || (amt != null && amt >= Number(c.min_amount)))
     .sort((a, b) => a.level - b.level)
 }
 
@@ -185,7 +189,9 @@ async function actorSatisfiesLevel(
   const tokens = delegationTokens(entityType, workflowType)
   for (const d of (delegations ?? []) as any[]) {
     const ets: string[] = Array.isArray(d.entity_types) ? d.entity_types : []
-    const covers = ets.length === 0 || ets.some((e) => tokens.includes(e))
+    // An empty entity_types must NOT be treated as "covers everything" — that would
+    // turn an unscoped delegation row into a blanket grant across all workflows.
+    const covers = ets.length > 0 && ets.some((e) => tokens.includes(e))
     if (!covers) continue
     const { data: delegator } = await supabase
       .from('profiles')
@@ -195,6 +201,10 @@ async function actorSatisfiesLevel(
       .maybeSingle()
     const dRole = (delegator as { role: string | null } | null)?.role ?? null
     const dEmp  = (delegator as { employee_id: string | null } | null)?.employee_id ?? null
+    // Segregation of duties: a delegation must never let the REQUESTER's own
+    // request be approved — neither the actor (checked above) nor the delegator
+    // may be the target employee.
+    if (dEmp && dEmp === targetEmployeeId) continue
     if (await profileSatisfiesLevel(supabase, tenantId, cfg, dRole, dEmp, targetEmployeeId)) {
       return { ok: true, viaDelegation: true }
     }
@@ -313,8 +323,14 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
     return { kind: 'error', error: { type: 'CONFLICT', message: 'This request is already closed' } }
   }
 
-  // current_level indexes into the applicable chain (1-based).
-  const cfg = applicable[instance.current_level - 1] ?? applicable[applicable.length - 1]
+  // current_level indexes into the applicable chain (1-based). If it is out of
+  // range, the chain config or amount changed after this instance was created —
+  // fail CLOSED with a conflict rather than silently rebinding to the last level
+  // (which could finalize against the wrong level's approver requirement).
+  const cfg = applicable[instance.current_level - 1]
+  if (!cfg) {
+    return { kind: 'error', error: { type: 'CONFLICT', message: 'Approval chain configuration changed for this request — please refresh and retry.' } }
+  }
 
   const auth = await actorSatisfiesLevel(
     supabase, input.tenantId, cfg, input.actorId, input.actorRole, input.targetEmployeeId,
@@ -322,7 +338,9 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
   )
   if (!auth.ok) return { kind: 'error', error: { type: 'FORBIDDEN', message: auth.message } }
 
-  const isFinalLevel = instance.current_level >= instance.total_levels
+  // Final-level detection uses the applicable chain length (authoritative now),
+  // consistent with how cfg was resolved.
+  const isFinalLevel = instance.current_level >= applicable.length
 
   if (isFinalLevel) {
     const rec = await recordAndAdvance(
@@ -340,7 +358,7 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
     'approved', input.actorId, input.comments, false, null, nextLevel,
   )
   if (!rec.ok) return { kind: 'error', error: { type: 'DB_ERROR', message: rec.message } }
-  return { kind: 'advanced', level: instance.current_level, nextLevel, totalLevels: instance.total_levels }
+  return { kind: 'advanced', level: instance.current_level, nextLevel, totalLevels: applicable.length }
 }
 
 // ── gateReject ───────────────────────────────────────────────────────────────────
@@ -369,7 +387,10 @@ export async function gateReject(supabase: SupabaseClient, input: GateInput): Pr
     return { kind: 'error', error: { type: 'CONFLICT', message: 'This request is already closed' } }
   }
 
-  const cfg = applicable[instance.current_level - 1] ?? applicable[applicable.length - 1]
+  const cfg = applicable[instance.current_level - 1]
+  if (!cfg) {
+    return { kind: 'error', error: { type: 'CONFLICT', message: 'Approval chain configuration changed for this request — please refresh and retry.' } }
+  }
 
   const auth = await actorSatisfiesLevel(
     supabase, input.tenantId, cfg, input.actorId, input.actorRole, input.targetEmployeeId,
