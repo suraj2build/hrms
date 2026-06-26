@@ -21,7 +21,7 @@ interface StatusResp { data: { enabled: boolean; provider: string; model: string
 const HIDE_ON = ['/login', '/owner', '/onboarding/portal', '/recruitment/portal', '/candidate']
 
 export function AssistantWidget() {
-  const { profile } = useAuthStore()
+  const { profile, accessToken } = useAuthStore()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
@@ -35,10 +35,11 @@ export function AssistantWidget() {
   const { data: status } = useQuery<StatusResp>({
     queryKey: ['assistant-status'],
     queryFn:  () => api.get('/assistant/status'),
-    // Only probe when the widget can actually render: a profile exists and we're
-    // not on a hidden (auth/owner/portal) page. Avoids firing 401s during the
-    // auth-bootstrap window or on pages where the assistant never shows.
-    enabled:  !!profile && !hidden,
+    // Only probe when the widget can actually render AND a token is available.
+    // `profile` is persisted to localStorage but `accessToken` is NOT — on reload
+    // the profile rehydrates instantly while the token is still null until Supabase
+    // re-bootstraps. Gating on the token avoids a "No token provided" 401 in that gap.
+    enabled:  !!profile && !!accessToken && !hidden,
     staleTime: 5 * 60_000,
     retry: false,                 // a 401/500 here is non-critical — don't retry-spam
     refetchOnWindowFocus: false,
