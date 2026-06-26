@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Sparkles, X, Send, Loader2, Settings } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { DEMO_MODE } from '@/lib/demo'
 
 interface Msg { role: 'user' | 'assistant'; content: string }
 interface ChatResp { data: { reply: string | null; not_configured?: boolean; error?: boolean; tools_used?: string[] } }
@@ -94,7 +95,7 @@ export function AssistantWidget() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold leading-tight">CognixHR Assistant</p>
               <p className="text-[10px] text-white/70 leading-tight">
-                {status?.data.enabled ? 'Read-only · answers from your data' : 'Not configured'}
+                {DEMO_MODE ? 'Demo · sample answers' : status?.data.enabled ? 'Read-only · answers from your data' : 'Not configured'}
               </p>
             </div>
             <button onClick={() => setOpen(false)} aria-label="Close" className="rounded-md p-1 hover:bg-white/15">
