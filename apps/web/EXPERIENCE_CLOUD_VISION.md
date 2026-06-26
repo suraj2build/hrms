@@ -6,7 +6,7 @@
 > near-term implementation foundation that the Roadmap's P0 builds on.
 >
 > **Audience:** product, design, engineering, leadership. **Horizon:** 3–5 years.
-> **Status:** vision — not a build spec.
+> **Status:** FROZEN — architectural foundation. Governed by `COGNIXHR_PRODUCT_MANIFESTO.md`. Changes require explicit, recorded amendment.
 
 ---
 

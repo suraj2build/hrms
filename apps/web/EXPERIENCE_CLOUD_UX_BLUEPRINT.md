@@ -6,8 +6,9 @@
 > Supersedes `ESS_UX_UNIFICATION_BLUEPRINT.md` at the *vision* level; that v1 doc
 > remains the concrete near-term cleanup the Roadmap's P0 executes.
 >
-> **Status:** design blueprint — not yet a build spec. Grounded in the four-part ESS
-> audit; cited files are real.
+> **Status:** FROZEN — architectural foundation. Governed by `COGNIXHR_PRODUCT_MANIFESTO.md`.
+> Grounded in the four-part ESS audit; cited files are real. Changes require explicit,
+> recorded amendment.
 
 ---
 

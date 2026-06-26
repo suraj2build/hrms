@@ -4,9 +4,10 @@
 > Companion docs: **Vision** (why) · **UX Blueprint v2** (how it works).
 > Builds on `ESS_UX_UNIFICATION_BLUEPRINT.md` (the v1 cleanup = this roadmap's P0).
 >
-> **Status:** plan — no code yet. Each phase is independently shippable, reuse-first,
-> and preserves governance (RBAC, tenant scope, the 402 write-gate, the lint/colour
-> gate). File/route/table references are real (from the four-part audit).
+> **Status:** FROZEN — architectural foundation. Governed by `COGNIXHR_PRODUCT_MANIFESTO.md`.
+> No code yet. Each phase is independently shippable, reuse-first, and preserves
+> governance (RBAC, tenant scope, the 402 write-gate, the lint/colour gate). File/route/
+> table references are real (from the four-part audit). Changes require recorded amendment.
 
 ---
 
