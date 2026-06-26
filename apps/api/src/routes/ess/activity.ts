@@ -24,6 +24,8 @@ interface ActivityEvent {
   title: string
   body?: string
   at:    string  // ISO timestamp for sorting + relative display
+  /** The person this event is about (for a face) — recognition giver, birthday colleague. */
+  person?: string
 }
 
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
@@ -135,9 +137,10 @@ export default async function essActivityRoutes(fastify: FastifyInstance) {
         for (const g of givers) giverMap.set(g.id, fullName(g))
       }
       for (const r of recRows) {
+        const giver = giverMap.get(r.from_employee) ?? 'A colleague'
         events.push({
-          id: `rec_${r.id}`, type: 'recognition', title: `${giverMap.get(r.from_employee) ?? 'A colleague'} recognized you`,
-          body: r.message ? `"${String(r.message).slice(0, 80)}"` : undefined, at: r.created_at,
+          id: `rec_${r.id}`, type: 'recognition', title: `${giver} recognized you`,
+          body: r.message ? `"${String(r.message).slice(0, 80)}"` : undefined, at: r.created_at, person: giver,
         })
       }
     }
@@ -156,7 +159,7 @@ export default async function essActivityRoutes(fastify: FastifyInstance) {
       if (typeof c.dob === 'string' && c.dob.slice(5) === todayMMDD) {
         events.push({
           id: `bday_${c.id}`, type: 'birthday', title: `${fullName(c)}'s birthday today`,
-          body: 'Send your wishes', at: today + 'T00:00:00Z',
+          body: 'Send your wishes', at: today + 'T00:00:00Z', person: fullName(c),
         })
       }
     }
