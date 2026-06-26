@@ -66,30 +66,48 @@ function ok(data: Json, message = 'Saved (demo)') {
 
 /**
  * Scripted assistant reply for the demo portal (no real LLM available). Keyword
- * matched against the user's message so the floating widget feels alive when
- * clicking through the demo. Numbers mirror the demo fixtures.
+ * matched, but the numbers are pulled from the SAME demo fixtures the rest of the
+ * UI renders — so the assistant's answers match what you see on the Leave / Pay /
+ * People screens. (On a live deployment a real LLM answers from real HR data.)
  */
 function demoAssistantReply(body: unknown): string {
   const msg = String((body as any)?.message ?? '').toLowerCase()
   const has = (...ws: string[]) => ws.some(w => msg.includes(w))
+  const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 
-  if (has('balance', 'leave left', 'how many leave', 'leaves do i'))
-    return 'You have 8 Casual Leave and 12 Earned Leave remaining this year. You can apply from Me → Leave.'
-  if (has('payslip', 'salary', 'net pay', 'last pay', 'paid'))
-    return 'Your last payslip (May 2026) shows a net pay of ₹86,400. Download it from Pay → Payslips.'
-  if (has('pending', 'approval', 'approve'))
-    return 'You have 3 requests pending your approval: 2 leave requests and 1 attendance regularisation. Open the Approvals inbox to action them.'
-  if (has('headcount', 'how many employee', 'total employee', 'team size', 'strength'))
-    return 'Your organisation currently has 48 active employees — Engineering 18, Sales 12, Operations 10, HR 8.'
-  if (has('on leave', 'who is off', 'who’s off', 'whos off', 'off today', 'off tomorrow'))
-    return 'On leave today: Rahul Verma (Earned Leave) and Anjali Mehta (Casual Leave). Everyone else is available.'
-  if (has('holiday', 'next holiday'))
-    return 'The next holiday is Independence Day on 15 Aug. After that, Gandhi Jayanti on 2 Oct.'
+  if (has('balance', 'leave left', 'how many leave', 'leaves do i', 'my leave')) {
+    const parts = fx.demoLeaveBalances().map(b => `${b.leave_types.name} ${b.balance}`).join(', ')
+    return `Your current leave balances are — ${parts}. Apply or view details from Me → Leave.`
+  }
+  if (has('payslip', 'salary', 'net pay', 'last pay', 'paid')) {
+    const latest: any = fx.demoMyPayslips()[0]
+    return latest
+      ? `Your latest payslip (${latest.month}) shows a net pay of ${inr(Number(latest.net_pay))} on a gross of ${inr(Number(latest.gross_pay))}. Download it from Pay → Payslips.`
+      : 'You have no payslips yet.'
+  }
+  if (has('pending', 'approval', 'approve', 'waiting')) {
+    const mine = fx.demoMyLeaveRequests().filter((r: any) => r.status === 'pending')
+    return `You have ${mine.length} pending leave request(s)${mine[0] ? ` — e.g. ${mine[0].computed_days} day(s) from ${mine[0].from_date} (“${mine[0].reason}”)` : ''}. Track them in My Approvals.`
+  }
+  if (has('headcount', 'how many employee', 'total employee', 'team size', 'strength', 'people')) {
+    return `Your organisation has ${fx.demoEmployeeList.length} employees on the roster. See the full list under People → Employees.`
+  }
+  if (has('on leave', 'who is off', 'who’s off', 'whos off', 'off today', 'off tomorrow')) {
+    return 'In this demo no one has an approved leave overlapping today. On a live deployment I’d list your team members who are off.'
+  }
+  if (has('holiday', 'next holiday')) {
+    const now = new Date()
+    const today = now.toISOString().slice(0, 10)
+    const next = fx.demoHolidays(now.getFullYear()).filter((h: any) => h.date >= today).slice(0, 2)
+    return next.length
+      ? `Upcoming holidays — ${next.map((h: any) => `${h.name} (${h.date})`).join(', ')}.`
+      : 'No more holidays this year in the demo calendar.'
+  }
   if (has('wfh', 'work from home', 'regulari'))
     return 'To request work-from-home or regularise attendance, go to Work → Attendance and use “Regularise”. Your manager approves it.'
-  if (has('hi', 'hello', 'hey', 'what can you', 'help'))
-    return 'Hi! I’m the CognixHR Assistant. I can answer questions about your leave balance, payslip, pending approvals, holidays, and headcount. (This is a demo — connect a provider key on a live deployment for full answers.)'
-  return 'I’m the CognixHR Assistant (demo). Try asking about your leave balance, last payslip, pending approvals, or headcount. On a live deployment I answer from your real HR data.'
+  if (has('hi', 'hello', 'hey', 'what can you', 'help', 'who are you'))
+    return 'Hi! I’m the CognixHR Assistant. Ask me about your leave balance, last payslip, pending requests, holidays, or headcount — I’ll answer from your data. (Demo: sample data; connect a provider key on a live deployment for full AI answers.)'
+  return 'I’m the CognixHR Assistant (demo). Try: “What’s my leave balance?”, “Show my last payslip”, “How many employees do we have?”, or “What’s the next holiday?”'
 }
 
 // ── Main resolver ─────────────────────────────────────────────────────────────
