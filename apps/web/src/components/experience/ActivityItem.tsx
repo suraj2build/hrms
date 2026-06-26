@@ -10,6 +10,7 @@
 import * as React from 'react'
 import { Clock, CalendarCheck, CreditCard, Award, Cake, Megaphone, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PersonAvatar } from './PersonAvatar'
 
 export type ActivityType = 'attendance' | 'leave' | 'payroll' | 'recognition' | 'birthday' | 'announcement'
 
@@ -19,6 +20,8 @@ export interface ActivityEvent {
   title: string
   body?: string
   at:    string
+  /** When set, the row shows this person's face instead of a type icon. */
+  person?: string
 }
 
 const ICON: Record<ActivityType, React.ComponentType<{ className?: string }>> = {
@@ -54,9 +57,13 @@ export function ActivityItem({ event, className }: { event: ActivityEvent; class
   const Icon = ICON[event.type] ?? Activity
   return (
     <div className={cn('flex items-start gap-3', className)}>
-      <span className={cn('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl', TINT[event.type] ?? 'bg-muted text-muted-foreground')}>
-        <Icon className="h-4 w-4" />
-      </span>
+      {event.person ? (
+        <PersonAvatar name={event.person} size="sm" className="mt-0.5" />
+      ) : (
+        <span className={cn('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl', TINT[event.type] ?? 'bg-muted text-muted-foreground')}>
+          <Icon className="h-4 w-4" />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-foreground">{event.title}</p>
         {event.body && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{event.body}</p>}
