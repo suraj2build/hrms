@@ -253,17 +253,30 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       .from('ai_assistant_config')
       .upsert(patch, { onConflict: 'tenant_id' })
 
-    // If the providers_json column isn't in the PostgREST cache yet, retry without it.
-    // Persist chain[1] in legacy fallback_ columns so it isn't lost.
-    if (error && (error.message.includes('providers_json') || error.message.includes('schema cache'))) {
-      const { providers_json: _pj, ...safePatch } = patch as any
+    const isSchemaErr = (e: any) =>
+      e?.message?.includes('schema cache') || e?.message?.includes('Could not find')
+
+    // Level 2: providers_json not in PostgREST cache — try with fallback_* columns (migration 318).
+    if (error && isSchemaErr(error)) {
+      const { providers_json: _pj, ...patch2 } = patch as any
       const second = providers_json[1]
-      safePatch.fallback_provider = second?.provider ?? null
-      safePatch.fallback_api_key  = second?.api_key  ?? null
-      safePatch.fallback_model    = second?.model    ?? null
+      patch2.fallback_provider = second?.provider ?? null
+      patch2.fallback_api_key  = second?.api_key  ?? null
+      patch2.fallback_model    = second?.model    ?? null
       ;({ error } = await fastify.supabase
         .from('ai_assistant_config')
-        .upsert(safePatch, { onConflict: 'tenant_id' }))
+        .upsert(patch2, { onConflict: 'tenant_id' }))
+    }
+
+    // Level 3: fallback_* also not in cache (cache predates migration 318) — write only original columns.
+    if (error && isSchemaErr(error)) {
+      const {
+        providers_json: _pj, fallback_provider: _fp, fallback_api_key: _fk, fallback_model: _fm,
+        ...minPatch
+      } = patch as any
+      ;({ error } = await fastify.supabase
+        .from('ai_assistant_config')
+        .upsert(minPatch, { onConflict: 'tenant_id' }))
     }
 
     if (error) return reply.code(500).send({ error: 'SAVE_FAILED', message: error.message })
