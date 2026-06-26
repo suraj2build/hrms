@@ -721,6 +721,7 @@ export const DOMAINS: Domain[] = [
       // Settings sub-pages — longer than Home's /admin/settings (16) → Setup wins
       '/admin/settings/roles',   // 21 chars
       '/admin/settings/users',   // 21 chars
+      '/admin/settings/ai',      // AI Assistant config → Setup › Company
       // Platform (super_admin SRE/platform tooling — moved here from Intelligence)
       '/admin/system/orchestration',
       '/admin/system/observability',
@@ -739,7 +740,8 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Company',
         items: [
-          { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', icon: Settings, keywords: ['company setup', 'company profile', 'tenant settings', 'company details', 'organization settings', 'branding'] },
+          { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', exact: true, icon: Settings, keywords: ['company setup', 'company profile', 'tenant settings', 'company details', 'organization settings', 'branding'] },
+          { id: 'ai-assistant',     label: 'AI Assistant',     route: '/admin/settings/ai',           icon: Sparkles, keywords: ['ai', 'assistant', 'chatbot', 'groq', 'openai', 'gemini', 'llm', 'ai config', 'api key', 'ai settings'] },
         ],
       },
 

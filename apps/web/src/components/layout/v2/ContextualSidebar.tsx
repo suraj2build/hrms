@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/button'
+import { SidebarSearchButton } from '@/components/search/SidebarSearchButton'
 import { getDomainForPath, getVisibleDomain, getExecutiveDomainForPath, type Domain, type DomainNavGroup } from './nav-config'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -169,7 +170,7 @@ function NavGroupItem({ group, expanded, collapsed, pathname, search, onToggle, 
 
 // ── ContextualSidebar ─────────────────────────────────────────────────────────
 
-export function ContextualSidebar() {
+export function ContextualSidebar({ onSearch }: { onSearch?: () => void } = {}) {
   const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen, executiveMode } = useUIStore()
   const { profile } = useAuthStore()
   const location = useLocation()
@@ -280,6 +281,16 @@ export function ContextualSidebar() {
         ))}
 
       </nav>
+
+      {/* ── Search (opens UniversalSearch / ⌘K) ──────────────────── */}
+      {onSearch && (
+        <div className={cn(
+          'border-t border-sidebar-border flex-shrink-0',
+          sidebarCollapsed ? 'px-1 py-1.5' : 'px-2 py-2',
+        )}>
+          <SidebarSearchButton onClick={onSearch} collapsed={sidebarCollapsed} />
+        </div>
+      )}
 
       {/* ── Collapse toggle (desktop only) ───────────────────────── */}
       <div className={cn(

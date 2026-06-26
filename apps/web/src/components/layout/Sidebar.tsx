@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, GitBranch, FileText, Settings,
   User, ChevronLeft, ChevronRight, Building2, BarChart3,
@@ -10,7 +10,7 @@ import {
   DollarSign, Zap, Mail, ShieldAlert, Activity, FlaskConical, TrendingDown,
   Workflow, Globe, Server, Webhook, Layers, Flame, LineChart, Siren, KeyRound,
   FolderUp, UserPlus, ChevronDown, Scale, CreditCard,
-  Receipt, PieChart, Banknote, Search, X,
+  Receipt, PieChart, Banknote,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -18,6 +18,8 @@ import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useBasePath } from '@/lib/routing'
 import { Button } from '@/components/ui/button'
+import { SidebarSearchButton } from '@/components/search/SidebarSearchButton'
+import { useCommandPalette } from '@/components/operational/CommandPalette'
 
 interface NavItem {
   label: string
@@ -125,11 +127,7 @@ export function Sidebar() {
   const { hasPermission } = useAuthStore()
   const basePath = useBasePath()
   const location = useLocation()
-  const navigate = useNavigate()
-
-  const [searchQuery, setSearchQuery]       = useState('')
-  const [searchHighlight, setSearchHighlight] = useState(0)
-  const searchInputRef = useRef<HTMLInputElement>(null)
+  const { open: openSearch } = useCommandPalette()
 
   // Collapsible section state — auto-opens section matching current route
   const [openSections, setOpenSections] = useState<Set<string>>(computeInitialSections)
@@ -390,23 +388,6 @@ export function Sidebar() {
     },
   ]
 
-  // Flatten all nav items for search
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    if (!q) return []
-    const results: Array<NavItem & { sectionLabel?: string }> = []
-    for (const section of NAV_SECTIONS) {
-      for (const item of section.items) {
-        if (item.permission && !hasPermission(item.permission)) continue
-        if (item.phase) continue  // skip coming-soon items
-        if (item.label.toLowerCase().includes(q) || item.href.toLowerCase().includes(q)) {
-          results.push({ ...item, sectionLabel: section.label })
-        }
-      }
-    }
-    return results.slice(0, 8)
-  }, [searchQuery, NAV_SECTIONS, hasPermission])
-
   function isActive(item: NavItem) {
     if (item.exact) return location.pathname === item.href || location.pathname === item.href + '/'
     return location.pathname.startsWith(item.href)
@@ -591,75 +572,12 @@ export function Sidebar() {
         </div>
       </nav>
 
-      {/* Search bar — sticks above the bottom footer */}
+      {/* Search — pinned above the bottom footer (opens ⌘K palette) */}
       <div className={cn(
-        'border-t border-sidebar-border flex-shrink-0 relative',
+        'border-t border-sidebar-border flex-shrink-0',
         sidebarCollapsed ? 'px-1 py-1.5' : 'px-2 py-2',
       )}>
-        {!sidebarCollapsed ? (
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={e => { setSearchQuery(e.target.value); setSearchHighlight(0) }}
-              onKeyDown={e => {
-                if (e.key === 'Escape') { setSearchQuery(''); searchInputRef.current?.blur() }
-                if (e.key === 'ArrowDown') { e.preventDefault(); setSearchHighlight(h => Math.min(h + 1, searchResults.length - 1)) }
-                if (e.key === 'ArrowUp')   { e.preventDefault(); setSearchHighlight(h => Math.max(h - 1, 0)) }
-                if (e.key === 'Enter' && searchResults[searchHighlight]) {
-                  navigate(searchResults[searchHighlight].href)
-                  setSearchQuery('')
-                }
-              }}
-              placeholder="Search pages…"
-              className="w-full rounded-md border border-border bg-background/60 py-1.5 pl-7 pr-6 text-[11px] text-foreground placeholder:text-muted-foreground/35 outline-none focus:border-primary/50 focus:bg-background transition-colors"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/35 hover:text-muted-foreground/70"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            )}
-
-            {/* Results panel — appears above the search bar */}
-            {searchResults.length > 0 && (
-              <div className="absolute bottom-full left-0 right-0 mb-1.5 rounded-xl border border-border bg-popover shadow-xl overflow-hidden z-50">
-                <p className="px-3 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/40">Results</p>
-                {searchResults.map((item, idx) => (
-                  <Link
-                    key={item.href}
-                    to={item.href}
-                    onClick={() => setSearchQuery('')}
-                    className={cn(
-                      'flex items-center gap-2.5 px-3 py-2 text-xs transition-colors',
-                      idx === searchHighlight
-                        ? 'bg-primary/10 text-foreground'
-                        : 'text-foreground hover:bg-accent',
-                    )}
-                  >
-                    <item.icon className="h-3 w-3 text-muted-foreground/50 flex-shrink-0" />
-                    <span className="flex-1 truncate">{item.label}</span>
-                    {item.sectionLabel && (
-                      <span className="text-[9px] text-muted-foreground/35 truncate max-w-[60px]">{item.sectionLabel}</span>
-                    )}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <button
-            onClick={() => { toggleSidebar(); setTimeout(() => searchInputRef.current?.focus(), 300) }}
-            title="Search pages"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:bg-sidebar-accent/60 hover:text-foreground mx-auto"
-          >
-            <Search className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <SidebarSearchButton onClick={openSearch} collapsed={sidebarCollapsed} />
       </div>
 
       {/* Bottom: compact ESS shortcuts + Settings + collapse */}

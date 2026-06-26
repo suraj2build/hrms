@@ -29,7 +29,6 @@ import { PreviewBanner }          from '@/components/layout/PreviewBanner'
 import { TopNavV2 }          from './v2/TopNavV2'
 import { ContextualSidebar } from './v2/ContextualSidebar'
 import { UniversalSearch }            from '@/components/search/UniversalSearch'
-import { SearchFab }                  from '@/components/search/SearchFab'
 import { OperationalContextProvider } from '@/contexts/OperationalContext'
 import { PayrollDeadlineProvider }    from '@/contexts/PayrollDeadlineContext'
 
@@ -113,8 +112,9 @@ export function AdminShellV2() {
         {/* ── Body: contextual sidebar + canvas ────────────────────── */}
         <div className="flex flex-1 overflow-hidden">
 
-          {/* Contextual sidebar — 200px expanded / 52px icon-only */}
-          <ContextualSidebar />
+          {/* Contextual sidebar — 200px expanded / 52px icon-only.
+              Search now lives pinned in its footer (was a floating fab). */}
+          <ContextualSidebar onSearch={() => setSearchOpen(true)} />
 
           {/* Fullscreen page canvas */}
           <main className="flex-1 overflow-y-auto app-canvas op-canvas">
@@ -126,8 +126,7 @@ export function AdminShellV2() {
 
         </div>
 
-        {/* ── Global floating overlays ──────────────────────────────── */}
-        <SearchFab onClick={() => setSearchOpen(true)} />
+        {/* ── Global search overlay (trigger lives in the sidebar footer) ── */}
         <UniversalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       </div>

@@ -17,6 +17,7 @@ import { EventToast }    from '@/components/notifications'
 import { api }           from '@/lib/api/client'
 import { useIsMobile }   from '@/hooks/useIsMobile'
 import { MobileEssShell } from '@/components/mobile/MobileEssShell'
+import { CommandPaletteProvider } from '@/components/operational/CommandPalette'
 
 interface Anomaly {
   date: string
@@ -121,24 +122,26 @@ export function EssShell() {
   if (isMobile) return <MobileEssShell />
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      <EmployeeSidebar />
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <Topbar />
-        {/* Inner Suspense — catches lazy-route chunk loading so the ESS shell
-            chrome (Topbar, EmployeeSidebar) stays mounted while pages load. */}
-        <AnomalyLoginAlert />
-        <div className="flex flex-1 overflow-hidden">
-          <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-            <EventToast />
-            <Suspense fallback={<ShellPageLoader />}>
-              <Outlet />
-            </Suspense>
-          </main>
-          {/* Right context panel — birthdays, anniversaries, holidays, kudos */}
-          <EssContextPanel />
+    <CommandPaletteProvider>
+      <div className="flex h-screen overflow-hidden bg-background">
+        <EmployeeSidebar />
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <Topbar />
+          {/* Inner Suspense — catches lazy-route chunk loading so the ESS shell
+              chrome (Topbar, EmployeeSidebar) stays mounted while pages load. */}
+          <AnomalyLoginAlert />
+          <div className="flex flex-1 overflow-hidden">
+            <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+              <EventToast />
+              <Suspense fallback={<ShellPageLoader />}>
+                <Outlet />
+              </Suspense>
+            </main>
+            {/* Right context panel — birthdays, anniversaries, holidays, kudos */}
+            <EssContextPanel />
+          </div>
         </div>
       </div>
-    </div>
+    </CommandPaletteProvider>
   )
 }

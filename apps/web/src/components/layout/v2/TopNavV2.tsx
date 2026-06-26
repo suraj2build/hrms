@@ -133,8 +133,8 @@ export function TopNavV2({ onSearchOpen: _onSearchOpen }: { onSearchOpen?: () =>
       </nav>
 
       {/* ── Right actions ──────────────────────────────────────── */}
-      {/* Search moved to a floating launcher (bottom-right) to declutter the top
-          row — see SearchFab in AdminShellV2. ⌘K still toggles it. */}
+      {/* Search now lives pinned in the contextual sidebar footer
+          (SidebarSearchButton in ContextualSidebar). ⌘K still toggles it. */}
       <div className="flex items-center gap-1 shrink-0 pl-2 pr-3">
 
         {/* Single hairline separates nav from the account cluster */}

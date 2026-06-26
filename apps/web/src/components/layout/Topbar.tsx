@@ -8,8 +8,6 @@ import { useBasePath }         from '@/lib/routing'
 import { Button }              from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { getInitials }         from '@/lib/utils'
-import { useCommandPalette } from '@/components/operational/CommandPalette'
-import { SearchFab }         from '@/components/search/SearchFab'
 import { ThemeToggle }         from '@/components/theme-toggle'
 import { RoleSwitcher }        from './RoleSwitcher'
 import { ManagerPersonaToggle } from './ManagerPersonaToggle'
@@ -41,7 +39,6 @@ export function Topbar() {
   const navigate = useNavigate()
   const basePath = useBasePath()
   const toggleMobileNav = useUIStore(s => s.toggleMobileNav)
-  const { open: openSearch } = useCommandPalette()
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -62,9 +59,8 @@ export function Topbar() {
         <Menu className="h-5 w-5" />
       </button>
 
-      {/* Search moved to a floating launcher (bottom-right) — declutters the
-          header. ⌘K still opens it. */}
-      <SearchFab onClick={openSearch} />
+      {/* Search now lives pinned at the bottom of the left sidebar
+          (SidebarSearchButton). ⌘K still opens it from anywhere. */}
 
       {/* Employee / Manager persona toggle — only renders inside the Manager
           Console for manager identities; swaps the left navigation. */}
