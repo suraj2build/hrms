@@ -44,6 +44,18 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_payroll_cost',
+      description: "Total payroll cost (gross, net, TDS) for the organisation in a given month. HR/Admin only. Use for questions like 'what is the payroll cost for April 2026' or 'total salary spend last month'.",
+      parameters: {
+        type: 'object',
+        properties: { month: { type: 'string', description: 'Month in YYYY-MM format, e.g. 2026-04 for April 2026' } },
+        required: ['month'],
+      },
+    },
+  },
 ]
 
 interface ToolCtx {
@@ -136,6 +148,34 @@ async function getHeadcount(ctx: ToolCtx, args: any): Promise<string> {
   return `Active headcount: ${count ?? 0}.`
 }
 
+const MONTH_RE = /^\d{4}-\d{2}$/
+function fmtINR(n: number): string {
+  return '₹' + Math.round(n).toLocaleString('en-IN')
+}
+
+async function getPayrollCost(ctx: ToolCtx, args: any): Promise<string> {
+  if (!isHrAdmin(ctx.caller.userRole)) return 'Payroll cost is available to HR/Admin only.'
+  const month = String(args?.month ?? '')
+  if (!MONTH_RE.test(month)) return 'Please provide the month as YYYY-MM (e.g. 2026-04 for April 2026).'
+
+  const { data, error } = await ctx.supabase
+    .from('payroll_slips')
+    .select('gross_pay, net_pay, tds_deducted, status')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('month', month)
+  if (error) return 'Could not look up payroll cost right now.'
+
+  const slips = (data ?? []) as Array<{ gross_pay: number | null; net_pay: number | null; tds_deducted: number | null; status: string }>
+  if (slips.length === 0) return `No payroll has been processed for ${month} yet.`
+
+  const gross = slips.reduce((s, r) => s + (Number(r.gross_pay) || 0), 0)
+  const net   = slips.reduce((s, r) => s + (Number(r.net_pay)   || 0), 0)
+  const tds   = slips.reduce((s, r) => s + (Number(r.tds_deducted) || 0), 0)
+  const finalized = slips.filter(r => r.status === 'finalized').length
+  const draftNote = finalized < slips.length ? ` (${finalized} of ${slips.length} finalized — figures include drafts)` : ''
+  return `Payroll cost for ${month}: gross ${fmtINR(gross)}, net ${fmtINR(net)}, TDS ${fmtINR(tds)}, across ${slips.length} employee(s)${draftNote}.`
+}
+
 /** Execute a tool call by name. Always returns a string (never throws to the loop). */
 export async function executeTool(ctx: ToolCtx, name: string, args: any): Promise<string> {
   try {
@@ -143,6 +183,7 @@ export async function executeTool(ctx: ToolCtx, name: string, args: any): Promis
       case 'get_team_on_leave':     return await getTeamOnLeave(ctx, args)
       case 'get_pending_approvals': return await getPendingApprovals(ctx)
       case 'get_headcount':         return await getHeadcount(ctx, args)
+      case 'get_payroll_cost':      return await getPayrollCost(ctx, args)
       default:                      return `Unknown tool: ${name}`
     }
   } catch {
