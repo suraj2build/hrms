@@ -34,12 +34,14 @@ export default async function operationalCountsRoutes(fastify: FastifyInstance) 
   fastify.get('/operational/counts', auth, async (req: any, reply) => {
     const tenantId: string = req.tenantId
 
-    const [pending_approvals, unresolved_anomalies, payroll_blockers, missing_punches] = await Promise.all([
-      safeCount(fastify, 'approval_instances',       tenantId, q => q.eq('status', 'pending')),
-      safeCount(fastify, 'attendance_anomalies',     tenantId, q => q.eq('resolved', false)),
-      safeCount(fastify, 'payroll_run_blockers',     tenantId, q => q.eq('resolved', false)),
-      safeCount(fastify, 'attendance_corrections',   tenantId, q => q.eq('status', 'pending')),
+    const [leaveCount, regCount, unresolved_anomalies, payroll_blockers, missing_punches] = await Promise.all([
+      safeCount(fastify, 'leave_requests',            tenantId, q => q.eq('status', 'PENDING')),
+      safeCount(fastify, 'attendance_regularisation', tenantId, q => q.eq('status', 'pending')),
+      safeCount(fastify, 'attendance_anomalies',      tenantId, q => q.eq('resolved', false)),
+      safeCount(fastify, 'payroll_run_blockers',      tenantId, q => q.eq('resolved', false)),
+      safeCount(fastify, 'attendance_corrections',    tenantId, q => q.eq('status', 'pending')),
     ])
+    const pending_approvals = leaveCount + regCount
 
     return reply.send({
       data: {

@@ -511,7 +511,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!await authorizeOtTarget(req, reply, id)) return
     if (!await assertOtPeriodOpen(req, reply, id)) return
     const schema = z.object({
-      rejection_reason: z.string().max(500).optional(),
+      rejection_reason: z.string().min(1, 'Rejection reason is required').max(500),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {

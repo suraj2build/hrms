@@ -276,6 +276,9 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     if (rev.status !== 'pending') {
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Revision is already ${rev.status}` })
     }
+    if (rev.requested_by === req.userId) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You cannot approve a revision you raised.' })
+    }
     if (!rev.new_ctc_annual || !rev.new_salary_structure_id) {
       return reply.code(422).send({ error: 'INCOMPLETE', message: 'new_ctc_annual and new_salary_structure_id are required to approve' })
     }

@@ -50,6 +50,9 @@ const generateSchema = z.object({
 const approveSchema = z.object({
   notes: z.string().max(500).optional(),
 })
+const rejectSchema = z.object({
+  notes: z.string().min(1, 'Rejection reason is required').max(500),
+})
 
 export default async function compOffRoute(fastify: FastifyInstance) {
   const auth       = { preHandler: [fastify.authenticate] }
@@ -402,7 +405,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     if (!await authorizeCompOffTarget(req, reply, id)) return
 
-    const parsed = approveSchema.safeParse(req.body ?? {})  // notes optional
+    const parsed = rejectSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }

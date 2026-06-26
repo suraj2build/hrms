@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { notifyHrAdmins, notify } from '../../lib/notify.js'
+import { approveLeaveRequest } from '../../lib/approval-service.js'
 
 export default async function bulkOpsRoutes(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
@@ -207,7 +208,6 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     }
 
     const { application_ids, reason } = parsed.data
-    const now = new Date().toISOString()
 
     const { data: apps } = await fastify.supabase
       .from('leave_requests')
@@ -221,18 +221,20 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const skipped = application_ids.filter(id => !(apps ?? []).find((a: any) => a.id === id))
 
     for (const app of (apps ?? []) as any[]) {
-      // Approve the request (leave_requests CHECK requires approved_by + approved_at)
-      const { error: updateErr } = await fastify.supabase
-        .from('leave_requests')
-        .update({ status: 'APPROVED', approved_by: req.userId, approved_at: now })
-        .eq('id', app.id)
+      // Route through the full approval service — inherits validateApprover,
+      // self-approval guard, atomic balance deduction, and attendance_daily upsert.
+      const result = await approveLeaveRequest(fastify.supabase, {
+        tenantId:  req.tenantId,
+        requestId: app.id,
+        ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
+      })
 
-      if (updateErr) {
-        failedIds.push({ id: app.id, reason: updateErr.message })
+      if (!result.ok) {
+        failedIds.push({ id: app.id, reason: result.error.message })
         continue
       }
 
-      // Apply to attendance_daily (simplified: set status='leave' for each date)
+      // Frozen-period payroll adjustment (extra logic beyond the approval service).
       const from = new Date(app.from_date)
       const to   = new Date(app.to_date)
       const dates: string[] = []
@@ -240,26 +242,6 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
         dates.push(d.toISOString().slice(0, 10))
       }
 
-      const isPaid      = (app.leave_types as any)?.is_paid ?? false
-      const dailyRows   = dates.map(date => ({
-        tenant_id:   req.tenantId,
-        employee_id: app.employee_id,
-        date,
-        status:      'leave',
-        is_payable:  isPaid,
-        day_fraction: isPaid ? 1.0 : 0.0,
-        work_hours:  0,
-        late_minutes: 0,
-        overtime_minutes: 0,
-        worked_on_weekly_off: false,
-        worked_on_holiday: false,
-      }))
-
-      await fastify.supabase
-        .from('attendance_daily')
-        .upsert(dailyRows, { onConflict: 'tenant_id,employee_id,date' })
-
-      // Check for frozen payroll periods and create adjustments if needed
       const affectedMonths = [...new Set(dates.map(d => d.slice(0, 7)))]
       for (const month of affectedMonths) {
         const { data: freeze } = await fastify.supabase

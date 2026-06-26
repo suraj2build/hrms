@@ -8,6 +8,7 @@ import {
 import { emitPreJoineeJoiningCompleted } from '../../lib/onboarding-orchestrator.js'
 import { reopenInvitationForReupload } from '../../lib/onboarding/reopen-invitation.js'
 import { logAction } from '../../lib/audit-service.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -861,6 +862,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   })
 
   fastify.post('/onboarding/pre-joinee/:id/approve', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
@@ -1252,6 +1256,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // ── 5. POST /onboarding/pre-joinee/:id/reject — reject with reason ─────────
 
   fastify.post('/onboarding/pre-joinee/:id/reject', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
