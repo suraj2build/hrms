@@ -29,6 +29,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
+import { ApprovalChainStepper } from '@/components/approvals/ApprovalChainStepper'
 import { LeaveContextDrawer, type LeaveContextTarget } from '@/components/operational/LeaveContextDrawer'
 import { RegularisationContextDrawer, type RegularisationContextTarget } from '@/components/operational/RegularisationContextDrawer'
 import {
@@ -425,6 +426,15 @@ function LeaveRequestsTable({
                   </td>
                 </tr>
 
+                {/* Expanded approval-chain row (multi-level chains only) */}
+                {isExpanded && (
+                  <tr className="border-b border-border/50 bg-muted/10">
+                    <td colSpan={7} className="px-3 pb-2 pt-0">
+                      <ApprovalChainStepper entityType="leave_request" entityId={row.id} />
+                    </td>
+                  </tr>
+                )}
+
                 {/* Inline rejection form row */}
                 {isRejecting && !isActioning && (
                   <tr className="border-b border-border/50 bg-muted/10">
@@ -660,6 +670,15 @@ function RegularisationTable({
                     )}
                   </td>
                 </tr>
+
+                {/* Expanded approval-chain row (multi-level chains only) */}
+                {isExpanded && (
+                  <tr className="border-b border-border/50 bg-muted/10">
+                    <td colSpan={7} className="px-3 pb-2 pt-0">
+                      <ApprovalChainStepper entityType="attendance_regularisation" entityId={row.id} />
+                    </td>
+                  </tr>
+                )}
 
                 {/* Inline rejection form */}
                 {isRejecting && !isActioning && (
