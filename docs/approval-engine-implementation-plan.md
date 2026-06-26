@@ -232,9 +232,17 @@ compatible (no chain = legacy single-step). Admin UI distinguishes enforced
 Deferred (low-risk cleanup, not blocking): physically retiring the duplicate
 standalone regularisation screens — they share the wired endpoints, so correct, just redundant.
 
-### Remaining: P2.3 + P2.4 (deep governance)
-- ⬜ 2.3 threshold/amount routing (reimbursement/loan/requisition finance tier) — needs engine extension to those entities (migration)
-- ⬜ 2.4 payroll maker-checker + offer salary sign-off
+### Deep governance
+| 2026-06-26 | P2.3 | `aea88ef` | **threshold/amount routing** — migration 314 (finance enums + `min_amount`); engine is amount-aware (applicable levels by ₹, index-based resolution); **reimbursement** wired (gate-driven auth, HR-only legacy fallback); config UI adds finance tabs + "Applies above ₹" |
+- ⬜ 2.4 payroll maker-checker + offer salary sign-off — **deferred** (needs your finance-org semantics; high-stakes money path)
+- ◑ 2.3 loan/advance wiring — deferred (they have their own pending_hr status machines; reimbursement covers the threshold pattern)
+
+**Migrations to run:** `314_approval_engine_threshold_routing.sql`
+
+### Where things stand
+P0 ✅ · P1 ✅ · P2.1 ✅ · P2.2 ✅ · P2.3 ✅ (reimbursement) · P3 ✅
+Remaining: **P2.4** (payroll maker-checker — deferred pending finance-org rules) and
+optional loan/advance engine wiring.
 
 ### Engine is now LIVE (backward-compatible) for: leave, regularisation, overtime, comp-off.
 With **no chain configured** every path behaves exactly as before. When an admin
