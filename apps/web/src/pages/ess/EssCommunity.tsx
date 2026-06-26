@@ -126,7 +126,11 @@ function PostCard({ p }: { p: FeedPost }) {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-foreground">
             {celebration && p.subject_name
-              ? <><span>{p.author_name ?? 'Someone'}</span> <span className="font-normal text-muted-foreground">wished</span> <span>{p.subject_name}</span></>
+              ? (p.author_name
+                  // Personal wish: "<author> wished <subject>"
+                  ? <><span>{p.author_name}</span> <span className="font-normal text-muted-foreground">wished</span> <span>{p.subject_name}</span></>
+                  // System celebration: subject is the headline
+                  : <span>{p.subject_name}</span>)
               : (p.author_name ?? (isAnnouncement ? 'Announcement' : 'Someone'))}
           </p>
           <p className="text-[11px] text-muted-foreground">{timeAgo(p.created_at)}</p>

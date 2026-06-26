@@ -21,6 +21,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,10 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
     const today       = todayISO()
     const in60Days    = offsetISO(60)
     const FAKE_EMP_ID = '00000000-0000-0000-0000-000000000000'
+
+    // Ensure today's birthday/anniversary system posts exist so the feed teaser
+    // below picks them up (idempotent, never throws).
+    await ensureTodaysCelebrations(fastify.supabase, tenantId)
 
     // ── Parallel fan-out (all independent) ──────────────────────────────────
     const [

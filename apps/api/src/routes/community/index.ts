@@ -13,6 +13,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 
 const HR_ROLES = ['super_admin', 'hr_admin']
 const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
@@ -40,6 +41,9 @@ export default async function communityRoutes(fastify: FastifyInstance) {
   fastify.get('/community/feed', auth, async (req: any, reply) => {
     const limit = Math.min(50, Math.max(1, Number((req.query as any).limit) || 25))
     const me    = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+
+    // Lazily ensure today's birthday/anniversary system posts exist (idempotent).
+    await ensureTodaysCelebrations(fastify.supabase, req.tenantId)
 
     const { data: posts, error } = await fastify.supabase
       .from('feed_posts')
