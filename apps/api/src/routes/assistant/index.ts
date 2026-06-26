@@ -156,6 +156,10 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     const env = envConfig()
     const r = row as any
+
+    // What the CHAT path will actually use — the ground truth that matters.
+    const { primary: activePrimary, fallback: activeFallback } = await resolveAssistantConfigs(fastify.supabase, req.tenantId)
+
     return reply.send({
       data: {
         // Primary
@@ -171,6 +175,14 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         fallback_model:    r?.fallback_model ?? null,
         has_fallback_key:  !!r?.fallback_api_key,
         fallback_key_hint: maskKey(r?.fallback_api_key),
+        // What chat actually resolves to (so admins can see env-shadowing)
+        active: {
+          provider: activePrimary.provider,
+          model:    effectiveModel(activePrimary),
+          source:   activePrimary.source,
+          usable:   isConfigUsable(activePrimary),
+          fallback_provider: activeFallback?.provider ?? null,
+        },
         // Shared
         providers:  Object.entries(PROVIDER_META).map(([id, m]) => ({ id, label: m.label, default_model: m.defaultModel })),
         updated_at: r?.updated_at ?? null,

@@ -18,11 +18,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 interface ProviderOpt { id: string; label: string; default_model: string }
+interface ActiveCfg {
+  provider: string; model: string; source: string; usable: boolean; fallback_provider: string | null
+}
 interface ConfigResp {
   provider: string; model: string | null; enabled: boolean
   has_key: boolean; key_hint: string | null; source: string; env_fallback: boolean
   fallback_provider: string | null; fallback_model: string | null
   has_fallback_key: boolean; fallback_key_hint: string | null
+  active?: ActiveCfg
   providers: ProviderOpt[]; updated_at: string | null
 }
 
@@ -149,6 +153,29 @@ export function AiAssistantSettings() {
           — if the primary is rate-limited or unavailable, the assistant automatically switches to it.
         </p>
       </div>
+
+      {/* Active-config banner — what the assistant actually uses right now */}
+      {cfg?.active && (
+        <div className={`flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-xs ${
+          cfg.active.usable
+            ? 'border-emerald-500/30 bg-emerald-500/5 text-foreground'
+            : 'border-amber-500/40 bg-amber-500/5 text-foreground'
+        }`}>
+          <Plug className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 ${cfg.active.usable ? 'text-emerald-500' : 'text-amber-500'}`} />
+          <p>
+            The assistant is currently using{' '}
+            <span className="font-semibold">{cfg.active.provider}</span>
+            {' '}<span className="text-muted-foreground">({cfg.active.model}, {cfg.active.source} key)</span>
+            {cfg.active.fallback_provider && <> with <span className="font-medium">{cfg.active.fallback_provider}</span> as fallback</>}.
+            {cfg.active.source === 'env' && (
+              <span className="block mt-0.5 text-amber-600">
+                ⚠ No saved key for this organisation — falling back to a server environment key.
+                Enter your key below and Save to use your own provider.
+              </span>
+            )}
+          </p>
+        </div>
+      )}
 
       {isLoading ? (
         <SectionCard><div className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading…</div></SectionCard>
