@@ -205,8 +205,14 @@ for tenants with no config.
 | 2026-06-26 | P1.1 + P1.2 | `7c2c85e` | `approval-orchestrator.ts` (gate + per-level resolver) wired into **leave** approve/reject |
 | 2026-06-26 | P1.3 | `b9373c3` | wired **regularisation** approve/reject (+ route side-effects guarded on final status) |
 | 2026-06-26 | P1.4 | `d5deabe` | migration 313 extends enums; wired **overtime** + **comp-off** |
-| — | P1.5 | _next_ | inbox chain/level read surface |
-| — | P1.6 | _next_ | reconcile config UIs |
+| 2026-06-26 | P1.5 | `f57cd62` | chain read surface (`GET /approvals/chain/:type/:id`) + opened config API to overtime/comp_off |
+| 2026-06-26 | P1.6 | `be8b665` | config UIs reconciled — `ApprovalWorkflows` is the driver (+ OT/comp-off tabs + enforced banner); `GovernanceMatrix` marked advisory |
+
+### ✅ P1 COMPLETE — one engine is the source of truth.
+Drives leave / regularisation / overtime / comp-off; per-level approver gate;
+recorded `approval_actions`; balance/credit only at the final level; backward-
+compatible (no chain = legacy single-step). Admin UI distinguishes enforced
+(`ApprovalWorkflows`) vs advisory (`GovernanceMatrix`).
 
 ### Engine is now LIVE (backward-compatible) for: leave, regularisation, overtime, comp-off.
 With **no chain configured** every path behaves exactly as before. When an admin
