@@ -577,20 +577,52 @@ export async function approveRegularisation(
     }
   }
 
-  // Segregation of duties (F3): a user may not approve their OWN regularisation —
-  // matches the self-approval guard already enforced on leave / overtime /
-  // corrections. Closes the audit gap where a manager could approve a backdated
-  // attendance correction for themselves.
-  if (await isSelfApproval(supabase, tenantId, ctx.approverId, regRow.employee_id)) {
-    return {
-      ok:    false,
-      error: { type: 'FORBIDDEN', message: 'You cannot approve your own regularisation request.' },
-    }
+  // Multi-level gate (engages only when a regularisation chain is configured).
+  // No chain => { finalize, authorized:false } and we run the legacy self-approval
+  // + validateApprover guards below, exactly as before.
+  const gate = await gateApprove(supabase, {
+    tenantId,
+    entityType:       'attendance_regularisation',
+    entityId:         regularisationId,
+    actorId:          ctx.approverId,
+    actorRole:        ctx.approverRole,
+    targetEmployeeId: regRow.employee_id,
+  })
+  if (gate.kind === 'error') {
+    return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
   }
-
-  // Auth
-  const authResult = await validateApprover(supabase, ctx, regRow.employee_id)
-  if (!authResult.ok) return authResult
+  if (gate.kind === 'advanced') {
+    // Intermediate approval recorded; the request stays pending for the next level.
+    await logAction(supabase, {
+      tenantId,
+      tableName:   'attendance_regularisation',
+      recordId:    regularisationId,
+      action:      'UPDATE',
+      performedBy: ctx.approverId,
+      oldData:     { status: 'pending', approval_level: gate.level },
+      newData:     { status: 'pending', approval_level: gate.nextLevel, total_levels: gate.totalLevels },
+    })
+    return { ok: true, value: {
+      id:                  regRow.id,
+      status:              'pending',
+      employee_id:         regRow.employee_id,
+      date:                regRow.date,
+      requested_check_in:  regRow.requested_check_in,
+      requested_check_out: regRow.requested_check_out,
+    } }
+  }
+  // gate.kind === 'finalize' — legacy guards only when the per-level gate did not
+  // already authorize this actor (Segregation of duties F3 + approver validation).
+  if (!gate.authorized) {
+    if (await isSelfApproval(supabase, tenantId, ctx.approverId, regRow.employee_id)) {
+      return {
+        ok:    false,
+        error: { type: 'FORBIDDEN', message: 'You cannot approve your own regularisation request.' },
+      }
+    }
+    const authResult = await validateApprover(supabase, ctx, regRow.employee_id)
+    if (!authResult.ok) return authResult
+  }
 
   // 2. Atomic RPC
   const now = new Date().toISOString()
@@ -667,8 +699,24 @@ export async function rejectRegularisation(
     }
   }
 
-  const authResult = await validateApprover(supabase, ctx, regRow.employee_id)
-  if (!authResult.ok) return authResult
+  // Multi-level gate. Reject always finalizes but records the action + closes the
+  // instance when a chain exists; legacy approver check only when not pre-authorized.
+  const gate = await gateReject(supabase, {
+    tenantId,
+    entityType:       'attendance_regularisation',
+    entityId:         regularisationId,
+    actorId:          ctx.approverId,
+    actorRole:        ctx.approverRole,
+    targetEmployeeId: regRow.employee_id,
+    comments:         rejectionReason,
+  })
+  if (gate.kind === 'error') {
+    return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
+  }
+  if (gate.kind === 'finalize' && !gate.authorized) {
+    const authResult = await validateApprover(supabase, ctx, regRow.employee_id)
+    if (!authResult.ok) return authResult
+  }
 
   // Atomic RPC
   const { data: rpcData, error: rpcErr } = await supabase.rpc(

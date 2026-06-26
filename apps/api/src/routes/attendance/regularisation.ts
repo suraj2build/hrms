@@ -438,16 +438,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
         })
         if (result.ok) {
           const approved = result.value
-          const punchRows: any[] = []
-          if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
-          if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
-          if (punchRows.length > 0) {
-            await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
+          // Multi-level chain: skip punch/recompute side-effects on an intermediate
+          // advance (status still 'pending') — only finalize on the last level.
+          if (approved.status === 'approved') {
+            const punchRows: any[] = []
+            if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
+            if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
+            if (punchRows.length > 0) {
+              await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
+            }
+            await recomputeRange(fastify.supabase, {
+              tenant_id: req.tenantId, employee_id: approved.employee_id,
+              from_date: approved.date, to_date: approved.date, changed_by: req.userId,
+            }).catch(() => {})
           }
-          await recomputeRange(fastify.supabase, {
-            tenant_id: req.tenantId, employee_id: approved.employee_id,
-            from_date: approved.date, to_date: approved.date, changed_by: req.userId,
-          }).catch(() => {})
           results.push({ id, ok: true })
         } else {
           results.push({ id, ok: false, error: result.error.message })
@@ -544,6 +548,13 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     const approved = result.value
+
+    // Multi-level chain: an intermediate approval leaves the request pending for the
+    // next level. Skip every finalize side-effect (punch logs, recompute, ledger,
+    // orchestration) until the final approval flips status to 'approved'.
+    if (approved.status !== 'approved') {
+      return reply.send({ message: 'Approval recorded', data: { id: approved.id, status: approved.status } })
+    }
 
     // Insert approved check-in/out into attendance_punch_logs (source = 'regularisation')
     // so the AttendanceEngine picks them up during recompute.
