@@ -100,108 +100,57 @@ export class AssistantNotConfiguredError extends Error {
 }
 
 // ── Gemini native implementation ───────────────────────────────────────────────
+//
+// Gemini thinking models (e.g. gemini-3.5-flash) attach a thought_signature to
+// every function call in their response. Our tool loop stores messages in the
+// OpenAI-compatible ChatMessage format which drops those thought parts. On the
+// next hop Gemini rejects the conversation with 400 "thought_signature missing".
+//
+// Fix: Gemini always runs WITHOUT tools and WITHOUT tool-related history.
+// It answers from the pre-built context snapshot instead (leave balances,
+// payslip, upcoming holidays, etc.). For live lookups (headcount, who is on
+// leave, pending approvals) Groq or OpenAI — which don't have this issue —
+// should be placed first in the provider chain in AI settings.
 
-async function chatCompleteGeminiInner(
+async function chatCompleteGemini(
   config: AssistantConfig,
   opts: { messages: ChatMessage[]; tools?: ToolDef[]; temperature?: number; maxTokens?: number },
 ): Promise<ChatResult> {
   const genAI = new GoogleGenerativeAI(config.apiKey!)
 
-  // Extract system instruction separately (Gemini handles it outside the message history)
   const sysMsg = opts.messages.find(m => m.role === 'system')
-  const convMsgs = opts.messages.filter(m => m.role !== 'system')
 
-  // Build tool_call_id → function name map so we can name function responses
-  const callIdToName = new Map<string, string>()
-  for (const m of convMsgs) {
-    if (m.role === 'assistant' && m.tool_calls) {
-      for (const tc of m.tool_calls) callIdToName.set(tc.id, tc.function.name)
-    }
-  }
-
-  // Convert OpenAI-style messages to Gemini Contents
+  // Strip tool-related turns so Gemini sees a clean user↔model conversation.
+  // Tool messages and tool-call-only assistant turns reference signatures we
+  // don't have, so they would cause a 400. Text-only turns are kept.
   const contents: any[] = []
-  for (const msg of convMsgs) {
-    if (msg.role === 'user') {
+  for (const msg of opts.messages) {
+    if (msg.role === 'system') continue
+    if (msg.role === 'tool') continue
+    if (msg.role === 'assistant') {
+      if (!msg.content) continue  // tool-call-only turns have no text — skip
+      contents.push({ role: 'model', parts: [{ text: msg.content }] })
+    } else {
       contents.push({ role: 'user', parts: [{ text: msg.content }] })
-    } else if (msg.role === 'assistant') {
-      const parts: any[] = []
-      if (msg.content) parts.push({ text: msg.content })
-      for (const tc of msg.tool_calls ?? []) {
-        let args: Record<string, unknown> = {}
-        try { args = JSON.parse(tc.function.arguments || '{}') } catch { /* noop */ }
-        parts.push({ functionCall: { name: tc.function.name, args } })
-      }
-      if (parts.length) contents.push({ role: 'model', parts })
-    } else if (msg.role === 'tool') {
-      const fnName = callIdToName.get(msg.tool_call_id) ?? 'unknown'
-      let responseData: unknown = msg.content
-      try { responseData = JSON.parse(msg.content) } catch { /* keep raw string */ }
-      contents.push({ role: 'user', parts: [{ functionResponse: { name: fnName, response: { result: responseData } } }] })
     }
   }
-
-  // Convert OpenAI tool definitions to Gemini function declarations
-  const geminiTools = opts.tools?.length ? [{
-    functionDeclarations: opts.tools.map(t => ({
-      name:        t.function.name,
-      description: t.function.description,
-      parameters:  t.function.parameters as any,
-    })),
-  }] as any : undefined
 
   const genModel = genAI.getGenerativeModel({
     model: effectiveModel(config),
     ...(sysMsg ? { systemInstruction: { role: 'system', parts: [{ text: sysMsg.content as string }] } } : {}),
-    ...(geminiTools ? { tools: geminiTools } : {}),
-    generationConfig: {
-      temperature: opts.temperature ?? 0.3,
-      maxOutputTokens: opts.maxTokens ?? 700,
-    } as any,
+    generationConfig: { temperature: opts.temperature ?? 0.3, maxOutputTokens: opts.maxTokens ?? 700 },
   })
 
   const result = await genModel.generateContent({ contents })
   const candidate = result.response.candidates?.[0]
 
   let textContent: string | null = null
-  const toolCalls: ToolCall[] = []
-
   for (const part of candidate?.content?.parts ?? []) {
     if ('text' in part && part.text) textContent = (textContent ?? '') + part.text
-    if ('functionCall' in part && part.functionCall) {
-      toolCalls.push({
-        id:   `fc-${part.functionCall.name}-${Date.now()}`,
-        type: 'function',
-        function: {
-          name:      part.functionCall.name,
-          arguments: JSON.stringify(part.functionCall.args ?? {}),
-        },
-      })
-    }
   }
 
-  return { content: textContent, toolCalls }
-}
-
-/**
- * Wrapper: if a thinking model returns a thought_signature alongside a function
- * call, our tool loop strips those thought parts when rebuilding the history,
- * causing the next hop to fail with 400. Catch that specific error and retry
- * without tools so Gemini answers from the pre-built context instead — no loop,
- * no missing signature.
- */
-async function chatCompleteGemini(
-  config: AssistantConfig,
-  opts: { messages: ChatMessage[]; tools?: ToolDef[]; temperature?: number; maxTokens?: number },
-): Promise<ChatResult> {
-  try {
-    return await chatCompleteGeminiInner(config, opts)
-  } catch (e: any) {
-    if (opts.tools?.length && e?.message?.includes('thought_signature')) {
-      return chatCompleteGeminiInner(config, { ...opts, tools: undefined })
-    }
-    throw e
-  }
+  // No tool calls returned — Gemini always answers from context.
+  return { content: textContent, toolCalls: [] }
 }
 
 // ── OpenAI-SDK implementation (Groq + OpenAI) ─────────────────────────────────
