@@ -584,13 +584,13 @@ export function MastersConfig() {
 
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const activeTab = (searchParams.get('tab') ?? 'work-locations') as TabId
+  const activeTab = (searchParams.get('tab') ?? 'identity-types') as TabId
   const currentTab = TABS.find((t) => t.id === activeTab) ?? TABS[0]
 
   // Bare /admin/masters → canonical first-tab URL so the sidebar highlights correctly
   useEffect(() => {
     if (!searchParams.get('tab')) {
-      navigate('/admin/masters?tab=work-locations', { replace: true })
+      navigate('/admin/masters?tab=identity-types', { replace: true })
     }
   }, [searchParams, navigate])
 

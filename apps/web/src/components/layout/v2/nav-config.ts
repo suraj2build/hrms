@@ -773,7 +773,7 @@ export const DOMAINS: Domain[] = [
           // and other lookup masters live on the tabbed /admin/masters page. Without
           // this entry those tabs were unreachable (forms pointed to "Masters" with
           // no nav path). exact:true so it doesn't clash with /admin/masters/* pages.
-          { id: 'reference-data', label: 'Reference Data', route: '/admin/masters', exact: true, icon: ListChecks, keywords: ['master data', 'lookup', 'reference tables', 'codes', 'masters', 'configuration data', 'taxonomy', 'identity types', 'document types'] },
+          { id: 'reference-data', label: 'Reference Data', route: '/admin/masters?tab=identity-types', icon: ListChecks, keywords: ['master data', 'lookup', 'reference tables', 'codes', 'masters', 'configuration data', 'taxonomy', 'identity types', 'document types'] },
         ],
       },
 
