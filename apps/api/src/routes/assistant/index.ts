@@ -134,9 +134,14 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       if (e instanceof AssistantNotConfiguredError) {
         return reply.code(200).send({ data: { reply: null, not_configured: true } })
       }
-      req.log.warn({ err: e?.message, status: e?.status }, 'assistant chat failed')
+      // Log which providers were tried so admins can see exactly what failed.
+      req.log.warn({
+        err: e?.message, status: e?.status,
+        tried: cfgList.map(c => `${c.provider}:${effectiveModel(c)}`),
+      }, 'assistant chat failed')
+      const triedDesc = cfgList.map(c => c.provider).join(' → ')
       const msg = e?.status === 429 ? 'The assistant is busy (rate limited). Please try again in a moment.'
-        : e?.status === 401 ? 'The assistant is misconfigured (invalid API key). Ask an admin to check AI settings.'
+        : e?.status === 401 ? `The assistant is misconfigured — ${triedDesc} rejected the API key. Ask an admin to re-check the key in AI settings.`
         : 'Sorry — I could not answer that just now. Please try again.'
       return reply.code(200).send({ data: { reply: msg, error: true } })
     }
