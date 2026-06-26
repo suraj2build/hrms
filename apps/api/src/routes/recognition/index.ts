@@ -21,11 +21,40 @@ const DEFAULT_BADGES = [
   { code: 'culture_ambassador', label: 'Culture Ambassador', icon: 'Sparkles',  description: 'Lives our values every day',          points: 10 },
 ]
 
+const DEFAULT_MONTHLY_BUDGET = 100
+
 async function resolveEmployeeId(fastify: FastifyInstance, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
     .from('profiles').select('employee_id')
     .eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
   return (data as { employee_id: string | null } | null)?.employee_id ?? null
+}
+
+/** First day of the current month (UTC), ISO — the budget period boundary. */
+function startOfMonthISO(): string {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
+
+/**
+ * A giver's monthly points budget: the tenant's configured allowance, how many
+ * points they've already spent this calendar month, and what remains.
+ */
+async function computeBudget(
+  fastify: FastifyInstance, tenantId: string, employeeId: string,
+): Promise<{ monthly: number; spent: number; remaining: number }> {
+  const [budgetRes, spentRes] = await Promise.all([
+    fastify.supabase
+      .from('recognition_budgets').select('monthly_points')
+      .eq('tenant_id', tenantId).maybeSingle(),
+    fastify.supabase
+      .from('recognition').select('points')
+      .eq('tenant_id', tenantId).eq('from_employee', employeeId)
+      .gte('created_at', startOfMonthISO()),
+  ])
+  const monthly = (budgetRes.data as { monthly_points?: number } | null)?.monthly_points ?? DEFAULT_MONTHLY_BUDGET
+  const spent   = ((spentRes.data ?? []) as any[]).reduce((s, r) => s + (r.points ?? 0), 0)
+  return { monthly, spent, remaining: Math.max(0, monthly - spent) }
 }
 
 // Provision the default badge set for a tenant that has none yet (covers tenants
@@ -87,9 +116,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   // ── GET /recognition/me ─────────────────────────────────────────────────────
   fastify.get('/recognition/me', auth, async (req: any, reply) => {
     const employeeId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
-    if (!employeeId) return reply.send({ data: { received: 0, given: 0, points: 0, recent: [] } })
+    if (!employeeId) return reply.send({ data: { received: 0, given: 0, points: 0, recent: [], budget: { monthly: DEFAULT_MONTHLY_BUDGET, spent: 0, remaining: DEFAULT_MONTHLY_BUDGET } } })
 
-    const [recvRes, giveRes] = await Promise.all([
+    const [recvRes, giveRes, budget] = await Promise.all([
       fastify.supabase
         .from('recognition')
         .select('id, from_employee, to_employee, badge_code, message, points, created_at')
@@ -98,6 +127,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('recognition').select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId).eq('from_employee', employeeId),
+      computeBudget(fastify, req.tenantId, employeeId),
     ])
 
     const received = recvRes.data ?? []
@@ -108,6 +138,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         given:    giveRes.count ?? 0,
         points,
         recent:   await enrich(fastify, req.tenantId, received),
+        budget,
       },
     })
   })
@@ -172,6 +203,18 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId).eq('code', parsed.data.badge_code).maybeSingle()
       points     = (badge as { points?: number } | null)?.points ?? 0
       badgeLabel = (badge as { label?: string } | null)?.label ?? null
+    }
+
+    // Anti-gaming: a points-bearing badge must fit the giver's remaining monthly
+    // budget. A message-only kudos (0 points) is always allowed.
+    if (points > 0) {
+      const budget = await computeBudget(fastify, req.tenantId, fromEmployee)
+      if (points > budget.remaining) {
+        return reply.code(400).send({
+          error:   'BUDGET_EXCEEDED',
+          message: `This badge costs ${points} pts but you have only ${budget.remaining} of ${budget.monthly} left this month. Try a lower-point badge or a message-only kudos.`,
+        })
+      }
     }
 
     const { data, error } = await fastify.supabase

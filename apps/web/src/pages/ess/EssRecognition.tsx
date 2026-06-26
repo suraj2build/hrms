@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper, Trophy,
+  Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper, Trophy, Coins,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -28,7 +28,8 @@ interface RecognitionRow {
   id: string; from_name?: string; to_name?: string
   badge_code: string | null; message: string; points: number; created_at: string
 }
-interface MeSummary { received: number; given: number; points: number; recent: RecognitionRow[] }
+interface Budget { monthly: number; spent: number; remaining: number }
+interface MeSummary { received: number; given: number; points: number; recent: RecognitionRow[]; budget?: Budget }
 interface LeaderRow { rank: number; employee_id: string; name: string; points: number; count: number }
 
 // ── Icon map (badge.icon stores a lucide name) ─────────────────────────────────
@@ -53,8 +54,8 @@ function timeAgo(iso: string): string {
 }
 
 // ── Give-recognition dialog ────────────────────────────────────────────────────
-function GiveDialog({ open, onOpenChange, badges }: {
-  open: boolean; onOpenChange: (o: boolean) => void; badges: Badge[]
+function GiveDialog({ open, onOpenChange, badges, budget }: {
+  open: boolean; onOpenChange: (o: boolean) => void; badges: Badge[]; budget?: Budget
 }) {
   const qc = useQueryClient()
   const [toEmployee, setToEmployee] = useState<string>('')
@@ -62,6 +63,10 @@ function GiveDialog({ open, onOpenChange, badges }: {
   const [message, setMessage]       = useState<string>('')
 
   const reset = () => { setToEmployee(''); setBadgeCode(''); setMessage('') }
+
+  const remaining   = budget?.remaining ?? Infinity
+  const selectedCost = badges.find(b => b.code === badgeCode)?.points ?? 0
+  const overBudget  = selectedCost > remaining
 
   const give = useMutation({
     mutationFn: () => api.post('/recognition', {
@@ -72,13 +77,14 @@ function GiveDialog({ open, onOpenChange, badges }: {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['recognition-feed'] })
       qc.invalidateQueries({ queryKey: ['recognition-me'] })
+      qc.invalidateQueries({ queryKey: ['ess-home'] })
       toast.success('Recognition sent 🎉')
       reset(); onOpenChange(false)
     },
     onError: (e: Error) => toast.error('Could not send recognition', { description: e.message }),
   })
 
-  const canSubmit = !!toEmployee && message.trim().length > 0 && !give.isPending
+  const canSubmit = !!toEmployee && message.trim().length > 0 && !overBudget && !give.isPending
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o) }}>
@@ -87,6 +93,22 @@ function GiveDialog({ open, onOpenChange, badges }: {
           <DialogTitle>Give recognition</DialogTitle>
           <DialogDescription>Appreciate a colleague — they'll see it in the company feed.</DialogDescription>
         </DialogHeader>
+
+        {/* Monthly budget meter */}
+        {budget && (
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+            <div className="flex items-center justify-between text-[11px] font-medium">
+              <span className="text-muted-foreground">Your recognition budget this month</span>
+              <span className={overBudget ? 'font-bold text-destructive' : 'font-bold text-primary'}>
+                {budget.remaining} / {budget.monthly} pts left
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${budget.monthly ? Math.round((budget.remaining / budget.monthly) * 100) : 0}%` }} />
+            </div>
+          </div>
+        )}
 
         <div className="space-y-4 py-1">
           <div>
@@ -103,13 +125,18 @@ function GiveDialog({ open, onOpenChange, badges }: {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {badges.map(b => {
                 const active = badgeCode === b.code
+                const unaffordable = b.points > remaining && !active
                 return (
                   <button
                     key={b.code}
                     type="button"
+                    disabled={unaffordable}
+                    title={unaffordable ? `Needs ${b.points} pts — only ${remaining} left this month` : undefined}
                     onClick={() => setBadgeCode(active ? '' : b.code)}
                     className={`flex items-center gap-2 rounded-lg border p-2 text-left transition-colors ${
-                      active ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
+                      active ? 'border-primary bg-primary/5'
+                      : unaffordable ? 'cursor-not-allowed border-border opacity-40'
+                      : 'border-border hover:bg-muted/50'
                     }`}
                   >
                     <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md ${active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
@@ -215,10 +242,16 @@ export function EssRecognition() {
         }
       />
 
-      <MetricRow cols={3}>
+      <MetricRow cols={4}>
         <MetricCard label="Received" value={me?.received ?? 0} icon={Heart}  variant="success" />
         <MetricCard label="Given"    value={me?.given ?? 0}    icon={Gift}   variant="info" />
         <MetricCard label="Points"   value={me?.points ?? 0}   icon={Star}   variant="warning" />
+        <MetricCard
+          label="Budget left"
+          value={me?.budget ? `${me.budget.remaining}/${me.budget.monthly}` : '—'}
+          icon={Coins}
+          variant="neutral"
+        />
       </MetricRow>
 
       {leaders.length > 0 && (
@@ -257,7 +290,7 @@ export function EssRecognition() {
         )}
       </SectionCard>
 
-      <GiveDialog open={giveOpen} onOpenChange={setGiveOpen} badges={badges} />
+      <GiveDialog open={giveOpen} onOpenChange={setGiveOpen} badges={badges} budget={me?.budget} />
     </PageContainer>
   )
 }
