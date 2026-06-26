@@ -1,0 +1,169 @@
+/**
+ * AssistantWidget — the always-present floating AI chat bubble.
+ *
+ * Mounted once globally (App.tsx). Self-guards: renders nothing on auth/owner
+ * pages or when logged out. Calls POST /assistant/chat (role-scoped server-side).
+ * Read-only assistant — no actions. Shows a friendly "not configured" state with a
+ * link to the admin AI settings when no provider key is set.
+ */
+import { useState, useRef, useEffect } from 'react'
+import { useLocation, Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Sparkles, X, Send, Loader2, Settings } from 'lucide-react'
+import { api } from '@/lib/api/client'
+import { useAuthStore } from '@/stores/authStore'
+
+interface Msg { role: 'user' | 'assistant'; content: string }
+interface ChatResp { data: { reply: string | null; not_configured?: boolean; error?: boolean; tools_used?: string[] } }
+interface StatusResp { data: { enabled: boolean; provider: string; model: string } }
+
+const HIDE_ON = ['/login', '/owner', '/onboarding/portal', '/recruitment/portal', '/candidate']
+
+export function AssistantWidget() {
+  const { profile } = useAuthStore()
+  const { pathname } = useLocation()
+  const [open, setOpen] = useState(false)
+  const [input, setInput] = useState('')
+  const [msgs, setMsgs] = useState<Msg[]>([])
+  const [sending, setSending] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
+
+  const { data: status } = useQuery<StatusResp>({
+    queryKey: ['assistant-status'],
+    queryFn:  () => api.get('/assistant/status'),
+    enabled:  !!profile,
+    staleTime: 5 * 60_000,
+  })
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [msgs, open, sending])
+
+  if (!profile) return null
+  if (HIDE_ON.some(p => pathname.startsWith(p))) return null
+
+  async function send() {
+    const text = input.trim()
+    if (!text || sending) return
+    const history = msgs.slice(-8)
+    setMsgs(m => [...m, { role: 'user', content: text }])
+    setInput('')
+    setSending(true)
+    try {
+      const res = await api.post<ChatResp>('/assistant/chat', { message: text, history })
+      if (res.data.not_configured) {
+        setMsgs(m => [...m, { role: 'assistant', content: '__NOT_CONFIGURED__' }])
+      } else {
+        setMsgs(m => [...m, { role: 'assistant', content: res.data.reply ?? '…' }])
+      }
+    } catch {
+      setMsgs(m => [...m, { role: 'assistant', content: 'Sorry — I could not reach the assistant. Please try again.' }])
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const greeting = profile.role === 'employee'
+    ? 'Ask me about your leave, payslip, or how to do something in CognixHR.'
+    : 'Ask about your team, pending approvals, headcount, or how to use CognixHR.'
+
+  return (
+    <>
+      {/* Launcher */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Open AI assistant"
+          className="fixed bottom-5 right-5 z-[60] flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105"
+          style={{ background: 'linear-gradient(135deg, #2E6FE6 0%, #15B8A6 100%)' }}
+        >
+          <Sparkles className="h-5 w-5" />
+        </button>
+      )}
+
+      {/* Panel */}
+      {open && (
+        <div className="fixed bottom-5 right-5 z-[60] flex h-[min(560px,80vh)] w-[min(380px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center gap-2.5 px-4 py-3 text-white" style={{ background: 'linear-gradient(135deg, #1A4D8F 0%, #15B8A6 100%)' }}>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight">CognixHR Assistant</p>
+              <p className="text-[10px] text-white/70 leading-tight">
+                {status?.data.enabled ? 'Read-only · answers from your data' : 'Not configured'}
+              </p>
+            </div>
+            <button onClick={() => setOpen(false)} aria-label="Close" className="rounded-md p-1 hover:bg-white/15">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3.5 py-3">
+            {msgs.length === 0 && (
+              <div className="mt-2 rounded-xl bg-muted/50 px-3.5 py-3 text-xs text-muted-foreground">
+                <p className="mb-1 font-medium text-foreground">Hi {profile.full_name?.split(' ')[0] ?? 'there'} 👋</p>
+                {greeting}
+              </div>
+            )}
+            {msgs.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {m.content === '__NOT_CONFIGURED__' ? (
+                  <div className="max-w-[85%] rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                    The assistant isn't switched on yet.{' '}
+                    {isAdmin ? (
+                      <Link to="/admin/settings/ai" onClick={() => setOpen(false)} className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
+                        <Settings className="h-3 w-3" /> Configure it
+                      </Link>
+                    ) : 'Ask an admin to enable it in Settings → AI Assistant.'}
+                  </div>
+                ) : (
+                  <div className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-3 py-2 text-xs ${
+                    m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
+                  }`}>
+                    {m.content}
+                  </div>
+                )}
+              </div>
+            ))}
+            {sending && (
+              <div className="flex justify-start">
+                <div className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="border-t border-border p-2.5">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+                rows={1}
+                maxLength={2000}
+                placeholder="Ask anything…"
+                className="max-h-24 flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
+              />
+              <button
+                onClick={send}
+                disabled={!input.trim() || sending}
+                aria-label="Send"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1 px-1 text-[9px] text-muted-foreground">AI can be wrong — verify important details.</p>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

@@ -256,6 +256,7 @@ import executiveRoutes                     from './routes/executive/index.js'
 import essOperationalRoute                 from './routes/notifications/ess-operational.js'
 import essSelfServiceRoute                  from './routes/ess/self-service.js'
 import essHomeRoute                         from './routes/ess/home.js'
+import assistantRoutes                      from './routes/assistant/index.js'
 
 // Routes — Governance Intelligence (Sprint 2)
 import governanceRoutes from './routes/governance/index.js'
@@ -737,6 +738,7 @@ async function start() {
   await fastify.register(essOperationalRoute, { prefix: '/ess' })   // GET /ess/* (routes defined relative)
   await fastify.register(essHomeRoute,        { prefix: '/ess' })   // GET /ess/home (aggregated home payload)
   await fastify.register(essSelfServiceRoute)                       // GET/POST/PUT/DELETE /ess/me/* (P4.1 data ownership)
+  await fastify.register(assistantRoutes)                           // AI Assistant: /assistant/chat + /assistant/config
 
   // ── System: Event Governance + Orchestration + Incidents + Webhooks + Integrations ──
   await fastify.register(eventGovernanceRoute)          // GET/POST /system/event-governance/*

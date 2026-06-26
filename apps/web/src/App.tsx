@@ -10,6 +10,7 @@ import { api } from '@/lib/api/client'
 import { DEMO_MODE } from '@/lib/demo'
 import { demoProfile, demoTenant } from '@/lib/demo/fixtures'
 import { DemoBanner } from '@/components/demo/DemoBanner'
+import { AssistantWidget } from '@/components/assistant/AssistantWidget'
 
 // ── Layouts ──────────────────────────────────────────────────────────────────
 import { AdminShellV2 }  from '@/components/layout/AdminShellV2'  // /admin/* — V2 shell with domain tabs
@@ -330,6 +331,7 @@ const InsightsHub          = lazy(() => import('@/pages/insights/InsightsHub').t
 const Settings          = lazy(() => import('@/pages/settings/Settings').then(m => ({ default: m.Settings })))
 const MastersConfig     = lazy(() => import('@/pages/settings/MastersConfig').then(m => ({ default: m.MastersConfig })))
 const ApprovalWorkflows = lazy(() => import('@/pages/settings/ApprovalWorkflows').then(m => ({ default: m.ApprovalWorkflows })))
+const AiAssistantSettings = lazy(() => import('@/pages/settings/AiAssistantSettings').then(m => ({ default: m.AiAssistantSettings })))
 const RolesPermissions  = lazy(() => import('@/pages/settings/RolesPermissions').then(m => ({ default: m.RolesPermissions })))
 const UsersManagement   = lazy(() => import('@/pages/settings/UsersManagement').then(m => ({ default: m.UsersManagement })))
 
@@ -910,6 +912,7 @@ export default function App() {
                 <Route path="/admin/settings"              element={<Settings />} />
                 <Route path="/admin/settings/users"        element={<UsersManagement />} />
                 <Route path="/admin/settings/roles"        element={<RolesPermissions />} />
+                <Route path="/admin/settings/ai"           element={<AiAssistantSettings />} />
                 <Route path="/admin/masters"               element={<MastersConfig />} />
                 <Route path="/admin/approvals/workflows"   element={<ApprovalWorkflows />} />
 
@@ -1077,6 +1080,7 @@ export default function App() {
           </Suspense>
           </RouteErrorBoundary>
           {DEMO_MODE && <DemoBanner />}
+          <AssistantWidget />
           <Toaster richColors position="top-right" />
         </AuthProvider>
       </BrowserRouter>
