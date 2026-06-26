@@ -11,7 +11,7 @@ import { useState }                              from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ShieldCheck, GitMerge, Users, Zap, FlaskConical,
-  Loader2, Trash2, Plus, CheckCircle2,
+  Loader2, Trash2, Plus, CheckCircle2, Info,
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -1181,6 +1181,18 @@ export function GovernanceMatrix() {
         title="Governance Matrix"
         subtitle="Approval matrices, delegations, and operational overrides"
       />
+
+      {/* Advisory banner — clarify what is and isn't enforced at approval time. */}
+      <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/5 px-3.5 py-2.5 text-xs text-foreground">
+        <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning" />
+        <p>
+          <span className="font-semibold">Advisory / planning surface.</span>{' '}
+          Matrices, delegations, and overrides here are <span className="font-medium">not</span>{' '}
+          yet enforced at approval time — the live engine reads the chains configured in{' '}
+          <span className="font-medium">Settings → Approval Workflows</span>. Use Simulate
+          to preview routing.
+        </p>
+      </div>
 
       {/* ── Tab bar ── */}
       <SubTabs tabs={TABS} value={activeTab} onChange={setActiveTab} className="mb-3" />

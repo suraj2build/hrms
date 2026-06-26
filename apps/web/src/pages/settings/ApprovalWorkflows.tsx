@@ -23,7 +23,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   GitMerge, ShieldAlert, Plus, Trash2, Pencil,
   Loader2, Check, X, ChevronDown, ChevronUp,
-  Users, Clock, CalendarDays,
+  Users, Clock, CalendarDays, Timer, Coffee, Info,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -39,7 +39,7 @@ import { cn }            from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type WorkflowType   = 'leave' | 'correction' | 'regularisation'
+type WorkflowType   = 'leave' | 'correction' | 'regularisation' | 'overtime' | 'comp_off'
 type ApproverType   = 'direct_manager' | 'hr_admin' | 'super_admin' | 'specific_role'
 type InstanceStatus = 'pending' | 'approved' | 'rejected' | 'escalated' | 'auto_approved'
 
@@ -91,6 +91,8 @@ const WORKFLOW_TABS: { id: WorkflowType; label: string; icon: React.ComponentTyp
   { id: 'leave',           label: 'Leave',          icon: CalendarDays },
   { id: 'correction',      label: 'Corrections',    icon: Clock        },
   { id: 'regularisation',  label: 'Regularisation', icon: Users        },
+  { id: 'overtime',        label: 'Overtime',       icon: Timer        },
+  { id: 'comp_off',        label: 'Comp-off',       icon: Coffee       },
 ]
 
 const APPROVER_TYPE_LABELS: Record<ApproverType, string> = {
@@ -350,8 +352,22 @@ export function ApprovalWorkflows() {
     <PageContainer>
       <PageHeader
         title="Approval Workflows"
-        subtitle="Configure multi-level approval chains for leave, corrections, and regularisations"
+        subtitle="Configure multi-level approval chains for leave, corrections, regularisation, overtime, and comp-off"
       />
+
+      {isAdmin && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-primary" />
+          <p>
+            <span className="font-semibold">This is the enforced approval config.</span>{' '}
+            Chains defined here are applied at approval time — each level's approver is
+            required in order before a request is finalised. A workflow type with{' '}
+            <span className="font-medium">no levels</span> uses the default single-step
+            (direct manager or HR admin) approval. The Governance Matrix screen is
+            advisory only and does not gate these endpoints.
+          </p>
+        </div>
+      )}
 
       {!isAdmin && (
         <SectionCard>
