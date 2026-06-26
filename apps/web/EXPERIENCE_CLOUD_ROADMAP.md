@@ -24,7 +24,7 @@ We ship **A first for fast wins**, but stand up the **kernel's read-models early
 the OS surfaces (Timeline, Notifications, ambient AI) have something to read.
 
 ```
-P0 Coherence ──► P1 Nav+Requests ──► P2 Kernel read-models ──► P3 OS surfaces
+P0 Coherence ──► P1 Nav+Requests ──► P2 Experience Core Services ──► P3 OS surfaces
                                                             └─► P4 Ambient AI + Identity
                                                             └─► P5 Community graph + Manager layer
                                                             └─► P6 Predictive intelligence + Platform
@@ -68,10 +68,17 @@ the request hub.
 
 ---
 
-## P2 — Kernel read-models  *(Track B · the platform foundation)*
+## P2 — Experience Core Services  *(Track B · the platform foundation)*
 
-**Goal:** stand up Events / Signals / Identity as read-models over existing data so OS
-surfaces have something to read. **Minimal new storage — mostly projections.**
+> **Amendment (recorded):** renamed from "Kernel read-models" to **Experience Core
+> Services** — the focus is business capability that powers the employee experience,
+> not infrastructure. The Experience Core is an internal *platform*, grown organically
+> from real surface demand: **never build an abstraction without an immediate consumer.**
+
+**Goal:** stand up Signals / Events / Identity as services over existing data so OS
+surfaces have something to read. **Minimal new storage — mostly projections.** Built
+**on demand, surface by surface** — Home pulls Signals first; the rest follow only when
+a real surface needs them.
 
 | Kernel piece | Build approach (reuse-first) |
 |---|---|

@@ -21,6 +21,9 @@ import {
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
+import { SignalCard, type Signal } from '@/components/experience/SignalCard'
+import { LoadingState } from '@/components/layout/LoadingState'
+import { ErrorState }   from '@/components/layout/ErrorState'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -149,6 +152,15 @@ export function EssHome() {
     staleTime: 2 * 60_000,
   })
 
+  // Experience Core: the "what needs you" signal layer (ranked server-side).
+  // Loads independently of the home shell so the OS layer streams in.
+  const signalsQ = useQuery<{ signals: Signal[] }>({
+    queryKey: ['ess-signals'],
+    queryFn:  () => api.get('/ess/signals'),
+    staleTime: 60_000,
+  })
+  const signals = signalsQ.data?.signals ?? []
+
   const firstName = (data?.profile?.name ?? auth?.full_name ?? 'there').split(' ')[0]
   const today     = data?.today
   const kpis      = data?.kpis
@@ -230,6 +242,25 @@ export function EssHome() {
           </div>
         </div>
       </Card>
+
+      {/* ── What needs you (Experience Core signals, ranked) ── */}
+      {signalsQ.isLoading ? (
+        <LoadingState rows={2} />
+      ) : signalsQ.isError ? (
+        <ErrorState title="Couldn’t load your signals" onRetry={() => signalsQ.refetch()} compact />
+      ) : signals.length > 0 ? (
+        <div className="space-y-2.5">
+          <SectionTitle icon={Inbox} label="What needs you" />
+          {signals.map((s) => (
+            <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-foreground">
+          <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-500" />
+          You’re all caught up — nothing needs your attention right now.
+        </div>
+      )}
 
       {/* ── Quick Actions ── */}
       <div className="flex flex-wrap gap-2">
