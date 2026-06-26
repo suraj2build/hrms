@@ -66,49 +66,57 @@ changes never touch HRMS. `source='managed'` rows are the ones you bill for
 
 ---
 
-## 2. What to build in the owner portal
+## 1b. Integration path — call the HRMS owner API (NOT direct DB)
+
+The owner portal must **not** read these tables directly from the browser —
+master API keys would leak into the client. Instead it calls the HRMS owner API
+(`apps/api/src/routes/owner/`, platform-admin JWT, service-role server-side).
+**These endpoints are already built in the HRMS repo.** The owner portal builds
+only the frontend that calls them. All require the platform-admin auth header.
+
+| Method & path | Purpose | Notes |
+|---|---|---|
+| `GET  /owner/ai-config` | Read master chain | keys masked (`key_hint`), never raw |
+| `PUT  /owner/ai-config` | Replace master chain | `{ chain: [{provider, model?, enabled?, api_key?}] }`; omit `api_key` to keep, `''` to clear; ASCII-validated |
+| `PATCH /owner/tenants/:id/ai-mode` | Flip a tenant | `{ ai_mode: 'self' | 'managed' }` |
+| `GET  /owner/ai-usage?days=30&tenant_id=` | Priced usage | aggregates `ai_usage_log` × `ai_price_table`; per-tenant `managed_cost` / `total_cost` |
+| `GET  /owner/ai-pricing` | Read price table | rows of `{provider, model, prompt_per_mtok, completion_per_mtok, currency}` |
+| `PUT  /owner/ai-pricing` | Upsert prices | `{ rows: [...] }`; `model = '*'` is the provider fallback rate |
+
+## 2. What to build in the owner portal (frontend only)
 
 ### 2a. Master keys screen (Settings → AI)
-- Form to edit `ai_managed_config.providers_json` — an ordered list of
-  `{ provider, api_key, model, enabled }` with add / reorder / remove (mirror the
-  HRMS AI Settings UI; you can copy `apps/web/src/pages/settings/AiAssistantSettings.tsx`).
-- A **Test** button per row is optional; if you want it, replicate HRMS's
-  `testConnection` (a 1-token completion) or just call the provider directly.
-- Validate keys are ASCII before saving (reuse the same hyphen-vs-em-dash check).
+- Form bound to `GET/PUT /owner/ai-config` — an ordered list of
+  `{ provider, api_key, model, enabled }` with add / reorder / remove. You can copy
+  the HRMS AI Settings UI (`apps/web/src/pages/settings/AiAssistantSettings.tsx`)
+  almost verbatim — it already does masked hints, omit-to-keep, reorder.
+- The API masks keys on read and validates ASCII on write; the frontend just
+  shows `key_hint` and sends a new `api_key` only when the admin types one.
 
 ### 2b. Per-tenant mode toggle (on the existing tenant/license admin screen)
 - A switch: **Self-managed (own keys)** ↔ **Managed (included in plan)**.
-- Writes `tenants.ai_mode`. That's the whole integration on the provisioning side.
+- Calls `PATCH /owner/tenants/:id/ai-mode` with `{ ai_mode }`. HRMS picks it up
+  on the tenant's next chat call.
 
 ### 2c. Billing / cost dashboard
-- Aggregate `ai_usage_log` per tenant per month. Example query:
-  ```sql
-  SELECT tenant_id,
-         date_trunc('month', created_at) AS month,
-         provider,
-         SUM(prompt_tokens)     AS prompt_tokens,
-         SUM(completion_tokens) AS completion_tokens,
-         SUM(total_tokens)      AS total_tokens,
-         COUNT(*)               AS calls
-  FROM ai_usage_log
-  WHERE source = 'managed'           -- only what you provisioned
-  GROUP BY 1, 2, 3
-  ORDER BY month DESC, total_tokens DESC;
-  ```
-- Apply your **price table** in the owner portal (per provider, per 1M tokens,
-  split prompt/completion). Keep it as data you can edit without a deploy. Example:
-  | provider | model | prompt $/1M | completion $/1M |
-  |---|---|---|---|
-  | groq | llama-3.3-70b-versatile | … | … |
-  | gemini | gemini-3.5-flash | … | … |
-  | openai | gpt-4o-mini | … | … |
-- `cost = prompt_tokens/1e6 * prompt_price + completion_tokens/1e6 * completion_price`.
+- Call `GET /owner/ai-usage?days=30` (optionally `&tenant_id=`). The API already
+  joins `ai_usage_log` with `ai_price_table` and returns per-tenant
+  `{ calls, total_tokens, managed_cost, total_cost }` plus grand totals.
+  `managed_cost` = what you provisioned (`source='managed'`) — that's the billable
+  figure; `total_cost` includes BYOK tenants for visibility.
+- Render it as a table; no client-side pricing math needed.
 
-### 2d. (Optional) read HRMS's per-tenant summary endpoint
-HRMS exposes `GET /assistant/usage` (HR-auth) returning month-to-date and
-last-30-day token totals + per-provider breakdown for **one** tenant. The owner
-portal generally won't need this (it can query the DB directly across all
-tenants), but it exists for in-app tenant-facing cost visibility.
+### 2d. Price grid (Settings → AI → Pricing)
+- Bind to `GET/PUT /owner/ai-pricing`. Rows are `{ provider, model,
+  prompt_per_mtok, completion_per_mtok, currency }` (USD per 1M tokens).
+- `model = '*'` is the per-provider fallback rate used when no exact model row
+  matches. Migration 322 seeds defaults for groq/gemini/openai — edit them here.
+- Editing is a row upsert (no deploy), shared across all owner admins.
+
+### 2e. (Optional) tenant-facing usage — `GET /assistant/usage`
+HRMS also exposes `GET /assistant/usage` (HR-auth, tenant-scoped) for in-app
+cost visibility to the tenant admin. The owner portal uses `/owner/ai-usage`
+instead (cross-tenant).
 
 ---
 

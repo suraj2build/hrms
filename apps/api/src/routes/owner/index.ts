@@ -1216,4 +1216,200 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     return reply.send({ data: stats })
   })
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //  AI PROVISIONING & BILLING
+  //  (managed master keys, per-tenant mode, cross-tenant usage, price table)
+  //  Contract + consumer side documented in docs/OWNER_PORTAL_AI_BILLING_SPEC.md.
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  // Mask a secret for display: keep a short prefix + last 4, hide the middle.
+  const maskKey = (key: string | null | undefined): string | null => {
+    if (!key) return null
+    if (key.length <= 10) return '••••'
+    return `${key.slice(0, 4)}••••${key.slice(-4)}`
+  }
+  // Keys ride in HTTP headers (ByteString) — must be ASCII. Return the first
+  // offending char (e.g. an em-dash auto-corrected from a hyphen) or null.
+  const firstNonAscii = (s: string): string | null => {
+    for (const ch of s) if (ch.codePointAt(0)! > 127) return ch
+    return null
+  }
+  const AI_PROVIDERS = ['groq', 'openai', 'gemini']
+
+  // ── GET /owner/ai-config — the global managed master chain (keys masked) ───────
+  fastify.get('/owner/ai-config', ownerAuth, async (_req, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('ai_managed_config').select('*').eq('id', 1).maybeSingle()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    const chain = Array.isArray((data as any)?.providers_json) ? (data as any).providers_json : []
+    return reply.send({
+      data: {
+        chain: chain.map((e: any) => ({
+          provider: e.provider,
+          model:    e.model ?? null,
+          enabled:  e.enabled !== false,
+          has_key:  !!e.api_key,
+          key_hint: maskKey(e.api_key),
+        })),
+        updated_at: (data as any)?.updated_at ?? null,
+      },
+    })
+  })
+
+  // ── PUT /owner/ai-config — replace the master chain ────────────────────────────
+  // Per entry: omit api_key to keep the saved one; send '' to clear it.
+  fastify.put('/owner/ai-config', ownerAuth, async (req: any, reply) => {
+    const body = req.body as any
+    if (!Array.isArray(body?.chain)) return reply.code(400).send({ error: 'VALIDATION', message: 'chain must be an array' })
+    if (body.chain.length > 5)       return reply.code(400).send({ error: 'VALIDATION', message: 'at most 5 providers' })
+
+    // Load existing keys so an omitted api_key preserves the saved value.
+    const { data: existing } = await fastify.supabase
+      .from('ai_managed_config').select('providers_json').eq('id', 1).maybeSingle()
+    const savedKey = new Map<string, string>()
+    for (const e of ((existing as any)?.providers_json ?? [])) {
+      if (e?.provider && e?.api_key) savedKey.set(e.provider, e.api_key)
+    }
+
+    const providers_json: any[] = []
+    for (const e of body.chain) {
+      if (!AI_PROVIDERS.includes(e?.provider)) {
+        return reply.code(400).send({ error: 'VALIDATION', message: `invalid provider "${e?.provider}"` })
+      }
+      let key: string | null
+      if (e.api_key === undefined)    key = savedKey.get(e.provider) ?? null
+      else if (e.api_key === '')      key = null
+      else                            key = String(e.api_key).trim() || null
+      if (key) {
+        const bad = firstNonAscii(key)
+        if (bad) return reply.code(400).send({
+          error: 'INVALID_KEY',
+          message: `${e.provider} key has an invalid character "${bad}" — re-copy it (a hyphen may have become a dash).`,
+        })
+      }
+      providers_json.push({
+        provider: e.provider,
+        api_key:  key,
+        model:    (e.model ?? null) || null,
+        enabled:  e.enabled !== false,
+      })
+    }
+
+    const { error } = await fastify.supabase
+      .from('ai_managed_config')
+      .upsert({ id: 1, providers_json, updated_by: req.platformAdminId, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: { ok: true } })
+  })
+
+  // ── PATCH /owner/tenants/:id/ai-mode — flip a tenant self↔managed ──────────────
+  fastify.patch('/owner/tenants/:id/ai-mode', ownerAuth, async (req: any, reply) => {
+    const { id } = req.params
+    const mode = (req.body as any)?.ai_mode
+    if (mode !== 'self' && mode !== 'managed') {
+      return reply.code(400).send({ error: 'VALIDATION', message: "ai_mode must be 'self' or 'managed'" })
+    }
+    const { data, error } = await fastify.supabase
+      .from('tenants').update({ ai_mode: mode }).eq('id', id).select('id, ai_mode').single()
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data })
+  })
+
+  // ── GET /owner/ai-usage — cross-tenant token usage, priced ─────────────────────
+  // ?days=30 (default, max 90) ?tenant_id=…  Applies ai_price_table to estimate cost.
+  fastify.get('/owner/ai-usage', ownerAuth, async (req: any, reply) => {
+    const q        = req.query as any
+    const days     = Math.min(90, Math.max(1, Number(q.days ?? 30)))
+    const tenantId = q.tenant_id ?? null
+    const since    = new Date(Date.now() - days * 86400_000).toISOString()
+
+    let usageQ = fastify.supabase
+      .from('ai_usage_log')
+      .select('tenant_id, provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(20000)
+    if (tenantId) usageQ = usageQ.eq('tenant_id', tenantId)
+
+    const [{ data: usage, error: uErr }, { data: prices }] = await Promise.all([
+      usageQ,
+      fastify.supabase.from('ai_price_table').select('provider, model, prompt_per_mtok, completion_per_mtok'),
+    ])
+    if (uErr) return reply.code(500).send({ error: 'DB_ERROR', message: uErr.message })
+
+    // Price lookup: exact provider+model, else provider '*' fallback, else 0.
+    const priceMap = new Map<string, { p: number; c: number }>()
+    for (const pr of (prices ?? []) as any[]) priceMap.set(`${pr.provider}:${pr.model}`, { p: Number(pr.prompt_per_mtok), c: Number(pr.completion_per_mtok) })
+    const priceFor = (provider: string, model: string) =>
+      priceMap.get(`${provider}:${model}`) ?? priceMap.get(`${provider}:*`) ?? { p: 0, c: 0 }
+    const costOf = (provider: string, model: string, pt: number, ct: number) => {
+      const pr = priceFor(provider, model)
+      return (pt / 1e6) * pr.p + (ct / 1e6) * pr.c
+    }
+
+    const rows = (usage ?? []) as any[]
+    const byTenant: Record<string, { tenant_id: string; calls: number; prompt: number; completion: number; total: number; managed_cost: number; total_cost: number }> = {}
+    for (const r of rows) {
+      const t = byTenant[r.tenant_id] ??= { tenant_id: r.tenant_id, calls: 0, prompt: 0, completion: 0, total: 0, managed_cost: 0, total_cost: 0 }
+      const cost = costOf(r.provider, r.model, r.prompt_tokens ?? 0, r.completion_tokens ?? 0)
+      t.calls++; t.prompt += r.prompt_tokens ?? 0; t.completion += r.completion_tokens ?? 0; t.total += r.total_tokens ?? 0
+      t.total_cost += cost
+      if (r.source === 'managed') t.managed_cost += cost  // what the provider actually owes us for
+    }
+    const tenants = Object.values(byTenant).sort((a, b) => b.total_cost - a.total_cost)
+      .map(t => ({ ...t, managed_cost: Number(t.managed_cost.toFixed(4)), total_cost: Number(t.total_cost.toFixed(4)) }))
+
+    return reply.send({
+      data: {
+        days,
+        currency: 'USD',
+        tenants,
+        totals: {
+          calls:        rows.length,
+          total_tokens: tenants.reduce((s, t) => s + t.total, 0),
+          managed_cost: Number(tenants.reduce((s, t) => s + t.managed_cost, 0).toFixed(2)),
+          total_cost:   Number(tenants.reduce((s, t) => s + t.total_cost, 0).toFixed(2)),
+        },
+      },
+    })
+  })
+
+  // ── GET /owner/ai-pricing — the editable price table ───────────────────────────
+  fastify.get('/owner/ai-pricing', ownerAuth, async (_req, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('ai_price_table')
+      .select('id, provider, model, prompt_per_mtok, completion_per_mtok, currency, updated_at')
+      .order('provider', { ascending: true }).order('model', { ascending: true })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── PUT /owner/ai-pricing — upsert price rows ──────────────────────────────────
+  // Body: { rows: [{ provider, model, prompt_per_mtok, completion_per_mtok, currency? }] }
+  fastify.put('/owner/ai-pricing', ownerAuth, async (req: any, reply) => {
+    const rows = (req.body as any)?.rows
+    if (!Array.isArray(rows) || rows.length === 0) return reply.code(400).send({ error: 'VALIDATION', message: 'rows must be a non-empty array' })
+    if (rows.length > 100) return reply.code(400).send({ error: 'VALIDATION', message: 'too many rows' })
+
+    const payload: any[] = []
+    for (const r of rows) {
+      if (!AI_PROVIDERS.includes(r?.provider) || !r?.model) {
+        return reply.code(400).send({ error: 'VALIDATION', message: 'each row needs a valid provider and model' })
+      }
+      payload.push({
+        provider:            r.provider,
+        model:               String(r.model),
+        prompt_per_mtok:     Number(r.prompt_per_mtok) || 0,
+        completion_per_mtok: Number(r.completion_per_mtok) || 0,
+        currency:            (r.currency || 'USD').toUpperCase().slice(0, 5),
+        updated_by:          req.platformAdminId,
+        updated_at:          new Date().toISOString(),
+      })
+    }
+    const { error } = await fastify.supabase
+      .from('ai_price_table').upsert(payload, { onConflict: 'provider,model' })
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: { ok: true, count: payload.length } })
+  })
 }
