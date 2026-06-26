@@ -214,6 +214,15 @@ recorded `approval_actions`; balance/credit only at the final level; backward-
 compatible (no chain = legacy single-step). Admin UI distinguishes enforced
 (`ApprovalWorkflows`) vs advisory (`GovernanceMatrix`).
 
+| 2026-06-26 | P2.1 | `258d44e` | **delegation enforcement** — gate honours active `approval_delegations` (delegate stands in for a delegator who satisfies the level) |
+| 2026-06-26 | P2.2 | `73d2a5c` | **SLA auto-approve** — scanner auto-advances stale INTERMEDIATE levels (never auto-finalizes; final level always needs a human) |
+
+### P2 status
+- ✅ 2.1 delegation enforcement
+- ✅ 2.2 SLA auto-approve (intermediate-level)
+- ⬜ 2.3 threshold/amount routing (reimbursement/loan/requisition finance tier) — needs engine extension to those entities (migration)
+- ⬜ 2.4 payroll maker-checker + offer salary sign-off
+
 ### Engine is now LIVE (backward-compatible) for: leave, regularisation, overtime, comp-off.
 With **no chain configured** every path behaves exactly as before. When an admin
 configures a chain in `ApprovalWorkflows`, that workflow type now enforces it:
