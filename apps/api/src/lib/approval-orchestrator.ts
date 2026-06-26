@@ -44,6 +44,8 @@ const ENTITY_TO_WORKFLOW: Partial<Record<EntityType, WorkflowType>> = {
   leave_request:             'leave',
   attendance_correction:     'correction',
   attendance_regularisation: 'regularisation',
+  overtime_request:          'overtime',
+  comp_off_request:          'comp_off',
 }
 
 // ── Decision contract ────────────────────────────────────────────────────────────

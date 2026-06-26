@@ -39,6 +39,7 @@ import {
 } from '../../lib/manager-scope.js'
 import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
+import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -260,6 +261,28 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       })
     }
 
+    // Multi-level gate (engages only when a comp-off chain is configured). An
+    // intermediate approval advances a level and returns without crediting balance.
+    {
+      const gate = await gateApprove(fastify.supabase, {
+        tenantId: req.tenantId, entityType: 'comp_off_request', entityId: id,
+        actorId: req.userId, actorRole: req.userRole, targetEmployeeId: (co as any).employee_id,
+      })
+      if (gate.kind === 'error') {
+        const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+        return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+      }
+      if (gate.kind === 'advanced') {
+        await logAction(fastify.supabase, {
+          tenantId: req.tenantId, tableName: 'comp_off_requests', recordId: id,
+          action: 'UPDATE', performedBy: req.userId,
+          newData: { status: 'pending', approval_level: gate.nextLevel, total_levels: gate.totalLevels },
+        })
+        return reply.send({ data: { id, status: 'pending', advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
+      }
+      // gate.kind === 'finalize' → fall through to the credit logic below.
+    }
+
     // Segregation of duties — a user may not approve their own comp-off (F3).
     if (await isSelfApproval(fastify.supabase, req.tenantId, req.userId, (co as any).employee_id)) {
       return reply.code(403).send({
@@ -412,7 +435,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     const { data: co } = await fastify.supabase
       .from('comp_off_requests')
-      .select('id, status')
+      .select('id, status, employee_id')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -425,6 +448,20 @@ export default async function compOffRoute(fastify: FastifyInstance) {
         error:   'INVALID_STATE',
         message: `Request is already ${(co as any).status}`,
       })
+    }
+
+    // Multi-level gate — reject always finalizes but records + closes the instance
+    // when a comp-off chain exists.
+    {
+      const gate = await gateReject(fastify.supabase, {
+        tenantId: req.tenantId, entityType: 'comp_off_request', entityId: id,
+        actorId: req.userId, actorRole: req.userRole, targetEmployeeId: (co as any).employee_id,
+        comments: parsed.data.notes,
+      })
+      if (gate.kind === 'error') {
+        const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+        return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+      }
     }
 
     const now = new Date().toISOString()

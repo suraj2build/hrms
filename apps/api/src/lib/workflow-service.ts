@@ -20,8 +20,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
-export type WorkflowType   = 'leave' | 'correction' | 'regularisation'
-export type EntityType     = 'leave_request' | 'attendance_correction' | 'attendance_regularisation'
+export type WorkflowType   = 'leave' | 'correction' | 'regularisation' | 'overtime' | 'comp_off'
+export type EntityType     = 'leave_request' | 'attendance_correction' | 'attendance_regularisation' | 'overtime_request' | 'comp_off_request'
 export type ApprovalAction = 'approved' | 'rejected' | 'escalated' | 'auto_approved'
 
 export type WorkflowError =

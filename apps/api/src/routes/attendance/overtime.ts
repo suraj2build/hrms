@@ -31,11 +31,19 @@ import {
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { logAction } from '../../lib/audit-service.js'
+import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
 export default async function overtimeRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+
+  // Resolve the employee an OT request belongs to (for the multi-level gate).
+  async function otEmployeeId(req: any, id: string): Promise<string | null> {
+    const { data } = await fastify.supabase
+      .from('overtime_requests').select('employee_id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    return (data as { employee_id: string } | null)?.employee_id ?? null
+  }
 
   function requireAdmin(req: any, reply: any): boolean {
     if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
@@ -479,6 +487,28 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Multi-level gate (engages only when an overtime chain is configured).
+    const empId = await otEmployeeId(req, id)
+    if (empId) {
+      const gate = await gateApprove(fastify.supabase, {
+        tenantId: req.tenantId, entityType: 'overtime_request', entityId: id,
+        actorId: req.userId, actorRole: req.userRole, targetEmployeeId: empId,
+      })
+      if (gate.kind === 'error') {
+        const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+        return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+      }
+      if (gate.kind === 'advanced') {
+        await logAction(fastify.supabase, {
+          tenantId: req.tenantId, tableName: 'overtime_requests', recordId: id,
+          action: 'UPDATE', performedBy: req.userId,
+          newData: { status: 'pending', approval_level: gate.nextLevel, total_levels: gate.totalLevels },
+        })
+        return reply.send({ data: { id, status: 'pending', advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
+      }
+      // gate.kind === 'finalize' → fall through to the real OT finalize below.
+    }
+
     const result = await approveOtRequest(
       fastify.supabase,
       req.tenantId,
@@ -516,6 +546,21 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // Multi-level gate — reject always finalizes but records + closes the instance
+    // when an overtime chain exists.
+    const rejEmpId = await otEmployeeId(req, id)
+    if (rejEmpId) {
+      const gate = await gateReject(fastify.supabase, {
+        tenantId: req.tenantId, entityType: 'overtime_request', entityId: id,
+        actorId: req.userId, actorRole: req.userRole, targetEmployeeId: rejEmpId,
+        comments: parsed.data.rejection_reason,
+      })
+      if (gate.kind === 'error') {
+        const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+        return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+      }
     }
 
     const result = await rejectOtRequest(
