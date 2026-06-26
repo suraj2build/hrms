@@ -154,7 +154,15 @@ async function chatCompleteGemini(
     model: effectiveModel(config),
     ...(sysMsg ? { systemInstruction: { role: 'system', parts: [{ text: sysMsg.content as string }] } } : {}),
     ...(geminiTools ? { tools: geminiTools } : {}),
-    generationConfig: { temperature: opts.temperature ?? 0.3, maxOutputTokens: opts.maxTokens ?? 700 },
+    generationConfig: {
+      temperature: opts.temperature ?? 0.3,
+      maxOutputTokens: opts.maxTokens ?? 700,
+      // Thinking models (e.g. gemini-3.5-flash) attach a thought_signature to
+      // function calls. Our tool loop drops those thought parts when rebuilding
+      // the history, causing a 400 on the next hop. Disabling thinking when tools
+      // are active avoids the signature entirely without affecting answer quality.
+      ...(geminiTools ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+    } as any,
   })
 
   const result = await genModel.generateContent({ contents })
