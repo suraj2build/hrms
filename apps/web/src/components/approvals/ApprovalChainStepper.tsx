@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 export type ChainEntityType =
   | 'leave_request' | 'attendance_correction' | 'attendance_regularisation'
   | 'overtime_request' | 'comp_off_request'
+  | 'reimbursement_claim' | 'employee_loan' | 'advance_salary'
 
 interface ChainLevel {
   level: number; approver_type: string; specific_role: string | null; label: string

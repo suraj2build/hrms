@@ -24,6 +24,7 @@ import {
   GitMerge, ShieldAlert, Plus, Trash2, Pencil,
   Loader2, Check, X, ChevronDown, ChevronUp,
   Users, Clock, CalendarDays, Timer, Coffee, Info,
+  CreditCard, Wallet, Banknote,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -39,7 +40,7 @@ import { cn }            from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type WorkflowType   = 'leave' | 'correction' | 'regularisation' | 'overtime' | 'comp_off'
+type WorkflowType   = 'leave' | 'correction' | 'regularisation' | 'overtime' | 'comp_off' | 'reimbursement' | 'loan' | 'advance'
 type ApproverType   = 'direct_manager' | 'hr_admin' | 'super_admin' | 'specific_role'
 type InstanceStatus = 'pending' | 'approved' | 'rejected' | 'escalated' | 'auto_approved'
 
@@ -51,6 +52,7 @@ interface WorkflowConfig {
   specific_role:             string | null
   label:                     string
   auto_approve_after_hours:  number | null
+  min_amount:                number | null
   is_active:                 boolean
   created_at:                string
 }
@@ -82,6 +84,7 @@ interface EmptyForm {
   specific_role:             string
   label:                     string
   auto_approve_after_hours:  string
+  min_amount:                string
   is_active:                 boolean
 }
 
@@ -93,7 +96,13 @@ const WORKFLOW_TABS: { id: WorkflowType; label: string; icon: React.ComponentTyp
   { id: 'regularisation',  label: 'Regularisation', icon: Users        },
   { id: 'overtime',        label: 'Overtime',       icon: Timer        },
   { id: 'comp_off',        label: 'Comp-off',       icon: Coffee       },
+  { id: 'reimbursement',   label: 'Reimbursement',  icon: CreditCard   },
+  { id: 'loan',            label: 'Loan',           icon: Wallet       },
+  { id: 'advance',         label: 'Advance',        icon: Banknote     },
 ]
+
+// Workflow types that route by amount — show the min-amount threshold field.
+const AMOUNT_WORKFLOWS: WorkflowType[] = ['reimbursement', 'loan', 'advance']
 
 const APPROVER_TYPE_LABELS: Record<ApproverType, string> = {
   direct_manager: 'Direct Manager',
@@ -126,6 +135,7 @@ function emptyForm(): EmptyForm {
     specific_role:           '',
     label:                   '',
     auto_approve_after_hours: '',
+    min_amount:              '',
     is_active:               true,
   }
 }
@@ -144,11 +154,13 @@ function LevelForm({
   onSave,
   onCancel,
   saving,
+  showAmount,
 }: {
   initial:  EmptyForm
   onSave:   (form: EmptyForm) => void
   onCancel: () => void
   saving:   boolean
+  showAmount: boolean
 }) {
   const [form, setForm] = useState<EmptyForm>(initial)
 
@@ -226,6 +238,24 @@ function LevelForm({
           />
         </div>
 
+        {/* Min amount threshold (amount-routed workflows only) */}
+        {showAmount && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              Applies above (₹)
+              <span className="ml-1 text-[10px] text-muted-foreground/60">(blank = always)</span>
+            </label>
+            <Input
+              type="number"
+              min={0}
+              value={form.min_amount}
+              onChange={(e) => set('min_amount', e.target.value)}
+              placeholder="e.g. 10000"
+              className="h-8 text-xs"
+            />
+          </div>
+        )}
+
         {/* Active */}
         <div className="space-y-1 flex flex-col justify-end">
           <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -301,6 +331,7 @@ export function ApprovalWorkflows() {
         specific_role:            form.specific_role || null,
         label:                    form.label,
         auto_approve_after_hours: form.auto_approve_after_hours ? parseInt(form.auto_approve_after_hours, 10) : null,
+        min_amount:               form.min_amount.trim() ? Number(form.min_amount) : null,
         is_active:                form.is_active,
       }),
     onSuccess: () => {
@@ -342,6 +373,7 @@ export function ApprovalWorkflows() {
       specific_role:           cfg.specific_role ?? '',
       label:                   cfg.label,
       auto_approve_after_hours: cfg.auto_approve_after_hours ? String(cfg.auto_approve_after_hours) : '',
+      min_amount:              cfg.min_amount != null ? String(cfg.min_amount) : '',
       is_active:               cfg.is_active,
     })
     setShowAddForm(false)
@@ -430,6 +462,7 @@ export function ApprovalWorkflows() {
                       onSave={(form) => saveMutation.mutate(form)}
                       onCancel={() => setShowAddForm(false)}
                       saving={saveMutation.isPending}
+                      showAmount={AMOUNT_WORKFLOWS.includes(activeTab)}
                     />
                   </div>
                 )}
@@ -455,6 +488,7 @@ export function ApprovalWorkflows() {
                             onSave={(form) => saveMutation.mutate(form)}
                             onCancel={() => setEditId(null)}
                             saving={saveMutation.isPending}
+                            showAmount={AMOUNT_WORKFLOWS.includes(activeTab)}
                           />
                         ) : (
                           <div className={cn(
@@ -484,6 +518,9 @@ export function ApprovalWorkflows() {
                               </div>
                               <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
                                 {cfg.specific_role && <span>Role: {cfg.specific_role}</span>}
+                                {cfg.min_amount != null && (
+                                  <span>Above ₹{Number(cfg.min_amount).toLocaleString('en-IN')}</span>
+                                )}
                                 {cfg.auto_approve_after_hours && (
                                   <span>Auto-approve after {cfg.auto_approve_after_hours}h</span>
                                 )}

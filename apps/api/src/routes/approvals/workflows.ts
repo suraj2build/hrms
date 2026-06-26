@@ -23,9 +23,9 @@ import {
 const HR_ROLES    = ['super_admin', 'hr_admin']
 const ALLOW_ROLES = [...HR_ROLES, 'manager']
 
-// Workflow types the engine drives (must match the 053 enum + migration 313).
-const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off'] as const
-const ENTITY_TYPES   = ['leave_request', 'attendance_correction', 'attendance_regularisation', 'overtime_request', 'comp_off_request'] as const
+// Workflow types the engine drives (must match the 053 enum + migrations 313/314).
+const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off', 'reimbursement', 'loan', 'advance'] as const
+const ENTITY_TYPES   = ['leave_request', 'attendance_correction', 'attendance_regularisation', 'overtime_request', 'comp_off_request', 'reimbursement_claim', 'employee_loan', 'advance_salary'] as const
 
 export default async function workflowsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -44,7 +44,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
 
     let q = fastify.supabase
       .from('approval_workflow_config')
-      .select('id, workflow_type, level, approver_type, specific_role, label, auto_approve_after_hours, is_active, created_at')
+      .select('id, workflow_type, level, approver_type, specific_role, label, auto_approve_after_hours, min_amount, is_active, created_at')
       .eq('tenant_id', req.tenantId)
       .order('workflow_type')
       .order('level')
@@ -69,6 +69,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
       specific_role:            z.string().max(50).optional(),
       label:                    z.string().max(100).default(''),
       auto_approve_after_hours: z.number().int().min(1).optional(),
+      min_amount:               z.number().min(0).nullable().optional(),
       is_active:                z.boolean().default(true),
     })
 

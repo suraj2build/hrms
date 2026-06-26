@@ -20,8 +20,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
-export type WorkflowType   = 'leave' | 'correction' | 'regularisation' | 'overtime' | 'comp_off'
-export type EntityType     = 'leave_request' | 'attendance_correction' | 'attendance_regularisation' | 'overtime_request' | 'comp_off_request'
+export type WorkflowType   = 'leave' | 'correction' | 'regularisation' | 'overtime' | 'comp_off' | 'reimbursement' | 'loan' | 'advance'
+export type EntityType     = 'leave_request' | 'attendance_correction' | 'attendance_regularisation' | 'overtime_request' | 'comp_off_request' | 'reimbursement_claim' | 'employee_loan' | 'advance_salary'
 export type ApprovalAction = 'approved' | 'rejected' | 'escalated' | 'auto_approved'
 
 export type WorkflowError =
@@ -66,17 +66,23 @@ export async function createWorkflowInstance(
   entityType:     EntityType,
   entityId:       string,
   submittedBy:    string,
+  totalLevelsOverride?: number,
 ): Promise<WorkflowResult<WorkflowInstance>> {
 
-  // Count configured levels for this workflow type
-  const { count: levelCount } = await supabase
-    .from('approval_workflow_config')
-    .select('id', { count: 'exact', head: true })
-    .eq('tenant_id', tenantId)
-    .eq('workflow_type', workflowType)
-    .eq('is_active', true)
-
-  const totalLevels = (levelCount ?? 0) > 0 ? (levelCount as number) : 1
+  let totalLevels: number
+  if (typeof totalLevelsOverride === 'number') {
+    // Amount-aware caller (threshold routing) computed the applicable level count.
+    totalLevels = Math.max(1, totalLevelsOverride)
+  } else {
+    // Count configured levels for this workflow type.
+    const { count: levelCount } = await supabase
+      .from('approval_workflow_config')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('workflow_type', workflowType)
+      .eq('is_active', true)
+    totalLevels = (levelCount ?? 0) > 0 ? (levelCount as number) : 1
+  }
 
   const { data, error } = await supabase
     .from('approval_instances')
@@ -268,7 +274,7 @@ export async function getWorkflowConfig(
 ) {
   const { data } = await supabase
     .from('approval_workflow_config')
-    .select('id, level, approver_type, specific_role, label, auto_approve_after_hours, is_active')
+    .select('id, level, approver_type, specific_role, label, auto_approve_after_hours, min_amount, is_active')
     .eq('tenant_id', tenantId)
     .eq('workflow_type', workflowType)
     .order('level', { ascending: true })
@@ -283,6 +289,9 @@ export const ENTITY_WORKFLOW_MAP: Record<EntityType, WorkflowType> = {
   attendance_regularisation: 'regularisation',
   overtime_request:          'overtime',
   comp_off_request:          'comp_off',
+  reimbursement_claim:       'reimbursement',
+  employee_loan:             'loan',
+  advance_salary:            'advance',
 }
 
 export interface ChainState {

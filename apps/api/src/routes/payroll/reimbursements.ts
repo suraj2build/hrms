@@ -6,14 +6,17 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
+import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
 export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
+  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
+
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!isHr(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -554,7 +557,10 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/reimbursements/claims/:id/approve ───────────────────────────
-  fastify.post('/claims/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+  // Auth is gate-driven: with NO reimbursement chain configured this stays HR-only
+  // (legacy). With a chain, the per-level gate authorises each approver (e.g. L1
+  // manager → L2 finance above a ₹ threshold via min_amount).
+  fastify.post('/claims/:id/approve', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const schema = z.object({
@@ -569,7 +575,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     // Fetch current claim to enforce status guard — prevents double-approve overwriting reviewer metadata
     const { data: existing, error: fetchErr } = await fastify.supabase
       .from('reimbursement_claims')
-      .select('id, status, employee_id')
+      .select('id, status, employee_id, claimed_amount')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
@@ -582,6 +588,31 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
         error:   'INVALID_STATUS',
         message: `Only submitted claims can be approved (current status: '${(existing as any).status}')`,
       })
+    }
+
+    // Multi-level gate (threshold routing by claimed amount).
+    const gate = await gateApprove(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'reimbursement_claim', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (existing as any).employee_id,
+      amount: Number((existing as any).claimed_amount),
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'advanced') {
+      await logAction(fastify.supabase, {
+        tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id,
+        action: 'UPDATE', performedBy: req.userId,
+        newData: { status: 'submitted', approval_level: gate.nextLevel, total_levels: gate.totalLevels },
+      })
+      return reply.send({ data: { id, status: 'submitted', advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
+    }
+    // gate.kind === 'finalize' — when no chain authorised the actor, preserve the
+    // legacy HR-only contract.
+    if (!gate.authorized && !isHr(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const now = new Date().toISOString()
@@ -617,7 +648,8 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/reimbursements/claims/:id/reject ────────────────────────────
-  fastify.post('/claims/:id/reject', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+  // Gate-driven auth (see approve). No chain => HR-only (legacy).
+  fastify.post('/claims/:id/reject', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const schema = z.object({
@@ -632,7 +664,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     // Fetch current claim to enforce status guard — prevents double-reject / rejecting already-approved claims
     const { data: existing, error: fetchErr } = await fastify.supabase
       .from('reimbursement_claims')
-      .select('id, status, employee_id')
+      .select('id, status, employee_id, claimed_amount')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
@@ -645,6 +677,23 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
         error:   'INVALID_STATUS',
         message: `Only submitted claims can be rejected (current status: '${(existing as any).status}')`,
       })
+    }
+
+    // Multi-level gate — reject always finalizes; records + closes the instance when
+    // a chain exists. No chain => preserve HR-only.
+    const gate = await gateReject(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'reimbursement_claim', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (existing as any).employee_id,
+      amount: Number((existing as any).claimed_amount),
+      comments: parsed.data.rejection_reason,
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'finalize' && !gate.authorized && !isHr(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const now = new Date().toISOString()

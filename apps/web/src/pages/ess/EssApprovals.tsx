@@ -343,6 +343,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
                 </span>
               }
               meta={`${(() => { if (!r.claim_month) return '—'; const d=new Date(r.claim_month.slice(0,7)+'-01T12:00:00Z'); const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(d.getTime())?'—':`${M[d.getUTCMonth()]}-${d.getUTCFullYear()}` })()} · ${fmtDatetime(r.created_at)}`}
+              chain={<ApprovalChainStepper entityType="reimbursement_claim" entityId={r.id} />}
               right={
                 r.status === 'draft' ? (
                   <Link to="/ess/reimbursements">

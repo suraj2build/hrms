@@ -58,6 +58,7 @@ export interface GateInput {
   actorRole:        string        // req.userRole
   targetEmployeeId: string        // employees.id the request belongs to
   comments?:        string | null
+  amount?:          number        // entity amount (₹) — drives min_amount level filtering
 }
 
 interface ConfigLevel {
@@ -67,7 +68,20 @@ interface ConfigLevel {
   specific_role:            string | null
   label:                    string
   auto_approve_after_hours: number | null
+  min_amount:               number | null
   is_active:                boolean
+}
+
+/**
+ * Levels that apply to an instance of this amount — a level with min_amount set is
+ * only included when amount >= min_amount. Sorted by level. With no amount (time-off
+ * entities) every level applies. This is what makes a Finance tier kick in only above
+ * a configured ₹ threshold, with no amount hardcoded in code.
+ */
+function applicableLevels(config: ConfigLevel[], amount: number | undefined): ConfigLevel[] {
+  return config
+    .filter(c => c.min_amount == null || (amount != null && amount >= Number(c.min_amount)))
+    .sort((a, b) => a.level - b.level)
 }
 
 // ── Per-level approver resolution ────────────────────────────────────────────────
@@ -204,6 +218,7 @@ async function getOrCreateInstance(
   entityType:  EntityType,
   entityId:    string,
   targetEmployeeId: string,
+  totalLevels: number,
 ) {
   const existing = await getWorkflowInstance(supabase, tenantId, entityType, entityId)
   if (existing) return existing
@@ -222,7 +237,7 @@ async function getOrCreateInstance(
   if (!submittedBy) return null  // can't satisfy NOT NULL — treat as no-instance (legacy)
 
   const created = await createWorkflowInstance(
-    supabase, tenantId, workflowType, entityType, entityId, submittedBy,
+    supabase, tenantId, workflowType, entityType, entityId, submittedBy, totalLevels,
   )
   if (created.ok) return created.value
 
@@ -284,8 +299,13 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
   // No chain configured → legacy single-step (caller runs its own validateApprover).
   if (config.length === 0) return { kind: 'finalize', authorized: false }
 
+  // Only the levels that apply to this amount form the chain (threshold routing).
+  const applicable = applicableLevels(config, input.amount)
+  if (applicable.length === 0) return { kind: 'finalize', authorized: false }  // amount below every level → legacy
+
   const instance = await getOrCreateInstance(
     supabase, input.tenantId, workflowType, input.entityType, input.entityId, input.targetEmployeeId,
+    applicable.length,
   )
   if (!instance) return { kind: 'finalize', authorized: false }  // couldn't engage engine → legacy
 
@@ -293,9 +313,8 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
     return { kind: 'error', error: { type: 'CONFLICT', message: 'This request is already closed' } }
   }
 
-  // Resolve the config row for the current level.
-  const cfg = config.find(c => c.level === instance.current_level)
-    ?? config.slice().sort((a, b) => b.level - a.level)[0]  // safety: highest configured level
+  // current_level indexes into the applicable chain (1-based).
+  const cfg = applicable[instance.current_level - 1] ?? applicable[applicable.length - 1]
 
   const auth = await actorSatisfiesLevel(
     supabase, input.tenantId, cfg, input.actorId, input.actorRole, input.targetEmployeeId,
@@ -337,8 +356,12 @@ export async function gateReject(supabase: SupabaseClient, input: GateInput): Pr
     .filter((c: any) => c.is_active) as ConfigLevel[]
   if (config.length === 0) return { kind: 'finalize', authorized: false }
 
+  const applicable = applicableLevels(config, input.amount)
+  if (applicable.length === 0) return { kind: 'finalize', authorized: false }
+
   const instance = await getOrCreateInstance(
     supabase, input.tenantId, workflowType, input.entityType, input.entityId, input.targetEmployeeId,
+    applicable.length,
   )
   if (!instance) return { kind: 'finalize', authorized: false }
 
@@ -346,8 +369,7 @@ export async function gateReject(supabase: SupabaseClient, input: GateInput): Pr
     return { kind: 'error', error: { type: 'CONFLICT', message: 'This request is already closed' } }
   }
 
-  const cfg = config.find(c => c.level === instance.current_level)
-    ?? config.slice().sort((a, b) => b.level - a.level)[0]
+  const cfg = applicable[instance.current_level - 1] ?? applicable[applicable.length - 1]
 
   const auth = await actorSatisfiesLevel(
     supabase, input.tenantId, cfg, input.actorId, input.actorRole, input.targetEmployeeId,
