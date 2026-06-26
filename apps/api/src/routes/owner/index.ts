@@ -1349,14 +1349,22 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     }
 
     const rows = (usage ?? []) as any[]
-    const byTenant: Record<string, { tenant_id: string; calls: number; prompt: number; completion: number; total: number; managed_cost: number; total_cost: number }> = {}
+    const byTenant: Record<string, { tenant_id: string; tenant_name: string | null; calls: number; prompt: number; completion: number; total_tokens: number; managed_cost: number; total_cost: number }> = {}
     for (const r of rows) {
-      const t = byTenant[r.tenant_id] ??= { tenant_id: r.tenant_id, calls: 0, prompt: 0, completion: 0, total: 0, managed_cost: 0, total_cost: 0 }
+      const t = byTenant[r.tenant_id] ??= { tenant_id: r.tenant_id, tenant_name: null, calls: 0, prompt: 0, completion: 0, total_tokens: 0, managed_cost: 0, total_cost: 0 }
       const cost = costOf(r.provider, r.model, r.prompt_tokens ?? 0, r.completion_tokens ?? 0)
-      t.calls++; t.prompt += r.prompt_tokens ?? 0; t.completion += r.completion_tokens ?? 0; t.total += r.total_tokens ?? 0
+      t.calls++; t.prompt += r.prompt_tokens ?? 0; t.completion += r.completion_tokens ?? 0; t.total_tokens += r.total_tokens ?? 0
       t.total_cost += cost
       if (r.source === 'managed') t.managed_cost += cost  // what the provider actually owes us for
     }
+
+    // Attach company names so the dashboard shows names, not UUIDs.
+    const ids = Object.keys(byTenant)
+    if (ids.length) {
+      const { data: names } = await fastify.supabase.from('tenants').select('id, name').in('id', ids)
+      for (const n of (names ?? []) as any[]) if (byTenant[n.id]) byTenant[n.id]!.tenant_name = n.name ?? null
+    }
+
     const tenants = Object.values(byTenant).sort((a, b) => b.total_cost - a.total_cost)
       .map(t => ({ ...t, managed_cost: Number(t.managed_cost.toFixed(4)), total_cost: Number(t.total_cost.toFixed(4)) }))
 
@@ -1367,7 +1375,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
         tenants,
         totals: {
           calls:        rows.length,
-          total_tokens: tenants.reduce((s, t) => s + t.total, 0),
+          total_tokens: tenants.reduce((s, t) => s + t.total_tokens, 0),
           managed_cost: Number(tenants.reduce((s, t) => s + t.managed_cost, 0).toFixed(2)),
           total_cost:   Number(tenants.reduce((s, t) => s + t.total_cost, 0).toFixed(2)),
         },
@@ -1382,7 +1390,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, provider, model, prompt_per_mtok, completion_per_mtok, currency, updated_at')
       .order('provider', { ascending: true }).order('model', { ascending: true })
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: { rows: data ?? [] } })
   })
 
   // ── PUT /owner/ai-pricing — upsert price rows ──────────────────────────────────

@@ -83,6 +83,31 @@ only the frontend that calls them. All require the platform-admin auth header.
 | `GET  /owner/ai-pricing` | Read price table | rows of `{provider, model, prompt_per_mtok, completion_per_mtok, currency}` |
 | `PUT  /owner/ai-pricing` | Upsert prices | `{ rows: [...] }`; `model = '*'` is the provider fallback rate |
 
+### 1c. Exact response envelopes (confirmed against the built handlers)
+
+```jsonc
+// GET /owner/ai-config
+{ "data": { "chain": [ { "provider":"groq", "model":"…|null", "enabled":true,
+                         "has_key":true, "key_hint":"gsk_••••AB12" } ],
+            "updated_at":"…|null" } }
+
+// GET /owner/ai-usage?days=30&tenant_id=…
+{ "data": { "days":30, "currency":"USD",
+            "tenants":[ { "tenant_id":"…", "tenant_name":"Acme Pvt Ltd",
+                          "calls":12, "prompt":3400, "completion":900,
+                          "total_tokens":4300, "managed_cost":0.0031, "total_cost":0.0031 } ],
+            "totals":{ "calls":12, "total_tokens":4300,
+                       "managed_cost":0.00, "total_cost":0.00 } } }
+
+// GET /owner/ai-pricing
+{ "data": { "rows":[ { "id":"…", "provider":"groq", "model":"llama-3.3-70b-versatile",
+                       "prompt_per_mtok":0.59, "completion_per_mtok":0.79,
+                       "currency":"USD", "updated_at":"…" } ] } }
+
+// PUT /owner/ai-config | PUT /owner/ai-pricing | PATCH /owner/tenants/:id/ai-mode
+// → { "data": { "ok": true, ... } }  (ai-mode returns { data: { id, ai_mode } })
+```
+
 ## 2. What to build in the owner portal (frontend only)
 
 ### 2a. Master keys screen (Settings → AI)
