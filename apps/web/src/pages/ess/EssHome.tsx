@@ -25,6 +25,7 @@ import { QuickActions, type Capability } from '@/components/experience/QuickActi
 import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
+import { resolveGreeting, type DayContext } from '@/components/experience/resolveGreeting'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState }   from '@/components/layout/ErrorState'
 
@@ -32,6 +33,7 @@ import { ErrorState }   from '@/components/layout/ErrorState'
 
 interface HomePayload {
   profile: { name: string | null; employee_code: string | null; joining_date: string | null; tenure_months: number; designation: string | null; department: string | null; grade: string | null; manager: string | null }
+  context?: DayContext
   today:   { check_in: string | null; check_out: string | null; total_hours: string | null; status: string }
   kpis:    { leave_days_remaining: number; net_pay: number | null; open_actions: number; pending_approvals: number }
   leave_balance: { name: string; balance: number; used: number }[]
@@ -62,17 +64,6 @@ function timeAgo(iso: string) {
   if (h < 24) return `${h}h ago`
   if (d === 1) return 'yesterday'
   return fmtDate(iso)
-}
-function greeting() {
-  const h = new Date().getHours()
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
-}
-function dayContext() {
-  const dow = new Date().getDay()
-  if (dow === 1) return 'a fresh week ahead'
-  if (dow === 5) return 'almost the weekend'
-  if (dow === 0 || dow === 6) return 'enjoy the weekend'
-  return 'hope it’s going well'
 }
 function lowerFirst(s: string) { return s.charAt(0).toLowerCase() + s.slice(1) }
 
@@ -121,7 +112,19 @@ export function EssHome() {
   const events  = activityQ.data?.events ?? []
   const today   = data?.today
   const kpis    = data?.kpis
-  const firstName = (data?.profile?.name ?? auth?.full_name ?? 'there').split(' ')[0]
+  const fullName  = data?.profile?.name ?? auth?.full_name ?? 'there'
+
+  // Dynamic, contextual greeting (EXPERIENCE_HOME_DESIGN.md §3.A) — context
+  // (birthday / first day / payday / holiday) beats time-of-day.
+  const ctx = data?.context
+  const greet = resolveGreeting(fullName, ctx, new Date())
+
+  // Memory touch (§3.D) — "earned, then shown": only render when genuinely true.
+  // Phase 1 derives from data already on the payload; richer habitual-time and
+  // pair-kudos lines arrive with /ess/progress + /ess/reflection.
+  const memoryTouch = ctx?.is_back_from_leave
+    ? null  // already carried by the greeting sub-line, don't repeat
+    : null
 
   // ── Ambient intelligence: one sentence per block, from the employee's own data ──
   const dow = new Date().getDay()
@@ -190,10 +193,11 @@ export function EssHome() {
       <Card className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{greeting()}, {firstName}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{greet.headline}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {dayContext()}{data?.profile?.designation ? ` · ${data.profile.designation}` : ''}
+              {greet.subline}{data?.profile?.designation ? ` · ${data.profile.designation}` : ''}
             </p>
+            {memoryTouch && <AmbientLine className="mt-2 text-xs">{memoryTouch}</AmbientLine>}
           </div>
           {today?.check_in ? (
             <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">

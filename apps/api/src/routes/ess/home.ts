@@ -92,6 +92,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
       pendingLeaveCnt,
       pendingRegCnt,
       colleaguesRes,
+      recentLeaveEndedRes,
     ] = await Promise.all([
       // 1. Employee basic record
       employeeId
@@ -124,10 +125,10 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
             .order('balance', { ascending: false }).limit(6)
         : Promise.resolve({ data: [] }),
 
-      // 5. Latest paid payslip
+      // 5. Latest paid payslip (updated_at → detect "salary released today")
       employeeId
         ? fastify.supabase.from('payroll_slips')
-            .select('net_pay, month, status')
+            .select('net_pay, month, status, updated_at')
             .eq('employee_id', employeeId).eq('tenant_id', tenantId)
             .order('month', { ascending: false }).limit(1)
         : Promise.resolve({ data: [] }),
@@ -177,6 +178,15 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId).eq('status', 'active')
         .not('id', 'eq', employeeId ?? FAKE_EMP_ID)
         .limit(500),
+
+      // 12. Most recent approved leave that ended yesterday → "welcome back"
+      employeeId
+        ? fastify.supabase.from('leave_requests')
+            .select('to_date')
+            .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+            .in('status', ['approved', 'APPROVED'])
+            .eq('to_date', offsetISO(-1)).limit(1)
+        : Promise.resolve({ data: [] }),
     ])
 
     // ── Profile ──────────────────────────────────────────────────────────────
@@ -292,8 +302,41 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
       .filter((c: any) => c.days_until <= 7 && c.years > 0)
       .sort((a: any, b: any) => a.days_until - b.days_until)
 
+    // ── Context — the day's shape, for the greeting selector + adaptation ─────
+    // One small object the client reads to choose greeting copy and to reshape
+    // movements (busy / salary / birthday / holiday / new-joiner / manager)
+    // WITHOUT changing Home's structure (EXPERIENCE_HOME_DESIGN.md §5).
+    const todayMMDD = today.slice(5)
+    const ownDob    = emp?.dob          as string | null
+    const ownJoin   = emp?.joining_date as string | null
+    const daysSinceJoin = ownJoin
+      ? Math.round((new Date(today + 'T12:00:00Z').getTime() - new Date(ownJoin + 'T12:00:00Z').getTime()) / 86_400_000)
+      : null
+    const nextHoliday  = upcoming_holidays[0] ?? null
+    const releasedToday = !!latestSlip
+      && String(latestSlip.status ?? '').toLowerCase() === 'finalized'
+      && typeof latestSlip.updated_at === 'string'
+      && (latestSlip.updated_at as string).slice(0, 10) === today
+    const backFromLeave = ((recentLeaveEndedRes as any).data ?? []).length > 0
+
+    const context = {
+      is_manager:           isManager,
+      is_first_day:         ownJoin === today,
+      is_new_joiner:        daysSinceJoin != null && daysSinceJoin >= 0 && daysSinceJoin <= 7,
+      is_birthday:          !!ownDob  && ownDob.slice(5)  === todayMMDD,
+      is_work_anniversary:  !!ownJoin && ownJoin.slice(5) === todayMMDD && ownJoin !== today,
+      anniversary_years:    ownJoin && ownJoin.slice(5) === todayMMDD ? new Date().getFullYear() - Number(ownJoin.slice(0, 4)) : null,
+      is_back_from_leave:   backFromLeave,
+      is_salary_day:        releasedToday,
+      holiday_today:        nextHoliday?.days_until === 0,
+      holiday_tomorrow:     nextHoliday?.days_until === 1,
+      next_holiday_name:    nextHoliday?.name ?? null,
+      next_holiday_days:    nextHoliday?.days_until ?? null,
+    }
+
     return reply.send({
       profile,
+      context,
       today: today_snapshot,
       kpis: {
         leave_days_remaining:  Math.round(totalLeave * 10) / 10,
