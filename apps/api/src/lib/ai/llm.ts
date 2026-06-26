@@ -101,7 +101,7 @@ export class AssistantNotConfiguredError extends Error {
 
 // ── Gemini native implementation ───────────────────────────────────────────────
 
-async function chatCompleteGemini(
+async function chatCompleteGeminiInner(
   config: AssistantConfig,
   opts: { messages: ChatMessage[]; tools?: ToolDef[]; temperature?: number; maxTokens?: number },
 ): Promise<ChatResult> {
@@ -157,11 +157,6 @@ async function chatCompleteGemini(
     generationConfig: {
       temperature: opts.temperature ?? 0.3,
       maxOutputTokens: opts.maxTokens ?? 700,
-      // Thinking models (e.g. gemini-3.5-flash) attach a thought_signature to
-      // function calls. Our tool loop drops those thought parts when rebuilding
-      // the history, causing a 400 on the next hop. Disabling thinking when tools
-      // are active avoids the signature entirely without affecting answer quality.
-      ...(geminiTools ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     } as any,
   })
 
@@ -186,6 +181,27 @@ async function chatCompleteGemini(
   }
 
   return { content: textContent, toolCalls }
+}
+
+/**
+ * Wrapper: if a thinking model returns a thought_signature alongside a function
+ * call, our tool loop strips those thought parts when rebuilding the history,
+ * causing the next hop to fail with 400. Catch that specific error and retry
+ * without tools so Gemini answers from the pre-built context instead — no loop,
+ * no missing signature.
+ */
+async function chatCompleteGemini(
+  config: AssistantConfig,
+  opts: { messages: ChatMessage[]; tools?: ToolDef[]; temperature?: number; maxTokens?: number },
+): Promise<ChatResult> {
+  try {
+    return await chatCompleteGeminiInner(config, opts)
+  } catch (e: any) {
+    if (opts.tools?.length && e?.message?.includes('thought_signature')) {
+      return chatCompleteGeminiInner(config, { ...opts, tools: undefined })
+    }
+    throw e
+  }
 }
 
 // ── OpenAI-SDK implementation (Groq + OpenAI) ─────────────────────────────────
