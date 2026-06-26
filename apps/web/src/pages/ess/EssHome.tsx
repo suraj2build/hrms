@@ -22,6 +22,9 @@ import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
 import { SignalCard, type Signal } from '@/components/experience/SignalCard'
+import { ActivityItem, type ActivityEvent } from '@/components/experience/ActivityItem'
+import { QuickActions, type Capability } from '@/components/experience/QuickActions'
+import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState }   from '@/components/layout/ErrorState'
 
@@ -161,19 +164,42 @@ export function EssHome() {
   })
   const signals = signalsQ.data?.signals ?? []
 
+  // Experience Core: the "what happened" layer (today's events, ranked server-side).
+  const activityQ = useQuery<{ events: ActivityEvent[] }>({
+    queryKey: ['ess-activity'],
+    queryFn:  () => api.get('/ess/activity'),
+    staleTime: 60_000,
+  })
+  const events = activityQ.data?.events ?? []
+
   const firstName = (data?.profile?.name ?? auth?.full_name ?? 'there').split(' ')[0]
   const today     = data?.today
   const kpis      = data?.kpis
   const isManager = ['manager', 'hr_admin', 'super_admin'].includes(auth?.role ?? '')
 
-  // Quick action shortcuts
-  const QUICK = [
-    { label: 'Apply Leave',    icon: CalendarCheck, to: `${base}/leave/balance` },
-    { label: 'Regularize',     icon: ClipboardEdit, to: `${base}/attendance`     },
-    { label: 'Payslip',        icon: Receipt,       to: `${base}/compensation`   },
-    { label: 'Reimbursement',  icon: CreditCard,    to: `${base}/reimbursements` },
-    { label: 'Helpdesk',       icon: LifeBuoy,      to: `${base}/issues`         },
-  ]
+  // "What should I do next" — capabilities, not a hard-coded menu. Context-aware:
+  // Regularize is promoted when the signals layer flags a missing check-in.
+  const hasNoCheckIn = signals.some((s) => s.id === 'no_check_in')
+  const capabilities: Capability[] = [
+    { id: 'flowdesk',  label: 'FlowDesk',      icon: Inbox,        href: '/flowdesk',        badge: kpis?.open_actions, primary: !hasNoCheckIn },
+    { id: 'regularize',label: 'Regularize',    icon: ClipboardEdit, href: '/attendance',      primary: hasNoCheckIn },
+    { id: 'leave',     label: 'Apply Leave',   icon: CalendarCheck, href: '/leave/balance' },
+    { id: 'payslip',   label: 'Payslip',       icon: Receipt,       href: '/compensation' },
+    { id: 'reimburse', label: 'Reimbursement', icon: CreditCard,    href: '/reimbursements' },
+    { id: 'helpdesk',  label: 'Helpdesk',      icon: LifeBuoy,      href: '/issues' },
+  ].sort((a, b) => Number(b.primary ?? false) - Number(a.primary ?? false))
+
+  // Celebrations — composed from existing home data (peers to celebrate today/tomorrow).
+  const celebrations = [
+    ...((data?.birthdays ?? []).filter((b) => b.days_until <= 1).map((b) => ({
+      id: `bd_${b.name}`, kind: 'birthday' as const, title: `${b.name}'s birthday`,
+      subtitle: b.days_until === 0 ? 'Today' : 'Tomorrow',
+    }))),
+    ...((data?.anniversaries ?? []).filter((a) => a.days_until <= 1).map((a) => ({
+      id: `an_${a.name}`, kind: 'anniversary' as const, title: `${a.name} · ${a.years}y anniversary`,
+      subtitle: a.days_until === 0 ? 'Today' : 'Tomorrow',
+    }))),
+  ].slice(0, 4)
 
   if (isLoading) {
     return (
@@ -262,27 +288,8 @@ export function EssHome() {
         </div>
       )}
 
-      {/* ── Quick Actions ── */}
-      <div className="flex flex-wrap gap-2">
-        {QUICK.map((q) => {
-          const Icon = q.icon
-          return (
-            <button key={q.label} onClick={() => navigate(q.to)}
-              className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm hover:border-primary/40 hover:bg-accent/40 transition-colors">
-              <Icon className="h-4 w-4 text-primary" />{q.label}
-            </button>
-          )
-        })}
-        <button onClick={() => navigate(`${base}/flowdesk`)}
-          className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors">
-          <Inbox className="h-4 w-4" />FlowDesk
-          {(kpis?.open_actions ?? 0) > 0 && (
-            <span className="ml-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-              {kpis!.open_actions}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* ── Quick Actions (capability-driven) ── */}
+      <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
 
       {/* ── KPI strip ── */}
       <div className="grid grid-cols-3 gap-3">
@@ -315,6 +322,21 @@ export function EssHome() {
 
         {/* Community feed teaser — wider column */}
         <div className="lg:col-span-3 space-y-5">
+
+          {/* What happened today (Experience Core activity) */}
+          <Card className="p-5">
+            <SectionTitle icon={Clock} label="What happened today" />
+            {activityQ.isLoading ? (
+              <LoadingState rows={3} compact />
+            ) : events.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">Nothing yet today — your activity will show up here.</p>
+            ) : (
+              <div className="space-y-3.5">
+                {events.map((e) => <ActivityItem key={e.id} event={e} />)}
+              </div>
+            )}
+          </Card>
+
           <Card className="p-5">
             <SectionTitle icon={Megaphone} label="Community" action="View all" onAction={() => navigate(`${base}/community`)} />
             {(data?.feed_teaser ?? []).length === 0 ? (
@@ -360,8 +382,23 @@ export function EssHome() {
           )}
         </div>
 
-        {/* Right column: Recognition + Holidays */}
+        {/* Right column: Celebrations + Recognition + Holidays */}
         <div className="lg:col-span-2 space-y-5">
+
+          {/* Celebrations — composed from existing data, premium & subtle */}
+          {celebrations.length > 0 && (
+            <Card className="p-5">
+              <SectionTitle icon={PartyPopper} label="Celebrations" />
+              <div className="space-y-2.5">
+                {celebrations.map((c) => (
+                  <CelebrationCard
+                    key={c.id} kind={c.kind} title={c.title} subtitle={c.subtitle}
+                    action={{ label: 'Wish', onClick: () => navigate(`${base}/community`) }}
+                  />
+                ))}
+              </div>
+            </Card>
+          )}
 
           <Card className="p-5">
             <SectionTitle icon={Award} label="Recognition" action="View all" onAction={() => navigate(`${base}/recognition`)} />
