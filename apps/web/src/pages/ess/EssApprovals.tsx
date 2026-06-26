@@ -27,6 +27,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
+import { ApprovalChainStepper } from '@/components/approvals/ApprovalChainStepper'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,12 +135,13 @@ function StatusChip({ status }: { status: string }) {
 // ── Row component ─────────────────────────────────────────────────────────────
 
 function PendingRow({
-  left, right, meta, status,
+  left, right, meta, status, chain,
 }: {
   left:   React.ReactNode
   right?: React.ReactNode
   meta:   string
   status: string
+  chain?: React.ReactNode
 }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between py-2 border-b border-border/40 last:border-0 gap-2 sm:gap-3">
@@ -149,6 +151,7 @@ function PendingRow({
           <StatusChip status={status} />
         </div>
         <p className="text-[10px] text-muted-foreground mt-0.5">{meta}</p>
+        {chain && <div className="mt-1.5">{chain}</div>}
       </div>
       {right && <div className="flex-shrink-0 w-full sm:w-auto">{right}</div>}
     </div>
@@ -281,6 +284,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
                 </span>
               }
               meta={`Submitted ${fmtDatetime(r.created_at)}${r.reason ? ` · "${r.reason}"` : ''}`}
+              chain={<ApprovalChainStepper entityType="leave_request" entityId={r.id} />}
             />
           ))}
         </div>
@@ -312,6 +316,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
                 </span>
               }
               meta={`${(r.reason ?? '').slice(0, 60)}${(r.reason ?? '').length > 60 ? '…' : ''} · ${fmtDatetime(r.created_at)}`}
+              chain={<ApprovalChainStepper entityType="attendance_regularisation" entityId={r.id} />}
             />
           ))}
         </div>
@@ -372,6 +377,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
                 </span>
               }
               meta={`${r.days_to_credit === 0.5 ? 'Half day' : `${r.days_to_credit} day`} · ${fmtDatetime(r.created_at)}`}
+              chain={<ApprovalChainStepper entityType="comp_off_request" entityId={r.id} />}
             />
           ))}
         </div>
