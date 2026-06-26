@@ -201,4 +201,16 @@ for tenants with no config.
 | Date | Slice | Commit | Notes |
 |---|---|---|---|
 | 2026-06-26 | P0 security | `24c0dca` | 6 verified bugs closed (pre-joinee guard, bulk-leave via service, comp self-approve, OT/comp-off reject reason, counts fix) |
-| — | P1.1 | _pending_ | orchestrator + leave |
+| 2026-06-26 | Plan | `8846b15` | this document |
+| 2026-06-26 | P1.1 + P1.2 | `7c2c85e` | `approval-orchestrator.ts` (gate + per-level resolver) wired into **leave** approve/reject |
+| 2026-06-26 | P1.3 | `b9373c3` | wired **regularisation** approve/reject (+ route side-effects guarded on final status) |
+| 2026-06-26 | P1.4 | `d5deabe` | migration 313 extends enums; wired **overtime** + **comp-off** |
+| — | P1.5 | _next_ | inbox chain/level read surface |
+| — | P1.6 | _next_ | reconcile config UIs |
+
+### Engine is now LIVE (backward-compatible) for: leave, regularisation, overtime, comp-off.
+With **no chain configured** every path behaves exactly as before. When an admin
+configures a chain in `ApprovalWorkflows`, that workflow type now enforces it:
+per-level approver, recorded `approval_actions`, balance/credit only at the final level.
+
+**Migrations to run:** `313_approval_engine_overtime_compoff.sql`.
