@@ -1,11 +1,13 @@
--- Migration 320: force PostgREST to reload its schema cache.
+-- Migration 320: idempotent schema-cache reload.
 --
--- Migrations 318 (fallback_* columns) and 319 (providers_json) added new
--- columns to ai_assistant_config. PostgREST caches the schema at startup and
--- only sees new columns after a reload. Without this, upserts to those columns
--- fail with "Could not find column in schema cache" even though the DB has them.
---
--- NOTIFY pgrst, 'reload schema' triggers an immediate cache refresh so writes
--- to providers_json and fallback_* work as soon as this migration runs.
+-- Ensures all columns added in migrations 318 and 319 exist and forces
+-- PostgREST to reload its schema cache. Safe to run multiple times.
+
+ALTER TABLE ai_assistant_config
+  ADD COLUMN IF NOT EXISTS fallback_provider TEXT
+    CHECK (fallback_provider IS NULL OR fallback_provider IN ('groq', 'openai', 'gemini')),
+  ADD COLUMN IF NOT EXISTS fallback_api_key  TEXT,
+  ADD COLUMN IF NOT EXISTS fallback_model    TEXT,
+  ADD COLUMN IF NOT EXISTS providers_json    JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 NOTIFY pgrst, 'reload schema';
