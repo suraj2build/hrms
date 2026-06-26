@@ -5,8 +5,10 @@ import { toast } from 'sonner'
 import {
   Fingerprint, CalendarDays, Wallet, RefreshCw, Receipt,
   Megaphone, MessageCircle, Plus, Award, Heart, Users, Lightbulb, Wrench, Sparkles, Trophy,
+  AlertCircle, CheckCircle2,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
+import type { Signal } from '@/components/experience/SignalCard'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 import { UpcomingHolidays } from './parts'
@@ -28,6 +30,10 @@ const CELEBRATION: Record<string, { emoji: string; label: string }> = {
 }
 interface Kudos { id: string; from_name?: string; to_name?: string; badge_code?: string; message: string; points: number; created_at: string }
 interface LeaderRow { rank: number; employee_id: string; name: string; points: number }
+interface ProgressPayload { show: boolean; heading: string; ambient: string; hints: { label: string; value: string }[] }
+interface Reflection { insight: string | null; action?: { label: string; href: string } }
+
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1)
 
 const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtTime = (iso: string | null) =>
@@ -76,6 +82,16 @@ export function MobileHome({ base }: { base: string }) {
   const { data: communityData } = useQuery<{ data: CommunityPost[] }>({
     queryKey: ['mobile-home-community'], queryFn: () => api.get('/community/feed?limit=15'),
   })
+  // Experience Core narrative services (shared cache keys with desktop Home).
+  const { data: signalsData } = useQuery<{ signals: Signal[] }>({
+    queryKey: ['ess-signals'], queryFn: () => api.get('/ess/signals'), staleTime: 60_000,
+  })
+  const { data: progress } = useQuery<ProgressPayload>({
+    queryKey: ['ess-progress'], queryFn: () => api.get('/ess/progress'), staleTime: 5 * 60_000,
+  })
+  const { data: reflection } = useQuery<Reflection>({
+    queryKey: ['ess-reflection'], queryFn: () => api.get('/ess/reflection'), staleTime: 5 * 60_000,
+  })
 
   const react = useMutation({
     mutationFn: ({ id, reaction }: { id: string; reaction: Reaction }) => api.post(`/community/posts/${id}/react`, { reaction }),
@@ -87,6 +103,12 @@ export function MobileHome({ base }: { base: string }) {
   const inTime = fmtTime(todayLog?.check_in ?? null)
   const leaders = (leaderData?.data ?? []).slice(0, 8)
 
+  // Today's Focus (Movement 2) — surfaced ONLY when something genuinely needs
+  // attention, so it never duplicates the punch card with empty reassurance.
+  const signals = signalsData?.signals ?? []
+  const urgentSignal = signals.find((s) => s.severity !== 'info')
+  const focusHref = urgentSignal?.action?.href ?? '/flowdesk'
+
   // Interleave community posts + recognition kudos into one feed, newest first.
   const feed = useMemo(() => {
     const posts = (communityData?.data ?? []).map((p) => ({ kind: 'post' as const, at: p.created_at, post: p }))
@@ -96,6 +118,22 @@ export function MobileHome({ base }: { base: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Today's Focus (Movement 2) — only when something needs attention */}
+      {urgentSignal && (
+        <button onClick={() => navigate(`${base}${focusHref}`)}
+          className="flex w-full items-start gap-3 rounded-2xl p-4 text-left text-white shadow-sm active:scale-[0.99] transition-transform"
+          style={{ background: 'linear-gradient(120deg,#1A4D8F,#2E6FE6)' }}>
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-white/90" />
+          <span className="min-w-0">
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-white/70">Today's focus</span>
+            <span className="mt-0.5 block text-sm font-semibold leading-snug">
+              The thing most worth your attention: {lowerFirst(urgentSignal.title)}.
+            </span>
+            <span className="mt-1.5 inline-block text-[11px] font-bold text-white/90">Review now →</span>
+          </span>
+        </button>
+      )}
+
       {/* Today punch — compact */}
       <button onClick={() => navigate(`${base}/attendance`)} className="flex w-full items-center justify-between rounded-2xl bg-white p-3.5 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] active:scale-[0.99] transition-transform">
         <div className="flex items-center gap-3">
@@ -149,6 +187,23 @@ export function MobileHome({ base }: { base: string }) {
         </div>
       </div>
 
+      {/* My Progress (Movement 7) — motivates, never reports; silent when empty */}
+      {progress?.show && (
+        <div className="rounded-2xl bg-white p-3.5 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
+          <p className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
+            <Sparkles className="h-3.5 w-3.5 text-[#15B8A6]" /> {progress.heading || 'You’re doing well'}
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-foreground/80">{progress.ambient}</p>
+          {progress.hints.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              {progress.hints.map((h) => (
+                <span key={h.label}>{h.label} · <span className="font-semibold text-foreground">{h.value}</span></span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Live feed */}
       <div className="flex items-center justify-between px-1">
         <p className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
@@ -178,7 +233,31 @@ export function MobileHome({ base }: { base: string }) {
         </div>
       )}
 
+      {/* AI reflection (Movement 9) — the memory-aware ambient moment */}
+      {reflection?.insight && (
+        <div className="rounded-2xl p-4 text-white shadow-sm" style={{ background: 'linear-gradient(135deg,#1A4D8F,#15B8A6)' }}>
+          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-white/80">
+            <Sparkles className="h-3.5 w-3.5" /> Cognix Insight
+          </p>
+          <p className="mt-1.5 text-[13px] font-medium leading-relaxed">{reflection.insight}</p>
+          {reflection.action && (
+            <button onClick={() => navigate(`${base}${reflection.action!.href}`)}
+              className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/15 px-3.5 py-1.5 text-[11px] font-bold backdrop-blur-sm active:scale-95 transition-transform">
+              {reflection.action.label} →
+            </button>
+          )}
+        </div>
+      )}
+
       <UpcomingHolidays limit={2} />
+
+      {/* Done for today (Movement 10) — the calm closer */}
+      <p className="flex items-center justify-center gap-1.5 pt-1 text-center text-[12px] text-muted-foreground">
+        <CheckCircle2 className="h-3.5 w-3.5 text-[#1A8050]" />
+        {signals.length > 0
+          ? 'A couple of things are still waiting — nothing that can’t wait for coffee.'
+          : 'That’s everything — you’re all set for today.'}
+      </p>
     </div>
   )
 }

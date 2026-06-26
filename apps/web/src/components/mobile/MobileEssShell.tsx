@@ -1,8 +1,11 @@
 import { Suspense, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Bell, User2, Users } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
+import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { resolveGreeting, type DayContext } from '@/components/experience/resolveGreeting'
 import { cn } from '@/lib/utils'
 import { HEADER_GRADIENT } from './glossy'
 import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
@@ -46,7 +49,12 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
   const inManagerConsole = pathname.startsWith('/manager') && !pathname.startsWith('/manager/self')
   const [persona, setPersona] = useState<Persona>(inManagerConsole && isManager ? 'team' : 'me')
 
-  const firstName = (profile?.full_name ?? 'there').split(' ')[0]
+  // Dynamic, contextual greeting (EXPERIENCE_HOME_DESIGN.md §3.A) — shared cache
+  // key with MobileHome so this adds no extra round-trip.
+  const { data: home } = useQuery<{ profile?: { name?: string | null }; context?: DayContext }>({
+    queryKey: ['ess-home'], queryFn: () => api.get('/ess/home'), staleTime: 2 * 60_000,
+  })
+  const greet = resolveGreeting(home?.profile?.name ?? profile?.full_name ?? 'there', home?.context, new Date())
 
   const onFab = () => navigate(`${base}/attendance`)
 
@@ -61,9 +69,9 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-white shadow-sm">
               <LogoMark size={22} />
             </span>
-            <span className="leading-tight">
-              <span className="block text-[11px] text-white/80">Good day,</span>
-              <span className="block text-base font-extrabold">Hi, {firstName} 👋</span>
+            <span className="min-w-0 leading-tight">
+              <span className="block text-base font-extrabold">{greet.headline}</span>
+              <span className="block line-clamp-1 text-[11px] text-white/80">{greet.subline}</span>
             </span>
           </span>
           <button aria-label="Notifications" onClick={() => navigate(`${base}/approvals`)} className="relative">
