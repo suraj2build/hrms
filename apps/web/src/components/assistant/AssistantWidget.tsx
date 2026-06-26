@@ -30,12 +30,18 @@ export function AssistantWidget() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
+  const hidden  = HIDE_ON.some(p => pathname.startsWith(p))
 
   const { data: status } = useQuery<StatusResp>({
     queryKey: ['assistant-status'],
     queryFn:  () => api.get('/assistant/status'),
-    enabled:  !!profile,
+    // Only probe when the widget can actually render: a profile exists and we're
+    // not on a hidden (auth/owner/portal) page. Avoids firing 401s during the
+    // auth-bootstrap window or on pages where the assistant never shows.
+    enabled:  !!profile && !hidden,
     staleTime: 5 * 60_000,
+    retry: false,                 // a 401/500 here is non-critical — don't retry-spam
+    refetchOnWindowFocus: false,
   })
 
   useEffect(() => {
@@ -43,7 +49,7 @@ export function AssistantWidget() {
   }, [msgs, open, sending])
 
   if (!profile) return null
-  if (HIDE_ON.some(p => pathname.startsWith(p))) return null
+  if (hidden) return null
 
   async function send() {
     const text = input.trim()
