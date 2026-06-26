@@ -181,12 +181,14 @@ function isActive(item: NavItem, pathname: string) {
 // ── Pending approvals count ───────────────────────────────────────────────────
 
 function usePendingApprovalsCount() {
-  const { data } = useQuery<{ data: unknown[] }>({
+  // Aggregate count across all approver entity types (leave + regularisation +
+  // overtime + comp-off), scoped to the caller (HR: tenant-wide, manager: reports).
+  const { data } = useQuery<{ data: { total: number } }>({
     queryKey: ['manager-pending-approvals-count'],
-    queryFn:  () => api.get('/approvals/pending?limit=100'),
+    queryFn:  () => api.get('/approvals/pending-count'),
     staleTime: 60_000,
   })
-  return (data?.data ?? []).length
+  return data?.data?.total ?? 0
 }
 
 // ── Item renderer (shared by flat + grouped layouts) ─────────────────────────

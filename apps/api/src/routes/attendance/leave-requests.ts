@@ -28,6 +28,7 @@ import {
   reverseApprovedLeaveRequest,
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
+import { getDirectReportIds }   from '../../lib/manager-scope.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -498,5 +499,50 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         reg_total:   pending.regTotal,
       },
     })
+  })
+
+  // ── GET /approvals/pending-count ────────────────────────────────────────────
+  // Aggregate pending count across ALL approver entity types (leave,
+  // regularisation, overtime, comp-off) for the sidebar/header badge. HR admins
+  // get tenant-wide counts; managers get only their direct reports'. Each count
+  // degrades to 0 on error so the badge never 500s.
+  fastify.get('/approvals/pending-count', auth, async (req: any, reply) => {
+    const tenantId: string = req.tenantId
+    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+
+    // Manager scope: resolve direct-report employee ids (empty => count nothing).
+    let reportIds: string[] | null = null
+    if (!isHrAdmin) {
+      const { data: profile } = await fastify.supabase
+        .from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+      const myEmpId = (profile as { employee_id: string | null } | null)?.employee_id
+      reportIds = myEmpId ? await getDirectReportIds(fastify.supabase, tenantId, myEmpId) : []
+    }
+
+    const countPending = async (table: string, statusVal: string): Promise<number> => {
+      try {
+        let q = fastify.supabase.from(table)
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('status', statusVal)
+        if (reportIds !== null) {
+          if (reportIds.length === 0) return 0
+          q = q.in('employee_id', reportIds)
+        }
+        const { count, error } = await q
+        if (error) return 0
+        return count ?? 0
+      } catch { return 0 }
+    }
+
+    const [leave, regularisation, overtime, comp_off] = await Promise.all([
+      countPending('leave_requests',            'PENDING'),
+      countPending('attendance_regularisation', 'pending'),
+      countPending('overtime_requests',         'PENDING'),
+      countPending('comp_off_requests',         'pending'),
+    ])
+    const total = leave + regularisation + overtime + comp_off
+
+    return reply.send({ data: { total, leave, regularisation, overtime, comp_off } })
   })
 }
