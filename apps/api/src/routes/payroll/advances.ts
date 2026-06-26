@@ -6,14 +6,16 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
+import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
 export default async function advancesRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!isHr(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -120,7 +122,8 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/advances/:id/approve ───────────────────────────────────────
-  fastify.post('/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+  // Gate-driven auth: no advance chain => HR-only (legacy); with a chain, per-level.
+  fastify.post('/:id/approve', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const schema = z.object({
@@ -150,6 +153,25 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     if (adv.status !== 'pending' && adv.status !== 'pending_hr') {
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Advance is already ${adv.status}` })
     }
+
+    // Multi-level gate (threshold routing by requested amount).
+    const gate = await gateApprove(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'advance_salary', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: adv.employee_id,
+      amount: Number(adv.requested_amount),
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'advanced') {
+      return reply.send({ message: 'Approval recorded', advance_id: id, advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels })
+    }
+    if (!gate.authorized && !isHr(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
     const now = new Date().toISOString()
 
     const { error: updateErr } = await fastify.supabase
@@ -181,7 +203,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/advances/:id/reject ────────────────────────────────────────
-  fastify.post('/:id/reject', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+  fastify.post('/:id/reject', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const schema = z.object({
@@ -191,6 +213,31 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { data: adv } = await fastify.supabase
+      .from('advance_salary_requests')
+      .select('id, status, employee_id, requested_amount')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!adv) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Advance not found' })
+    if ((adv as any).status !== 'pending') {
+      return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in a pending state' })
+    }
+
+    // Gate-driven auth; no chain => HR-only (legacy).
+    const gate = await gateReject(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'advance_salary', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (adv as any).employee_id,
+      amount: Number((adv as any).requested_amount ?? 0),
+      comments: parsed.data.rejection_reason,
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'finalize' && !gate.authorized && !isHr(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const { data: rejected, error } = await fastify.supabase

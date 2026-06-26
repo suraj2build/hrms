@@ -18,6 +18,7 @@ import { Input }            from '@/components/ui/input'
 import { Button }           from '@/components/ui/button'
 import { PageContainer }    from '@/components/layout/PageContainer'
 import { PageHeader }       from '@/components/layout/PageHeader'
+import { ApprovalChainStepper } from '@/components/approvals/ApprovalChainStepper'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -437,6 +438,7 @@ function AdvanceCard({ advance }: { advance: AdvanceRequest }) {
           <div className="mt-1.5">
             <WorkflowTracker status={advance.status} />
           </div>
+          <ApprovalChainStepper entityType="advance_salary" entityId={advance.id} className="mt-1.5" />
           <div className="flex items-center gap-4 mt-1.5 text-[10px] text-muted-foreground">
             <span>Applied {advance.requested_date}</span>
             <span>Recovery: {advance.recovery_months} months</span>
@@ -485,6 +487,7 @@ function LoanCard({ loan }: { loan: LoanRequest }) {
           <div className="mt-1.5">
             <WorkflowTracker status={loan.status} />
           </div>
+          <ApprovalChainStepper entityType="employee_loan" entityId={loan.id} className="mt-1.5" />
           <div className="flex items-center gap-4 mt-1.5 text-[10px] text-muted-foreground flex-wrap">
             <span>{loan.tenure_months}mo · {loan.interest_rate_pct}% p.a.</span>
             <span>EMI: {fmtINR(loan.emi_amount)}/mo</span>

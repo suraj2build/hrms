@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 const PAYMENT_TYPES = ['emi', 'prepayment', 'foreclosure', 'adjustment'] as const
@@ -17,9 +18,10 @@ function computeEMI(principal: number, annualRatePct: number, tenureMonths: numb
 
 export default async function loansRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!isHr(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -101,9 +103,39 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/loans/:id/approve ──────────────────────────────────────────
-  fastify.post('/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+  // Auth is gate-driven: with NO loan chain configured this stays HR-only (legacy);
+  // with a chain, the per-level gate authorises each approver (e.g. L1 manager →
+  // L2 HR → L3 finance above a ₹ threshold via min_amount).
+  fastify.post('/:id/approve', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
+
+    const { data: loan } = await fastify.supabase
+      .from('employee_loans')
+      .select('id, status, employee_id, principal_amount')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!loan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Loan not found' })
+    if (!['pending', 'pending_hr'].includes((loan as any).status)) {
+      return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending/pending_hr state' })
+    }
+
+    // Multi-level gate (threshold routing by principal amount).
+    const gate = await gateApprove(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'employee_loan', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (loan as any).employee_id,
+      amount: Number((loan as any).principal_amount),
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'advanced') {
+      return reply.send({ data: { id, status: (loan as any).status, advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
+    }
+    if (!gate.authorized && !isHr(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
 
     const { data, error } = await fastify.supabase
       .from('employee_loans')
@@ -128,7 +160,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/loans/:id/reject ────────────────────────────────────────────
-  fastify.post('/:id/reject', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+  fastify.post('/:id/reject', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const schema = z.object({
@@ -138,6 +170,31 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const { data: loan } = await fastify.supabase
+      .from('employee_loans')
+      .select('id, status, employee_id, principal_amount')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!loan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Loan not found' })
+    if ((loan as any).status !== 'pending') {
+      return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
+    }
+
+    // Gate-driven auth; no chain => HR-only (legacy).
+    const gate = await gateReject(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'employee_loan', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (loan as any).employee_id,
+      amount: Number((loan as any).principal_amount ?? 0),
+      comments: parsed.data.rejection_reason,
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'finalize' && !gate.authorized && !isHr(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const { data: rejected, error } = await fastify.supabase
