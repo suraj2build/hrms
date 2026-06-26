@@ -51,6 +51,7 @@
 
 import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import { testConnection, effectiveModel, type AssistantConfig } from '../../lib/ai/llm.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1301,6 +1302,30 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .upsert({ id: 1, providers_json, updated_by: req.platformAdminId, updated_at: new Date().toISOString() }, { onConflict: 'id' })
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.send({ data: { ok: true } })
+  })
+
+  // ── GET /owner/ai-config/test?provider=… — 1-token check of the STORED key ─────
+  // Tests the saved master key for a provider (not unsaved input) → { ok, model?, error? }.
+  fastify.get('/owner/ai-config/test', ownerAuth, async (req: any, reply) => {
+    const provider = (req.query as any)?.provider
+    const modelArg = (req.query as any)?.model || null
+    if (!AI_PROVIDERS.includes(provider)) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'invalid provider' })
+    }
+
+    const { data } = await fastify.supabase
+      .from('ai_managed_config').select('providers_json').eq('id', 1).maybeSingle()
+    const entry = (((data as any)?.providers_json ?? []) as any[]).find(e => e?.provider === provider)
+    const apiKey = entry?.api_key ?? null
+    if (!apiKey) {
+      return reply.send({ data: { ok: false, error: 'No saved key for this provider — Save a key first, then Test.' } })
+    }
+
+    const cfg: AssistantConfig = {
+      provider, apiKey, model: modelArg ?? entry?.model ?? null, enabled: true, source: 'managed',
+    }
+    const result = await testConnection(cfg)
+    return reply.send({ data: result.ok ? { ok: true, model: effectiveModel(cfg) } : { ok: false, error: result.message } })
   })
 
   // ── PATCH /owner/tenants/:id/ai-mode — flip a tenant self↔managed ──────────────

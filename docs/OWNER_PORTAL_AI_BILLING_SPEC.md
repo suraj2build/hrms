@@ -78,6 +78,7 @@ only the frontend that calls them. All require the platform-admin auth header.
 |---|---|---|
 | `GET  /owner/ai-config` | Read master chain | keys masked (`key_hint`), never raw |
 | `PUT  /owner/ai-config` | Replace master chain | `{ chain: [{provider, model?, enabled?, api_key?}] }`; omit `api_key` to keep, `''` to clear; ASCII-validated |
+| `GET  /owner/ai-config/test?provider=` | Test the **stored** master key | 1-token check → `{ data: { ok, model?, error? } }`; tests the saved key (paste → Save → Test) |
 | `PATCH /owner/tenants/:id/ai-mode` | Flip a tenant | `{ ai_mode: 'self' | 'managed' }` |
 | `GET  /owner/ai-usage?days=30&tenant_id=` | Priced usage | aggregates `ai_usage_log` × `ai_price_table`; per-tenant `managed_cost` / `total_cost` |
 | `GET  /owner/ai-pricing` | Read price table | rows of `{provider, model, prompt_per_mtok, completion_per_mtok, currency}` |
