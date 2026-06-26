@@ -82,7 +82,7 @@ export async function buildAssistantContext(
 
   // Upcoming holidays (tenant-wide, safe for everyone)
   const holidays = await safe<Array<{ name: string; date: string }>>(
-    supabase.from('holidays').select('name, date').eq('tenant_id', caller.tenantId)
+    supabase.from('holiday_calendar').select('name, date').eq('tenant_id', caller.tenantId)
       .gte('date', today).order('date', { ascending: true }).limit(3),
   )
   if (holidays && holidays.length) {

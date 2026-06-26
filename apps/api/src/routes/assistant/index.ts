@@ -28,8 +28,11 @@ const HR_ROLES = ['super_admin', 'hr_admin']
 
 const SYSTEM_BASE =
   'You are the CognixHR Assistant, a helpful in-app assistant for an HR/payroll system. ' +
+  'You can answer questions across HR using the available tools: employee profiles, leave balances and requests, ' +
+  'attendance, pending approvals, assigned assets, holidays, headcount, departments, payroll cost/runs and (HR-only) compensation. ' +
+  'Prefer calling a tool to fetch live data over guessing. When a question needs an employee, pass their name or code to the tool. ' +
   'Answer concisely and professionally. Only use the data provided in the context or returned by tools — ' +
-  'never invent leave balances, salaries, names, or policies. If you do not have the data, say so and suggest where in the app to find it. ' +
+  'never invent leave balances, salaries, names, or policies. If a tool reports no access or no data, relay that plainly and suggest where in the app to look. ' +
   'You cannot perform actions (applying leave, approving) — you are read-only; guide the user to the right screen instead. ' +
   'Keep answers short (1–4 sentences) unless asked for detail.'
 
@@ -79,7 +82,11 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       { role: 'user', content: parsed.data.message },
     ]
 
-    const tools = isManagerOrHr ? ASSISTANT_TOOLS : undefined
+    // Tools are offered to everyone; each tool re-checks role + scope internally,
+    // so an employee only ever gets their own data and sensitive tools (compensation,
+    // org-wide payroll/headcount) refuse non-HR callers.
+    void isManagerOrHr
+    const tools = ASSISTANT_TOOLS
     const toolCtx = { supabase: fastify.supabase, caller, employeeId }
     const toolsUsed: string[] = []
 
