@@ -16,12 +16,21 @@ interface PendingEmployee { first_name?: string; last_name?: string }
 interface PendingLeaveItem { id: string; from_date?: string; to_date?: string; reason?: string; leave_types?: { name?: string } | null; employees?: PendingEmployee }
 interface PendingRegItem { id: string; date?: string; reason?: string; employees?: PendingEmployee }
 interface PendingPayload { leave_requests?: PendingLeaveItem[]; regularisations?: PendingRegItem[] }
+interface PendingOtItem { id: string; attendance_date?: string; status: string; employees?: PendingEmployee }
+interface PendingCoItem { id: string; worked_date?: string; status: string; employee?: { name?: string } | null }
 
 const isPending = (s: string) => s === 'pending'
 const who = (e?: PendingEmployee) => (e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || 'Employee' : 'Employee')
 
 type Decision = 'approve' | 'reject'
-type ActKind = 'leave' | 'regularisation'
+type ActKind = 'leave' | 'regularisation' | 'overtime' | 'comp_off'
+
+const ACT_PATH: Record<ActKind, string> = {
+  leave:          '/leave-requests',
+  regularisation: '/attendance/regularisation',
+  overtime:       '/overtime/requests',
+  comp_off:       '/attendance/comp-off',
+}
 
 const REQUESTS = (base: string) => [
   { label: 'Apply Leave',     icon: CalendarCheck, to: `${base}/leave/balance`, from: '#1A4D8F', c: '#15B8A6' },
@@ -44,20 +53,36 @@ export function MobileFlowDesk({ base }: { base: string }) {
     queryFn: () => api.get('/approvals/pending?limit=20'),
     enabled: isManager,
   })
+  const { data: otData } = useQuery<{ data: PendingOtItem[] }>({
+    queryKey: ['mobile-flowdesk-ot'],
+    queryFn: () => api.get('/overtime/requests?status=PENDING&limit=20'),
+    enabled: isManager,
+  })
+  const { data: coData } = useQuery<{ data: PendingCoItem[] }>({
+    queryKey: ['mobile-flowdesk-co'],
+    queryFn: () => api.get('/attendance/comp-off?status=pending'),
+    enabled: isManager,
+  })
   const leaves = pending?.leave_requests ?? []
   const regs = pending?.regularisations ?? []
-  const awaiting = leaves.length + regs.length
+  const ots = otData?.data ?? []
+  const cos = coData?.data ?? []
+  const awaiting = leaves.length + regs.length + ots.length + cos.length
 
   const act = useMutation({
     mutationFn: ({ kind, id, decision, reason }: { kind: ActKind; id: string; decision: Decision; reason?: string }) => {
-      const path = kind === 'leave' ? `/leave-requests/${id}` : `/attendance/regularisation/${id}`
-      return decision === 'approve'
-        ? api.post(`${path}/approve`, {})
-        : api.post(`${path}/reject`, { rejection_reason: reason || undefined })
+      const path = `${ACT_PATH[kind]}/${id}`
+      if (decision === 'approve') return api.post(`${path}/approve`, {})
+      // Reject body differs by entity: comp-off uses `notes` (required); overtime &
+      // the rest use `rejection_reason` (required for overtime, optional for leave/reg).
+      const body = kind === 'comp_off' ? { notes: reason } : { rejection_reason: reason || undefined }
+      return api.post(`${path}/reject`, body)
     },
     onSuccess: (_r, v) => {
       toast.success(v.decision === 'approve' ? 'Approved' : 'Rejected')
       qc.invalidateQueries({ queryKey: ['mobile-flowdesk-pending'] })
+      qc.invalidateQueries({ queryKey: ['mobile-flowdesk-ot'] })
+      qc.invalidateQueries({ queryKey: ['mobile-flowdesk-co'] })
     },
     onError: (e: Error) => toast.error('Action failed', { description: e.message }),
   })
@@ -104,6 +129,14 @@ export function MobileFlowDesk({ base }: { base: string }) {
                 <ApprovalRow key={r.id} kind="regularisation" id={r.id} busyId={busyId} onAct={onAct}
                   title={`${who(r.employees)} · Regularisation`} sub={r.date?.slice(0, 10) ?? ''} />
               ))}
+              {ots.map((r) => (
+                <ApprovalRow key={r.id} kind="overtime" id={r.id} busyId={busyId} onAct={onAct} reasonRequired
+                  title={`${who(r.employees)} · Overtime`} sub={r.attendance_date?.slice(0, 10) ?? ''} />
+              ))}
+              {cos.map((r) => (
+                <ApprovalRow key={r.id} kind="comp_off" id={r.id} busyId={busyId} onAct={onAct} reasonRequired
+                  title={`${r.employee?.name ?? 'Employee'} · Comp-off`} sub={r.worked_date?.slice(0, 10) ?? ''} />
+              ))}
             </div>
           )}
         </div>
@@ -143,13 +176,15 @@ export function MobileFlowDesk({ base }: { base: string }) {
 }
 
 /** Pending team item with inline approve / reject (same endpoints as desktop). */
-function ApprovalRow({ title, sub, kind, id, busyId, onAct }: {
+function ApprovalRow({ title, sub, kind, id, busyId, onAct, reasonRequired = false }: {
   title: string; sub: string; kind: ActKind; id: string
   busyId: string | null; onAct: (kind: ActKind, id: string, decision: Decision, reason?: string) => void
+  reasonRequired?: boolean
 }) {
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
   const busy = busyId === id
+  const rejectBlocked = reasonRequired && !reason.trim()
 
   return (
     <div className="rounded-xl bg-white px-3 py-2.5 shadow-sm">
@@ -173,9 +208,9 @@ function ApprovalRow({ title, sub, kind, id, busyId, onAct }: {
       </div>
       {rejecting && (
         <div className="mt-2 flex items-center gap-1.5">
-          <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (optional)"
+          <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={reasonRequired ? 'Reason (required)' : 'Reason (optional)'}
             className="h-8 flex-1 rounded-lg border border-[#E2E8F0] bg-white px-2 text-xs outline-none focus:border-[#1A4D8F]/50" />
-          <button disabled={busy} onClick={() => { onAct(kind, id, 'reject', reason.trim()); setRejecting(false); setReason('') }}
+          <button disabled={busy || rejectBlocked} onClick={() => { onAct(kind, id, 'reject', reason.trim()); setRejecting(false); setReason('') }}
             className="rounded-lg bg-[#C93535] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Reject</button>
           <button onClick={() => { setRejecting(false); setReason('') }} className="px-1.5 text-xs text-muted-foreground">Cancel</button>
         </div>
