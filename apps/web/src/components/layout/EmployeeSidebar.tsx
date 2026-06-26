@@ -9,8 +9,8 @@
  *   Console shortcut + team management links
  */
 
-import { useMemo, useEffect } from 'react'
-import { Link, useLocation }  from 'react-router-dom'
+import { useMemo, useEffect, useState, useRef } from 'react'
+import { Link, useLocation, useNavigate }  from 'react-router-dom'
 import { useQuery }           from '@tanstack/react-query'
 import {
   Home, Users, Inbox, Trophy, Megaphone,
@@ -20,6 +20,7 @@ import {
   UserCircle, Rocket, LogOut,
   LayoutDashboard, CheckSquare, BarChart3, ArrowUpRight,
   ChevronDown, ChevronRight, ChevronLeft,
+  Search, X,
 } from 'lucide-react'
 import { cn }            from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -180,8 +181,13 @@ export function EmployeeSidebar() {
   const { profile }     = useAuthStore()
   const employeeId      = profile?.employee_id ?? null
   const location        = useLocation()
+  const navigate        = useNavigate()
   const pendingCount    = usePendingCount(employeeId)
   const hasOnboarding   = useHasOnboarding(employeeId)
+
+  const [searchQuery,     setSearchQuery]     = useState('')
+  const [searchHighlight, setSearchHighlight] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { setMobileNavOpen(false) }, [location.pathname, setMobileNavOpen])
 
@@ -211,6 +217,20 @@ export function EmployeeSidebar() {
       .filter(g => g.items.length > 0),
     [pendingCount, isManager, hasOnboarding],
   )
+
+  // Flatten all visible nav items for search
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return []
+    const allItems = [
+      ...visiblePillars,
+      ...GROUPS.flatMap(g => g.items),
+      ...(isManager ? MANAGER_QUICK_ITEMS : []),
+    ]
+    return allItems
+      .filter(i => i.label.toLowerCase().includes(q) || i.href.toLowerCase().includes(q))
+      .slice(0, 8)
+  }, [searchQuery, visiblePillars, GROUPS, isManager])
 
   // Service group collapse — active group open by default
   const activeServiceGroup = useMemo(
@@ -390,6 +410,72 @@ export function EmployeeSidebar() {
           )}
 
         </nav>
+
+        {/* ── Search bar ───────────────────────────────────────────────── */}
+        <div className={cn(
+          'border-t border-sidebar-border flex-shrink-0 relative',
+          sidebarCollapsed ? 'px-2 py-2' : 'px-3 py-2',
+        )}>
+          {!sidebarCollapsed ? (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setSearchHighlight(0) }}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { setSearchQuery(''); searchInputRef.current?.blur() }
+                  if (e.key === 'ArrowDown') { e.preventDefault(); setSearchHighlight(h => Math.min(h + 1, searchResults.length - 1)) }
+                  if (e.key === 'ArrowUp')   { e.preventDefault(); setSearchHighlight(h => Math.max(h - 1, 0)) }
+                  if (e.key === 'Enter' && searchResults[searchHighlight]) {
+                    navigate(searchResults[searchHighlight].href)
+                    setSearchQuery('')
+                  }
+                }}
+                placeholder="Search pages…"
+                className="w-full rounded-md border border-border bg-background/60 py-1.5 pl-7 pr-6 text-[11px] text-foreground placeholder:text-muted-foreground/35 outline-none focus:border-primary/50 focus:bg-background transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/35 hover:text-muted-foreground/70"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+              {searchResults.length > 0 && (
+                <div className="absolute bottom-full left-0 right-0 mb-1.5 rounded-xl border border-border bg-popover shadow-xl overflow-hidden z-50">
+                  <p className="px-3 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/40">Results</p>
+                  {searchResults.map((item, idx) => (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      onClick={() => setSearchQuery('')}
+                      className={cn(
+                        'flex items-center gap-2.5 px-3 py-2 text-xs transition-colors',
+                        idx === searchHighlight
+                          ? 'bg-primary/10 text-foreground'
+                          : 'text-foreground hover:bg-accent',
+                      )}
+                    >
+                      <item.icon className="h-3 w-3 text-muted-foreground/50 flex-shrink-0" />
+                      <span className="flex-1 truncate">{item.label}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => { toggleSidebar(); setTimeout(() => searchInputRef.current?.focus(), 300) }}
+              title="Search pages"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground mx-auto"
+            >
+              <Search className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
 
         {/* ── Collapse toggle ──────────────────────────────────────────── */}
         <div className={cn('p-2 border-t border-sidebar-border flex-shrink-0 hidden lg:block', sidebarCollapsed && 'lg:flex lg:justify-center')}>
